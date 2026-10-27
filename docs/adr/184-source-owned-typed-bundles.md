@@ -212,9 +212,9 @@ federated catalog's runtime availability/count projection.
   源 loader 不再接收可变的 `staging_requests: list[dict]`。`NautilusCatalogLoader`
   只接受这个请求。LocalCNFutures 在 staging 前拒绝未声明历史规则成员的请求；
   规则成员的实际加载/单次缓存仍未切换。LocalCNFutures 的 strict 规则 provider
-  按 SQLite 路径、行数/最大 rowid、data_version 和主库/WAL 文件状态缓存；同一
-  revision 只加载一次，加载期间 revision 变化则不缓存。该 revision 是源定义，
-  不是 SQLite 内建事务快照。
+  在调用方 SQLite 连接上 `BEGIN`，同一事务内取得 revision、读取 frame、构造 provider
+  并再次校验 revision；缓存键包含数据库路径、行数/最大 rowid、data_version 和
+  主库/WAL 文件状态。加载期间 revision 变化则不缓存。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
   改为分别读取 `initial_margin_ratio` / `maintenance_margin_ratio`；缺任一条即失败，

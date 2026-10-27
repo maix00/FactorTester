@@ -483,26 +483,29 @@ _RULE_PROVIDER_CACHE: tuple[object, tuple[object, ...], object] | None = None
 _RULE_PROVIDER_LOCK = Lock()
 
 
+def _rule_revision_for(connection, path: Path) -> tuple[object, ...]:
+    from tools.data.field_history import HISTORICAL_FIELD_TABLE
+    query = f'SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM "{HISTORICAL_FIELD_TABLE}"'
+    count, max_rowid = connection.execute(query).fetchone()
+    data_version = connection.execute("PRAGMA data_version").fetchone()[0]
+    files = []
+    for candidate in (path, path.with_name(path.name + '-wal')):
+        try:
+            stat = candidate.stat()
+            files.append((candidate.as_posix(), stat.st_mtime_ns, stat.st_size))
+        except FileNotFoundError:
+            files.append((candidate.as_posix(), None, None))
+    return (path.as_posix(), int(count), int(max_rowid), int(data_version), tuple(files))
+
+
 def _rule_store_revision() -> tuple[object, ...] | None:
-    """Return a path/WAL/row revision for the append-only rule history store."""
+    """Return the current path/WAL/row revision without opening a caller transaction."""
     try:
-        from tools.data.field_history import HISTORICAL_FIELD_TABLE
         from tools.data.hub import DataHub
-        path = DataHub.get_instance().get_store_path('openctp').resolve()
-        query = (
-            f'SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM "{HISTORICAL_FIELD_TABLE}"'
-        )
-        with DataHub.get_instance().connect_store('openctp') as conn:
-            count, max_rowid = conn.execute(query).fetchone()
-            data_version = conn.execute("PRAGMA data_version").fetchone()[0]
-        files = []
-        for candidate in (path, path.with_name(path.name + '-wal')):
-            try:
-                stat = candidate.stat()
-                files.append((candidate.as_posix(), stat.st_mtime_ns, stat.st_size))
-            except FileNotFoundError:
-                files.append((candidate.as_posix(), None, None))
-        return (path.as_posix(), int(count), int(max_rowid), int(data_version), tuple(files))
+        hub = DataHub.get_instance()
+        path = hub.get_store_path('openctp').resolve()
+        with hub.connect_store('openctp') as conn:
+            return _rule_revision_for(conn, path)
     except Exception:
         return None
 
@@ -514,24 +517,40 @@ def _clear_rule_provider_cache() -> None:
 
 
 def _strict_exchange_field_history():
-    """Load strict historical rules once per unchanged SQLite revision."""
+    """Load strict historical rules from one caller-owned SQLite snapshot."""
     global _RULE_PROVIDER_CACHE
-    from tools.data.field_history import load_market_rule_field_provider
+    from tools.data.field_history import (
+        ensure_historical_field_schema, load_historical_field_frame,
+        load_market_rule_field_provider,
+    )
+    from tools.data.hub import DataHub
 
     loader = load_market_rule_field_provider
-    revision = _rule_store_revision()
-    if revision is None:
+    try:
+        hub = DataHub.get_instance()
+        path = hub.get_store_path('openctp').resolve()
+    except Exception:
         return loader(include_openctp_latest=False, transaction_fee_source='exchange')
-    with _RULE_PROVIDER_LOCK:
-        cached = _RULE_PROVIDER_CACHE
-        if cached is not None and cached[0] is loader and cached[1] == revision:
-            return cached[2]
-        provider = loader(
-            include_openctp_latest=False, transaction_fee_source='exchange',
-        )
-        if _rule_store_revision() == revision:
-            _RULE_PROVIDER_CACHE = (loader, revision, provider)
-        return provider
+    with hub.connect_store('openctp') as conn:
+        ensure_historical_field_schema(conn)
+        conn.execute("BEGIN")
+        try:
+            revision = _rule_revision_for(conn, path)
+            with _RULE_PROVIDER_LOCK:
+                cached = _RULE_PROVIDER_CACHE
+                if cached is not None and cached[0] is loader and cached[1] == revision:
+                    return cached[2]
+            frame = load_historical_field_frame(connection=conn, ensure_schema=False)
+            provider = loader(
+                frame=frame, include_openctp_latest=False,
+                transaction_fee_source='exchange',
+            )
+            if _rule_revision_for(conn, path) == revision:
+                with _RULE_PROVIDER_LOCK:
+                    _RULE_PROVIDER_CACHE = (loader, revision, provider)
+            return provider
+        finally:
+            conn.rollback()
 
 
 def _declare_source_semantics(
