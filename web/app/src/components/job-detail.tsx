@@ -77,9 +77,10 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
   if (!detail) return <Spin />;
   const percent = progressPercent(progress, detail.status);
   return <div className="tr-job-page-detail"><div className="tr-job-state"><Tag color={detail.status === "succeeded" ? "green" : detail.status === "failed" ? "red" : "blue"}>{t(`jobs.states.${detail.status}`, { defaultValue: detail.status })}</Tag>
-    <Progress percent={percent ?? 0} showInfo={percent !== undefined} status={detail.status === "failed" ? "exception" : !terminalStatus(detail.status) ? "active" : "normal"} />
+    {percent !== undefined ? <Progress percent={percent} showInfo status={detail.status === "failed" ? "exception" : !terminalStatus(detail.status) ? "active" : "normal"} /> : null}
     <span>{String(progress?.phase || progress?.message || "")}</span>
     {!terminalStatus(detail.status) ? <Button danger onClick={() => { void request(jobURL(job, "/cancel"), { method: "POST" }).then(() => setRefresh((value) => value + 1)).catch((reason) => setError(reason.message)); }}>{t("jobs.cancel")}</Button> : null}</div>
+    {detail.error ? <Alert type="error" showIcon message={typeof detail.error === "string" ? detail.error : JSON.stringify(detail.error)} /> : null}
     <Tabs items={[
       { key: "overview", label: t("jobs.overview"), children: <ResultView value={{ job_id: detail.job_id || job.job_id, kind: detail.kind, status: detail.status, ...detail.result_summary }} /> },
       { key: "results", label: t("jobs.results"), children: result ? <ResultView value={result} /> : <Empty description={t(terminalStatus(detail.status) ? "empty" : "jobs.waitingResults")} /> },

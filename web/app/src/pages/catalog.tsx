@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Button, Input, Select, Tabs, Tag } from "antd";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { StrategyDetail } from "../components/strategy-detail.tsx";
 import { FactorDetail } from "../components/factor-detail.tsx";
 import { FunctionPage } from "../components/function-page.tsx";
 import { TRDataTable } from "../components/data-table.tsx";
@@ -49,7 +50,7 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
     setDetail(null); setDetailError(""); if (!selected) return;
     const controller = new AbortController(), ref = encodeURIComponent(identity(selected));
     const url = tab === "factors" ? `/api/factor-library/factors/detail?factor_ref=${ref}${selected.owner_username ? `&owner_username=${encodeURIComponent(selected.owner_username)}` : ""}`
-      : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? `/api/strategy-library/strategies/${ref}`
+      : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? `/api/strategy-library/strategies/${ref}?include_source=0`
       : tab === "groups" ? `/api/product-library/product-groups/${ref}` : null;
     if (!url) { setDetail(selected); return; }
     void request(url, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data); }).catch((reason) => { if (!controller.signal.aborted) setDetailError(reason.message); });
@@ -60,7 +61,7 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
   const visible = serverPaged ? filtered : filtered.slice((page - 1) * size, page * size);
   const label = (key: string): string => t(domain === "strategies" ? `library.scopes.${key}` : `catalog.${key}`);
   const select = (row: Row): void => { setSelected(row); if (mobile) setDetailOpen(true); };
-  const contents = detailError ? <div role="alert">{detailError}</div> : tab === "factors" || tab === "families" ? <FactorDetail detail={detail} /> : <ResultView value={detail} />;
+  const contents = detailError ? <div role="alert">{detailError}</div> : tab === "factors" || tab === "families" ? <FactorDetail detail={detail} /> : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? <StrategyDetail onRemoved={() => { setSelected(null); setDetailOpen(false); setRevision((value) => value + 1); }} key={identity(selected || {})} detail={detail} onUpdated={(value) => { setSelected(value); setRevision((revision) => revision + 1); }} /> : <ResultView value={detail} />;
   if (creating) return <FunctionPage title={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}><LibraryCreate kind={domain === "factors" ? "factor" : "strategy"} onCancel={() => setCreating(false)} onCreated={() => { setCreating(false); setRevision((value) => value + 1); }} /></FunctionPage>;
   return <FunctionPage title={t(`nav.${domain}`)} actions={<><Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} />{domain !== "products" ? <Button type="primary" aria-label={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")} icon={<PlusOutlined />} onClick={() => setCreating(true)}>{t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}</Button> : null}</>}>
     <Tabs activeKey={tab} onChange={(value) => { setTab(value); setPage(1); setRows([]); setSelected(null); setQuery(""); setOwnerFilter(undefined); setFamilyFilter(undefined); }} items={tabsByDomain[domain].map((key) => ({ key, label: label(key) }))} />

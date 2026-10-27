@@ -61,3 +61,22 @@ Structured result charts/plugins, complete version editing/recovery flows,
 authenticated local execution acceptance and broker/session management remain
 tracked by #445. The Research graph editor is still embedded from the existing
 route; it has not been reimplemented or presented as fully migrated.
+
+## Legacy parity pass
+
+The subsequent inventory is in MIGRATION.md: 114 first-pass feature items and
+all 40 legacy route-dispatch branches. Its status labels distinguish native
+controls from embedded routes, generic JSON displays and absent functionality.
+
+This pass adds cursor/account scopes to Jobs; shared table cursor controls;
+mobile source summaries and a full-width scope selector; dedicated strategy
+revision/source/edit/sharing controls; and the legacy trading status surface.
+Desktop and 390 × 844 in-app browser interactions were checked using an isolated
+HTTP fixture. Source requests before activation: zero. A historical source read
+used its selected revision; a remote Job kept server_id and port. Browser error
+logs were empty. Mobile viewport overrides were reset after testing.
+
+Evidence: `/Users/maxdeux/.codex/visualizations/2026/10/27/tr-parity/desktop-jobs.png`
+and `mobile-jobs.png`. These are fixture UI checks, not actual production Jobs,
+source inspection, authorization or broker execution acceptance. UI scope is
+passed; the whole migration remains incomplete per MIGRATION.md.

@@ -392,3 +392,13 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-report-add { display:grid; gap:12px; padding:20px 0; }
 .tr-report-add input,.tr-report-add textarea { width:100%; box-sizing:border-box; border:1px solid #dce2ea; border-radius:6px; padding:10px 12px; font:inherit; }
 .tr-report-add button { justify-self:start; }
+.tr-cursor-pagination { display:flex; align-items:center; justify-content:flex-end; gap:12px; margin-top:20px; color:#64748b; }
+.tr-cursor-pagination .ant-select { width:80px; }
+@media(max-width:767px) { .tr-cursor-pagination { justify-content:space-between; gap:6px; flex-wrap:wrap; } }
+.tr-trading-grid { display:grid; grid-template-columns:minmax(220px,1fr) minmax(320px,2fr); gap:24px; padding:8px 0 24px; }
+.tr-trading-grid > .ant-card:last-child { grid-column:1/-1; }
+@media(max-width:900px) { .tr-trading-grid { grid-template-columns:minmax(0,1fr); gap:16px; } }
+.tr-detail-toolbar { display:flex; gap:12px; align-items:center; margin-bottom:20px; }
+.tr-detail-toolbar .ant-select { flex:1; min-width:0; }
+.tr-source-view { padding:20px; background:#f5f7fb; border:1px solid #e8ecf2; border-radius:8px; overflow:auto; max-height:65vh; line-height:1.6; tab-size:4; }
+.tr-job-mobile-meta { display:block; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#64748b; font-size:12px; line-height:20px; margin-top:6px; }
