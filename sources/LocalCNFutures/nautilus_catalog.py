@@ -52,6 +52,19 @@ def stage_catalogs(
     *, staging_requests: list[dict[str, Any]], source_key: str, frequency: str,
     start_utc: str, end_utc: str, start_ns: int, end_ns: int, target_root: Path,
 ) -> dict[str, dict[str, str]]:
+    if frequency != "MIN1":
+        raise ValueError(f"{frequency}: source-owned DAY1 catalog loader is not implemented")
+    product_contracts: dict[str, str] = {}
+    for request in staging_requests:
+        for contract_uid in request["paths"]:
+            product_key = str(contract_uid).split("|")[2]
+            previous = product_contracts.get(product_key)
+            if previous is not None and previous != str(contract_uid):
+                raise ValueError(
+                    f"{product_key}: multiple contracts are not supported by the "
+                    "single-catalog consumer contract"
+                )
+            product_contracts[product_key] = str(contract_uid)
     target_root.mkdir(parents=True, exist_ok=True)
     catalogs: dict[str, dict[str, str]] = {}
     seen_contracts: set[str] = set()
@@ -83,7 +96,7 @@ def stage_catalogs(
                 end_ns=min(end_ns, spec.expiration_ns),
             )
             product_key = str(contract_uid).split("|")[2]
-            catalogs.setdefault(product_key, {
+            catalogs[product_key] = {
                 "catalog_dir": str(target), "contract_uid": str(contract_uid),
-            })
+            }
     return catalogs

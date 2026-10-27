@@ -78,6 +78,56 @@ def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_pa
     assert len(calls) == 1
 
 
+def test_stage_catalogs_rejects_multiple_contracts_for_one_product(monkeypatch, tmp_path):
+    import pytest
+    from types import SimpleNamespace
+    from server.services.nautilus_bridge import catalog_staging
+    from sources.LocalCNFutures import nautilus_catalog
+
+    rows = [
+        {"uid": "CFFEX|F|T|2403", "start_ts": 1700611200000, "end_ts": 1708387200000},
+        {"uid": "CFFEX|F|T|2406", "start_ts": 1700611200000, "end_ts": 1717171200000},
+    ]
+    product = SimpleNamespace(get_parent_product=lambda: SimpleNamespace(
+        get_contract_list=lambda start, end: rows,
+    ))
+    calls = []
+    monkeypatch.setattr(nautilus_catalog, "find_contract_product", lambda uid: product)
+    monkeypatch.setattr(nautilus_catalog, "cn_futures_trading_spec_fields",
+                        lambda product: {"point_value": 10000, "min_tick": 0.005,
+                                         "long_margin_ratio": 0.02, "short_margin_ratio": 0.02,
+                                         "trading_spec_source": "test"})
+    monkeypatch.setattr(nautilus_catalog, "contract_data_path_for",
+                        lambda uid, product: f"/data/{uid.rsplit('|', 1)[-1]}.parquet")
+    monkeypatch.setattr(nautilus_catalog, "build_contract_spec",
+                        lambda uid, **kwargs: SimpleNamespace(
+                            activation_ns=1700611200000000000,
+                            expiration_ns=1708473600000000000,
+                        ))
+    monkeypatch.setattr(nautilus_catalog, "stage_contract_minute_catalog",
+                        lambda source, target, **kwargs: calls.append(str(target)))
+    with pytest.raises(ValueError, match="multiple contracts"):
+        catalog_staging.stage_run_spec_catalogs(
+            staging_requests=[{"paths": [row["uid"] for row in rows]}],
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+            start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+            target_root=tmp_path,
+        )
+    assert len(calls) == 0
+
+
+def test_stage_run_spec_catalogs_fails_closed_for_day1(tmp_path):
+    import pytest
+    from server.services.nautilus_bridge import catalog_staging
+
+    with pytest.raises(ValueError, match="DAY1"):
+        catalog_staging.stage_run_spec_catalogs(
+            staging_requests=[], source_key="LocalCNFuturesContractDAY1", frequency="DAY1",
+            start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+            target_root=tmp_path,
+        )
+
+
 def _bundle_with_loader():
     from dataclasses import replace
     from sources.registry import installed_bundles
