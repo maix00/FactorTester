@@ -55,6 +55,7 @@ class CatalogLoadRequest:
 
     source_key: str
     frequency: str
+    related_members: tuple[str, ...]
     staging_requests: tuple[CatalogStagingRequest, ...]
     start_utc: str
     end_utc: str

@@ -86,6 +86,7 @@ def stage_run_spec_catalogs(
         raise ValueError("invalid catalog staging request") from exc
     return load_catalog(CatalogLoadRequest(
         source_key=source_key, frequency=frequency,
+        related_members=tuple(member.related_members),
         staging_requests=requests, start_utc=start_utc, end_utc=end_utc,
         start_ns=start_ns, end_ns=end_ns, target_root=target_root,
     ))

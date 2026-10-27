@@ -222,6 +222,7 @@ def test_staging_dispatches_source_owned_non_cn_loader(monkeypatch, tmp_path):
     assert captured[0].start_ns == 1704153600000000000
     assert captured[0].target_root is tmp_path
     assert captured[0].frequency == "MIN15"
+    assert captured[0].related_members == ()
 
 
 def test_invalid_source_selection_never_activates_or_creates_catalog(monkeypatch, tmp_path):
