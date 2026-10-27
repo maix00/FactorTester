@@ -4,7 +4,7 @@ export type RangeBand = { id: string; label: string; start: number; end: number 
 export type PriceHandle = (() => void) & { setTimeZone: (zone: string) => void; setRangeBands: (bands: RangeBand[]) => void; selectRangeBand: (id: string) => boolean; fitContent: () => void };
 export type Indicator = { id: string; label: string; points: { timestamp: number; value: number | null }[] };
 declare global { interface Window {
-  FTPriceChart?: { barsOf: (payload: unknown) => MarketBar[] };
+  FTPriceChart?: { timestampOf: (time: unknown) => number; barsOf: (payload: unknown) => MarketBar[] };
   FTChartWorkbench?: {
     mountPriceChart: (host: HTMLElement, options: { bars: MarketBar[]; hasOpenInterest?: boolean; timeZone?: string; translate: (label: string) => string }) => PriceHandle;
     mountFactorChart: (host: HTMLElement, options: { bars: MarketBar[]; indicators: Indicator[]; product: string; loadRange: () => Promise<null>; translate: (label: string) => string }) => { dispose: () => void };

@@ -5,6 +5,8 @@ import { request } from "../configuration/api.ts";
 import { jobURL, progressPercent, terminalStatus, type JobReference } from "../job-model.ts";
 import { usePageInstance } from "../page-instance.ts";
 import { readJobArtifact } from "../artifacts.ts";
+import { FactorResults } from "./factor-results.tsx";
+import { seriesArtifact } from "../charts/factor-result.ts";
 import { ResultView } from "./result-view.tsx";
 
 export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
@@ -83,7 +85,10 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
     {detail.error ? <Alert type="error" showIcon message={typeof detail.error === "string" ? detail.error : JSON.stringify(detail.error)} /> : null}
     <Tabs items={[
       { key: "overview", label: t("jobs.overview"), children: <ResultView value={{ job_id: detail.job_id || job.job_id, kind: detail.kind, status: detail.status, ...detail.result_summary }} /> },
-      { key: "results", label: t("jobs.results"), children: result ? <ResultView value={result} /> : <Empty description={t(terminalStatus(detail.status) ? "empty" : "jobs.waitingResults")} /> },
+      { key: "results", label: t("jobs.results"), children: detail.kind === "factor_evaluation" ? <FactorResults result={result || detail.result_summary} artifactName={seriesArtifact(artifacts, true)} job={job} configuration={detail.configuration || detail.run_spec || detail.job_spec} /> : seriesArtifact(artifacts) ? <Tabs items={[
+        { key: "summary", label: t("jobs.overview"), children: <ResultView value={result} /> },
+        { key: "factor-series", label: t("factorResults.title"), children: <FactorResults result={null} artifactName={seriesArtifact(artifacts)} job={job} configuration={detail.configuration || detail.run_spec || detail.job_spec} /> },
+      ]} /> : result ? <ResultView value={result} /> : <Empty description={t(terminalStatus(detail.status) ? "empty" : "jobs.waitingResults")} /> },
       { key: "configuration", label: t("jobs.configuration"), children: <pre className="tr-job-detail">{JSON.stringify(detail.execution_plan || detail.run_spec || detail.job_spec || detail.configuration, null, 2)}</pre> },
       { key: "inputs", label: t("jobs.inputs"), children: <div className="tr-job-artifact-list">{artifacts.map((item, index) => {
         const name = String(item.name || "");
