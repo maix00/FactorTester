@@ -11,10 +11,13 @@ def test_installed_bundles_route_is_metadata_only(monkeypatch):
         "bundle_id": "Local",
         "members": [],
         "availability": {"status": "unknown", "product_count": None},
+        "execution_location": "server",
     }
+    client = {**descriptor, "id": "ClientOnly", "bundle_id": "ClientOnly",
+              "execution_location": "client"}
     monkeypatch.setattr(
         product_catalog_projection, "installed_bundle_descriptors",
-        lambda: (descriptor,),
+        lambda: (descriptor, client),
     )
     monkeypatch.setattr(
         catalog_routes, "json_response",
