@@ -36,6 +36,19 @@ impl MappedIpc {
     /// not. The cache producer must enforce this immutable publication contract.
     pub unsafe fn open(path: impl AsRef<Path>) -> Result<Self, ArrowError> {
         let file = File::open(path)?;
+        // SAFETY: forwarded unchanged from this function's caller.
+        unsafe { Self::from_file(file) }
+    }
+
+    /// Map an already-open immutable cache file.
+    ///
+    /// This avoids reopening a path which eviction or atomic replacement may
+    /// have changed between cache admission and native consumption. A caller
+    /// may pass a duplicated or transferred OS file handle.
+    ///
+    /// # Safety
+    /// The same inode immutability guarantee as [`Self::open`] is required.
+    pub unsafe fn from_file(file: File) -> Result<Self, ArrowError> {
         if file.metadata()?.len() < 10 {
             return Err(invalid("IPC file is too short"));
         }

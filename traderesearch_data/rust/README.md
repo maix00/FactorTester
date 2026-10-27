@@ -17,6 +17,13 @@ through reference-counted ownership after the reader is dropped. Validation is
 enabled; compressed or misaligned input is rejected rather than silently
 allocating private value buffers. RecordBatch/schema metadata still allocates.
 
+Native consumers should prefer `MappedIpc::from_file` using a duplicated or
+transferred handle from `SharedColumnarCache.borrow_chunk`. Opening the file
+under the cache key lock prevents eviction from removing its path before the
+native consumer acquires it. OS handle transfer is the caller's responsibility;
+never serialize a process-local integer fd as if it were a portable file handle.
+The lease and all downstream arrays still require normal query admission.
+
 This reader alone does not connect Nautilus `run_catalogs` to the shared cache.
 Raw Bundle schemas and Nautilus event schemas may require different buffers.
 Connecting the execution consumer must preserve native event precision/order
@@ -27,6 +34,7 @@ Focused verification:
 ```sh
 cargo test --manifest-path traderesearch_data/rust/Cargo.toml
 cargo run --manifest-path traderesearch_data/rust/Cargo.toml --example inspect_ipc -- /absolute/immutable/cache.arrow
+python -m tests.benchmarks.verify_shared_native_input --reader /absolute/target/debug/examples/inspect_ipc
 ```
 
 Build outputs should use an external `CARGO_TARGET_DIR`. The inspector reports

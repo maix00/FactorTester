@@ -139,6 +139,32 @@ class SharedColumnarCache:
         return (str(path.resolve()), stat.st_dev, stat.st_ino,
                 stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
+    @contextmanager
+    def borrow_chunk(self, chunk: str):
+        """Lease an immutable published inode for native/cross-process readers.
+
+        Pass a duplicated/transferred OS handle to the consumer, not a pathname
+        which eviction can remove before it is opened. The caller must retain
+        its normal query admission and must not write/truncate the file. A miss
+        raises FileNotFoundError so the producer can be used again.
+        """
+        if (not isinstance(chunk, str) or len(chunk) != 64
+                or any(c not in '0123456789abcdef' for c in chunk)):
+            raise ValueError('expected published chunk identity')
+        stripe = int(chunk[:8], 16) % 64
+        with _lock(self.root / f'key-{stripe}.lock', self.timeout):
+            path = self.root / f'{chunk}.arrow'
+            handle = path.open('rb')
+            try:
+                os.utime(path, None)
+            except BaseException:
+                handle.close()
+                raise
+        try:
+            yield handle
+        finally:
+            handle.close()
+
     def _reserve(self, stripe: int):
         reservation = self.root / f'{stripe}.reserve'
         with _lock(self.base / 'quota.lock', self.timeout):

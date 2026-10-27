@@ -81,6 +81,20 @@ def test_source_replacement_does_not_reuse_old_data(tmp_path):
     assert len(list(cache.root.glob('*.arrow'))) == 2
 
 
+def test_borrowed_chunk_uses_open_inode_and_validates_identity(tmp_path):
+    source = tmp_path/'source.parquet'; _file(source, 10)
+    cache = SharedColumnarCache(tmp_path/'cache', _scope())
+    list(cache.iter_parquet_batches(source, columns=['value']))
+    path = next(cache.root.glob('*.arrow'))
+    with pytest.raises(ValueError):
+        with cache.borrow_chunk('../outside'): pass
+    with cache.borrow_chunk(path.stem) as handle:
+        with pa.ipc.open_file(handle) as reader:
+            assert reader.read_all().column('value').to_pylist() == list(range(10))
+        assert not handle.closed
+    assert handle.closed
+
+
 def _worker(root, source, event, queue):
     # Count actual decodes, not just the number of published files.
     original = pq.ParquetFile
