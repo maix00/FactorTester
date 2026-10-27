@@ -186,6 +186,25 @@ def test_build_contract_spec_rejects_missing_or_side_specific_margin():
         )
 
 
+def test_market_member_must_declare_related_history_member(monkeypatch, tmp_path):
+    import pytest
+    from dataclasses import replace
+    from server.services.nautilus_bridge import catalog_staging
+    from sources.registry import installed_bundles
+
+    bundle = installed_bundles()[0]
+    member = next(item for item in bundle.members if item.id == "LocalCNFuturesContractMIN1")
+    bundle = replace(bundle, members=(replace(member, related_members=()),))
+    monkeypatch.setattr(catalog_staging, "installed_bundles", lambda: (bundle,))
+    with pytest.raises(ValueError, match="does not declare its historical rules member"):
+        catalog_staging.stage_run_spec_catalogs(
+            staging_requests=[{"paths": ["CFFEX|F|T|2403"]}],
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+            start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+            target_root=tmp_path,
+        )
+
+
 def _bundle_with_loader():
     from dataclasses import replace
     from sources.registry import installed_bundles

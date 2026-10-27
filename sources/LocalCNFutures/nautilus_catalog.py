@@ -101,6 +101,10 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
     staging_requests = request.staging_requests
     if frequency not in {"MIN1", "DAY1"}:
         raise ValueError(f"{frequency}: unsupported source-owned catalog frequency")
+    if "FieldHistory:market_rules:exchange" not in request.related_members:
+        raise ValueError(
+            "LocalCNFutures market member does not declare its historical rules member"
+        )
     product_contracts: dict[str, str] = {}
     for request in staging_requests:
         for contract_uid in request.paths:
