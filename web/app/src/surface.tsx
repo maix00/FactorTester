@@ -1,4 +1,5 @@
 import React from "react";
+import { ProductDetailPage } from "./pages/product-detail.tsx";
 import { JobsPage, JobDetailPage } from "./pages/jobs.tsx";
 import { getPage } from "./registry.ts";
 import { PageFrame } from "./frame.tsx";
@@ -12,6 +13,7 @@ import { TestConfigurationPage } from "./pages/test-configuration.tsx";
 
 export function PageSurface({ pageId }: { pageId: string }): React.ReactElement {
   const page = getPage(pageId);
+  if (pageId === "product-detail") return <ProductDetailPage />;
   if (pageId === "job-detail") return <JobDetailPage />;
   if (pageId === "jobs") return <JobsPage />;
   if (pageId === "account") return <AccountPage />;

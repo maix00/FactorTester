@@ -11,6 +11,7 @@ import { LibraryCreate } from "../components/library-create.tsx";
 import { ResultView } from "../components/result-view.tsx";
 import { request } from "../configuration/api.ts";
 import { formatDate } from "../format.ts";
+import { usePageInstance } from "../page-instance.ts";
 import { useCompactLayout } from "../configuration/layout.ts";
 
 type Row = Record<string, any>;
@@ -22,7 +23,7 @@ const owner = (row: Row): string => String(row.owner_username || row.owner || ro
 const family = (row: Row): string => String(row.factor_family_alias || row.family_alias || row.identity?.family_alias || row.family_ref || "—");
 
 export function CatalogPage({ domain = "products" }: { domain?: Domain }): React.ReactElement {
-  const { t } = useTranslation(), mobile = useCompactLayout();
+  const { t } = useTranslation(), mobile = useCompactLayout(), instance = usePageInstance();
   const [tab, setTab] = useState(tabsByDomain[domain][0]);
   const [rows, setRows] = useState<Row[]>([]), [total, setTotal] = useState(0);
   const [query, setQuery] = useState(""), [familyFilter, setFamilyFilter] = useState<string>(), [ownerFilter, setOwnerFilter] = useState<string>();
@@ -60,21 +61,26 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
   const filtered = useMemo(() => rows.filter((row) => (serverPaged || !query || [displayTitle(row), family(row), owner(row)].some((value) => value.toLowerCase().includes(query.toLowerCase()))) && (!familyFilter || family(row) === familyFilter) && (!ownerFilter || owner(row) === ownerFilter)), [rows, query, familyFilter, ownerFilter, serverPaged, t]);
   const visible = serverPaged ? filtered : filtered.slice((page - 1) * size, page * size);
   const label = (key: string): string => t(domain === "strategies" ? `library.scopes.${key}` : `catalog.${key}`);
-  const select = (row: Row): void => { setSelected(row); if (mobile) setDetailOpen(true); };
+  const select = (row: Row): void => { if (tab === "products") { instance.open("product-detail", { productName: row.name || row.code || row.id, productTitle: row.desc || row.name || row.code }); return; } setSelected(row); if (mobile) setDetailOpen(true); };
   const contents = detailError ? <div role="alert">{detailError}</div> : tab === "factors" || tab === "families" ? <FactorDetail detail={detail} /> : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? <StrategyDetail onRemoved={() => { setSelected(null); setDetailOpen(false); setRevision((value) => value + 1); }} key={identity(selected || {})} detail={detail} onUpdated={(value) => { setSelected(value); setRevision((revision) => revision + 1); }} /> : <ResultView value={detail} />;
   if (creating) return <FunctionPage title={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}><LibraryCreate kind={domain === "factors" ? "factor" : "strategy"} onCancel={() => setCreating(false)} onCreated={() => { setCreating(false); setRevision((value) => value + 1); }} /></FunctionPage>;
   return <FunctionPage title={t(`nav.${domain}`)} actions={<><Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} />{domain !== "products" ? <Button type="primary" aria-label={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")} icon={<PlusOutlined />} onClick={() => setCreating(true)}>{t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}</Button> : null}</>}>
     <Tabs activeKey={tab} onChange={(value) => { setTab(value); setPage(1); setRows([]); setSelected(null); setQuery(""); setOwnerFilter(undefined); setFamilyFilter(undefined); }} items={tabsByDomain[domain].map((key) => ({ key, label: label(key) }))} />
     {tab === "reference" ? <ReferenceLookup /> : <><div className="tr-library-filters"><Input.Search allowClear aria-label={t("library.search")} placeholder={t("library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
       {domain === "factors" ? <Select allowClear aria-label={t("library.allFamilies")} placeholder={t("library.allFamilies")} value={familyFilter} options={[...new Set(rows.map(family))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setFamilyFilter(value); setPage(1); }} /> : null}
-      {!serverPaged ? <Select allowClear aria-label={t("library.allOwners")} placeholder={t("library.allOwners")} value={ownerFilter} options={[...new Set(rows.map(owner))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setOwnerFilter(value); setPage(1); }} /> : null}
+      {!serverPaged && domain !== "products" ? <Select allowClear aria-label={t("library.allOwners")} placeholder={t("library.allOwners")} value={ownerFilter} options={[...new Set(rows.map(owner))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setOwnerFilter(value); setPage(1); }} /> : null}
       <Button onClick={() => { setQuery(""); setFamilyFilter(undefined); setOwnerFilter(undefined); setPage(1); }}>{t("library.reset")}</Button></div>
     <TRDataTable rows={visible} rowKey={identity} rowSelection={{ type: "radio", selectedRowKeys: selected ? [identity(selected)] : [], onSelect: select }} loading={loading} error={error} pagination={{ page, pageSize: size, total: serverPaged ? total : filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
-      { title: t("editor.name"), key: "name", render: (_, row) => <button className={`tr-table-link ${selected && identity(row) === identity(selected) ? "is-selected" : ""}`} onClick={() => select(row)}>{displayTitle(row)}{mobile ? <small className="tr-library-row-meta">{family(row)} · {owner(row)}</small> : null}</button> },
+      { title: t("editor.name"), key: "name", render: (_: unknown, row: Row) => <button className={`tr-table-link ${selected && identity(row) === identity(selected) ? "is-selected" : ""}`} onClick={() => select(row)}>{displayTitle(row)}{mobile ? <small className="tr-library-row-meta">{domain === "products" ? [row.exchange, row.desc].filter(Boolean).join(" · ") : `${family(row)} · ${owner(row)}`}</small> : null}</button> },
       ...(domain === "factors" ? [{ title: t("catalog.families"), key: "family", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => family(row) }] : []),
-      { title: t("library.version"), key: "version", responsive: ["md"], render: (_, row) => <span className="tr-version-ref" title={row.current_revision?.revision_ref || row.revision_ref || row.ref}>{row.version || row.current_revision?.revision_ref || row.revision_ref || row.ref || "—"}</span> },
-      { title: t("library.owner"), key: "owner", responsive: ["md"], render: (_, row) => owner(row) },
-      { title: t("jobs.updated"), dataIndex: "updated_at", responsive: ["lg"], render: (value) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—" },
+      ...(domain === "products" ? [
+        { title: t("market.exchange"), dataIndex: "exchange", responsive: ["md"] as "md"[] },
+        { title: t("market.description"), dataIndex: "desc", responsive: ["md"] as "md"[] },
+      ] : [
+      { title: t("library.version"), key: "version", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => <span className="tr-version-ref" title={row.current_revision?.revision_ref || row.revision_ref || row.ref}>{row.version || row.current_revision?.revision_ref || row.revision_ref || row.ref || "—"}</span> },
+      { title: t("library.owner"), key: "owner", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => owner(row) },
+      { title: t("jobs.updated"), dataIndex: "updated_at", responsive: ["lg"] as "lg"[], render: (value: string) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—" },
+      ]),
     ]} />
     {selected && !mobile ? <section className="tr-library-detail"><header><h2>{displayTitle(selected)}</h2><Button onClick={() => setDetailOpen(true)}>{t("details")}</Button></header><div className="tr-library-meta"><span>{t("catalog.families")}: {family(selected)}</span><span>{t("library.owner")}: {owner(selected)}</span><Tag>{selected.version || t("library.frozen")}</Tag></div>{contents}</section> : null}
     </>}

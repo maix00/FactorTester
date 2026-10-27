@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from "react";
-export type PageArguments = { jobId?: string; workspaceId?: string; section?: string; factorRef?: string; create?: "factor" | "strategy"; servicePort?: number; serverId?: string };
+export type PageArguments = { productName?: string; productTitle?: string; contractUid?: string; jobId?: string; workspaceId?: string; section?: string; factorRef?: string; create?: "factor" | "strategy"; servicePort?: number; serverId?: string };
 export interface PageInstance { id: string; pageId: string; mobile: boolean; active?: boolean; args: PageArguments; open: (pageId: string, args?: PageArguments) => void; back?: () => void }
 let sequence = 0;
 export function newPageInstanceId(pageId: string): string { return `tr-${pageId}-${Date.now().toString(36)}-${++sequence}`; }

@@ -20,7 +20,7 @@ export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): Re
   const instance = usePageInstance();
   const recent = recentIds();
   const pages = pagesForScope("mobile")
-    .filter((page) => !page.mobileTab && page.id !== "job-detail")
+    .filter((page) => !page.mobileTab && ! ["job-detail", "product-detail"].includes(page.id))
     .sort((a, b) => {
       const ai = recent.indexOf(a.id);
       const bi = recent.indexOf(b.id);

@@ -46,5 +46,6 @@ export const BUILTIN_PAGES: PageDefinition[] = [
   { id: "strategies", route: "/strategies?scope=public", title: "策略库", scope: "both", icon: "strategy" },
   { id: "more", route: "/app?view=more", title: "更多功能", scope: "mobile", mobileTab: "more", icon: "workspace", sidebarVisible: false },
   { id: "settings", route: "/settings/account", title: "设置", scope: "both", icon: "settings", sidebarVisible: false },
+  { id: "product-detail", route: "/products/product", title: "产品详情", scope: "both", icon: "catalog", sidebarVisible: false },
   { id: "job-detail", route: "/jobs", title: "任务详情", scope: "both", icon: "runs", sidebarVisible: false },
 ];

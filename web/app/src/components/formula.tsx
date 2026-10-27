@@ -1,15 +1,12 @@
 import React, { useEffect, useState } from "react";
+import { loadScript, loadStylesheet } from "../assets.ts";
 type Renderer = { renderToString: (value: string, options: Record<string, unknown>) => string };
 declare global { interface Window { katex?: Renderer } }
-let ready: Promise<Renderer> | undefined;
-function renderer(): Promise<Renderer> {
-  if (window.katex) return Promise.resolve(window.katex);
-  if (!ready) ready = new Promise<Renderer>((resolve, reject) => {
-    if (!document.querySelector('[data-tr-katex]')) { const style = document.createElement("link"); style.rel = "stylesheet"; style.href = "/research-static/katex/katex.min.css"; style.dataset.trKatex = "1"; document.head.append(style); }
-    const script = document.createElement("script"); script.src = "/research-static/katex/katex.min.js";
-    script.onload = () => window.katex ? resolve(window.katex) : reject(new Error("Formula renderer unavailable")); script.onerror = () => reject(new Error("Formula renderer unavailable")); document.head.append(script);
-  }).catch((error) => { ready = undefined; throw error; });
-  return ready;
+async function renderer(): Promise<Renderer> {
+  loadStylesheet("/research-static/katex/katex.min.css");
+  if (!window.katex) await loadScript("/research-static/katex/katex.min.js");
+  if (!window.katex) throw new Error("Formula renderer unavailable");
+  return window.katex;
 }
 export function Formula({ latex }: { latex: string }): React.ReactElement {
   const [html, setHTML] = useState("");
