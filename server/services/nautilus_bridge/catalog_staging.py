@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
+import json
 from pathlib import Path
 from typing import Any
 
 from server.services.nautilus_bridge.catalog import stage_contract_minute_catalog
-from server.services.nautilus_bridge.market_data import FuturesContractSpec, iter_minute_bars
+from server.services.nautilus_bridge.market_data import FuturesContractSpec
 from server.modules.shared.price_services import (
     cn_futures_trading_spec_fields,
     contract_data_path_for,
@@ -55,26 +56,34 @@ def build_contract_spec(
     )
 
 
-def build_run_spec_session_calendar(
-    *, staging_requests: list[dict[str, Any]], source_key: str,
-    frequency: str, start_utc: str, end_utc: str,
-) -> Any:
-    """Build the authoritative TradeResearch session window from source bars."""
-    from tools.factors.expr.streaming.calendar_window import TradingCalendarWindow
+def build_run_spec_session_calendar(*, catalogs: dict[str, dict[str, str]]) -> Any:
+    """Reuse day summaries frozen by catalog staging; never reread source Bars."""
+    from tools.factors.expr.streaming.calendar_window import (
+        TradingCalendarWindow, TradingSessionSummary,
+    )
 
-    start_ns, end_ns = _ns(start_utc), _ns(end_utc)
-    def source_bars():
-        for request in staging_requests:
-            for contract_uid in request["paths"]:
-                product = find_contract_product(contract_uid)
-                if product is None:
-                    raise ValueError(f"contract is not in the product catalog: {contract_uid}")
-                path = contract_data_path_for(contract_uid, product)
-                for bar in iter_minute_bars(path, start_ns=start_ns, end_ns=end_ns):
-                    if hasattr(bar, "trading_day"):
-                        yield bar
-
-    return TradingCalendarWindow.from_contract_bars(source_bars())
+    summary = TradingSessionSummary()
+    seen: set[Path] = set()
+    for value in catalogs.values():
+        folder = Path(value["catalog_dir"]).resolve(strict=True)
+        if folder in seen:
+            continue
+        seen.add(folder)
+        receipt = json.loads((folder / "factor_tester_catalog_receipt.json").read_text())
+        if receipt.get("contract_uid") != value["contract_uid"]:
+            raise ValueError("calendar catalog identity differs from frozen input")
+        sessions = receipt.get("session_summaries")
+        if not sessions:
+            raise ValueError("catalog has no frozen session summaries; restage this input")
+        total = 0
+        for item in sessions:
+            start, end, count = (int(item[key]) for key in ("start_ns", "end_ns", "bar_count"))
+            summary.add(date.fromisoformat(item["trading_day"]), start, end,
+                        contract=value["contract_uid"], count=count)
+            total += count
+        if total != int(receipt["selected_count"]):
+            raise ValueError("calendar summary count differs from frozen input")
+    return TradingCalendarWindow(summary.sessions())
 
 
 def stage_run_spec_catalogs(

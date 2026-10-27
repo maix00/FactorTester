@@ -148,7 +148,7 @@ DataFusion 查询内存池预算与 spill 上限独立于回放批大小。清�
 日历、范围与摘要应冻结复用；实时适配器与历史回放遵守相同的事件/可用时刻
 合同，但不共享可变回放缓存。
 
-当前 Python 绑定、逐 Bar 迭代及 heap 合并是明确的过渡实现，不是目标架构，
+0ea29dd68 交付时的 Python 绑定、逐 Bar 迭代及 heap 合并是过渡实现，不是目标架构，
 不得把本次读取改进称为零 Python per-Bar 或完整 Rust Job。后续切换必须以
 Nautilus 原生 BacktestNode/DataIterator 分发给 FactorActor 与执行系统，完成
 同一真实任务的读取次数、跨语言调用、耗时、峰值 RSS 及结果逐点对账后，
@@ -237,5 +237,41 @@ BacktestNode 支持由 feature `nautilus-backtest` 隔离，默认 bridge 不拉
 
 聚焦验证：native bridge 26 项与真实 Catalog 集成 1 项；公开 API/测试选择器
 82 项；session window 26 项；Plan 26 项。正确性提交 hook 额外选择 138 项通过。
-没有执行全仓测试。原生接线和离线工具已验证，不代表 Celery 的 Python 过渡
-读取/合并/因子事件路径已被替换；切换仍须同一真实策略 Job 端到端验收。
+没有执行全仓测试。该里程碑仅验证原生接线和离线工具；后续实际回放切换见下节。
+
+## 实际策略入口移除 Python 合并（2026-10-27）
+
+旧 `iter_catalog_bar_batches`、heapq.merge、逐批 Python add_data/run/clear 循环
+已删除，小窗口市场/开盘成交验收也没有保留旧路径。基准程序不保存旧合并器副本。
+实际家族/RunSpec runner 通过薄接口 BacktestEngine.run_catalogs 调用 Nautilus
+既有 Catalog 查询、DataIterator 归并、同时间戳对齐分批及原生回放循环。该方法是
+本地增加的接入接口；底层回放算法与 BacktestNode 共用，没有另写数据引擎。
+已经配置好的 Venue、账户、费用、成本法等引擎状态保留原样，不换成验收用的
+默认引擎。该变化不声称已补全先前未接通的 DMTM/历史规则等配置分支。
+
+查询内存预算仍按输入数分摊（总计 128 MiB 的已跟踪查询预算），并在原生查询端
+限制同时间戳组、在跨来源对齐后限制整个批次。超限报错，不截断或拆散同时间戳。
+实际迭代数与总收据、逐来源收据分别比较，不能让一个来源少一条、另一个多一条
+在总数上相消。逐来源数量在原生批次抵达时 O(1) 累加，不在每根 Bar 上查询数据库。
+DataFusion 预算不覆盖所有分配，仍需要 worker 的进程级硬限制。
+
+同时修复真实阈值家族误调用 members() 的错误；分组使用成员选择、阈值使用
+方向决策。目标单数量读取 Nautilus 的实际持仓及去重后的未完成订单，不再维护
+一份“已提交买单就是持仓”的集合。首次策略/因子回调异常请求原生停止，并传回
+runner，不能仅记录日志后导出成功报告。独立真实测试覆盖两类策略、下一 Bar
+开盘成交、双产品跨文件/批次、跨来源硬上限及回调失败不发布报告。
+
+日历摘要在 Catalog 首次转换时增量累计并冻结到收据；每个交易日/合约仅保存
+start/end/count。TradingCalendarWindow 的两种来源入口和 staging 复用同一摘要
+累加器，移除按 Bar 保存时间元组的实现。RunSpec 从冻结摘要建立日历，不再重扫
+价格源。旧收据缺少摘要时明确要求 restage，依赖日历的因子不得猜测日历；固定
+窗口不强制要求其不需要的日历。真实来源禁止二次读取的测试已通过。
+
+本次本机 GTHT 扩展已重建。构建入口检查 run_catalogs 能力及 Rust 构建输入的
+mtime，避免相同版本号的旧扩展直接被判定为已构建；增量依赖判定仍交给 Cargo。
+没有修改 Nautilus core 来依赖因子库，也未增加常驻数据服务。
+
+仍未完成：当前实际策略消费因子仍经 Python on_bar 适配，再调用 Rust kernel。
+独立 Rust FactorActor 尚未替换该真实 Job 的因子消费端；Celery/RabbitMQ、原研报
+策略、公网及持久化端到端验收仍须继续。当前路径已移除 Python 行情合并，但不能
+称整条 Job 为零 Python per-Bar。

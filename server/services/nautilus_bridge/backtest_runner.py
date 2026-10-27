@@ -115,111 +115,40 @@ def preflight_catalogs(opened, *, max_input_bars: int) -> tuple[int, int, int]:
     return first, last, total
 
 
-def iter_catalog_bar_batches(opened, *, max_input_bars: int,
-                             max_batch_bars: int = 250_000,
-                             max_timestamp_group_bars: int | None = None,
-                             query_memory_limit_bytes: int = 128 * 1024 * 1024,
-                             target_batch_bars: int = 10_000):
-    """Merge native lazy query sessions; retain one source batch per catalog.
-
-    Target batch size is soft; timestamp groups are atomic and have an explicit
-    hard bound. These bounds do not replace the query runtime/process memory cap.
-    """
-    import heapq
-    from itertools import groupby
-
-    for name, value in (("max_batch_bars", max_batch_bars),
-                        ("query_memory_limit_bytes", query_memory_limit_bytes),
-                        ("target_batch_bars", target_batch_bars)):
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError(f"{name} must be a positive integer")
-    if max_timestamp_group_bars is None:
-        max_timestamp_group_bars = max_batch_bars
-    if (isinstance(max_timestamp_group_bars, bool) or not isinstance(max_timestamp_group_bars, int)
-            or not 1 <= max_timestamp_group_bars <= max_batch_bars):
-        raise ValueError("timestamp group budget must be positive and fit the replay batch budget")
-    rows = tuple(opened)
-    preflight_catalogs(rows, max_input_bars=max_input_bars)
-    target = min(max_batch_bars, target_batch_bars)
-    sessions, streams = [], []
-
-    def source_stream(session, count):
-        processed = 0
-        batch = None
-        try:
-            while (batch := session.next_batch()) is not None:
-                processed += len(batch)
-                if processed > count:
-                    raise ValueError("catalog query exceeds its frozen receipt count")
-                yield from batch
-                batch.clear()
-            if processed != count:
-                raise ValueError(f"catalog replay count {processed} != receipt {count}")
-        finally:
-            if batch is not None:
-                batch.clear()
-
-    try:
-        for _, catalog, receipt, _ in rows:
-            session = catalog.query_bar_batches(
-                identifiers=[receipt["bar_type"]], start=int(receipt["first_available_ns"]),
-                end=int(receipt["last_available_ns"]), chunk_size=target,
-                max_timestamp_group_rows=max_timestamp_group_bars,
-                memory_limit_bytes=max(1, query_memory_limit_bytes // len(rows)),
-            )
-            sessions.append(session)
-            streams.append(source_stream(session, int(receipt["selected_count"])))
-        merged = heapq.merge(*streams, key=lambda bar: int(bar.ts_init))
-        pending = []
-        for _, group in groupby(merged, key=lambda bar: int(bar.ts_init)):
-            aligned = []
-            for bar in group:
-                if len(aligned) >= max_timestamp_group_bars:
-                    raise ValueError("replay timestamp group exceeds its bar budget")
-                aligned.append(bar)
-            if pending and len(pending) + len(aligned) > max_batch_bars:
-                yield pending
-                pending = []
-            pending.extend(aligned)
-            if len(pending) >= target:
-                yield pending
-                pending = []
-        if pending:
-            yield pending
-    finally:
-        for stream in streams:
-            stream.close()
-        for session in sessions:
-            session.close()
-
-
 def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes: int = 20,
-                           max_batch_bars: int = 250_000):
-    """Feed bounded slices to Nautilus' native streaming replay path."""
+                           max_batch_bars: int = 250_000,
+                           query_memory_limit_bytes: int = 128 * 1024 * 1024):
+    """Use Nautilus' native Catalog merge/replay on the configured engine.
+
+    Only frozen receipt validation/configuration crosses Python here. Market
+    batches never enter a Python merge, list conversion or add_data loop.
+    """
     if isinstance(batch_minutes, bool) or not isinstance(batch_minutes, int) or batch_minutes <= 0:
         raise ValueError("batch_minutes must be a positive integer")
     rows = tuple(opened)
-    next_start, _, _ = preflight_catalogs(rows, max_input_bars=max_input_bars)
-    total = batches = largest = 0
-    previous_end = None
-    from contextlib import closing
-    with closing(iter_catalog_bar_batches(rows, max_input_bars=max_input_bars,
-                                          max_batch_bars=max_batch_bars,
-                                          target_batch_bars=batch_minutes * len(rows))) as batches_iter:
-        for bars in batches_iter:
-            begin, end = int(bars[0].ts_init), int(bars[-1].ts_init)
-            if previous_end is not None and begin <= previous_end:
-                raise ValueError("streaming batch splits or reorders a replay timestamp")
-            total += len(bars)
-            largest = max(largest, len(bars))
-            try:
-                engine.add_data(bars)
-                bars.clear()  # Nautilus owns this bounded batch now.
-                engine.run(start=next_start, end=end, streaming=True)
-            finally:
-                engine.clear_data()
-            next_start = previous_end = end
-            batches += 1
+    first, last, expected = preflight_catalogs(rows, max_input_bars=max_input_bars)
+    if isinstance(max_batch_bars, bool) or not isinstance(max_batch_bars, int) or max_batch_bars < 1:
+        raise ValueError("max_batch_bars must be a positive integer")
+    if (isinstance(query_memory_limit_bytes, bool) or not isinstance(query_memory_limit_bytes, int)
+            or query_memory_limit_bytes < 1):
+        raise ValueError("query memory limit must be a positive integer")
+    from nautilus_trader.config import BacktestDataConfig
+    from nautilus_trader.model import NautilusDataType
+    data = [BacktestDataConfig(
+        data_type=NautilusDataType.Bar, catalog_path=str(folder),
+        bar_types=[str(receipt["bar_type"])],
+        start_time=int(receipt["first_available_ns"]),
+        end_time=int(receipt["last_available_ns"]),
+    ) for folder, _catalog, receipt, _instrument in rows]
+    total, batches, largest, source_counts = engine.run_catalogs(
+        data=data, chunk_size=min(batch_minutes * len(rows), max_batch_bars, 1_000_000),
+        max_chunk_events=max_batch_bars, start=first, end=last,
+        query_memory_limit_bytes=max(1, query_memory_limit_bytes // len(rows)),
+    )
+    if list(source_counts) != [int(row[2]["selected_count"]) for row in rows]:
+        raise ValueError("native per-source replay counts differ from frozen receipts")
+    if total != expected or engine.get_result().iterations != expected:
+        raise ValueError("native catalog replay count differs from the frozen receipts")
     return {"bars": total, "batch_count": batches, "max_batch_bars": largest}
 
 
@@ -259,7 +188,6 @@ def run_small_catalog_replay(
     from nautilus_trader.execution import MakerTakerFeeModel
     from nautilus_trader.model import (
         AccountType,
-        Bar,
         Currency,
         InstrumentId,
         Money,
@@ -308,6 +236,7 @@ def run_small_catalog_replay(
     started = time.perf_counter()
     engine = BacktestEngine(config=BacktestEngineConfig(
         trader_id=TraderId.from_str("FT-PROBE-001"),
+        shutdown_on_error=True,
         exec_engine=ExecutionEngineConfig(
             position_cost_basis=cost_basis,
             position_cost_basis_by_instrument={
@@ -343,11 +272,17 @@ def run_small_catalog_replay(
                     self.instrument_id = instrument_id
                     self.bar_type = BarType.from_str(bar_type)
                     self.seen = 0
+                    self.submitted = 0
+                    self.pending = False
+                    self.expected_fill_prices: list[str] = []
 
                 def on_start(self) -> None:
                     self.subscribe_bars(self.bar_type)
 
                 def on_bar(self, bar) -> None:
+                    if self.pending:
+                        self.expected_fill_prices.append(str(bar.open))
+                        self.pending = False
                     self.seen += 1
                     if self.seen not in (2, 5):
                         return
@@ -361,66 +296,24 @@ def run_small_catalog_replay(
                         time_in_force=TimeInForce.AT_THE_OPEN,
                     )
                     self.submit_order(order)
+                    self.submitted += 1
+                    self.pending = True
 
             probe_strategy = ProbeStrategy(ids[0], opened[0][2]["bar_type"])
             engine.add_strategy(probe_strategy)
         else:
             probe_strategy = None
 
-        processed = batches = largest_batch = largest_event_batch = 0
-        next_bar_open_orders = 0
+        replay = replay_catalog_batches(
+            engine, opened, max_input_bars=max_input_bars,
+            batch_minutes=batch_minutes, max_batch_bars=max_batch_bars,
+        )
+        processed, batches, largest_batch = (replay[key] for key in
+                                             ("bars", "batch_count", "max_batch_bars"))
+        largest_event_batch = largest_batch
         timeline_first_ns = first_available_ns
-        next_start_ns = timeline_first_ns
-        previous_batch_end_ns = None
-        probe_seen = 0
-        probe_order_pending = False
-        expected_probe_fill_prices: list[str] = []
-        for bars in iter_catalog_bar_batches(opened, max_input_bars=max_input_bars, target_batch_bars=batch_minutes * len(opened),
-                                             max_batch_bars=max_batch_bars):
-            processed += len(bars)
-            if processed > max_input_bars:
-                raise ValueError("catalog query exceeds explicit replay bar cap")
-            largest_batch = max(largest_batch, len(bars))
-            if synthetic_order_probe:
-                for bar in sorted(bars, key=lambda item: int(item.ts_init)):
-                    if str(bar.bar_type.instrument_id) != ids[0]:
-                        continue
-                    if probe_order_pending:
-                        expected_probe_fill_prices.append(str(bar.open))
-                        probe_order_pending = False
-                    probe_seen += 1
-                    if probe_seen in (2, 5):
-                        probe_order_pending = True
-                        next_bar_open_orders += 1
-            events = list(bars)
-            events.sort(key=lambda item: (
-                int(item.ts_init), 0 if isinstance(item, Bar) else 1,
-            ))
-            largest_event_batch = max(largest_event_batch, len(events))
-            batch_start_ns = min(int(event.ts_init) for event in events)
-            batch_end_ns = max(int(event.ts_init) for event in events)
-            if previous_batch_end_ns is not None and batch_start_ns <= previous_batch_end_ns:
-                raise ValueError(
-                    "streaming batch splits or reorders one NautilusTrader replay timestamp"
-                )
-            if batch_end_ns < next_start_ns:
-                raise ValueError("streaming replay clock would move backwards")
-            # add_data copies into NT-owned storage.  Discard the short Python
-            # batch immediately after loading, then run and clear native data.
-            engine.add_data(events)
-            bars.clear()
-            events.clear()
-            engine.run(start=next_start_ns, end=batch_end_ns, streaming=True)
-            engine.clear_data()
-            previous_batch_end_ns = batch_end_ns
-            # Keep the engine clock at the previous batch boundary. NautilusTrader
-            # advances scheduled timers across gaps before delivering the next bar.
-            next_start_ns = batch_end_ns
-            batches += 1
-        expected = sum(int(row[2]["selected_count"]) for row in opened)
-        if processed != expected:
-            raise ValueError(f"catalog replay count {processed} != receipts {expected}")
-        engine.end()
+        next_bar_open_orders = probe_strategy.submitted if probe_strategy is not None else 0
+        expected_probe_fill_prices = probe_strategy.expected_fill_prices if probe_strategy is not None else []
         result = engine.get_result()
         probe_fill_prices: tuple[str, ...] = ()
         if synthetic_order_probe:

@@ -17,6 +17,29 @@ from tools.factors.expr.core import FactorExpr
 from tools.data.types.time_freq import DataFreq
 
 
+def _on_replay_bar(strategy, bar) -> None:
+    """Nautilus logs callback exceptions; retain and surface the first failure."""
+    if strategy.replay_failure is not None:
+        return
+    try:
+        strategy._process_bar(bar)
+    except Exception as error:
+        strategy.replay_failure = error
+        strategy.shutdown_system(reason=f"factor strategy failed: {error}")
+
+
+def _replay_with_strategy(engine, trader, opened, **limits):
+    try:
+        result = replay_catalog_batches(engine, opened, **limits)
+    except Exception:
+        if trader.replay_failure is not None:
+            raise RuntimeError("Nautilus factor strategy callback failed") from trader.replay_failure
+        raise
+    if trader.replay_failure is not None:
+        raise RuntimeError("Nautilus factor strategy callback failed") from trader.replay_failure
+    return result
+
+
 def _shared_factor_adapter(*, bindings, refs, products, bar_types, events,
                            calendar, publications, publication_counts):
     """One run/input/clock scoped DAG; roles only subscribe to its outputs."""
@@ -96,11 +119,14 @@ def run_strategy_replay(
                 publications=publications, publication_counts=publication_counts,
             )
             self.seen = 0
+            self.replay_failure = None
 
         def on_start(self) -> None:
             self.subscribe_bars(bar_type)
 
-        def on_bar(self, bar) -> None:
+        on_bar = _on_replay_bar
+
+        def _process_bar(self, bar) -> None:
             self.events.on_bar(bar)
             self.factor_adapter.on_bar(bar)
             self.seen += 1
@@ -114,8 +140,7 @@ def run_strategy_replay(
 
     trader = Trader()
     engine.add_strategy(trader)
-    replay = replay_catalog_batches(engine, opened, max_input_bars=max_bars, batch_minutes=batch_minutes)
-    engine.end()
+    replay = _replay_with_strategy(engine, trader, opened, max_input_bars=max_bars, batch_minutes=batch_minutes)
     reports = export_backtest_reports(engine, Path(output_dir), venue=venue)
     return {
         "engine": "nautilus_trader",
@@ -210,6 +235,7 @@ def run_strategy_family_replay(
             engine.add_instrument(instrument)
     publications = {role: deque(maxlen=2) for role in factor_bindings}
     publication_counts = dict.fromkeys(factor_bindings, 0)
+    instrument_ids = {product: value.instrument_id for product, value in bar_types.items()}
 
     class FamilyTrader(Strategy):
         def __init__(self) -> None:
@@ -220,39 +246,49 @@ def run_strategy_family_replay(
                 bar_types=bar_types, events=self.events, calendar=session_calendar,
                 publications=publications, publication_counts=publication_counts,
             )
-            self.positions_seen: set[Any] = set()
+            self.replay_failure = None
             self.last_signal: Any = None
 
         def on_start(self) -> None:
             for value in bar_types.values():
                 self.subscribe_bars(value)
 
-        def on_bar(self, bar) -> None:
+        on_bar = _on_replay_bar
+
+        def _process_bar(self, bar) -> None:
             self.events.on_bar(bar)
             self.factor_adapter.on_bar(bar)
             signal = publications.get("signal") or []
             if not signal or signal[-1] is self.last_signal:
                 return
             self.last_signal = signal[-1]
-            members = set(family.members(dict(signal[-1].values)))
-            for product, member in opened.items():
-                instrument_id = BarType.from_str(str(member[2]["bar_type"])).instrument_id
-                side = OrderSide.BUY if product in members else OrderSide.SELL
-                if side is OrderSide.SELL and product not in self.positions_seen:
-                    continue
-                if side is OrderSide.BUY and product in self.positions_seen:
+            values = dict(signal[-1].values)
+            from server.services.nautilus_bridge.strategy_families import CrossSectionalGroup
+            if isinstance(family, CrossSectionalGroup):
+                members = set(family.members(values))
+                targets = {product: int(product in members) for product in opened}
+            else:
+                targets = {product: family.direction(values[product]) for product in opened}
+            cache = self.cache
+            for product, instrument_id in instrument_ids.items():
+                scope = {"instrument_id": instrument_id, "strategy_id": self.strategy_id}
+                current = sum((position.signed_qty for position in cache.positions_open(**scope)), Decimal(0))
+                pending = {order.client_order_id: order for order in
+                           (*cache.orders_open(**scope), *cache.orders_inflight(**scope))}
+                remaining = sum((Decimal(str(order.leaves_qty)) * (1 if order.side == OrderSide.BUY else -1)
+                                 for order in pending.values()), Decimal(0))
+                delta = Decimal(targets[product]) - current - remaining
+                if not delta:
                     continue
                 self.submit_order(self.order_factory.market(
-                    instrument_id=instrument_id, order_side=side,
-                    quantity=Quantity.from_str("1"),
+                    instrument_id=instrument_id, order_side=OrderSide.BUY if delta > 0 else OrderSide.SELL,
+                    quantity=Quantity.from_str(str(abs(delta))),
                     time_in_force=TimeInForce.AT_THE_OPEN,
                 ))
-                self.positions_seen.add(product) if side is OrderSide.BUY else self.positions_seen.discard(product)
 
     trader = FamilyTrader()
     engine.add_strategy(trader)
-    replay = replay_catalog_batches(engine, opened.values(), max_input_bars=max_bars * len(opened), batch_minutes=batch_minutes)
-    engine.end()
+    replay = _replay_with_strategy(engine, trader, opened.values(), max_input_bars=max_bars * len(opened), batch_minutes=batch_minutes)
     reports = export_backtest_reports(engine, Path(output_dir), venue=venue)
     return {
         "engine": "nautilus_trader", "products": sorted(map(str, opened)),
@@ -346,17 +382,13 @@ def run_strategy_family_run_spec(
             target_root=Path(output_dir) / "catalogs",
         )
         plan = {**plan, "catalog_inputs": catalogs}
-    if plan.get("session_calendar") is None and staging_requests:
+    if plan.get("session_calendar") is None:
         try:
             from server.services.nautilus_bridge.catalog_staging import (
                 build_run_spec_session_calendar,
             )
             plan["session_calendar"] = build_run_spec_session_calendar(
-                staging_requests=staging_requests,
-                source_key=str(source_adapter.get("member_key") or ""),
-                frequency=str(source_adapter.get("frequency") or ""),
-                start_utc=str(window.get("start") or ""),
-                end_utc=str(window.get("end") or ""),
+                catalogs=catalogs,
             )
         except (OSError, ValueError) as error:
             # A fixed-window factor can still run.  A session-window factor

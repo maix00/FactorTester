@@ -33,6 +33,8 @@ def test_builder_uses_vendor_toolchain_and_reused_dev_target():
     assert "maturin develop --profile dev --locked" in builder
     assert 'getattr(native, "__file__", None)' in builder
     assert "_libnautilus" in builder
+    assert 'getattr(BacktestEngine, "run_catalogs", None)' in builder
+    assert 'path.stat().st_mtime_ns > native_mtime_ns' in builder
 
 
 def test_test_entrypoint_builds_extension_for_runtime_tests():

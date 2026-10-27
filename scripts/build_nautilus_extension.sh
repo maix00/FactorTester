@@ -54,6 +54,20 @@ if nautilus_trader.__version__ != expected_version:
 if not package_path.is_relative_to(source) or not native_path.is_relative_to(source):
     print("needs-build")
     raise SystemExit(0)
+from nautilus_trader.backtest import BacktestEngine
+if not callable(getattr(BacktestEngine, "run_catalogs", None)):
+    print("needs-build")
+    raise SystemExit(0)
+# A matching package version does not imply the local Rust edits are built.
+# Only inspect native build inputs; Cargo still owns incremental dependency tracking.
+native_mtime_ns = native_path.stat().st_mtime_ns
+rust_root = source.parent
+build_inputs = [rust_root / name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")]
+build_inputs.extend(path for path in (rust_root / "crates").rglob("*")
+                    if path.suffix in {".rs", ".toml"})
+if any(path.stat().st_mtime_ns > native_mtime_ns for path in build_inputs if path.is_file()):
+    print("needs-build")
+    raise SystemExit(0)
 print(f"ready: NautilusTrader {expected_version}: {native_path}")
 ' "${EXPECTED_VERSION}" "${PYTHON_SOURCE}")"
   [[ "${state}" == ready:* ]]

@@ -1,6 +1,38 @@
 from server.services.nautilus_bridge.catalog_staging import _ns
 
 
+def test_staged_calendar_reuses_frozen_day_summary_without_source_access(tmp_path, monkeypatch):
+    from datetime import date
+    from tests.nautilus_runtime import require_nautilus
+    from tests.server.test_nautilus_bridge_backtest_runner import _real_catalog
+    from server.services.nautilus_bridge.catalog_staging import build_run_spec_session_calendar
+    require_nautilus()
+    item = _real_catalog(tmp_path, count=8)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("calendar must not scan source prices again")
+    monkeypatch.setattr("server.services.nautilus_bridge.market_data.iter_minute_bars", forbidden)
+    calendar = build_run_spec_session_calendar(catalogs={"T": {
+        "catalog_dir": str(item.catalog_dir), "contract_uid": item.expected_contract_uid,
+    }})
+    assert len(calendar.sessions) == 1
+    session = calendar.sessions[0]
+    assert session.trading_day == date(2024, 1, 2)
+    assert session.bar_count == 8
+    assert session.end_ns - session.start_ns == 8 * 60_000_000_000
+
+
+def test_session_summary_keeps_aggregate_state_for_overlapping_contracts():
+    from tools.factors.expr.streaming.calendar_window import TradingSessionSummary
+    summary = TradingSessionSummary()
+    for bar in range(10_000):
+        summary.add("day", bar, bar + 1, contract="A")
+    for bar in range(5_000):
+        summary.add("day", bar, bar + 1, contract="B")
+    assert len(summary._groups) == 2
+    session, = summary.sessions()
+    assert (session.start_ns, session.end_ns, session.bar_count) == (0, 10_000, 10_000)
+
+
 def test_catalog_window_timestamp_is_utc():
     assert _ns("2024-01-02T00:00:00Z") == 1704153600000000000
 

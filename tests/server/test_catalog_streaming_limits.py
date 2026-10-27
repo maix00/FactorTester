@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from server.services.nautilus_bridge.backtest_runner import (
-    MINUTE_NS, iter_catalog_bar_batches, replay_catalog_batches,
+    MINUTE_NS, replay_catalog_batches,
 )
 
 
@@ -14,31 +14,8 @@ class Catalog:
         self.queries = []
         self.sessions = []
 
-    def query_bar_batches(self, *, identifiers, start, end, chunk_size, max_timestamp_group_rows, memory_limit_bytes):
-        self.queries.append((start, end))
-        bars = [bar for bar in self.bars if start <= bar.ts_init <= end]
-
-        class Session:
-            def __init__(self):
-                self.position = 0
-                self.closed = False
-
-            def next_batch(self):
-                if self.position == len(bars):
-                    return None
-                first = self.position
-                end = min(len(bars), first + chunk_size)
-                while end < len(bars) and bars[end].ts_init == bars[end - 1].ts_init:
-                    end += 1
-                self.position = end
-                return bars[first:end]
-
-            def close(self):
-                self.closed = True
-
-        session = Session()
-        self.sessions.append(session)
-        return session
+    def query_bar_batches(self, **kwargs):
+        raise AssertionError("native replay must not materialize Python batches")
 
 
 def opened(catalog):
@@ -50,88 +27,87 @@ def opened(catalog):
 def test_oversized_receipt_fails_before_querying_any_bars():
     catalog = Catalog()
     with pytest.raises(ValueError, match="bar cap"):
-        list(iter_catalog_bar_batches([opened(catalog)], max_input_bars=7))
+        replay_catalog_batches(SimpleNamespace(), [opened(catalog)], max_input_bars=7)
     assert catalog.queries == []
 
 
-def test_query_bounds_follow_availability_and_streaming_releases_batches():
+def test_native_replay_receives_frozen_bounds_without_python_queries():
     catalog = Catalog(delay=MINUTE_NS * 2)
-
-    class Engine:
-        def __init__(self):
-            self.loaded = []
-            self.processed = self.peak = self.clears = 0
-
-        def add_data(self, bars):
-            assert not self.loaded
-            self.loaded = list(bars)
-            self.peak = max(self.peak, len(self.loaded))
-
-        def run(self, *, start, end, streaming):
-            assert streaming is True
-            assert start <= self.loaded[0].ts_init <= self.loaded[-1].ts_init == end
-            self.processed += len(self.loaded)
-
-        def clear_data(self):
-            self.loaded.clear()
-            self.clears += 1
-
-    engine = Engine()
+    calls = []
+    def run_catalogs(**kwargs):
+        calls.append(kwargs)
+        return (8, 3, 3, [8])
+    engine = SimpleNamespace(run_catalogs=run_catalogs,
+                             get_result=lambda: SimpleNamespace(iterations=8))
     result = replay_catalog_batches(engine, [opened(catalog)], max_input_bars=8, batch_minutes=3)
     assert result == {"bars": 8, "batch_count": 3, "max_batch_bars": 3}
-    assert engine.processed == 8
-    assert engine.peak == 3
-    assert engine.clears == 3 and engine.loaded == []
-    assert catalog.queries[0][0] == catalog.bars[0].ts_init
-    assert catalog.queries[-1][1] == catalog.bars[-1].ts_init
+    assert len(calls) == 1
+    assert calls[0]["start"] == catalog.bars[0].ts_init
+    assert calls[0]["end"] == catalog.bars[-1].ts_init
+    assert calls[0]["chunk_size"] == 3
+    assert calls[0]["max_chunk_events"] == 250_000
+    assert catalog.queries == []
 
 
-def test_native_failure_still_releases_loaded_batch():
+def test_native_failure_is_not_retried_through_python_merge():
     catalog = Catalog()
-    engine = SimpleNamespace(add_data=lambda _: None, clear_data=lambda: None)
-    cleared = []
-    engine.run = lambda **_: (_ for _ in ()).throw(RuntimeError("failed"))
-    engine.clear_data = lambda: cleared.append(True)
-    with pytest.raises(RuntimeError, match="failed"):
+    def fail(**kwargs):
+        raise RuntimeError("native failed")
+    engine = SimpleNamespace(run_catalogs=fail)
+    with pytest.raises(RuntimeError, match="native failed"):
         replay_catalog_batches(engine, [opened(catalog)], max_input_bars=8)
-    assert cleared == [True]
-    assert catalog.sessions[0].closed
+    assert catalog.queries == []
 
 
-def test_per_batch_bar_budget_bounds_native_query_chunks():
-    catalog = Catalog(count=16)
-    batches = list(iter_catalog_bar_batches(
-        [opened(catalog)], max_input_bars=16, max_batch_bars=2,
-    ))
-    assert sum(len(batch) for batch in batches) == 16
-    assert max(len(batch) for batch in batches) <= 2
-    assert len(batches) >= 8
-
-
-def test_multi_catalog_equal_timestamps_stay_in_one_batch_and_sources_close():
-    first, second = Catalog(count=5), Catalog(count=5)
-    batches = list(iter_catalog_bar_batches([opened(first), opened(second)],
-                                            max_input_bars=10, max_batch_bars=3))
-    timestamps = [int(bar.ts_init) for batch in batches for bar in batch]
-    assert timestamps == sorted([bar.ts_init for bar in first.bars + second.bars])
-    assert len(timestamps) == 10
-    assert all(batches[i][-1].ts_init < batches[i+1][0].ts_init for i in range(len(batches)-1))
-    assert all(session.closed for catalog in (first, second) for session in catalog.sessions)
-
-
-def test_oversized_global_timestamp_group_refuses_and_closes_all_sources():
-    first, second = Catalog(count=4), Catalog(count=4)
-    for bar in first.bars + second.bars:
-        bar.ts_init = 100
-    with pytest.raises(ValueError, match="timestamp group"):
-        list(iter_catalog_bar_batches([opened(first), opened(second)], max_input_bars=8,
-                                      max_batch_bars=10, max_timestamp_group_bars=5))
-    assert all(session.closed for catalog in (first, second) for session in catalog.sessions)
-
-
-def test_early_consumer_close_releases_all_native_sessions():
+def test_partial_native_shutdown_does_not_publish_a_complete_receipt():
     catalog = Catalog()
-    stream = iter_catalog_bar_batches([opened(catalog)], max_input_bars=8, max_batch_bars=2)
-    next(stream)
-    stream.close()
-    assert catalog.sessions[0].closed
+    engine = SimpleNamespace(run_catalogs=lambda **_: (4, 1, 4, [8]),
+                             get_result=lambda: SimpleNamespace(iterations=4))
+    with pytest.raises(ValueError, match="count differs"):
+        replay_catalog_batches(engine, [opened(catalog)], max_input_bars=8)
+
+
+@pytest.mark.parametrize("cap", [1, 4])
+def test_native_two_product_timestamp_group_and_hard_cap(tmp_path, cap):
+    from tests.nautilus_runtime import require_nautilus
+    from tests.server.test_nautilus_bridge_backtest_runner import _real_catalog
+    from server.services.nautilus_bridge.backtest_runner import _load_input
+    require_nautilus()
+    from nautilus_trader.backtest import BacktestEngine
+    from nautilus_trader.config import BacktestEngineConfig
+    from nautilus_trader.execution import MakerTakerFeeModel
+    from nautilus_trader.model import AccountType, Currency, Money, OmsType, Venue
+    from decimal import Decimal
+    rows = []
+    for code, month in (("T", "2403"), ("TL", "2406")):
+        folder = tmp_path / code
+        folder.mkdir()
+        rows.append(_load_input(_real_catalog(folder, code=code, month=month, count=8)))
+    engine = BacktestEngine(config=BacktestEngineConfig(bypass_logging=True, run_analysis=False))
+    try:
+        engine.add_venue(venue=Venue("CFFEX"), oms_type=OmsType.NETTING,
+                         account_type=AccountType.MARGIN, base_currency=Currency.from_str("CNY"),
+                         starting_balances=[Money.from_str("1000000 CNY")],
+                         fee_model=MakerTakerFeeModel(maker_rate=Decimal(0), taker_rate=Decimal(0)))
+        for row in rows:
+            engine.add_instrument(row[3])
+        if cap == 1:
+            with pytest.raises(RuntimeError, match="hard event cap"):
+                replay_catalog_batches(engine, rows, max_input_bars=16,
+                                       batch_minutes=1, max_batch_bars=cap)
+            assert engine.get_result().iterations == 0
+        else:
+            result = replay_catalog_batches(engine, rows, max_input_bars=16,
+                                             batch_minutes=1, max_batch_bars=cap)
+            assert result == {"bars": 16, "batch_count": 8, "max_batch_bars": 2}
+            assert engine.get_result().iterations == 16
+    finally:
+        engine.dispose()
+
+
+def test_per_source_mismatch_cannot_cancel_out_in_total_count():
+    first, second = Catalog(count=8), Catalog(count=8)
+    engine = SimpleNamespace(run_catalogs=lambda **_: (16, 4, 4, [7, 9]),
+                             get_result=lambda: SimpleNamespace(iterations=16))
+    with pytest.raises(ValueError, match="per-source"):
+        replay_catalog_batches(engine, [opened(first), opened(second)], max_input_bars=16)

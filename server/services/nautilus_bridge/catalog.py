@@ -93,6 +93,7 @@ class CatalogReceipt:
     elapsed_ms: float
     process_peak_rss_bytes: int
     max_batch_bars: int
+    session_summaries: tuple[dict[str, str | int], ...] = ()
 
 
 def stage_contract_minute_catalog(
@@ -138,6 +139,8 @@ def stage_contract_minute_catalog(
         last: MarketBar | None = None
         selected_count = 0
         batch: list[MarketBar] = []
+        from tools.factors.expr.streaming.calendar_window import TradingSessionSummary
+        session_summary = TradingSessionSummary()
 
         def flush() -> None:
             if not batch:
@@ -162,6 +165,8 @@ def stage_contract_minute_catalog(
             if selected_count > max_bars:
                 raise ValueError("selected window exceeds explicit max_bars budget")
             selected_hash.update(_bar_digest_line(bar))
+            session_summary.add(bar.trading_day, bar.clock.interval_open_ns,
+                                bar.clock.interval_end_ns)
             if first is None:
                 first = bar
             last = bar
@@ -198,6 +203,11 @@ def stage_contract_minute_catalog(
             catalog_files=files,
             elapsed_ms=round((time.perf_counter() - started) * 1000, 3),
             process_peak_rss_bytes=_peak_rss_bytes(), max_batch_bars=batch_bars,
+            session_summaries=tuple({
+                "trading_day": item.trading_day.isoformat(),
+                "start_ns": item.start_ns, "end_ns": item.end_ns,
+                "bar_count": item.bar_count,
+            } for item in session_summary.sessions()),
         )
         receipt_path = staged / "factor_tester_catalog_receipt.json"
         receipt_path.write_text(json.dumps(asdict(receipt), ensure_ascii=False,

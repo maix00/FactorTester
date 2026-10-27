@@ -109,9 +109,24 @@ EXACT_PATH_TESTS = {
     ),
     "server/services/nautilus_bridge/catalog.py": (
         "tests/server/test_nautilus_bridge_catalog.py",
+        "tests/server/test_nautilus_catalog_staging.py",
+    ),
+    "server/services/nautilus_bridge/catalog_staging.py": (
+        "tests/server/test_nautilus_catalog_staging.py",
+        "tests/server/test_nautilus_strategy_runspec.py",
+        "tests/server/test_nautilus_bridge_catalog.py",
+    ),
+    "tools/factors/expr/streaming/calendar_window.py": (
+        "tests/server/test_factor_calendar_window.py",
+        "tests/server/test_factor_session_rolling.py",
+        "tests/server/test_nautilus_catalog_staging.py",
     ),
     "tests/benchmarks/bench_nautilus_catalog_staging.py": (
         "tests/server/test_nautilus_bridge_catalog.py",
+    ),
+    "tests/benchmarks/bench_strategy_catalog_runtime.py": (
+        "tests/server/test_nautilus_strategy_family_replay.py",
+        "tests/server/test_catalog_streaming_limits.py",
     ),
     "server/services/nautilus_bridge/backtest_runner.py": (
         "tests/server/test_catalog_streaming_limits.py",
