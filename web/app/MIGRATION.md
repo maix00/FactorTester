@@ -289,3 +289,12 @@
 - 明确返回的空集合显示“无”，零值和 false 保留；不把这些值当缺失隐藏。
 - 属性弹窗收紧至 640px；手机仍为公共独立返回页面。来源与适配状态保留，无新增说明段落。
 - 35 项前端检查、类型检查与构建；本地手机重新从 More→产品→数据源→成员完整进入并截图，展开缺失字段确认可见。桌面弹窗另核；无控制台错误。未部署。
+
+## 2026-10-27 公共详情与 Nautilus 字段核对
+
+- 策略元数据与通用记录改用紧凑行，引用长文本可折行；版本选择只显示 rN，精确 revision_ref 仍在详情，不伪造 Frozen 状态。
+- 通用数组复用 TRDataTable；短标量数组直接展示，不制造单行分页表。对象单元格仅展开时序列化，避免隐藏状态反复构造大 JSON；无提速基准声明。
+- Job 阶段为空不占一整行；概览使用多语言字段标签。Manager task_detail.job 包装按当前契约解析，保留任务摘要与路由。
+- Job 配置直接按冻结 hash 读取 RunSpec，回测只呈现 nautilus_contract；删除该视图的旧 configuration/job_spec/execution_plan 回退。
+- 数据源补充当前能力契约 mode_available；产品/数据源的进一步字段迁移缺口见 [Nautilus 迁移核对](NAUTILUS-MIGRATION.md)。旧注册表仍有后端依赖，未宣称全清理。
+- 37 项前端检查与类型检查通过；本地当前 Manager 包装/RunSpec 夹具核对了 Venue/account_type/oms_type/native_config 与旧字段不显示。真实任务与全页面移动验收仍待完成。

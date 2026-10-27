@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Button, Collapse, Descriptions, Input, Popconfirm, Select, Spin, Tabs } from "antd";
+import { Alert, Button, Collapse, Input, Popconfirm, Select, Spin, Tabs } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { TRDataTable } from "./data-table.tsx";
 import { LibraryCreate } from "./library-create.tsx";
+import { PropertyGroups } from "./property-groups.tsx";
 import { ResultView } from "./result-view.tsx";
 import { formatDate } from "../format.ts";
 type Row = Record<string, any>;
@@ -49,16 +50,17 @@ export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row |
   const loaded = source?.revision_ref === ref ? source : null;
   const hooks: Row[] = (loaded || revision).hooks || [];
   return <section className="tr-strategy-detail">{error ? <Alert type="error" message={error} action={<Button onClick={() => setRetry((value) => value + 1)}>{t("retry")}</Button>} /> : null}
-    <div className="tr-detail-toolbar"><Select aria-label={t("library.version")} value={ref} options={(revisions.length ? revisions : [current]).filter((item) => item.revision_ref).map((item) => ({ value: item.revision_ref, label: `r${item.revision_number || "—"} · ${item.revision_ref}` }))} onChange={(value) => { setSelectedRef(value); setExpanded([]); }} />
+    <div className="tr-detail-toolbar"><Select aria-label={t("library.version")} value={ref} options={(revisions.length ? revisions : [current]).filter((item) => item.revision_ref).map((item) => ({ value: item.revision_ref, label: `r${item.revision_number || "—"}` }))} onChange={(value) => { setSelectedRef(value); setExpanded([]); }} />
       {strategy.access?.can_edit ? <Button disabled={ref !== current.revision_ref} loading={loading} onClick={() => void edit()}>{t("configuration.edit")}</Button> : null}{strategy.access?.can_delete ? <Popconfirm title={t("strategyDetail.archiveConfirm")} onConfirm={() => action("", "DELETE")}><Button danger disabled={loading}>{t("strategyDetail.archive")}</Button></Popconfirm> : null}</div>
     <Tabs activeKey={tab} onChange={setTab} items={[
-      { key: "overview", label: t("details"), children: <><Descriptions column={1} items={[
-        { key: "strategy", label: t("strategyDetail.reference"), children: strategy.strategy_ref },
-        { key: "owner", label: t("library.owner"), children: strategy.owner_ref },
-        { key: "description", label: t("library.description"), children: strategy.description || "—" },
-        { key: "entry", label: t("editor.entrypoint"), children: revision.entrypoint || "—" },
-        { key: "hash", label: t("strategyDetail.sourceHash"), children: revision.source_sha256 || "—" },
-      ]} /><Collapse items={hooks.map((hook, index) => ({ key: String(index), label: hook.name || hook.method || `Hook ${index + 1}`, children: sourceLoading ? <Spin /> : <pre className="tr-job-detail">{loaded?.hooks?.[index]?.source || "—"}</pre> }))} activeKey={expanded} onChange={(keys) => setExpanded(Array.isArray(keys) ? keys.map(String) : [String(keys)])} /></> },
+      { key: "overview", label: t("details"), children: <><PropertyGroups groups={[{key:"strategy",title:t("details"),items:[
+        { key: "strategy", label: t("strategyDetail.reference"), value: strategy.strategy_ref },
+        { key: "owner", label: t("library.owner"), value: strategy.owner_ref },
+        { key: "description", label: t("library.description"), value: strategy.description, wide:true },
+        { key: "entry", label: t("editor.entrypoint"), value: revision.entrypoint },
+        { key: "revision", label:t("library.version"),value:revision.revision_ref},
+        { key: "hash", label: t("strategyDetail.sourceHash"), value: revision.source_sha256 },
+      ]}]} /><Collapse items={hooks.map((hook, index) => ({ key: String(index), label: hook.name || hook.method || `Hook ${index + 1}`, children: sourceLoading ? <Spin /> : <pre className="tr-job-detail">{loaded?.hooks?.[index]?.source || "—"}</pre> }))} activeKey={expanded} onChange={(keys) => setExpanded(Array.isArray(keys) ? keys.map(String) : [String(keys)])} /></> },
       { key: "source", label: t("editor.source"), children: <Spin spinning={sourceLoading}>{loaded ? <pre className="tr-source-view"><code>{loaded.source_code || ""}</code></pre> : null}</Spin> },
       { key: "revisions", label: t("strategyDetail.history"), children: <TRDataTable rows={revisions.slice((page - 1) * size, page * size)} rowKey="revision_ref" pagination={{ page, pageSize: size, total: revisions.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
         { title: t("library.version"), key: "version", render: (_, row) => <button className="tr-table-link" onClick={() => { setSelectedRef(row.revision_ref); setTab("source"); }}>{`r${row.revision_number || "—"}`}</button> },

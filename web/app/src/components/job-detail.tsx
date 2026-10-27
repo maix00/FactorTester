@@ -2,11 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, Progress, Select, Spin, Tabs, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
-import { jobURL, progressPercent, terminalStatus, type JobReference } from "../job-model.ts";
+import { jobURL, jobDetailOf, progressPercent, terminalStatus, type JobReference } from "../job-model.ts";
 import { usePageInstance } from "../page-instance.ts";
 import { readJobArtifact } from "../artifacts.ts";
 import { FactorResults } from "./factor-results.tsx";
 import { seriesArtifact } from "../charts/factor-result.ts";
+import { FrozenRunSpec } from "./frozen-run-spec.tsx";
+import { PropertyGroups } from "./property-groups.tsx";
 import { ResultView } from "./result-view.tsx";
 
 export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
@@ -44,7 +46,7 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
       if (values[1].status === "fulfilled") setArtifacts(values[1].value.artifacts ?? values[1].value.items ?? []);
     };
     const load = async (): Promise<boolean> => {
-      const data = await request(jobURL(job), { signal: controller.signal });
+      const data = jobDetailOf(await request(jobURL(job), { signal: controller.signal }));
       if (controller.signal.aborted) return true;
       setDetail(data); setProgress(data.progress || null);
       if (terminalStatus(data.status)) { stream?.close(); if (data.status === "succeeded") await loadOutputs(); }
@@ -80,16 +82,22 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
   const percent = progressPercent(progress, detail.status);
   return <div className="tr-job-page-detail"><div className="tr-job-state"><Tag color={detail.status === "succeeded" ? "green" : detail.status === "failed" ? "red" : "blue"}>{t(`jobs.states.${detail.status}`, { defaultValue: detail.status })}</Tag>
     {percent !== undefined ? <Progress percent={percent} showInfo status={detail.status === "failed" ? "exception" : !terminalStatus(detail.status) ? "active" : "normal"} /> : null}
-    <span>{String(progress?.phase || progress?.message || "")}</span>
+    {progress?.phase || progress?.message ? <span className="tr-job-phase">{String(progress.phase || progress.message)}</span> : null}
     {!terminalStatus(detail.status) ? <Button danger onClick={() => { void request(jobURL(job, "/cancel"), { method: "POST" }).then(() => setRefresh((value) => value + 1)).catch((reason) => setError(reason.message)); }}>{t("jobs.cancel")}</Button> : null}</div>
     {detail.error ? <Alert type="error" showIcon message={typeof detail.error === "string" ? detail.error : JSON.stringify(detail.error)} /> : null}
     <Tabs items={[
-      { key: "overview", label: t("jobs.overview"), children: <ResultView value={{ job_id: detail.job_id || job.job_id, kind: detail.kind, status: detail.status, ...detail.result_summary }} /> },
+      { key: "overview", label: t("jobs.overview"), children: <><PropertyGroups groups={[{key:"job",title:t("jobs.overview"),items:[
+        {key:"job",label:t("jobs.jobId"),value:detail.job_id || job.job_id},
+        {key:"kind",label:t("configuration.testKind"),value:detail.kind,render:value => t(`configuration.analysisNames.${value}`,{defaultValue:String(value)})},
+        {key:"status",label:t("jobs.status"),value:detail.status,render:value => t(`jobs.states.${value}`,{defaultValue:String(value)})},
+        {key:"server",label:t("jobs.server"),value:detail.server_name || detail.server_id || job.server_id},
+        {key:"port",label:t("jobs.port"),value:detail.port ?? detail.service_port ?? job.service_port},
+      ]}]} />{detail.result_summary ? <ResultView value={detail.result_summary} /> : null}</> },
       { key: "results", label: t("jobs.results"), children: detail.kind === "factor_evaluation" ? <FactorResults result={result || detail.result_summary} artifactName={seriesArtifact(artifacts, true)} job={job} configuration={detail.configuration || detail.run_spec || detail.job_spec} /> : seriesArtifact(artifacts) ? <Tabs items={[
         { key: "summary", label: t("jobs.overview"), children: <ResultView value={result} /> },
         { key: "factor-series", label: t("factorResults.title"), children: <FactorResults result={null} artifactName={seriesArtifact(artifacts)} job={job} configuration={detail.configuration || detail.run_spec || detail.job_spec} /> },
       ]} /> : result ? <ResultView value={result} /> : <Empty description={t(terminalStatus(detail.status) ? "empty" : "jobs.waitingResults")} /> },
-      { key: "configuration", label: t("jobs.configuration"), children: <pre className="tr-job-detail">{JSON.stringify(detail.execution_plan || detail.run_spec || detail.job_spec || detail.configuration, null, 2)}</pre> },
+      { key: "configuration", label: t("jobs.configuration"), children: <FrozenRunSpec hash={detail.run_spec_hash} serverID={job.server_id} /> },
       { key: "inputs", label: t("jobs.inputs"), children: <div className="tr-job-artifact-list">{artifacts.map((item, index) => {
         const name = String(item.name || "");
         return <div className="tr-job-artifact" key={item.name || index}><span>{item.name || item.kind}</span>{name ? <Button type="link" onClick={() => void artifact(name, true)}>{t("jobs.download")}</Button> : null}</div>;

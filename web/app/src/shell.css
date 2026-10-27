@@ -340,7 +340,7 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-table-link { color:#1677ff; border:0; padding:0; background:none; cursor:pointer; text-align:left; }
 .tr-job-state { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:20px; background:white; border:1px solid #e8ecf2; border-radius:12px; margin-bottom:24px; }
 .tr-job-state .ant-progress { flex:1; min-width:160px; margin:0; }
-.tr-job-state > span:last-of-type { width:100%; color:#64748b; }
+.tr-job-phase { width:100%; color:#64748b; }
 .tr-job-artifact { display:flex; justify-content:space-between; gap:16px; padding:16px 0; border-bottom:1px solid #e8ecf2; }
 .tr-artifact-frame { width:100%; height:70vh; border:0; margin-top:20px; background:white; }
 .tr-picker-control { display:flex; align-items:center; gap:8px; }
@@ -536,3 +536,51 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-source-mapping dt,.tr-source-mapping dd { font-family:ui-monospace,SFMono-Regular,monospace; font-size:12px; }
 .tr-source-mapping dd { text-align:right; }
 @media(max-width:760px) { .tr-source-property-meta { font-size:11px; } .tr-property-list > div { grid-template-columns:minmax(110px,43%) minmax(0,1fr); gap:12px; } .tr-property-list > .is-wide { grid-template-columns:1fr; } }
+/* Shared record/detail presentation follows the compact TradeResearch system. */
+.tr-record-values { display:grid; margin:0 0 20px; }
+.tr-record-values > div { display:grid; grid-template-columns:minmax(130px,32%) minmax(0,1fr); gap:24px; padding:12px 0; border-bottom:1px solid var(--line); font-size:13px; line-height:21px; align-items:baseline; }
+.tr-record-values > div:last-child { border-bottom:0; }
+.tr-record-values dt { color:var(--muted); overflow-wrap:anywhere; }
+.tr-record-values dd { margin:0; min-width:0; overflow-wrap:anywhere; color:var(--text); font-variant-numeric:tabular-nums; }
+.tr-result-view { min-width:0; }
+.tr-result-view > .ant-collapse { margin:12px 0; }
+.tr-result-view > .ant-collapse > .ant-collapse-item > .ant-collapse-header { padding-inline:0; font-weight:500; }
+.tr-result-view > .ant-collapse > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box { padding-inline:0; }
+.tr-detail-toolbar { flex-wrap:wrap; gap:8px; }
+.tr-detail-toolbar .ant-select { min-width:160px; }
+.tr-strategy-detail > .ant-tabs { margin-top:4px; }
+.tr-strategy-detail .tr-property-groups { padding:12px 0 20px; }
+.tr-library-meta:empty { display:none; }
+.tr-library-detail > header { gap:16px; align-items:baseline; }
+.tr-library-detail h2 { font-size:20px; overflow-wrap:anywhere; }
+.tr-factor-detail > section { margin:24px 0; }
+.tr-factor-detail h3 { margin:0 0 12px; font-size:14px; font-weight:600; }
+.tr-factor-description { color:var(--muted); font-size:13px; line-height:1.7; margin:16px 0 24px; }
+.tr-factor-formula .katex-display { margin:0; }
+.tr-job-state { padding:14px 18px; margin-bottom:20px; border-radius:8px; }
+.tr-job-state > .ant-tag { flex:none; width:auto; margin:0; }
+.tr-job-page-detail > .ant-tabs .tr-property-groups { max-width:840px; padding:12px 0 24px; }
+.tr-trading-grid .ant-card { border-radius:8px; box-shadow:none; }
+.tr-trading-grid .ant-card-head { min-height:52px; padding-inline:20px; }
+.tr-trading-grid .ant-card-head-title { font-size:14px; }
+.tr-trading-grid .ant-card-body { padding:20px; }
+.tr-settings-content { max-height:75vh; overflow:auto; padding-right:8px; }
+.tr-settings-card { padding:0; border:0; background:transparent; }
+.tr-settings-row { border-top:0; }
+@media(max-width:760px) {
+ .tr-record-values > div { grid-template-columns:minmax(100px,36%) minmax(0,1fr); gap:16px; padding:10px 0; }
+ .tr-detail-toolbar .ant-select { flex-basis:100%; }
+ .tr-factor-formula { padding:16px; margin:12px 0 20px; }
+ .tr-job-state { padding:12px 14px; }
+ .tr-job-state .ant-progress { min-width:100px; }
+ .tr-source-view { padding:14px; font-size:12px; }
+ .tr-trading-grid .ant-card-head,.tr-trading-grid .ant-card-body { padding-inline:16px; }
+}
+@container tr-panel (max-width:760px) {
+ .tr-record-values > div { grid-template-columns:minmax(100px,36%) minmax(0,1fr); gap:16px; }
+ .tr-detail-toolbar .ant-select { flex-basis:100%; }
+ .tr-trading-grid { grid-template-columns:minmax(0,1fr); gap:16px; }
+}
+.tr-scalar-values { margin:0; padding:0; list-style:none; font-size:13px; line-height:21px; }
+.tr-scalar-values li { padding:6px 0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.tr-value-empty { color:var(--muted); font-size:13px; }

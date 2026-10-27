@@ -12,6 +12,7 @@ import { bookTypes, sourceCapability, sourceIdentity, sourceTitle, type SourceRo
 function Value({value}: {value:unknown}): React.ReactElement {
  const {t}=useTranslation();
  if (value === null || value === undefined || value === "") return <>—</>;
+ if (typeof value === "boolean") return <>{t(value ? "sources.yes" : "sources.no")}</>;
  if (Array.isArray(value)) return <>{value.map(String).join(" · ") || t("sources.none")}</>;
  if (typeof value === "object" && !Object.keys(value).length) return <>{t("sources.none")}</>;
  if (typeof value === "object") return <dl className="tr-source-mapping">{Object.entries(value).map(([key,item]) => <div key={key}><dt>{key}</dt><dd>{String(item)}</dd></div>)}</dl>;
@@ -67,7 +68,7 @@ function SourceProperties({member}:{member:SourceRow}):React.ReactElement {
  <div className="tr-source-property-meta"><code>{member.id || member.key}</code><span>{t(`sources.origins.${origin}`)}</span></div>
  <div className={`tr-source-adapter-status ${adapter===true ? "is-ready" : adapter===false ? "is-unavailable" : ""}`}><span aria-hidden="true" />{adapterLabel}</div>
  <PropertyGroups groups={[
-  {key:"data",title:t("sources.groups.data"),items:[{key:"frequency",label:t("sources.frequencies"),value:member.frequency},...['data_kind','market_depth','delivery_mode','sampling_mode','supported_book_types'].map(item)]},
+  {key:"data",title:t("sources.groups.data"),items:[{key:"frequency",label:t("sources.frequencies"),value:capability?.frequency ?? member.frequency},...['mode_available','data_kind','market_depth','delivery_mode','sampling_mode','supported_book_types'].map(item)]},
   {key:"time",title:t("sources.groups.time"),items:['timezone','bar_time_semantics','raw_timestamp_unit','layout','naming_scheme'].map(item)},
   {key:"mapping",title:t("sources.groups.mapping"),items:['time_columns','data_columns'].map(item)},
   {key:"adapter",title:t("sources.groups.engine"),items:[...['adapter_id','instrument_scope','reason'].map(item),{key:"books",label:t("sources.configurableBooks"),value:capabilities?.simulated_venue_config ? bookTypes(capabilities) : undefined,render:value => <Value value={value} />}]},

@@ -14,3 +14,17 @@ export function progressPercent(progress: Record<string, unknown> | null, status
   const total = Number(progress.total), completed = Number(progress.completed);
   return total > 0 && Number.isFinite(completed) ? Math.max(0, Math.min(100, completed / total * 100)) : undefined;
 }
+/** Current Manager envelope: routing metadata and task_detail.job stay distinct. */
+export function jobDetailOf(payload: Record<string, any>): Record<string, any> {
+  const task = payload.task_detail || payload;
+  return { ...task, ...(task.job || {}),
+    progress: task.progress ?? task.job?.progress,
+    run_spec_hash: task.job?.run_spec_hash ?? task.run_spec_hash,
+  };
+}
+export function runSpecURL(hash: string, serverID?: string): string {
+ const value=hash.replace(/^sha256:/i, "");
+ if(!/^[a-f0-9]{64}$/i.test(value))throw new Error("Invalid RunSpec hash");
+ const params=new URLSearchParams();if(serverID)params.set("server_id",serverID);
+ return `/api/run-specs/${encodeURIComponent(value)}${params.size ? `?${params}` : ""}`;
+}

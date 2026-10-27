@@ -14,7 +14,7 @@ export function FactorDetail({ detail }: { detail: Record<string, any> | null })
   return <div className="tr-factor-detail">
     {description ? <p className="tr-factor-description">{description}</p> : null}
     {typeof formula === "string" && formula ? <section><h3>{t("library.formula")}</h3><Formula latex={formula} /></section> : null}
-    {Array.isArray(params) && params.length ? <section><h3>{t("editor.parameters")}</h3><TRDataTable rows={params.slice((page - 1) * size, page * size)} rowKey={(row) => row.alias || row.name} pagination={{ page, pageSize: size, total: params.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
+    {Array.isArray(params) && params.length ? <section><h3>{t("editor.parameters")}</h3><TRDataTable rows={params.slice((page - 1) * size, page * size)} rowKey={(row) => row.alias || row.name} pagination={{ page, pageSize: size, total: params.length, hideOnSinglePage: true, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
       { title: t("editor.name"), key: "name", render: (_, row) => row.name || row.alias },
       { title: t("library.type"), key: "type", render: (_, row) => row.value_type || row.type || "—" },
       { title: t("library.defaultValue"), key: "default", render: (_, row) => { const value = row.default_value ?? row.default; return value === undefined ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value); } },
