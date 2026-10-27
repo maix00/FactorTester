@@ -169,7 +169,17 @@ class CatalogRoutesMixin:
         )
         category_id = category_ids[0] if len(category_ids) == 1 else ",".join(category_ids)
         try:
-            if parsed.path == "/api/product-library/data-sources":
+            if parsed.path == "/api/product-library/installed-bundles":
+                from server.services.product_catalog_projection import (
+                    installed_bundle_descriptors,
+                )
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "metadata_only": True,
+                    "sources": list(installed_bundle_descriptors()),
+                }
+            elif parsed.path == "/api/product-library/data-sources":
                 sources = self.state.federated_source_descriptors(
                     refresh=str(query.get("refresh", [""])[0]).lower()
                     in {"1", "true", "yes"},

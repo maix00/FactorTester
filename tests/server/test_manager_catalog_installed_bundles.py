@@ -1,0 +1,40 @@
+from types import SimpleNamespace
+
+from server.manager.http import catalog_routes
+from server.services import product_catalog_projection
+
+
+def test_installed_bundles_route_is_metadata_only(monkeypatch):
+    responses = []
+    descriptor = {
+        "id": "Local",
+        "bundle_id": "Local",
+        "members": [],
+        "availability": {"status": "unknown", "product_count": None},
+    }
+    monkeypatch.setattr(
+        product_catalog_projection, "installed_bundle_descriptors",
+        lambda: (descriptor,),
+    )
+    monkeypatch.setattr(
+        catalog_routes, "json_response",
+        lambda _handler, value, status=200: responses.append((value, status)),
+    )
+
+    class Handler(catalog_routes.CatalogRoutesMixin):
+        def _session(self):
+            return {"username": "alice", "role": "user"}
+
+        def _visitor_mode(self):
+            return None
+
+    handled = Handler()._serve_product_catalog(SimpleNamespace(
+        path="/api/product-library/installed-bundles", query="",
+    ))
+    assert handled is True
+    assert responses == [({
+        "success": True,
+        "origin": "server",
+        "metadata_only": True,
+        "sources": [descriptor],
+    }, 200)]
