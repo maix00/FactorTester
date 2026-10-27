@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any, Callable
 
+from traderesearch_data.nautilus import NautilusAdapterContract
 from tools.data.availability.schema import availability_dimensions
 
 
@@ -18,34 +19,6 @@ ProductPredicate = Callable[[Any], bool]
 MemberLoader = Callable[[], tuple["DataSourceMember", ...]]
 AssetClassResolver = Callable[[Any], str | None]
 HistoricalFieldProviderLoader = Callable[[], Any]
-
-
-@dataclass(frozen=True, slots=True)
-class NautilusAdapterContract:
-    """Source-owned declaration of one verified Nautilus feed adapter.
-
-    The source owns its physical schema and time semantics. The bridge only
-    compares this declaration with the catalog projection before admitting it.
-    """
-
-    member_key: str
-    adapter_id: str
-    frequency: str
-    sampling_mode: str
-    data_kind: str
-    market_depth: str
-    delivery_mode: str
-    timezone: str
-    layout: str
-    naming_scheme: str
-    required_time_columns: tuple[tuple[str, str], ...]
-    required_data_columns: tuple[tuple[str, str], ...]
-    clock_policy: str
-    product_scope: str
-    instrument_scope: str = "unspecified"
-    bar_time_semantics: str = "unspecified"
-    raw_timestamp_unit: str = "unspecified"
-    supported_book_types: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

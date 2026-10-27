@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from server.services.nautilus_bridge.native_configuration import NAUTILUS_BOOK_TYPES
-from tools.data.source_catalog import NautilusAdapterContract as AdapterContract
+from traderesearch_data.nautilus import NautilusAdapterContract as AdapterContract
 
 _NAUTILUS_BOOK_TYPES = frozenset(NAUTILUS_BOOK_TYPES)
 

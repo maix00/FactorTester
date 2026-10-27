@@ -189,3 +189,30 @@ def test_external_root_is_explicit_and_client_code_is_not_activated(tmp_path):
     import os
     completed = subprocess.run([sys.executable, "-S", "-c", "from sources.registry import installed_bundles,load_all_sources; assert installed_bundles()[0].provisioner=='user'; assert load_all_sources()==()"], cwd=ROOT, env={**os.environ,"TR_SOURCE_BUNDLE_ROOT":str(tmp_path)}, capture_output=True, text=True)
     assert completed.returncode == 0, completed.stderr
+
+
+def test_source_adapter_contract_import_has_no_platform_or_engine_dependencies():
+    code = """
+import sys
+from traderesearch_data.nautilus import NautilusAdapterContract
+from sources.LocalCNFutures.nautilus_adapter import CONTRACT_MIN1, CONTRACT_DAY1
+assert isinstance(CONTRACT_MIN1, NautilusAdapterContract)
+assert CONTRACT_DAY1.frequency == 'DAY1'
+assert NautilusAdapterContract.__module__ == 'traderesearch_data.nautilus'
+assert not any(name == 'tools' or name.startswith(('tools.', 'server.', 'nautilus_trader.')) for name in sys.modules)
+"""
+    subprocess.run([sys.executable, "-S", "-c", code], cwd=ROOT, check=True,
+                   capture_output=True, text=True)
+
+
+def test_lazy_bundle_paths_preserve_existing_artifact_resolution():
+    import sources.LocalCNFutures as source
+    from scripts.data_dir import DATA_DIR
+    from tools.data.artifacts.storage import artifact_path, source_data_root
+
+    assert source.SOURCE_DATA_DIR == str(source_data_root("LocalCNFutures", default=DATA_DIR))
+    assert source.MINK_PRODUCT_DIR == source.SOURCE_DATA_DIR + "/data_mink_product"
+    assert source.ROLLER_INFO_PATH == str(artifact_path("LocalCNFutures", "roller_info.parquet"))
+    assert source.TERM_STRUCTURE_PATH == str(artifact_path("LocalCNFutures", "term_structure-listed_contracts.parquet"))
+    with pytest.raises(AttributeError):
+        getattr(source, "nonexistent_bundle_attribute")

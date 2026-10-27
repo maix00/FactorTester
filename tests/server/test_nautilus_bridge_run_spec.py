@@ -172,8 +172,9 @@ def test_run_spec_resolves_an_adapter_declared_by_a_different_source(monkeypatch
     from tools.data.source_catalog import (
         DataSourceMember,
         DataSourceMode,
-        NautilusAdapterContract,
     )
+
+    from traderesearch_data.nautilus import NautilusAdapterContract
 
     adapter = NautilusAdapterContract(
         member_key="ExampleRatesContractMIN15",

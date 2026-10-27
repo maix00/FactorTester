@@ -140,3 +140,14 @@ JSON 不可变快照热读取同规模约 0.285–0.300ms；单次额外约 5ns�
 
 现有来源声明/精确适配选择、合约 catalog staging 和新 JSON 规则聚焦测试通过；真实服务器
 安装/发现集合、客户端入口、规则数据加载与产品分类迁移仍需后续验收。
+
+### Public optional adapter declaration
+
+`traderesearch_data.nautilus.NautilusAdapterContract` is now the single definition
+used by source declarations and bridge admission. It contains metadata only and
+has no Nautilus runtime or platform-domain imports. LocalCNFutures path constants
+resolve on first access rather than during package import, so importing its feed
+contract no longer initializes artifact paths or NumPy. Exact path resolver
+outputs and current source admission/staging remain covered by focused tests.
+This does not yet externalize the complete source implementation or replace the
+federated catalog's runtime availability/count projection.

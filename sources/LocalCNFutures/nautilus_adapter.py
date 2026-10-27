@@ -4,7 +4,7 @@ These contracts describe only this source's physical parquet layouts and time
 labels. Other data sources must declare their own adapter contracts.
 """
 
-from tools.data.source_catalog import NautilusAdapterContract
+from traderesearch_data.nautilus import NautilusAdapterContract
 
 
 CONTRACT_MIN1 = NautilusAdapterContract(
