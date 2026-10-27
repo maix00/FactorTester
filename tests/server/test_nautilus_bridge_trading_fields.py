@@ -179,6 +179,7 @@ def test_source_owned_provider_binding_freezes_changing_fields() -> None:
         key=SOURCE.member_key, timezone=SOURCE.timezone,
         execution_provider=execution_provider,
         trading_field_provider_ref="FieldHistory:market_rules:exchange",
+        trading_field_related_members=("FieldHistory:market_rules:exchange",),
         trading_field_effective_clock="effective_timestamp_or_trading_day",
         load_trading_field_provider=lambda: (loads.append("loaded") or _changing_provider()),
     )
@@ -271,11 +272,16 @@ def test_source_owned_provider_binding_rejects_missing_or_mismatched_metadata() 
         key=SOURCE.member_key, timezone=SOURCE.timezone,
         execution_provider=execution_provider,
         trading_field_provider_ref="", trading_field_effective_clock="unspecified",
+        trading_field_related_members=("FieldHistory:market_rules:exchange",),
         load_trading_field_provider=lambda: _provider(),
     )
     with pytest.raises(TradingFieldContractError, match="no declared historical"):
         bind_historical_trading_fields(resolved, member)
     member.trading_field_provider_ref = "FieldHistory:market_rules:exchange"
+    member.trading_field_related_members = ()
+    with pytest.raises(TradingFieldContractError, match="no declared related"):
+        bind_historical_trading_fields(resolved, member)
+    member.trading_field_related_members = ("FieldHistory:market_rules:exchange",)
     member.trading_field_effective_clock = "wrong_clock"
     with pytest.raises(TradingFieldContractError, match="unsupported historical field clock"):
         bind_historical_trading_fields(resolved, member)

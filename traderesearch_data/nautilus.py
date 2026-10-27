@@ -57,12 +57,16 @@ class CatalogMemberRef:
             "authority", "bundle_id", "member_id", "product_ref",
             "source_product_ref", "contract_uid", "bar_type",
         ):
-            if not str(getattr(self, name)).strip():
-                raise ValueError(f"catalog member {name} is required")
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"catalog member {name} must be a non-empty string")
         if not isinstance(self.catalog_dir, Path):
             raise TypeError("catalog_dir must be a Path")
-        if self.source_revision is not None and not str(self.source_revision).strip():
-            raise ValueError("source_revision must be non-empty when present")
+        revision = self.source_revision
+        if revision is not None and (
+            not isinstance(revision, str) or not revision.strip()
+        ):
+            raise ValueError("source_revision must be a non-empty string or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,8 +76,13 @@ class CatalogSet:
     refs: tuple[CatalogMemberRef, ...]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.refs, tuple):
+            raise TypeError("CatalogSet.refs must be a tuple")
+        if any(not isinstance(item, CatalogMemberRef) for item in self.refs):
+            raise TypeError("CatalogSet.refs contains a non-CatalogMemberRef")
         identities = [
-            (item.source_product_ref, item.contract_uid, item.bar_type)
+            (item.authority, item.bundle_id, item.member_id,
+             item.source_product_ref, item.contract_uid, item.bar_type)
             for item in self.refs
         ]
         if len(set(identities)) != len(identities):
@@ -93,6 +102,8 @@ class CatalogStagingRequest:
     paths: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.paths, tuple):
+            raise TypeError("catalog staging paths must be a tuple")
         if not self.paths or any(not isinstance(path, str) or not path for path in self.paths):
             raise ValueError("catalog staging paths must be non-empty strings")
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -22,6 +22,7 @@ from tools.data.field_history import (
     OPENCTP_LATEST_FIELD_PROVIDER,
     OPENCTP_LATEST_FIELD_SOURCE_KEY,
 )
+from traderesearch_data.rules import TradingFieldProvider, TradingFieldValue
 
 MARKET_RULE_FIELDS = (
     "VolumeMultiple", "PriceTick", "MinLimitOrderVolume", "MaxLimitOrderVolume",
@@ -33,25 +34,6 @@ MARKET_RULE_FIELDS = (
 )
 POSITIVE_FIELDS = frozenset({"VolumeMultiple", "PriceTick", "MinLimitOrderVolume",
                              "MaxLimitOrderVolume"})
-
-
-@runtime_checkable
-class TradingFieldProvider(Protocol):
-    """Minimal source-owned historical-field lookup contract."""
-
-    def resolve_at(self, *args: Any, **kwargs: Any) -> Any: ...
-
-
-@runtime_checkable
-class TradingFieldValue(Protocol):
-    """Fields consumed from one source-owned historical lookup result."""
-
-    value: Any
-    approximated: bool
-    provider: str
-    source_key: str
-    effective_trading_day: Any
-    effective_timestamp: Any
 
 
 class TradingFieldContractError(ValueError):
@@ -112,7 +94,13 @@ def bind_historical_trading_fields(
         raise TradingFieldContractError(
             f"{source.member_key}: no declared historical trading-field provider binding"
         )
-    if related and provider_ref not in related:
+    if not related:
+        raise TradingFieldContractError(
+            f"{source.member_key}: no declared related historical member"
+        )
+    if any(not isinstance(value, str) or not value for value in related):
+        raise TradingFieldContractError("related historical members must be non-empty strings")
+    if provider_ref not in related:
         raise TradingFieldContractError(
             f"{source.member_key}: historical provider is not a declared related member"
         )

@@ -184,7 +184,8 @@ federated catalog's runtime availability/count projection.
   并调用源提供的 loader；`TradingFieldProvider` 只要求 `resolve_at` 协议，
   `TradingFieldValue` 只要求字段，不再以具体 `FieldHistoryProvider`/
   `HistoricalFieldValue` 类作为准入条件，也不再导入规则 fallback 枚举/异常类。
-  源 loader 仍返回现有 FieldHistory 实现，完整规则数据协议迁移尚未完成。
+  协议现位于公共 `traderesearch_data.rules`；源 loader 仍返回现有 FieldHistory
+  实现，完整规则数据协议迁移尚未完成。
 - 多合约目录显式失败。`stage_catalogs` 在写任何 catalog 前检查同一品种的多个合约
   并拒绝；这是防止错误结果的 fail-closed，不是多合约已完成。
 - DAY1 不再静默复用 MIN1 `stage_contract_minute_catalog`。源 loader 使用
@@ -203,11 +204,14 @@ federated catalog's runtime availability/count projection.
   源 loader 不再接收可变的 `staging_requests: list[dict]`。`NautilusCatalogLoader`
   只接受这个请求。LocalCNFutures 在 staging 前拒绝未声明历史规则成员的请求；
   规则成员的实际加载/单次缓存仍未切换。LocalCNFutures 的 strict 规则 provider
-  现在按 `openctp` SQLite 的 mtime/size 缓存：同一 revision 只加载一次，revision
-  变化后重新加载；加载期间 revision 变化则不缓存。
+  按 SQLite 路径、行数/最大 rowid、data_version 和主库/WAL 文件状态缓存；同一
+  revision 只加载一次，加载期间 revision 变化则不缓存。该 revision 是源定义，
+  不是 SQLite 内建事务快照。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
-  仍相同，完整历史规则/执行路径尚未接入。
+  改为分别读取 `initial_margin_ratio` / `maintenance_margin_ratio`；缺任一条即失败，
+  不再复制同一值。所有金额/比例/乘数/步长先拒绝 NaN/Infinity。当前真实 Local 源没有
+  这两条字段时 staging 会 fail-closed，需补规则来源。
 
 多合约的显式引用形状与消费者迁移条件见
 [ADR-186](186-multi-contract-catalog-references.md)；在消费者契约确认前保持

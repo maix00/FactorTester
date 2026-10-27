@@ -236,9 +236,33 @@ def test_catalog_set_preserves_multiple_contracts_per_product(tmp_path):
     assert catalog_set.by_product("T") == (first, second)
     with pytest.raises(ValueError, match="duplicate catalog member reference"):
         CatalogSet((first, first))
+    with pytest.raises(TypeError, match="must be a tuple"):
+        CatalogSet([first])
+    alternative = CatalogMemberRef(
+        authority="Other", bundle_id="Local", member_id="LocalCNFuturesContractMIN1",
+        product_ref="T", source_product_ref="T.SHFE", contract_uid="CFFEX|F|T|2403",
+        catalog_dir=tmp_path / "other", bar_type="T2403.CFFEX-1-MINUTE-LAST-EXTERNAL",
+    )
+    assert CatalogSet((first, alternative)).by_product("T") == (first, alternative)
+    with pytest.raises(ValueError, match="authority"):
+        CatalogMemberRef(
+            authority=None, bundle_id="Local", member_id="m", product_ref="T",
+            source_product_ref="T.SHFE", contract_uid="CFFEX|F|T|2403",
+            catalog_dir=tmp_path, bar_type="T2403.CFFEX-1-MINUTE-LAST-EXTERNAL",
+        )
+    with pytest.raises(TypeError, match="paths must be a tuple"):
+        from traderesearch_data.nautilus import CatalogStagingRequest
+        CatalogStagingRequest(["CFFEX|F|T|2403"])
     with pytest.raises(TypeError, match="catalog_dir"):
         CatalogMemberRef(
             authority="Local", bundle_id="Local", member_id="m", product_ref="T",
             source_product_ref="T.SHFE", contract_uid="CFFEX|F|T|2403",
             catalog_dir="not-a-path", bar_type="T2403.CFFEX-1-MINUTE-LAST-EXTERNAL",
         )
+
+
+def test_public_rule_protocols_live_in_traderesearch_data():
+    from traderesearch_data.rules import TradingFieldProvider, TradingFieldValue
+
+    assert TradingFieldProvider.__module__ == "traderesearch_data.rules"
+    assert TradingFieldValue.__module__ == "traderesearch_data.rules"

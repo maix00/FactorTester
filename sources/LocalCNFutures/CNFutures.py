@@ -479,17 +479,30 @@ def _asset_class_for_local_future(product: Product) -> str | None:
     return None
 
 
-_RULE_PROVIDER_CACHE: tuple[object, tuple[int, int], object] | None = None
+_RULE_PROVIDER_CACHE: tuple[object, tuple[object, ...], object] | None = None
 _RULE_PROVIDER_LOCK = Lock()
 
 
-def _rule_store_revision() -> tuple[int, int] | None:
-    """Return the mutable SQLite revision used by the strict historical loader."""
+def _rule_store_revision() -> tuple[object, ...] | None:
+    """Return a path/WAL/row revision for the append-only rule history store."""
     try:
+        from tools.data.field_history import HISTORICAL_FIELD_TABLE
         from tools.data.hub import DataHub
-        path = DataHub.get_instance().get_store_path('openctp')
-        stat = path.stat()
-        return stat.st_mtime_ns, stat.st_size
+        path = DataHub.get_instance().get_store_path('openctp').resolve()
+        query = (
+            f'SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM "{HISTORICAL_FIELD_TABLE}"'
+        )
+        with DataHub.get_instance().connect_store('openctp') as conn:
+            count, max_rowid = conn.execute(query).fetchone()
+            data_version = conn.execute("PRAGMA data_version").fetchone()[0]
+        files = []
+        for candidate in (path, path.with_name(path.name + '-wal')):
+            try:
+                stat = candidate.stat()
+                files.append((candidate.as_posix(), stat.st_mtime_ns, stat.st_size))
+            except FileNotFoundError:
+                files.append((candidate.as_posix(), None, None))
+        return (path.as_posix(), int(count), int(max_rowid), int(data_version), tuple(files))
     except Exception:
         return None
 

@@ -172,10 +172,24 @@ def test_build_contract_spec_rejects_missing_or_side_specific_margin():
             spec_fields=dict(base), source_key="LocalCNFuturesContractMIN1",
             frequency="MIN1",
         )
-    with pytest.raises(ValueError, match="non-numeric margin"):
+    with pytest.raises(ValueError, match="long_margin_ratio is not numeric"):
         nautilus_catalog.build_contract_spec(
             "CFFEX|F|T|2403", product=object(), contract_row=row,
             spec_fields={**base, "long_margin_ratio": "bad", "short_margin_ratio": 0.02},
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+        )
+    with pytest.raises(ValueError, match="missing initial_margin_ratio"):
+        nautilus_catalog.build_contract_spec(
+            "CFFEX|F|T|2403", product=object(), contract_row=row,
+            spec_fields={**base, "long_margin_ratio": 0.02, "short_margin_ratio": 0.02},
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+        )
+    with pytest.raises(ValueError, match="must be finite"):
+        nautilus_catalog.build_contract_spec(
+            "CFFEX|F|T|2403", product=object(), contract_row=row,
+            spec_fields={**base, "long_margin_ratio": 0.02, "short_margin_ratio": 0.02,
+                         "initial_margin_ratio": float("inf"),
+                         "maintenance_margin_ratio": 0.01},
             source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
         )
     with pytest.raises(ValueError, match="side-specific margin is not representable"):

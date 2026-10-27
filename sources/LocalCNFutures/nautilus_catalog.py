@@ -23,6 +23,16 @@ from server.modules.shared.price_services import (
 from server.services.nautilus_bridge.source_registry import from_server_sources
 
 
+def _finite_decimal(value: Any, name: str, contract_uid: str) -> Decimal:
+    try:
+        number = Decimal(str(value))
+    except (ArithmeticError, TypeError, ValueError) as exc:
+        raise ValueError(f"{contract_uid}: {name} is not numeric") from exc
+    if not number.is_finite():
+        raise ValueError(f"{contract_uid}: {name} must be finite")
+    return number
+
+
 def build_contract_spec(
     contract_uid: str, *, product: Any, contract_row: dict[str, Any],
     spec_fields: dict[str, Any], source_key: str, frequency: str,
@@ -31,23 +41,38 @@ def build_contract_spec(
     if len(parts) != 4 or parts[1] != "F":
         raise ValueError(f"unsupported contract UID: {contract_uid}")
     venue, underlying, month = parts[0], parts[2], parts[3]
-    min_tick = Decimal(str(spec_fields["min_tick"]))
+    min_tick = _finite_decimal(spec_fields["min_tick"], "min_tick", contract_uid)
+    multiplier = _finite_decimal(spec_fields["point_value"], "point_value", contract_uid)
+    if min_tick <= 0 or multiplier <= 0:
+        raise ValueError(f"{contract_uid}: tick and multiplier must be positive")
     precision = max(0, -min_tick.as_tuple().exponent)
-    long_margin = spec_fields.get("long_margin_ratio")
-    short_margin = spec_fields.get("short_margin_ratio")
-    if long_margin is None or short_margin is None:
+
+    long_raw = spec_fields.get("long_margin_ratio")
+    short_raw = spec_fields.get("short_margin_ratio")
+    if long_raw is None or short_raw is None:
         raise ValueError(f"contract has no side-specific margin: {contract_uid}")
-    try:
-        long_margin = Decimal(str(long_margin))
-        short_margin = Decimal(str(short_margin))
-    except (ArithmeticError, TypeError, ValueError) as exc:
-        raise ValueError(f"contract has a non-numeric margin: {contract_uid}") from exc
+    long_margin = _finite_decimal(long_raw, "long_margin_ratio", contract_uid)
+    short_margin = _finite_decimal(short_raw, "short_margin_ratio", contract_uid)
     if long_margin != short_margin:
         raise ValueError(
             f"{contract_uid}: side-specific margin is not representable by the "
             "current single-margin Instrument contract"
         )
-    margin = long_margin
+    initial_margin = spec_fields.get("initial_margin_ratio")
+    maintenance_margin = spec_fields.get("maintenance_margin_ratio")
+    if initial_margin is None:
+        raise ValueError(f"{contract_uid}: missing initial_margin_ratio")
+    if maintenance_margin is None:
+        raise ValueError(f"{contract_uid}: missing maintenance_margin_ratio")
+    initial_margin = _finite_decimal(
+        initial_margin, "initial_margin_ratio", contract_uid,
+    )
+    maintenance_margin = _finite_decimal(
+        maintenance_margin, "maintenance_margin_ratio", contract_uid,
+    )
+    if initial_margin < 0 or maintenance_margin < 0:
+        raise ValueError(f"{contract_uid}: margin ratios must be non-negative")
+
     resolved_source = from_server_sources().resolve(
         source_key, frequency=frequency, product=product,
     )
@@ -57,13 +82,12 @@ def build_contract_spec(
         instrument_code=f"{underlying}{month}", venue=venue,
         underlying=underlying,
         price_increment=min_tick, price_precision=precision,
-        multiplier=Decimal(str(spec_fields["point_value"])), currency="CNY",
+        multiplier=multiplier, currency="CNY",
         activation_ns=start_ns, expiration_ns=end_ns,
-        margin_init=margin, margin_maint=margin,
+        margin_init=initial_margin, margin_maint=maintenance_margin,
         provenance=str(spec_fields.get("trading_spec_source") or "run_spec_product_catalog"),
         resolved_source=resolved_source,
     )
-
 
 _SESSION_RE = re.compile(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})")
 
