@@ -1,7 +1,10 @@
 # ADR-184：数据源自行维护适配器的类型化 Bundle
 
-状态：部分实施，存在代码偏离。用户确定目标边界；本次固化设计，运行时代码尚未迁移。
+状态：部分实施；P0 现状对齐与消费者契约审计已完成，P1 尚未开始。
+用户确定目标边界；运行时代码仍存在具体来源依赖和未冻结输入。
 关联：[#447](https://github.com/maix00/FactorTester/issues/447)、[#445](https://github.com/maix00/FactorTester/issues/445)。
+P0 审计基线：[source-bundle-p0-2026-10-27.md](../audits/source-bundle-p0-2026-10-27.md)
+（checkout `945ddc5b7`）。该审计不表示验收完成。
 
 ## 依赖边界
 
@@ -100,11 +103,31 @@ RunSpec 固定来源身份、成员版本与执行位置；本机任务调用本
 
 ## 当前偏离与切换顺序
 
-1. `tools/data/source_catalog.py` 仍定义 NautilusAdapterContract，成员仍直接持有历史提供器。
-2. `sources/Local/data_source_bundle.py` 已从 JSON 显式选择行情成员；历史规则成员已在清单中独立声明，但旧执行绑定尚未切换。
-3. `catalog_staging.py` 仍直接调用中国期货产品、路径、point_value/min_tick 转换。
-4. `trading_fields.py` 仍限定 FieldHistory:market_rules:exchange 及具体 FieldHistoryProvider。
-5. 当前 source-owned nautilus_adapter.py 主要是声明，尚未拥有完整加载实现。
+P0 审计在 `945ddc5b7` 上确认以下偏离，按影响排序：
+
+1. **多合约返回被压缩**：`sources/LocalCNFutures/nautilus_catalog.py` 会 stage 每个请求
+   合约，但返回 `catalogs.setdefault(product_key, ...)`，同一品种只保留第一个。
+   当前执行消费者只接受 `product -> ReplayInput`，不能据此声称完整换月/全合约回放。
+   切到多合约前必须先与执行消费者约定显式多 catalog 引用。
+2. **历史规则有损**：`build_contract_spec` 仍取 `max(long_margin, short_margin)`，
+   initial/maintenance 相同，缺失补零。`FuturesContractSpec` 只有单一 margin 字段，
+   没有多空/保证时间语义；必须接入无损规则路径或明确 fail-closed，不得保留 max 当完成。
+3. **DAY1 走分钟 loader**：`LocalCNFuturesContractDAY1` 与 MIN1 共用
+   `stage_contract_minute_catalog`，后者固定读取 `iter_minute_bars` 并创建
+   `1-MINUTE-LAST-EXTERNAL` BarType；DAY1 的 `TRADING_DAY`、结算列、交易日标签语义
+   尚未执行验证。
+4. **中央代码仍持有具体来源选择**：`nautilus_catalog.py` 仍调用
+   `price_services`、`catalog_staging`、`source_registry` 的产品/路径/生命周期函数，
+   不是可脱离平台独立安装的 Bundle。
+5. **规则绑定仍为特定 provider**：`trading_fields.py` 仍限定
+   `FieldHistory:market_rules:exchange` 与具体 FieldHistoryProvider；行情成员声明了
+   `related_members`，但执行侧尚未按关系只加载一次。
+6. **产品绑定/分类未迁移**：`Local` 的 `product_bindings` 为空；既有产品与用户分类
+   记录尚未映射到 `source_product_ref`。
+7. **目录 API 未切纯元数据**：`product_source_descriptors()`、联邦能力快照和旧目录
+   路径仍会激活接入代码/检查可用性；客户端 `source.json` 仍是旧契约。
+8. **RunSpec 未冻结输入身份**：尚未固定 Bundle、成员、接入包、映射版本和关系；
+   清单版本不等于行情内容 revision。
 
 先建立带验收的协议与类型化注册，再将现有真实来源接入；每个切换批次同时替换消费者并删除
 其旧分支，不长期双写两套接口。静态字段、历史规则和行情保持可追溯，禁止迁移数据文件或
