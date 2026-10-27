@@ -44,6 +44,11 @@ LEAF_TEST_MODULES = {"calc", "catalog", "group", "backtest", "scripts", "release
 # Precise ownership mappings for modules that previously expanded to most of
 # the repository. Add the directly affected tests here when a domain changes.
 EXACT_PATH_TESTS = {
+    "tools/testers/settings/json_schema.py": ("tests/server/test_configuration_editor_schema.py",),
+    "server/manager/services/test_authoring.py": (
+        "tests/server/test_configuration_editor_schema.py",
+        "tests/server/test_strategy_library.py",
+    ),
     "vendor/nautilus_trader": ("tests/scripts/test_nautilus_extension_build.py",),
     "environment.yml": ("tests/scripts/test_nautilus_extension_build.py",),
     "scripts/test.sh": ("tests/scripts/test_nautilus_extension_build.py",),
@@ -483,6 +488,8 @@ EXACT_PATH_TESTS["tests/factors/rolling_benchmarks/extrema.py"] = ("tests/factor
 EXACT_PATH_TESTS["tests/factors/test_shared_timeline.py"] = ("tests/factors/test_shared_timeline.py",)
 
 PREFIX_PATH_TESTS = {
+    "web/app/": ("tests/release/test_configuration_editor_frontend.py",),
+    "static/vendor/web-app/": ("tests/release/test_configuration_editor_frontend.py",),
     "tools/testers/backtest/engines/factors/": (
         "tests/factors/test_factor_expr_incremental.py",
         "tests/factors/test_groupby_scope_derived_missing.py",

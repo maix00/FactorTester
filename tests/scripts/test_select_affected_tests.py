@@ -4,6 +4,18 @@ from pathlib import Path
 from scripts import select_affected_tests as selector
 
 
+def test_configuration_editor_selects_schema_and_real_frontend_checks():
+    assert selector.select({"tools/testers/settings/json_schema.py"}) == (
+        "SCOPED", ["tests/server/test_configuration_editor_schema.py"],
+    )
+    assert selector.select({"web/app/src/pages/test-configuration.tsx"}) == (
+        "SCOPED", ["tests/release/test_configuration_editor_frontend.py"],
+    )
+    assert selector.select({"static/vendor/web-app/configuration-code.js"}) == (
+        "SCOPED", ["tests/release/test_configuration_editor_frontend.py"],
+    )
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=repo, text=True).strip()
 

@@ -1,5 +1,7 @@
 # 架构决策记录
 
+- [181 — Schema-driven test configuration editor](181-schema-driven-test-configuration-editor.md)
+
 本目录记录 FactorTester 的架构决策。ADR 是当前实现的可审计说明，不是脱离源码
 长期维护的愿望清单；每次架构迁移都必须同时说明已落地边界、尚未迁移的遗留和验收条件。
 

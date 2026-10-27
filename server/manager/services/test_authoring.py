@@ -68,6 +68,7 @@ class TestAuthoringService:
                     "/api/product-library/data-source-categories",
                     "/api/jobs/artifact-capabilities",
                     "/api/test-authoring/modules",
+                    "/api/test-authoring/configuration-schema",
                 }
                 or cls._SETTINGS_RE.fullmatch(path)
                 or cls._SETTINGS_SUMMARY_RE.fullmatch(path)
@@ -138,6 +139,11 @@ class TestAuthoringService:
         owner: str,
         query: dict[str, list[str]] | None = None,
     ) -> TestAuthoringResponse:
+        if path == "/api/test-authoring/configuration-schema":
+            from tools.testers.settings.json_schema import configuration_editor_contract
+
+            locale = str((query or {}).get("locale", ["zh"])[0])
+            return TestAuthoringResponse({"success": True, **configuration_editor_contract(locale=locale)})
         if path == "/api/test-authoring/modules":
             from server.modules.single_factor_test.backtest_settings import (
                 _navigation_children,
