@@ -21,11 +21,13 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from server.services.nautilus_bridge.market_data import (
+    DailySettlementRecord,
     FuturesContractSpec,
     MarketBar,
     iter_daily_bars,
     iter_minute_bars,
     to_nautilus_bar,
+    to_nautilus_daily_settlement,
     to_nautilus_instrument,
 )
 from server.services.nautilus_bridge.version import NAUTILUS_VERSION
@@ -143,6 +145,7 @@ def _stage_contract_catalog(
         last: MarketBar | None = None
         selected_count = 0
         settlement_records: list[dict[str, str | int]] = []
+        settlement_events = []
         batch: list[MarketBar] = []
         from tools.factors.expr.streaming.calendar_window import TradingSessionSummary
         session_summary = TradingSessionSummary()
@@ -175,6 +178,19 @@ def _stage_contract_catalog(
                     "event_ns": bar.clock.interval_end_ns,
                     "settlement_price": str(bar.settlement_price),
                 })
+                settlement_events.append(to_nautilus_daily_settlement(
+                    DailySettlementRecord(
+                        contract_uid=bar.contract_uid,
+                        instrument_id=str(instrument.id),
+                        trading_day=bar.trading_day,
+                        settlement_price=bar.settlement_price,
+                        timestamp_ns=bar.clock.interval_end_ns,
+                        rule_set_ref=instrument_spec.provenance,
+                        source_path=str(source),
+                        row_number=bar.row_number,
+                    ),
+                    instrument=instrument, instrument_spec=instrument_spec,
+                ))
             session_summary.add(bar.trading_day, bar.clock.interval_open_ns,
                                 bar.clock.interval_end_ns)
             if first is None:
@@ -184,6 +200,8 @@ def _stage_contract_catalog(
             if len(batch) == batch_bars:
                 flush()
         flush()
+        if settlement_events:
+            catalog.write_instrument_closes(settlement_events)
         if first is None or last is None:
             raise ValueError("source contains no bars in selected window")
         final_stat = source.stat()

@@ -132,6 +132,10 @@ def test_daily_catalog_uses_trading_day_labels_and_exchange_close(tmp_path):
     assert load_catalog_settlement_records(
         target, contract_uid="CFFEX|F|T|2403",
     )[0] == expected_settlement
+    assert any(
+        "instrument_close" in item["path"].lower()
+        for item in receipt.catalog_files
+    ), receipt.catalog_files
     with pytest.raises(ValueError, match="identity differs"):
         load_catalog_settlement_records(target, contract_uid="CFFEX|F|T|2406")
     catalog = ParquetDataCatalog(str(target))
