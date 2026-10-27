@@ -74,6 +74,25 @@ class FrozenBundleInput:
         }
 
 
+def frozen_bundle_input_from_dict(payload: dict[str, Any]) -> FrozenBundleInput:
+    """Round-trip a frozen identity from persisted RunSpec/report JSON."""
+    try:
+        identity = FrozenBundleInput(
+            authority=payload["authority"], owner=payload["owner"],
+            device=payload["device"], bundle_id=payload["bundle_id"],
+            bundle_version=payload["bundle_version"],
+            bundle_fingerprint=payload["bundle_fingerprint"],
+            mapping_version=payload["mapping_version"],
+            member_ids=tuple(payload["member_ids"]),
+            related_members=tuple(payload["related_members"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid frozen Bundle input payload") from exc
+    if payload.get("input_ref") != identity.input_ref:
+        raise ValueError("frozen Bundle input ref does not match its payload")
+    return identity
+
+
 def freeze_bundle_input(
     bundle: BundleManifest, *, member_ids: tuple[str, ...],
     authority: str, owner: str, device: str, mapping_version: str,

@@ -46,3 +46,21 @@ def test_frozen_bundle_input_rejects_foreign_member():
             bundle, member_ids=("not-installed",), authority="platform",
             owner="system", device="server-1", mapping_version="mapping-v1",
         )
+
+
+def test_frozen_bundle_input_round_trips_and_checks_ref():
+    from server.services.nautilus_bridge.input_identity import (
+        frozen_bundle_input_from_dict,
+    )
+
+    bundle = installed_bundles()[0]
+    identity = freeze_bundle_input(
+        bundle, member_ids=("LocalCNFuturesContractMIN1",),
+        authority="platform", owner="system", device="server-1",
+        mapping_version="mapping-v1",
+    )
+    payload = identity.as_dict()
+    assert frozen_bundle_input_from_dict(payload) == identity
+    payload["mapping_version"] = "tampered"
+    with pytest.raises(ValueError, match="does not match"):
+        frozen_bundle_input_from_dict(payload)
