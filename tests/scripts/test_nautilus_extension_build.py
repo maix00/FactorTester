@@ -33,8 +33,11 @@ def test_builder_uses_vendor_toolchain_and_reused_dev_target():
     assert "maturin develop --profile dev --locked" in builder
     assert 'getattr(native, "__file__", None)' in builder
     assert "_libnautilus" in builder
+    assert "factortester_nautilus_runtime" in builder
+    assert "attach_factor_family" in builder
     assert 'getattr(BacktestEngine, "run_catalogs", None)' in builder
-    assert 'path.stat().st_mtime_ns > native_mtime_ns' in builder
+    assert "source_signature" in builder
+    assert "factortester-runtime-receipt.json" in builder
 
 
 def test_test_entrypoint_builds_extension_for_runtime_tests():
@@ -70,3 +73,15 @@ def test_runtime_helper_rejects_a_native_module_without_a_binary_path(monkeypatc
 
     with pytest.raises(pytest.fail.Exception, match="native extension is unavailable"):
         require_nautilus()
+
+
+def test_composition_preserves_upstream_features_version_and_dev_profile():
+    import tomllib
+    native=tomllib.loads((ROOT/"vendor/nautilus_trader/python/pyproject.toml").read_text())
+    composition=tomllib.loads((ROOT/"native/factortester_nautilus_runtime/pyproject.toml").read_text())
+    assert composition["project"]["version"]==native["project"]["version"]
+    assert composition["tool"]["maturin"]["features"]==native["tool"]["maturin"]["features"]
+    upstream=tomllib.loads((ROOT/"vendor/nautilus_trader/Cargo.toml").read_text())
+    wrapper=tomllib.loads((ROOT/"native/factortester_nautilus_runtime/Cargo.toml").read_text())
+    assert wrapper["profile"]["dev"]==upstream["profile"]["dev"]
+    assert "nautilus-factor-bridge" not in upstream.get("workspace",{}).get("dependencies",{})

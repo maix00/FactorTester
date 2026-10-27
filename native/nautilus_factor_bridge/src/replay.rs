@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 #[must_use = "check the factor outcome after the native node completes"]
 pub struct FactorReplayHandle {
-    error: Arc<Mutex<Option<String>>>,
+    pub(crate) error: Arc<Mutex<Option<String>>>,
 }
 
 impl FactorReplayHandle {

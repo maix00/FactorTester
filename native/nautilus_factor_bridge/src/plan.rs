@@ -21,6 +21,9 @@ impl FactorPlanEngine {
     pub fn boundary_channels(&self) -> usize { self.inner.boundary_channels() }
     pub fn input_fields(&self) -> usize { self.inner.input_fields() }
     pub fn input_columns(&self) -> &[String] { self.inner.input_columns() }
+    pub fn boundary_names(&self) -> &[String] { self.inner.boundary_names() }
+    pub fn node_count(&self) -> usize { self.inner.node_count() }
+    pub fn output_count(&self) -> usize { self.inner.output_count() }
     pub fn curve_channels(&self) -> usize { self.inner.curve_channels() }
 
     pub fn update_into(&mut self, bar: &MarketBar, out: &mut Vec<f64>) -> Result<(), alpha_algo::Error> {

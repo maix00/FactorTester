@@ -207,20 +207,7 @@ impl OrderStatisticTree {
     total
   }
 
-  fn sum_le(&self, key: f64) -> f64 {
-    let mut node = self.root;
-    let mut total = 0.0;
-    while let Some(index) = node {
-      if key < self.nodes[index].key {
-        node = self.nodes[index].left;
-      } else {
-        let left_sum = self.nodes[index].left.map(|i| self.nodes[i].sum).unwrap_or(0.0);
-        total += left_sum + self.nodes[index].key * self.nodes[index].count as f64;
-        node = self.nodes[index].right;
-      }
-    }
-    total
-  }
+
 
   fn rank_lt(&self, key: f64) -> usize {
     let mut node = self.root;
@@ -236,9 +223,7 @@ impl OrderStatisticTree {
     total
   }
 
-  fn total_sum(&self) -> f64 {
-    self.root.map(|index| self.nodes[index].sum).unwrap_or(0.0)
-  }
+
 
   fn kth_at(&self, mut node: Option<usize>, mut k: usize) -> Option<f64> {
     while let Some(index) = node {
@@ -876,88 +861,11 @@ pub fn ta_ema_streaming(values: &[f64], span: usize) -> Result<Vec<f64>, Error> 
   Ok(values.iter().copied().map(|value| state.update(value)).collect())
 }
 
-struct Fenwick {
-  tree: Vec<usize>,
-  size: usize,
-}
 
-impl Fenwick {
-  fn new(size: usize) -> Self { Self { tree: vec![0; size + 1], size } }
-  fn add(&mut self, index: usize, delta: isize) {
-    let mut i = index + 1;
-    while i <= self.size {
-      self.tree[i] = (self.tree[i] as isize + delta).max(0) as usize;
-      i += i & i.wrapping_neg();
-    }
-  }
-  fn prefix(&self, index: usize) -> usize {
-    let mut i = index + 1;
-    let mut total = 0;
-    while i > 0 { total += self.tree[i]; i -= i & i.wrapping_neg(); }
-    total
-  }
-  fn kth(&self, mut k: usize) -> usize {
-    let mut index = 0usize;
-    let mut bit = self.size.next_power_of_two();
-    while bit > 0 {
-      let next = index + bit;
-      if next <= self.size && self.tree[next] < k {
-        index = next;
-        k -= self.tree[next];
-      }
-      bit >>= 1;
-    }
-    index
-  }
-}
 
-fn session_quantile_like(
-  values: &[f64], session_ids: &[u32], lookback_sessions: usize,
-  quantile: Option<f64>, rank: bool,
-) -> Result<Vec<f64>, Error> {
-  validate(values, session_ids, lookback_sessions)?;
-  let mut coordinates: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
-  coordinates.sort_by(|a, b| a.partial_cmp(b).unwrap());
-  coordinates.dedup();
-  if coordinates.is_empty() { return Ok(vec![f64::NAN; values.len()]); }
-  let lookup = |value: f64| -> usize {
-    coordinates.partition_point(|candidate| *candidate < value)
-  };
-  let mut fenwick = Fenwick::new(coordinates.len());
-  let mut ring: VecDeque<(u32, f64)> = VecDeque::new();
-  let mut out = Vec::with_capacity(values.len());
-  for (index, value) in values.iter().copied().enumerate() {
-    let session = session_ids[index];
-    let first_session = (session + 1).saturating_sub(lookback_sessions as u32);
-    while ring.front().is_some_and(|(id, _)| *id < first_session) {
-      if let Some((_, old)) = ring.pop_front() {
-        if old.is_finite() { fenwick.add(lookup(old), -1); }
-      }
-    }
-    ring.push_back((session, value));
-    if value.is_finite() { fenwick.add(lookup(value), 1); }
-    let total = fenwick.prefix(coordinates.len() - 1);
-    if total == 0 {
-      out.push(f64::NAN);
-    } else if rank {
-      if !value.is_finite() {
-        out.push(f64::NAN);
-      } else {
-        let below = fenwick.prefix(lookup(value));
-        out.push(below as f64 / total as f64);
-      }
-    } else {
-      let q = quantile.unwrap_or(0.5).clamp(0.0, 1.0);
-      let position = q * (total - 1) as f64;
-      let lower = position.floor() as usize;
-      let upper = position.ceil() as usize;
-      let lower_v = coordinates[fenwick.kth(lower + 1)];
-      let upper_v = coordinates[fenwick.kth(upper + 1)];
-      out.push(lower_v + (upper_v - lower_v) * (position - lower as f64));
-    }
-  }
-  Ok(out)
-}
+
+
+
 
 pub fn ta_session_rolling_quantile(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize, quantile: f64,

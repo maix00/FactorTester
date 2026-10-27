@@ -171,6 +171,7 @@ pub struct FactorPlanKernel {
     fields: usize,
     required_fields: usize,
     input_columns: Vec<String>,
+    boundary_names: Vec<String>,
     slots: Vec<Vec<f64>>,
     node_keys: Vec<String>,
     boundary_channels: usize,
@@ -191,6 +192,9 @@ impl FactorPlanKernel {
     pub fn boundary_channels(&self) -> usize { self.boundary_channels }
     pub fn input_fields(&self) -> usize { self.required_fields }
     pub fn input_columns(&self) -> &[String] { &self.input_columns }
+    pub fn boundary_names(&self) -> &[String] { &self.boundary_names }
+    pub fn node_count(&self) -> usize { self.nodes.len() }
+    pub fn output_count(&self) -> usize { self.outputs.len() }
     pub fn curve_channels(&self) -> usize { self.curve_channels }
     pub fn new(products: usize, specs: Vec<ExprSpec>, outputs: Vec<usize>) -> Result<Self, crate::algo::Error> {
         if products == 0 || specs.is_empty() || outputs.is_empty() {
@@ -326,7 +330,7 @@ impl FactorPlanKernel {
         let required_fields = nodes.iter().filter_map(|node| match node.spec.as_ref() {
             ExprSpec::Column(index) => Some(index + 1), _ => None,
         }).max().unwrap_or(0);
-        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, required_fields, input_columns: Vec::new(), slots, node_keys: Vec::new(), boundary_channels, curve_channels })
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, required_fields, input_columns: Vec::new(), boundary_names: Vec::new(), slots, node_keys: Vec::new(), boundary_channels, curve_channels })
     }
 
     pub fn update(&mut self, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
@@ -541,7 +545,7 @@ impl FactorPlanKernel {
                         out[product] = state.update_explicit(start, current, input[product]);
                     }
                 }
-                ExprSpec::SessionReset { child, boundary, op, min_periods, propagate_nan } => {
+                ExprSpec::SessionReset { child, boundary, op: _, min_periods, propagate_nan } => {
                     let input = &head[*child];
                     let boundary_values = &head[*boundary];
                     let node = &mut self.nodes[index];
@@ -628,7 +632,7 @@ impl FactorPlanKernel {
                         if truth && !*include_current { if node.since_first[product].is_none() { node.since_first[product] = Some(current as usize); } node.since_last[product] = Some(current as usize); }
                     }
                 }
-                ExprSpec::Scope { child, count, op, min_periods, propagate_nan, sessions } => {
+                ExprSpec::Scope { child, count, op: _, min_periods, propagate_nan, sessions } => {
                     let input = &head[*child];
                     let node = &mut self.nodes[index];
                     if !sessions.is_empty() {
@@ -848,7 +852,7 @@ enum RawNode {
 }
 
 #[derive(Deserialize)]
-struct RawPlan { #[serde(default)] columns: Option<Vec<String>>, #[serde(default)] keys: Vec<String>, nodes: Vec<RawNode>, outputs: Vec<usize> }
+struct RawPlan { #[serde(default)] boundaries: Vec<String>, #[serde(default)] columns: Option<Vec<String>>, #[serde(default)] keys: Vec<String>, nodes: Vec<RawNode>, outputs: Vec<usize> }
 
 fn session_op(name: &str, quantile: Option<f64>) -> Result<SessionOp, crate::algo::Error> {
     crate::algo::parse_session_op(name, quantile)
@@ -924,6 +928,7 @@ impl FactorPlanKernel {
         }
         let mut plan = Self::new(products, specs, raw.outputs)?;
         plan.node_keys = raw.keys;
+        plan.boundary_names = raw.boundaries;
         if let Some(columns) = raw.columns {
             if columns.len() < plan.required_fields {
                 return Err(crate::algo::Error::InvalidParameter("plan column metadata differs from its input nodes".into()));

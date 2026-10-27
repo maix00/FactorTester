@@ -12,17 +12,7 @@ use rayon::prelude::*;
 
 use crate::algo::{Context, Error, is_normal};
 
-fn collect_window<NumT: Float>(x: &[NumT], start: usize, periods: usize) -> Vec<NumT> {
-  let mut buf = Vec::with_capacity(periods);
-  let win_start = start.saturating_sub(periods - 1);
-  for k in win_start..=start {
-    let value = x[k];
-    if is_normal(&value) {
-      buf.push(value);
-    }
-  }
-  buf
-}
+
 
 /// Exponential moving average matching pandas `ewm(span=periods, adjust=True, ignore_na=False).mean()`.
 ///

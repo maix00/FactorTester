@@ -22,15 +22,7 @@ fn layout(len: usize, groups: usize) -> (usize, usize) {
 /// Copy a (N, T) panel into a (T, N) row-major buffer so each timestamp is one
 /// contiguous chunk. Cross-sectional kernels follow the same recipe: transpose
 /// once, process rows in parallel, transpose the result back.
-fn to_rows<NumT: Float>(input: &[NumT], groups: usize, rows: usize) -> Vec<NumT> {
-  let mut buffer = vec![NumT::nan(); groups * rows];
-  for g in 0..groups {
-    for t in 0..rows {
-      buffer[t * groups + g] = input[g * rows + t];
-    }
-  }
-  buffer
-}
+
 
 fn from_rows<NumT: Float>(buffer: &[NumT], out: &mut [NumT], groups: usize, rows: usize) {
   for g in 0..groups {

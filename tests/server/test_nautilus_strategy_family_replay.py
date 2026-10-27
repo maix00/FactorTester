@@ -28,6 +28,9 @@ def test_real_group_strategy_runs_across_two_products(tmp_path, monkeypatch):
     assert result["products"] == ["T", "TL"]
     assert result["bars"] == 16
     assert result["publications"] == {"signal": 8}
+    assert result["factor_actors"] == 1
+    assert result["python_factor_bar_callbacks"] == 0
+    assert result["strategy_publications"] == [8]
     assert result["batch_count"] >= 2
     assert result["max_batch_bars"] <= 6
     assert result["orders"] >= 1
@@ -44,21 +47,21 @@ def test_real_threshold_family_consumes_signal_and_creates_orders(tmp_path):
         output_dir=tmp_path / "threshold-reports", max_bars=8,
     )
     assert result["publications"] == {"signal": 8}
+    assert result["factor_actors"] == 1
+    assert result["python_factor_bar_callbacks"] == 0
+    assert result["strategy_publications"] == [8]
     assert result["orders"] == 1
 
 
-def test_callback_failure_prevents_report_publication(tmp_path):
+def test_unsupported_python_family_cannot_register_a_callback(tmp_path):
     import pytest
     require_nautilus()
-    class BrokenThreshold:
+    class PythonFamily:
         def direction(self, value):
-            raise ValueError("injected decision failure")
-    with pytest.raises(RuntimeError, match="callback failed") as error:
+            raise AssertionError("Python decision must never execute")
+    with pytest.raises(ValueError, match="unsupported native"):
         run_strategy_family_replay(
-            inputs={"T": _real_catalog(tmp_path, count=8)},
-            factor_bindings={"signal": CLOSE},
-            factor_refs={"signal": "factor:v2:" + "a" * 43},
-            family=BrokenThreshold(), output_dir=tmp_path / "invalid-reports", max_bars=8,
-        )
-    assert "injected decision failure" in str(error.value.__cause__)
-    assert not (tmp_path / "invalid-reports").exists()
+            inputs={"T": _real_catalog(tmp_path,count=8)}, factor_bindings={"signal":CLOSE},
+            factor_refs={"signal":"factor:v2:" + "a"*43}, family=PythonFamily(),
+            output_dir=tmp_path/"invalid-reports", max_bars=8)
+    assert not (tmp_path/"invalid-reports").exists()

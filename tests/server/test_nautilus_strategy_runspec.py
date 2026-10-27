@@ -48,7 +48,8 @@ def test_strategy_family_resolves_multiple_factor_roles(monkeypatch, tmp_path):
     assert result == {"ok": True}
     assert sorted(captured["factor_bindings"]) == ["confirm", "signal"]
     assert captured["factor_refs"] == {"signal": "factor:v2:" + "a" * 43, "confirm": "factor:v2:" + "b" * 43}
-    assert captured["family"].members({"T": 1.0}) == ()
+    assert captured["family"].split_count == 2
+    assert captured["family"].group_index == 1
 
 
 def test_strategy_family_compiles_run_spec_execution_plan(monkeypatch, tmp_path):

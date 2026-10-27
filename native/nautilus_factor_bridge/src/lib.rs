@@ -7,8 +7,13 @@
 use alpha_algo::{IntervalKernel, SessionOp};
 
 pub mod plan;
+pub mod output;
 #[cfg(feature = "nautilus-backtest")]
 pub mod replay;
+#[cfg(feature = "nautilus-backtest")]
+pub mod family;
+#[cfg(feature = "nautilus-backtest")]
+pub mod runtime;
 #[cfg(feature = "nautilus")]
 pub mod boundary;
 pub use plan::{BinaryOp, CrossOp, ExprSpec, FactorPlanEngine};
@@ -49,12 +54,12 @@ pub struct FactorUpdate {
 }
 
 /// Bounded output consumer; finish is called when Nautilus stops the Actor.
-pub trait FactorOutputSink: Send {
+pub trait FactorOutputSink {
     fn write_update(&mut self, update: &FactorUpdate) -> anyhow::Result<()>;
     fn finish(&mut self) -> anyhow::Result<()> { Ok(()) }
 }
 
-impl<F: FnMut(&FactorUpdate) -> anyhow::Result<()> + Send> FactorOutputSink for F {
+impl<F: FnMut(&FactorUpdate) -> anyhow::Result<()>> FactorOutputSink for F {
     fn write_update(&mut self, update: &FactorUpdate) -> anyhow::Result<()> { self(update) }
 }
 
@@ -339,6 +344,10 @@ pub mod nautilus {
         last_update: Option<FactorUpdate>,
         boundary_buffer: Vec<u8>,
         pending_boundaries: std::collections::BTreeMap<i64, Vec<u8>>,
+        calendar: Vec<(i64, i64)>,
+        calendar_index: usize,
+        emitted_session: Option<usize>,
+        boundary_kinds: Vec<bool>,
         pending_timestamp: Option<i64>,
         future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<usize, Bar>>,
         max_future_slices: usize,
@@ -382,6 +391,8 @@ pub mod nautilus {
                 last_update: None,
                 boundary_buffer: Vec::new(),
                 pending_boundaries: std::collections::BTreeMap::new(),
+                calendar: Vec::new(), calendar_index: 0, emitted_session: None,
+                boundary_kinds: Vec::new(),
             }
         }
 
@@ -410,8 +421,24 @@ pub mod nautilus {
             if self.last_update.as_ref().is_some_and(|update| market.timestamp_ns <= update.timestamp_ns) {
                 anyhow::bail!("market slice must follow the last completed slice");
             }
+            if !self.boundary_kinds.is_empty() {
+                let mut session_start = false;
+                if self.boundary_kinds.iter().any(|is_bar| !is_bar) {
+                    while self.calendar_index < self.calendar.len() && market.timestamp_ns > self.calendar[self.calendar_index].1 {
+                        self.calendar_index += 1;
+                    }
+                    anyhow::ensure!(self.calendar_index < self.calendar.len() && market.timestamp_ns >= self.calendar[self.calendar_index].0,
+                        "factor slice is outside its frozen session calendar");
+                    session_start = self.emitted_session != Some(self.calendar_index);
+                    self.emitted_session = Some(self.calendar_index);
+                }
+                for (channel,is_bar) in self.boundary_kinds.iter().enumerate() {
+                    let first=channel*self.expected_products.len();
+                    self.boundary_buffer[first..first+self.expected_products.len()].fill(u8::from(*is_bar || session_start));
+                }
+            }
             if let Some(flags) = self.pending_boundaries.remove(&market.timestamp_ns) {
-                self.boundary_buffer.copy_from_slice(&flags);
+                for (target, flag) in self.boundary_buffer.iter_mut().zip(flags) {*target |= flag;}
             }
             // Move the reusable buffer into the temporary input and back;
             // there is no per-Bar boundary allocation or copy.
@@ -461,7 +488,7 @@ pub mod nautilus {
             }
         }
 
-        pub fn set_update_sink(&mut self, mut sink: impl FnMut(&FactorUpdate) + Send + 'static) {
+        pub fn set_update_sink(&mut self, mut sink: impl FnMut(&FactorUpdate) + 'static) {
             self.set_output_sink(move |update: &FactorUpdate| { sink(update); Ok(()) });
         }
 
@@ -621,9 +648,13 @@ pub mod nautilus {
             self.pending_count = 0;
             self.pending_available_at_ns = 0;
             let mut market = std::mem::replace(&mut self.market, MarketBar::new(0, Vec::new(), Vec::new()));
-            let _ = self.evaluate_market_ref(&mut market);
+            let result = self.evaluate_market_ref(&mut market);
             self.market = market;
             self.pending_timestamp = None;
+            if let Err(error)=result {
+                self.last_error=Some(error.to_string());
+                return;
+            }
             while let Some((&next, slice)) = self.future_slices.iter().next() {
                 if slice.len() != self.expected_products.len() { break; }
                 let slice = self.future_slices.remove(&next).unwrap();
@@ -662,7 +693,7 @@ pub mod nautilus {
     where E::Error: std::fmt::Display {
         fn on_start(&mut self) -> anyhow::Result<()> {
             for bar_type in self.bar_types.clone() { self.subscribe_bars(bar_type, None, None); }
-            if !self.boundary_buffer.is_empty() {
+            if !self.boundary_buffer.is_empty() && self.boundary_kinds.is_empty() {
                 use nautilus_model::data::{DataType, ensure_custom_data_json_registered};
                 ensure_custom_data_json_registered::<crate::boundary::FactorBoundary>()?;
                 self.subscribe_data(DataType::new("FactorBoundary", None, None), None, None);
@@ -717,6 +748,17 @@ pub mod nautilus {
     }
 
     impl FactorActor<crate::plan::FactorPlanEngine> {
+        pub fn configure_calendar(&mut self, channels: &[String], calendar: Vec<(i64,i64)>) -> anyhow::Result<()> {
+            anyhow::ensure!(channels.len()==self.boundary_channels(),"boundary schema mismatch");
+            let kinds=channels.iter().map(|name| match name.as_str() {
+                "bar"=>Ok(true), "trading_day_start"|"trading_session_start"=>Ok(false),
+                _=>Err(anyhow::anyhow!("boundary {name} requires a frozen custom event stream"))
+            }).collect::<anyhow::Result<Vec<_>>>()?;
+            anyhow::ensure!(kinds.iter().all(|is_bar| *is_bar) || !calendar.is_empty(),"session boundaries require frozen calendar");
+            anyhow::ensure!(calendar.iter().all(|(s,e)|s<e) && calendar.windows(2).all(|v|v[0].1<v[1].0),"invalid session calendar");
+            self.boundary_kinds=kinds; self.calendar=calendar;
+            Ok(())
+        }
         pub fn validate_bar_columns(&self, fields: &[&str]) -> anyhow::Result<()> {
             let expected = self.engine.input_columns();
             if !expected.is_empty() {
@@ -727,6 +769,10 @@ pub mod nautilus {
             Ok(())
         }
 
+        pub fn input_columns(&self) -> &[String] {self.engine.input_columns()}
+        pub fn boundary_names(&self) -> &[String] {self.engine.boundary_names()}
+        pub fn node_count(&self) -> usize {self.engine.node_count()}
+        pub fn output_count(&self) -> usize {self.engine.output_count()}
         pub fn input_fields(&self) -> usize { self.engine.input_fields() }
         pub fn boundary_channels(&self) -> usize { self.engine.boundary_channels() }
         pub fn curve_channels(&self) -> usize { self.engine.curve_channels() }

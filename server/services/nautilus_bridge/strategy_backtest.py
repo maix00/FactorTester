@@ -1,175 +1,46 @@
-"""Bounded real Nautilus run of a frozen Strategy on one catalog."""
-
+"""Frozen Job control plane over one native factor/strategy runtime."""
 from __future__ import annotations
 
+from dataclasses import asdict
 from decimal import Decimal
-from collections import deque
+import json
 from pathlib import Path
 from typing import Any
 
 from server.services.nautilus_bridge.backtest_runner import (
     _load_input, ReplayInput, preflight_catalogs, replay_catalog_batches,
 )
-from server.services.nautilus_bridge.factor_stream import build_factor_expr_bar_adapter
-from server.services.nautilus_bridge.nautilus_events import NautilusEventTimeline
 from server.services.nautilus_bridge.reports import export_backtest_reports
-from tools.factors.expr.core import FactorExpr
+from server.services.nautilus_bridge.strategy_families import CrossSectionalGroup, ThresholdState
 from tools.data.types.time_freq import DataFreq
 
 
-def _on_replay_bar(strategy, bar) -> None:
-    """Nautilus logs callback exceptions; retain and surface the first failure."""
-    if strategy.replay_failure is not None:
-        return
-    try:
-        strategy._process_bar(bar)
-    except Exception as error:
-        strategy.replay_failure = error
-        strategy.shutdown_system(reason=f"factor strategy failed: {error}")
-
-
-def _replay_with_strategy(engine, trader, opened, **limits):
-    try:
-        result = replay_catalog_batches(engine, opened, **limits)
-    except Exception:
-        if trader.replay_failure is not None:
-            raise RuntimeError("Nautilus factor strategy callback failed") from trader.replay_failure
-        raise
-    if trader.replay_failure is not None:
-        raise RuntimeError("Nautilus factor strategy callback failed") from trader.replay_failure
-    return result
-
-
-def _shared_factor_adapter(*, bindings, refs, products, bar_types, events,
-                           calendar, publications, publication_counts):
-    """One run/input/clock scoped DAG; roles only subscribe to its outputs."""
-    if set(refs) != set(bindings):
-        raise ValueError("factor role refs must exactly match their frozen bindings")
+def _frozen_shared_plan(bindings, refs, products, calendar):
+    from tools.factors.expr.streaming.rust_incremental import shared_factor_plan_spec
+    if not bindings or set(refs) != set(bindings) or "signal" not in bindings:
+        raise ValueError("factor roles must exactly bind frozen refs and include signal")
     expressions = {}
-    roles_by_ref = {}
     for role, expression in bindings.items():
         ref = refs[role]
-        previous = expressions.get(ref)
-        if previous is not None and previous.semantic_fingerprint() != expression.semantic_fingerprint():
+        if ref in expressions and expressions[ref].semantic_fingerprint() != expression.semantic_fingerprint():
             raise ValueError("one frozen factor ref resolved to conflicting expressions")
         expressions[ref] = expression
-        roles_by_ref.setdefault(ref, []).append(role)
-
-    def publish(rows):
-        for ref, publication in rows.items():
-            for role in roles_by_ref[ref]:
-                publications[role].append(publication)
-                publication_counts[role] += 1
-
-    return build_factor_expr_bar_adapter(
-        expressions=expressions, products=products,
-        bar_types_by_product=bar_types, source_freq=DataFreq.MIN1,
-        session_calendar=calendar, event_line=events,
-        bar_clock=lambda _p, bar: _clock(bar),
-        factor_fields=lambda _p, bar: _bar_fields(bar),
-        first_executable_at=lambda clocks: max(clock.available_at_ns for clock in clocks.values()) + 1,
-        on_publication=publish,
-    )
+    spec, _ = shared_factor_plan_spec(expressions, products, source_freq=DataFreq.MIN1,
+                                      session_calendar=calendar)
+    output_by_ref = {ref: index for index, ref in enumerate(expressions)}
+    return spec, {role: output_by_ref[ref] for role, ref in refs.items()}
 
 
-def run_strategy_replay(
-    *, input: ReplayInput, strategy_kind: str,
-    factor_bindings: dict[str, FactorExpr],
-    factor_refs: dict[str, str],
-    product: Any, output_dir: Path, max_bars: int = 8,
-    factor_field: str = "CLOSE_ADJUSTED", session_calendar: Any = None,
-    batch_minutes: int = 20,
-) -> dict[str, Any]:
-    """Run one FactorExpr strategy in Nautilus and export native reports."""
-    from nautilus_trader.backtest import BacktestEngine
-    from nautilus_trader.config import BacktestEngineConfig
-    from nautilus_trader.execution import MakerTakerFeeModel
-    from nautilus_trader.model import (
-        AccountType, BarType, Currency, Money, OmsType, OrderSide, Quantity,
-        TimeInForce, TraderId, Venue,
-    )
-    from nautilus_trader.trading import Strategy
-
-    folder, catalog, receipt, instrument = _load_input(input)
-    opened = ((folder, catalog, receipt, instrument),)
-    preflight_catalogs(opened, max_input_bars=max_bars)
-    bar_type = BarType.from_str(str(receipt["bar_type"]))
-    engine = BacktestEngine(config=BacktestEngineConfig(
-        trader_id=TraderId.from_str("FT-FACTOR-001"),
-    ))
-    venue = Venue("CFFEX")
-    engine.add_venue(
-        venue=venue, oms_type=OmsType.NETTING,
-        account_type=AccountType.MARGIN, base_currency=Currency.from_str("CNY"),
-        starting_balances=[Money.from_str("1000000 CNY")],
-        fee_model=MakerTakerFeeModel(
-            maker_rate=Decimal(0), taker_rate=Decimal(0)),
-    )
-    engine.add_instrument(instrument)
-    publications = {role: deque(maxlen=2) for role in factor_bindings}
-    publication_counts = dict.fromkeys(factor_bindings, 0)
-
-    class Trader(Strategy):
-        def __init__(self) -> None:
-            super().__init__()
-            self.events = NautilusEventTimeline(calendar=session_calendar)
-            self.factor_adapter = _shared_factor_adapter(
-                bindings=factor_bindings, refs=factor_refs, products=(product,),
-                bar_types={product: bar_type}, events=self.events, calendar=session_calendar,
-                publications=publications, publication_counts=publication_counts,
-            )
-            self.seen = 0
-            self.replay_failure = None
-
-        def on_start(self) -> None:
-            self.subscribe_bars(bar_type)
-
-        on_bar = _on_replay_bar
-
-        def _process_bar(self, bar) -> None:
-            self.events.on_bar(bar)
-            self.factor_adapter.on_bar(bar)
-            self.seen += 1
-            if self.seen == 2:
-                self.submit_order(self.order_factory.market(
-                    instrument_id=bar.bar_type.instrument_id,
-                    order_side=OrderSide.BUY,
-                    quantity=Quantity.from_str("1"),
-                    time_in_force=TimeInForce.AT_THE_OPEN,
-                ))
-
-    trader = Trader()
-    engine.add_strategy(trader)
-    replay = _replay_with_strategy(engine, trader, opened, max_input_bars=max_bars, batch_minutes=batch_minutes)
-    reports = export_backtest_reports(engine, Path(output_dir), venue=venue)
-    return {
-        "engine": "nautilus_trader",
-        **replay,
-        "strategy_kind": strategy_kind,
-        "factor_roles": sorted(factor_bindings),
-        "publications": publication_counts,
-        "factor_plan_nodes": trader.factor_adapter.stream._executor.node_count,
-        "reports": reports,
-        "order_count": engine.get_result().total_orders,
-        "catalog": str(folder),
-    }
-
-
-def _bar_fields(bar: Any) -> dict[str, float]:
-    return {
-        "OPEN_ADJUSTED": float(bar.open),
-        "HIGH_ADJUSTED": float(bar.high),
-        "LOW_ADJUSTED": float(bar.low),
-        "CLOSE_ADJUSTED": float(bar.close),
-        "VOLUME": float(getattr(bar, "volume", 0)),
-    }
-
-
-def _clock(bar: Any):
-    from server.services.nautilus_bridge.market_data import BarClock
-    minute = 60_000_000_000
-    end = int(bar.ts_event)
-    return BarClock(None, None, end - minute, end, int(bar.ts_init), "factor bar")
+def run_strategy_replay(*, input: ReplayInput, strategy_kind: str, factor_bindings,
+                        factor_refs, product, output_dir: Path, max_bars: int = 8,
+                        session_calendar=None, batch_minutes: int = 20):
+    if strategy_kind != "threshold":
+        raise ValueError("single strategy helper requires threshold family")
+    result = run_strategy_family_replay(inputs={product:input}, factor_bindings=factor_bindings,
+        factor_refs=factor_refs, family=ThresholdState(1,0), output_dir=output_dir,
+        max_bars=max_bars, session_calendar=session_calendar, batch_minutes=batch_minutes)
+    return {**result,"strategy_kind":strategy_kind,"order_count":result["orders"],
+            "catalog":str(input.catalog_dir)}
 
 
 def _build_strategy_family_engine(execution_plan: Any, instruments: list[Any]):
@@ -193,110 +64,59 @@ def _build_strategy_family_engine(execution_plan: Any, instruments: list[Any]):
     return engine, Venue.from_str(sorted(configured)[0])
 
 
-def run_strategy_family_replay(
-    *, inputs: dict[Any, ReplayInput], factor_bindings: dict[str, FactorExpr],
-    factor_refs: dict[str, str],
-    family: Any, output_dir: Path, max_bars: int = 8,
-    factor_field: str = "CLOSE_ADJUSTED", execution_plan: Any = None,
-    session_calendar: Any = None,
-    batch_minutes: int = 20,
-) -> dict[str, Any]:
-    """Run one strategy family across multiple frozen product catalogs."""
+def run_strategy_family_replay(*, inputs: dict[Any,ReplayInput], factor_bindings,
+    factor_refs, family, output_dir: Path, max_bars: int = 8, execution_plan=None,
+    session_calendar=None, batch_minutes: int = 20, trace_path: Path | None = None):
+    """One Rust Actor/Plan and native consumer; Python never receives a Bar."""
+    from nautilus_trader._libnautilus import attach_factor_family
     from nautilus_trader.backtest import BacktestEngine
     from nautilus_trader.config import BacktestEngineConfig
     from nautilus_trader.execution import MakerTakerFeeModel
-    from nautilus_trader.model import (
-        AccountType, BarType, Currency, Money, OmsType, OrderSide, Quantity,
-        TimeInForce, TraderId, Venue,
-    )
-    from nautilus_trader.trading import Strategy
+    from nautilus_trader.model import AccountType, Currency, Money, OmsType, TraderId, Venue
 
-    opened = {product: _load_input(item) for product, item in inputs.items()}
-    preflight_catalogs(opened.values(), max_input_bars=max_bars * len(opened))
-    bar_types = {
-        product: BarType.from_str(str(row[2]["bar_type"]))
-        for product, row in opened.items()
-    }
-    instruments = [row[3] for row in opened.values()]
-    if execution_plan is not None:
-        engine, venue = _build_strategy_family_engine(execution_plan, instruments)
+    if isinstance(family,CrossSectionalGroup):
+        rule={"kind":"cross_sectional_group",**asdict(family)}
+    elif isinstance(family,ThresholdState):
+        rule={"kind":"threshold",**asdict(family)}
     else:
-        engine = BacktestEngine(config=BacktestEngineConfig(
-            trader_id=TraderId.from_str("FT-STRATEGY-001"),
-        ))
-        venue = Venue("CFFEX")
-        engine.add_venue(
-            venue=venue, oms_type=OmsType.NETTING,
-            account_type=AccountType.MARGIN, base_currency=Currency.from_str("CNY"),
-            starting_balances=[Money.from_str("1000000 CNY")],
-            fee_model=MakerTakerFeeModel(maker_rate=Decimal(0), taker_rate=Decimal(0)),
-        )
-        for instrument in instruments:
-            engine.add_instrument(instrument)
-    publications = {role: deque(maxlen=2) for role in factor_bindings}
-    publication_counts = dict.fromkeys(factor_bindings, 0)
-    instrument_ids = {product: value.instrument_id for product, value in bar_types.items()}
-
-    class FamilyTrader(Strategy):
-        def __init__(self) -> None:
-            super().__init__()
-            self.events = NautilusEventTimeline(calendar=session_calendar)
-            self.factor_adapter = _shared_factor_adapter(
-                bindings=factor_bindings, refs=factor_refs, products=tuple(opened),
-                bar_types=bar_types, events=self.events, calendar=session_calendar,
-                publications=publications, publication_counts=publication_counts,
-            )
-            self.replay_failure = None
-            self.last_signal: Any = None
-
-        def on_start(self) -> None:
-            for value in bar_types.values():
-                self.subscribe_bars(value)
-
-        on_bar = _on_replay_bar
-
-        def _process_bar(self, bar) -> None:
-            self.events.on_bar(bar)
-            self.factor_adapter.on_bar(bar)
-            signal = publications.get("signal") or []
-            if not signal or signal[-1] is self.last_signal:
-                return
-            self.last_signal = signal[-1]
-            values = dict(signal[-1].values)
-            from server.services.nautilus_bridge.strategy_families import CrossSectionalGroup
-            if isinstance(family, CrossSectionalGroup):
-                members = set(family.members(values))
-                targets = {product: int(product in members) for product in opened}
-            else:
-                targets = {product: family.direction(values[product]) for product in opened}
-            cache = self.cache
-            for product, instrument_id in instrument_ids.items():
-                scope = {"instrument_id": instrument_id, "strategy_id": self.strategy_id}
-                current = sum((position.signed_qty for position in cache.positions_open(**scope)), Decimal(0))
-                pending = {order.client_order_id: order for order in
-                           (*cache.orders_open(**scope), *cache.orders_inflight(**scope))}
-                remaining = sum((Decimal(str(order.leaves_qty)) * (1 if order.side == OrderSide.BUY else -1)
-                                 for order in pending.values()), Decimal(0))
-                delta = Decimal(targets[product]) - current - remaining
-                if not delta:
-                    continue
-                self.submit_order(self.order_factory.market(
-                    instrument_id=instrument_id, order_side=OrderSide.BUY if delta > 0 else OrderSide.SELL,
-                    quantity=Quantity.from_str(str(abs(delta))),
-                    time_in_force=TimeInForce.AT_THE_OPEN,
-                ))
-
-    trader = FamilyTrader()
-    engine.add_strategy(trader)
-    replay = _replay_with_strategy(engine, trader, opened.values(), max_input_bars=max_bars * len(opened), batch_minutes=batch_minutes)
-    reports = export_backtest_reports(engine, Path(output_dir), venue=venue)
-    return {
-        "engine": "nautilus_trader", "products": sorted(map(str, opened)),
-        "factor_roles": sorted(factor_bindings), **replay,
-        "publications": publication_counts,
-        "factor_plan_nodes": trader.factor_adapter.stream._executor.node_count,
-        "orders": engine.get_result().total_orders, "reports": reports,
-    }
+        raise ValueError("unsupported native strategy family")
+    products=tuple(inputs)
+    spec, role_outputs = _frozen_shared_plan(factor_bindings,factor_refs,products,session_calendar)
+    opened={product:_load_input(item) for product,item in inputs.items()}
+    preflight_catalogs(opened.values(),max_input_bars=max_bars*len(opened))
+    instruments=[row[3] for row in opened.values()]
+    strategy_id="FactorFamily-000"
+    if execution_plan is not None:
+        engine,venue=_build_strategy_family_engine(execution_plan,instruments)
+        strategy_id=str(execution_plan.strategy_venue_bindings[0]["strategy_id"])
+        if "-" not in strategy_id: strategy_id += "-000"
+    else:
+        engine=BacktestEngine(config=BacktestEngineConfig(trader_id=TraderId.from_str("FT-STRATEGY-001")))
+        venue=Venue("CFFEX")
+        engine.add_venue(venue=venue,oms_type=OmsType.NETTING,account_type=AccountType.MARGIN,
+            base_currency=Currency.from_str("CNY"),starting_balances=[Money.from_str("1000000 CNY")],
+            fee_model=MakerTakerFeeModel(maker_rate=Decimal(0),taker_rate=Decimal(0)))
+        for instrument in instruments: engine.add_instrument(instrument)
+    try:
+        runtime=attach_factor_family(engine=engine,plan_json=json.dumps(spec),
+            products=list(map(str,products)),bar_types=[str(row[2]["bar_type"]) for row in opened.values()],
+            consumers_json=json.dumps([{"strategy_id":strategy_id,"signal_output":role_outputs["signal"],"rule":rule}]),
+            calendar_json=json.dumps([(s.start_ns,s.end_ns) for s in session_calendar.sessions] if session_calendar is not None else []),
+            trace_path=None if trace_path is None else str(trace_path))
+        try:
+            replay=replay_catalog_batches(engine,opened.values(),max_input_bars=max_bars*len(opened),batch_minutes=batch_minutes)
+        except Exception:
+            runtime.raise_if_failed()
+            raise
+        runtime.ensure_success()
+        reports=export_backtest_reports(engine,Path(output_dir),venue=venue)
+        return {"engine":"nautilus_trader","products":sorted(map(str,products)),**replay,
+            "factor_roles":sorted(factor_bindings),"publications":{role:runtime.slice_count for role in factor_bindings},
+            "factor_plan_nodes":runtime.node_count,"factor_actors":1,
+            "strategy_publications":runtime.consumer_counts,"python_factor_bar_callbacks":0,
+            "factor_refs":dict(factor_refs),"factor_output_slots":role_outputs,"rank_passes":runtime.rank_passes,"orders":engine.get_result().total_orders,"reports":reports}
+    finally:
+        engine.dispose()
 
 
 def run_strategy_family_run_spec(

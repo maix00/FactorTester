@@ -59,4 +59,6 @@ def require_nautilus():
     if not callable(getattr(BacktestEngine, "run_catalogs", None)):
         pytest.fail("The native extension lacks configured-engine Catalog replay; rebuild the vendored extension.",
                     pytrace=False)
+    if not callable(getattr(native, "attach_factor_family", None)):
+        pytest.fail("The extension lacks the shared Rust FactorActor runtime; rebuild the composed runtime.", pytrace=False)
     return nautilus_trader

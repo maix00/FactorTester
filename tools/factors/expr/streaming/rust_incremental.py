@@ -17,9 +17,7 @@ class UnsupportedByRustPlan(UnsupportedStreamingFactor):
     pass
 
 
-def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any, ...], *, source_freq=None, session_calendar=None, event_line=None):
-    from alpha import FactorPlanState
-
+def shared_factor_plan_spec(expressions: Mapping[str, Any], products: tuple[Any, ...], *, source_freq=None, session_calendar=None, event_line=None):
     if not expressions or not products:
         raise UnsupportedByRustPlan("empty factor set")
     specs = []
@@ -72,10 +70,18 @@ def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any
             keys.append(key)
             nodes.append(node)
         outputs.append(local_to_global[spec["outputs"][0]])
-    state = FactorPlanState(json.dumps({
-        "columns": columns, "keys": keys, "nodes": nodes, "outputs": outputs,
-    }), len(products))
-    return RustIncrementalExecutor(expressions, products, columns, state, specs, len(nodes), boundaries, event_line, term_columns)
+    return {"columns": columns, "keys": keys, "nodes": nodes, "outputs": outputs,
+            "boundaries": boundaries, "term_columns": term_columns}, specs
+
+
+def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any, ...], *, source_freq=None, session_calendar=None, event_line=None):
+    from alpha import FactorPlanState
+    spec, specs = shared_factor_plan_spec(expressions, products, source_freq=source_freq,
+                                           session_calendar=session_calendar)
+    state = FactorPlanState(json.dumps(spec), len(products))
+    return RustIncrementalExecutor(expressions, products, spec["columns"], state, specs,
+                                   len(spec["nodes"]), spec["boundaries"], event_line,
+                                   spec["term_columns"])
 
 
 class _NodePlan:

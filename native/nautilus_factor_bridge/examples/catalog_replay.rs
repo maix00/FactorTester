@@ -1,21 +1,19 @@
 //! Offline acceptance harness, not a replacement RunSpec or a trading Job runner.
 //! Nautilus owns all reading, merge, cache and replay; no Python per-Bar calls.
-use anyhow::Context;
 use nautilus_backtest::{
     config::{BacktestDataConfig, BacktestEngineConfig, BacktestRunConfig, BacktestVenueConfig},
     node::BacktestNode,
 };
 use nautilus_common::cache::CacheConfig;
 use nautilus_execution::models::fee::{FeeModelAny, MakerTakerFeeModel};
-use nautilus_factor_bridge::{FactorOutputSink, FactorUpdate, replay::attach_factor_plan};
+use nautilus_factor_bridge::{output::JsonFactorSink, replay::attach_factor_plan};
 use nautilus_model::{
     data::{BarType, NautilusDataType},
     enums::{AccountType, BookType, OmsType},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     fs::{File, OpenOptions},
-    io::{BufWriter, Write},
     time::Instant,
 };
 
@@ -38,44 +36,6 @@ struct Manifest {
     chunk_size: usize,
     cache_bar_capacity: usize,
     expected_slices: u64,
-}
-
-struct JsonUpdates {
-    output: BufWriter<File>,
-    rows: u64,
-    expected: u64,
-}
-
-#[derive(Serialize)]
-struct Row<'a> {
-    timestamp_ns: i64,
-    available_at_ns: i64,
-    values: &'a [f64],
-}
-
-impl FactorOutputSink for JsonUpdates {
-    fn write_update(&mut self, update: &FactorUpdate) -> anyhow::Result<()> {
-        serde_json::to_writer(
-            &mut self.output,
-            &Row {
-                timestamp_ns: update.timestamp_ns,
-                available_at_ns: update.available_at_ns,
-                values: &update.values,
-            },
-        )?;
-        self.output.write_all(b"\n")?;
-        self.rows += 1;
-        Ok(())
-    }
-    fn finish(&mut self) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.rows == self.expected,
-            "factor output count {} differs from frozen expected {}",
-            self.rows,
-            self.expected
-        );
-        self.output.flush().context("flush factor output")
-    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -161,11 +121,7 @@ fn main() -> anyhow::Result<()> {
         &products,
         &types,
         &fields,
-        JsonUpdates {
-            output: BufWriter::with_capacity(65_536, output),
-            rows: 0,
-            expected: manifest.expected_slices,
-        },
+        JsonFactorSink::new(output, Some(manifest.expected_slices)),
     )?;
     let result = node.run()?;
     outcome.ensure_success()?;
