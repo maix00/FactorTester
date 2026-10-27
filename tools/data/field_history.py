@@ -1028,10 +1028,39 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         _create_schema(conn)
         storage_df = _serialise_history_frame(_normalise_history_frame(existing_df))
         storage_df.to_sql(HISTORICAL_FIELD_TABLE, conn, if_exists="append", index=False)
+        _ensure_revision_schema(conn)
         return
     _create_schema(conn)
     if existing is not None:
         _migrate_contract_scope_values(conn)
+    _ensure_revision_schema(conn)
+
+
+def _ensure_revision_schema(conn: sqlite3.Connection) -> None:
+    """Maintain an O(1) revision in the same transaction as rule writes."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS historical_field_revision (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            revision INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO historical_field_revision (id, revision) VALUES (1, 0)"
+    )
+    for operation in ("INSERT", "UPDATE", "DELETE"):
+        conn.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS historical_field_revision_{operation.lower()}
+            AFTER {operation} ON "{HISTORICAL_FIELD_TABLE}"
+            BEGIN
+                UPDATE historical_field_revision
+                SET revision = revision + 1
+                WHERE id = 1;
+            END
+            """
+        )
 
 
 def _create_schema(conn: sqlite3.Connection) -> None:

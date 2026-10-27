@@ -154,7 +154,7 @@ def test_new_server_source_is_projected_without_special_casing(monkeypatch):
         source_catalog._DECLARATIONS.pop("SyntheticForTest", None)
 
 
-def test_rule_revision_tracks_wal_commit_and_database_path(monkeypatch, tmp_path):
+def test_rule_revision_tracks_commits_and_database_path(monkeypatch, tmp_path):
     import sqlite3
     from tools.data import field_history, hub
     from sources.LocalCNFutures import CNFutures
@@ -162,9 +162,15 @@ def test_rule_revision_tracks_wal_commit_and_database_path(monkeypatch, tmp_path
     db = tmp_path / "rules.sqlite"
     table = field_history.HISTORICAL_FIELD_TABLE
     with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute(f'CREATE TABLE "{table}" (value TEXT)')
-        conn.execute(f'INSERT INTO "{table}" VALUES (?)', ("first",))
+        field_history.ensure_historical_field_schema(conn)
+        conn.execute(
+            f'INSERT INTO "{table}" (provider, source_key, instrument, instrument_type, '
+            "field_name, effective_trading_day, value, value_type, contract_codes) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("p", "s", "AU", "future", "PriceTick", "2025-01-01", "1", "number", "[]"),
+        )
         conn.commit()
 
     class FakeHub:
@@ -174,12 +180,19 @@ def test_rule_revision_tracks_wal_commit_and_database_path(monkeypatch, tmp_path
 
         def connect_store(self, key):
             assert key == "openctp"
-            return sqlite3.connect(db)
+            connection = sqlite3.connect(db)
+            connection.row_factory = sqlite3.Row
+            return connection
 
     monkeypatch.setattr(hub.DataHub, "get_instance", classmethod(lambda cls: FakeHub()))
     first = CNFutures._rule_store_revision()
     with sqlite3.connect(db) as conn:
-        conn.execute(f'INSERT INTO "{table}" VALUES (?)', ("second",))
+        conn.execute(
+            f'INSERT INTO "{table}" (provider, source_key, instrument, instrument_type, '
+            "field_name, effective_trading_day, value, value_type, contract_codes) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("p", "s2", "AU", "future", "PriceTick", "2025-01-02", "2", "number", "[]"),
+        )
         conn.commit()
     second = CNFutures._rule_store_revision()
     assert first is not None and second is not None
@@ -235,3 +248,40 @@ def test_strict_provider_loads_one_caller_owned_frame_per_revision(monkeypatch, 
         assert len(frames) == 2
     finally:
         CNFutures._clear_rule_provider_cache()
+
+
+def test_rule_revision_snapshot_distinguishes_old_and_new_connections(tmp_path):
+    import sqlite3
+    from pathlib import Path
+    from tools.data import field_history
+    from sources.LocalCNFutures.CNFutures import _rule_revision_for
+
+    db = tmp_path / "rules.sqlite"
+    table = field_history.HISTORICAL_FIELD_TABLE
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        field_history.ensure_historical_field_schema(conn)
+        conn.execute(
+            f'INSERT INTO "{table}" (provider, source_key, instrument, instrument_type, '
+            "field_name, effective_trading_day, value, value_type, contract_codes) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("p", "old", "AU", "future", "PriceTick", "2025-01-01", "1", "number", "[]"),
+        )
+        conn.commit()
+    old = sqlite3.connect(db)
+    old.row_factory = sqlite3.Row
+    old.execute("BEGIN")
+    old_revision = _rule_revision_for(old, Path(db))
+    with sqlite3.connect(db) as new:
+        new.execute(
+            f'INSERT INTO "{table}" (provider, source_key, instrument, instrument_type, '
+            "field_name, effective_trading_day, value, value_type, contract_codes) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("p", "new", "AU", "future", "PriceTick", "2025-01-02", "2", "number", "[]"),
+        )
+        new.commit()
+    new_revision = _rule_revision_for(sqlite3.connect(db), Path(db))
+    old.rollback()
+    old.close()
+    assert old_revision != new_revision

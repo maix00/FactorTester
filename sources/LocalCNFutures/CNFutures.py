@@ -484,18 +484,12 @@ _RULE_PROVIDER_LOCK = Lock()
 
 
 def _rule_revision_for(connection, path: Path) -> tuple[object, ...]:
-    from tools.data.field_history import HISTORICAL_FIELD_TABLE
-    query = f'SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM "{HISTORICAL_FIELD_TABLE}"'
-    count, max_rowid = connection.execute(query).fetchone()
-    data_version = connection.execute("PRAGMA data_version").fetchone()[0]
-    files = []
-    for candidate in (path, path.with_name(path.name + '-wal')):
-        try:
-            stat = candidate.stat()
-            files.append((candidate.as_posix(), stat.st_mtime_ns, stat.st_size))
-        except FileNotFoundError:
-            files.append((candidate.as_posix(), None, None))
-    return (path.as_posix(), int(count), int(max_rowid), int(data_version), tuple(files))
+    row = connection.execute(
+        "SELECT revision FROM historical_field_revision WHERE id = 1"
+    ).fetchone()
+    if row is None:
+        raise ValueError("rule store has no revision row")
+    return path.as_posix(), int(row[0])
 
 
 def _rule_store_revision() -> tuple[object, ...] | None:
@@ -517,7 +511,7 @@ def _clear_rule_provider_cache() -> None:
 
 
 def _strict_exchange_field_history():
-    """Load strict historical rules from one caller-owned SQLite snapshot."""
+    """Load strict rules once per committed store revision, in one snapshot."""
     global _RULE_PROVIDER_CACHE
     from tools.data.field_history import (
         ensure_historical_field_schema, load_historical_field_frame,
@@ -531,26 +525,25 @@ def _strict_exchange_field_history():
         path = hub.get_store_path('openctp').resolve()
     except Exception:
         return loader(include_openctp_latest=False, transaction_fee_source='exchange')
-    with hub.connect_store('openctp') as conn:
-        ensure_historical_field_schema(conn)
-        conn.execute("BEGIN")
-        try:
-            revision = _rule_revision_for(conn, path)
-            with _RULE_PROVIDER_LOCK:
+    with _RULE_PROVIDER_LOCK:
+        with hub.connect_store('openctp') as conn:
+            ensure_historical_field_schema(conn)
+            conn.execute("SAVEPOINT rule_provider_snapshot")
+            try:
+                revision = _rule_revision_for(conn, path)
                 cached = _RULE_PROVIDER_CACHE
                 if cached is not None and cached[0] is loader and cached[1] == revision:
                     return cached[2]
-            frame = load_historical_field_frame(connection=conn, ensure_schema=False)
-            provider = loader(
-                frame=frame, include_openctp_latest=False,
-                transaction_fee_source='exchange',
-            )
-            if _rule_revision_for(conn, path) == revision:
-                with _RULE_PROVIDER_LOCK:
-                    _RULE_PROVIDER_CACHE = (loader, revision, provider)
-            return provider
-        finally:
-            conn.rollback()
+                frame = load_historical_field_frame(connection=conn, ensure_schema=False)
+                provider = loader(
+                    frame=frame, include_openctp_latest=False,
+                    transaction_fee_source='exchange',
+                )
+                _RULE_PROVIDER_CACHE = (loader, revision, provider)
+                return provider
+            finally:
+                conn.execute("ROLLBACK TO rule_provider_snapshot")
+                conn.execute("RELEASE rule_provider_snapshot")
 
 
 def _declare_source_semantics(
