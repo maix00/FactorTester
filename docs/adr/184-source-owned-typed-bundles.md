@@ -363,3 +363,10 @@ RSS硬限制：仍被借用的淘汰页、Arrow解码工作区、JSON和运行�
 RSS含共享页不能相加当物理占用。仅单轮合成样本，冷缓存未清OS页面缓存，不是线上
 p95、Rust性能或浏览器端到端数据。复现：GTHT Python运行
 `-m tests.benchmarks.bench_shared_market_cache --rows 200000 --processes 4`。
+
+后续公共 Rust 读取器位于 traderesearch_data/rust，不依赖 Nautilus，不含第二套缓存
+身份/配额实现。读取同一未压缩 IPC 文件，Arrow 数组保留 mmap 的引用计数所有权，
+拒绝压缩和未对齐输入而非静默复制。测试直接检查值缓冲地址在映射范围内，并验证
+释放读取器后数组仍有效；字符串、Decimal、带时区纳秒时间戳和空值往返通过。
+Python Arrow22发布的字典字符串/嵌套列表/空值缓存已由Rust Arrow59.3.1实际读取。
+这证明跨语言格式兼容与读取器行为，不改变上文原生回放尚未接线的限制。
