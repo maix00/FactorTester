@@ -225,7 +225,10 @@ federated catalog's runtime availability/count projection.
 [ADR-186](186-multi-contract-catalog-references.md)；在消费者契约确认前保持
 fail-closed。
 
-仍未完成：显式多 catalog 消费者契约、真实 DAY1 异常日历/结算验证、无损保证金、
+仍规则/日历/结算现有字段与缺口见
+[source-rule-calendar-settlement-2026-10-27.md](../audits/source-rule-calendar-settlement-2026-10-27.md)。
+
+未完成：显式多 catalog 消费者契约、真实 DAY1 异常日历/结算验证、无损保证金、
 非 CN/非 Parquet 独立 Bundle、RunSpec 输入身份冻结。
 
 ### Source-owned catalog staging entrypoint
