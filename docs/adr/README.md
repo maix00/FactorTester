@@ -1,5 +1,7 @@
 # 架构决策记录
 
+- [184 — 数据源自行维护适配器的类型化 Bundle](184-source-owned-typed-bundles.md)
+
 - [182 — TradeResearch CLI 分阶段命名迁移](182-traderesearch-cli-naming.md)
 
 - [181 — Schema-driven test configuration editor](181-schema-driven-test-configuration-editor.md)

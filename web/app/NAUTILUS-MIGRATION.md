@@ -29,3 +29,13 @@
 - 真实保存→RunSpec→Nautilus Job 验证，再逐项清除旧 UI 元数据；当前未达到删除旧 Web 条件。
 
 本轮未修改后端或 Nautilus 计算代码。上述清单用于跟踪未接通部分，不把缺口关闭为“完成”。
+
+## 数据领域解耦边界更新
+
+用户确定：产品/数据源保持引擎中立，属性与 Nautilus 完整显式对应；每个数据源独立维护
+可选 Nautilus 加载接口；行情、历史规则作为同一 Bundle 的不同成员类型。
+见 [ADR-184](../../docs/adr/184-source-owned-typed-bundles.md) 与 [#447](https://github.com/maix00/FactorTester/issues/447)。
+
+因此产品前端不能依赖 Nautilus 实例化后才取得基础元数据；展示来源中立属性，以及适配模块
+声明的对应关系和执行能力。Nautilus Instrument 只在适配边界构造。历史规则成员不进入
+K 线频率候选。当前仅完成设计与依赖审计，尚未切换注册表、加载和前端成员类型。
