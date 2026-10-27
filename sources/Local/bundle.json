@@ -51,7 +51,9 @@
       "related_members": [
         "FieldHistory:market_rules:exchange"
       ],
-      "integrations": {},
+      "integrations": {
+        "nautilus_catalog": "sources.LocalCNFutures.nautilus_catalog:stage_catalogs"
+      },
       "update_policy": {
         "mode": "mutable_history",
         "revision_policy": "unversioned",
@@ -67,7 +69,9 @@
       "related_members": [
         "FieldHistory:market_rules:exchange"
       ],
-      "integrations": {},
+      "integrations": {
+        "nautilus_catalog": "sources.LocalCNFutures.nautilus_catalog:stage_catalogs"
+      },
       "update_policy": {
         "mode": "mutable_history",
         "revision_policy": "unversioned",

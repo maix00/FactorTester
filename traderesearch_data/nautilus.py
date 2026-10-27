@@ -1,11 +1,13 @@
 """Optional Nautilus feed contract for source-owned adapters.
 
-Only immutable metadata is defined here. Importing this module does not load
-Nautilus, TradeResearch internals, plugins or market data.
+Only metadata and a loader protocol are defined here. Importing this module
+does not load Nautilus, TradeResearch internals, plugins or market data.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,4 +38,14 @@ class NautilusAdapterContract:
     supported_book_types: tuple[str, ...] = ()
 
 
-__all__ = ["NautilusAdapterContract"]
+# The loader is source-owned; no engine or platform domain objects cross this
+# boundary. Paths identify the output catalog, never a centrally guessed input.
+class NautilusCatalogLoader(Protocol):
+    def __call__(
+        self, *, staging_requests: list[dict[str, Any]], source_key: str,
+        frequency: str, start_utc: str, end_utc: str, start_ns: int, end_ns: int,
+        target_root: Path,
+    ) -> dict[str, dict[str, str]]: ...
+
+
+__all__ = ["NautilusAdapterContract", "NautilusCatalogLoader"]

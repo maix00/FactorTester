@@ -151,3 +151,24 @@ contract no longer initializes artifact paths or NumPy. Exact path resolver
 outputs and current source admission/staging remain covered by focused tests.
 This does not yet externalize the complete source implementation or replace the
 federated catalog's runtime availability/count projection.
+
+### Source-owned catalog staging entrypoint
+
+The installed market member's `integrations.nautilus_catalog` now selects the
+loader using `NautilusCatalogLoader`. Central staging validates a unique
+server-installed Bar member, exact frequency and explicit entrypoint before
+importing plugin code. LocalCNFutures owns its former contract UID parsing,
+lifecycle selection, trading-spec mapping and source-path selection in
+`nautilus_catalog.py`; the predecessor implementation is removed from central
+staging. Repeated requests for one contract reuse its staged result within the
+call, rather than reading/writing the source again. A separate synthetic
+non-CN loader verifies the dispatch does not interpret Chinese UIDs or parquet
+paths. Calendar summaries remain receipt-based with no source reread.
+
+Remaining boundaries are explicit: this Bundle loader still calls existing
+platform price/catalog and native conversion utilities; it is not yet a fully
+external installable source package. The source registry's execution-admission
+checks and historical-rule binding still need neutral/source-owned ports.
+Current RunSpec records do not yet freeze the Bundle manifest/package revision.
+The existing product-keyed catalog return contract is unchanged; this tranche
+does not establish full multi-contract roll/replay acceptance.
