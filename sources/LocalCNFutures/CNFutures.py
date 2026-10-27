@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
@@ -478,12 +479,46 @@ def _asset_class_for_local_future(product: Product) -> str | None:
     return None
 
 
+_RULE_PROVIDER_CACHE: tuple[object, tuple[int, int], object] | None = None
+_RULE_PROVIDER_LOCK = Lock()
+
+
+def _rule_store_revision() -> tuple[int, int] | None:
+    """Return the mutable SQLite revision used by the strict historical loader."""
+    try:
+        from tools.data.hub import DataHub
+        path = DataHub.get_instance().get_store_path('openctp')
+        stat = path.stat()
+        return stat.st_mtime_ns, stat.st_size
+    except Exception:
+        return None
+
+
+def _clear_rule_provider_cache() -> None:
+    global _RULE_PROVIDER_CACHE
+    with _RULE_PROVIDER_LOCK:
+        _RULE_PROVIDER_CACHE = None
+
+
 def _strict_exchange_field_history():
+    """Load strict historical rules once per unchanged SQLite revision."""
+    global _RULE_PROVIDER_CACHE
     from tools.data.field_history import load_market_rule_field_provider
 
-    return load_market_rule_field_provider(
+    loader = load_market_rule_field_provider
+    revision = _rule_store_revision()
+    if revision is not None:
+        with _RULE_PROVIDER_LOCK:
+            cached = _RULE_PROVIDER_CACHE
+            if cached is not None and cached[0] is loader and cached[1] == revision:
+                return cached[2]
+    provider = loader(
         include_openctp_latest=False, transaction_fee_source='exchange',
     )
+    if revision is not None and _rule_store_revision() == revision:
+        with _RULE_PROVIDER_LOCK:
+            _RULE_PROVIDER_CACHE = (loader, revision, provider)
+    return provider
 
 
 def _declare_source_semantics(

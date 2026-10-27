@@ -90,6 +90,28 @@ def test_field_history_is_lazy_strict_historical_and_preserves_raw_mapping(monke
     }]
 
 
+def test_strict_rule_provider_is_cached_per_sqlite_revision(monkeypatch):
+    from tools.data import field_history
+    from sources.LocalCNFutures import CNFutures
+
+    calls = []
+    monkeypatch.setattr(CNFutures, "_rule_store_revision", lambda: (1, 1))
+    monkeypatch.setattr(
+        field_history, "load_market_rule_field_provider",
+        lambda **kwargs: (calls.append(kwargs), object())[-1],
+    )
+    CNFutures._clear_rule_provider_cache()
+    try:
+        first = CNFutures._strict_exchange_field_history()
+        assert CNFutures._strict_exchange_field_history() is first
+        assert len(calls) == 1
+        monkeypatch.setattr(CNFutures, "_rule_store_revision", lambda: (2, 2))
+        assert CNFutures._strict_exchange_field_history() is not first
+        assert len(calls) == 2
+    finally:
+        CNFutures._clear_rule_provider_cache()
+
+
 def test_new_server_source_is_projected_without_special_casing(monkeypatch):
     from tools.data.source_catalog import (
         DataSourceDeclaration,
