@@ -335,6 +335,7 @@ def test_bundle_native_margin_fields_reach_instrument_unchanged(monkeypatch):
     # Bundle-provided native fields must not be recomputed by the bridge.
     fields = {"price_increment": "0.005", "multiplier": "10000",
               "margin_init": "0.025", "margin_maint": "0.02",
+              "min_quantity": "2.0", "max_quantity": "20",
               "trading_spec_source": "synthetic test fixture"}
     spec = nautilus_catalog.build_contract_spec(
         "CFFEX|F|T|2403", product=object(),
@@ -344,3 +345,5 @@ def test_bundle_native_margin_fields_reach_instrument_unchanged(monkeypatch):
     instrument = to_nautilus_instrument(spec)
     assert instrument.margin_init == Decimal("0.025")
     assert instrument.margin_maint == Decimal("0.02")
+    assert str(instrument.min_quantity) == "2"
+    assert str(instrument.max_quantity) == "20"

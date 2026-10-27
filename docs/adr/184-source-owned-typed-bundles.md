@@ -310,8 +310,10 @@ LocalCNFutures 的 `instrument_fields.py` 现在拥有唯一字段生产实现�
 平台产品详情仅调用提供器并保留同名字段，Decimal 以字符串无损 JSON 传输；React 产品页
 用公共分页表格显示相同键和值，中文/英文仅翻译标签，未知新字段也直接展示。
 多空/按手规则尚不能表达为当前单一比例时，Bundle 不伪造比例，保留原规则数据供审计。
-这仍是当前快照信息，不得当作历史交易规则冻结的完成证明；数量限额等 Instrument 其余
-属性还需要逐项完成实际执行消费，不能因页面能显示就声称全部 Nautilus 能力接通。
+这仍是当前快照信息，不得当作历史交易规则冻结的完成证明；其余 Instrument 属性仍需逐项核对实际执行消费，不能因页面能显示就声称全部 Nautilus
+能力接通。Bundle 的 min_quantity/max_quantity 已同名传入 Nautilus FuturesContract；
+不另建数量限制模型，缺失时沿用 Nautilus 默认值。有限、正整数及上下界校验发生在
+初始化，不进入逐 Bar 热路径。
 原生行情回放 `run_catalogs` 未改变，没有新增 Python 行情物化或逐 Bar 字段查询。
 
 

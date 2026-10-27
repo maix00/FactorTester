@@ -532,6 +532,8 @@ class FuturesContractSpec:
     margin_maint: Decimal
     provenance: str
     resolved_source: object
+    min_quantity: Decimal | None = None
+    max_quantity: Decimal | None = None
 
     def __post_init__(self) -> None:
         if (not self.provenance or not self.instrument_code or not self.venue
@@ -547,6 +549,16 @@ class FuturesContractSpec:
             raise ValueError("invalid contract lifecycle")
         if self.margin_init < 0 or self.margin_maint < 0:
             raise ValueError("margin ratios must be non-negative")
+        for name in ("min_quantity", "max_quantity"):
+            quantity = getattr(self, name)
+            if quantity is not None and (
+                not isinstance(quantity, Decimal) or not quantity.is_finite()
+                or quantity <= 0 or quantity != quantity.to_integral_value()
+            ):
+                raise ValueError(f"{name} must be a positive whole-contract quantity")
+        if (self.min_quantity is not None and self.max_quantity is not None
+                and self.min_quantity > self.max_quantity):
+            raise ValueError("min_quantity exceeds max_quantity")
         # Keep source authority explicit.  A bare caller-supplied asset class
         # would let a futures contract silently inherit the wrong semantics.
         from server.services.nautilus_bridge.source_registry import ResolvedSource
@@ -604,4 +616,8 @@ def to_nautilus_instrument(spec: FuturesContractSpec):
         ts_event=spec.activation_ns, ts_init=spec.activation_ns,
         margin_init=spec.margin_init, margin_maint=spec.margin_maint,
         exchange=spec.venue,
+        min_quantity=(Quantity.from_str(str(spec.min_quantity.to_integral_value()))
+                      if spec.min_quantity is not None else None),
+        max_quantity=(Quantity.from_str(str(spec.max_quantity.to_integral_value()))
+                      if spec.max_quantity is not None else None),
     )

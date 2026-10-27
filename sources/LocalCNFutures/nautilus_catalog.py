@@ -67,6 +67,10 @@ def build_contract_spec(
         margin_init=margin_init, margin_maint=margin_maint,
         provenance=str(spec_fields.get("trading_spec_source") or "run_spec_product_catalog"),
         resolved_source=resolved_source,
+        min_quantity=(_finite_decimal(spec_fields["min_quantity"], "min_quantity", contract_uid)
+                      if spec_fields.get("min_quantity") is not None else None),
+        max_quantity=(_finite_decimal(spec_fields["max_quantity"], "max_quantity", contract_uid)
+                      if spec_fields.get("max_quantity") is not None else None),
     )
 
 _SESSION_RE = re.compile(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})")

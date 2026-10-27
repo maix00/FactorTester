@@ -308,3 +308,30 @@ def test_unknown_asset_class_and_unresolved_source_are_rejected():
     with pytest.raises(ValueError, match="admitted physical-contract feed"):
         FuturesContractSpec(**{**kwargs, "instrument_code": "T2403",
                                "underlying": "T"}, resolved_source=unadmitted)
+
+
+def test_native_quantity_limits_preserve_values_and_defaults():
+    from dataclasses import replace
+    require_nautilus()
+    spec = FuturesContractSpec(
+        instrument_code="T2403", venue="CFFEX", underlying="T",
+        price_increment=Decimal("0.005"), price_precision=3,
+        multiplier=Decimal("10000"), currency="CNY",
+        activation_ns=1, expiration_ns=2_000_000_000_000_000_000,
+        margin_init=Decimal("0.02"), margin_maint=Decimal("0.02"),
+        provenance="synthetic fixture", resolved_source=resolved_contract_minute_source(),
+    )
+    original = to_nautilus_instrument(spec)
+    assert str(original.min_quantity) == "1"
+    assert original.max_quantity is None
+    instrument = to_nautilus_instrument(replace(
+        spec, min_quantity=Decimal("3"), max_quantity=Decimal("25")))
+    assert str(instrument.min_quantity) == "3"
+    assert str(instrument.max_quantity) == "25"
+    for invalid in (Decimal("NaN"), Decimal("Infinity"), Decimal("0"),
+                    Decimal("-1"), Decimal("1.5")):
+        for key in ("min_quantity", "max_quantity"):
+            with pytest.raises(ValueError, match="whole-contract"):
+                replace(spec, **{key: invalid})
+    with pytest.raises(ValueError, match="exceeds"):
+        replace(spec, min_quantity=Decimal("3"), max_quantity=Decimal("2"))
