@@ -104,7 +104,9 @@ class CatalogStagingRequest:
     def __post_init__(self) -> None:
         if not isinstance(self.paths, tuple):
             raise TypeError("catalog staging paths must be a tuple")
-        if not self.paths or any(not isinstance(path, str) or not path for path in self.paths):
+        if not self.paths or any(
+            not isinstance(path, str) or not path.strip() for path in self.paths
+        ):
             raise ValueError("catalog staging paths must be non-empty strings")
 
 
@@ -128,7 +130,7 @@ class CatalogLoadRequest:
         if not isinstance(self.frequency, str) or not self.frequency:
             raise ValueError("catalog frequency is required")
         if not isinstance(self.related_members, tuple) or any(
-            not isinstance(value, str) or not value for value in self.related_members
+            not isinstance(value, str) or not value.strip() for value in self.related_members
         ):
             raise TypeError("catalog related_members must be a tuple of non-empty strings")
         if not isinstance(self.staging_requests, tuple) or any(

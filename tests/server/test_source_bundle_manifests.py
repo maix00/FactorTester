@@ -304,3 +304,11 @@ def test_catalog_load_request_rejects_mutable_or_invalid_fields(tmp_path):
             end_utc="2024-01-03T00:00:00Z", start_ns=0, end_ns=1,
             target_root=str(tmp_path),
         )
+
+
+def test_catalog_staging_request_rejects_blank_paths():
+    import pytest
+    from traderesearch_data.nautilus import CatalogStagingRequest
+
+    with pytest.raises(ValueError, match="non-empty strings"):
+        CatalogStagingRequest(("  ",))
