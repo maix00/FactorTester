@@ -129,3 +129,50 @@ def test_daily_settlement_posts_pnl_and_revalues_margin_on_open_position(tmp_pat
         for item in __import__("ast").literal_eval(value)
     ]
     assert "2062.00" in margins and "2066.80" in margins
+
+
+def test_live_source_change_between_runs_is_not_rejected(tmp_path):
+    require_nautilus()
+    rows = [
+        {"TRADING_DAY": date(2024, 1, 2), "PRODUCT": "T",
+         "CONTRACT": "T2403.CFE", "CONTRACT_UID": "CFFEX|F|T|2403",
+         "OPEN": 102.9, "HIGH": 103.0, "LOW": 102.8, "CLOSE": 102.95,
+         "VOLUME": 1000.0, "OPEN_INTEREST": 180000.0,
+         "SETTLEMENT_PRICE": 102.94},
+        {"TRADING_DAY": date(2024, 1, 3), "PRODUCT": "T",
+         "CONTRACT": "T2403.CFE", "CONTRACT_UID": "CFFEX|F|T|2403",
+         "OPEN": 102.95, "HIGH": 103.1, "LOW": 102.9, "CLOSE": 103.05,
+         "VOLUME": 1100.0, "OPEN_INTEREST": 181000.0,
+         "SETTLEMENT_PRICE": 103.04},
+    ]
+    spec = FuturesContractSpec(
+        "T2403", "CFFEX", "T", Decimal("0.005"), 3, Decimal("10000"),
+        "CNY", 1, 2_000_000_000_000_000_000, Decimal("0.02"),
+        Decimal("0.02"), "test-only fixture", resolved_contract_minute_source(),
+    )
+    fingerprint = "sha256:" + "d" * 64
+    receipts = []
+    for index, settlement in enumerate((102.94, 105.0)):
+        changed = [dict(row) for row in rows]
+        changed[0]["SETTLEMENT_PRICE"] = settlement
+        source = tmp_path / f"daily-{index}.parquet"
+        pq.write_table(pa.Table.from_pylist(changed), source)
+        target = tmp_path / f"catalog-{index}"
+        stage_contract_daily_catalog(
+            source, target, contract_uid="CFFEX|F|T|2403",
+            instrument_spec=spec, start_ns=0, end_ns=2_000_000_000_000_000_000,
+            product_codes={"T"},
+            session_for_day=lambda day: (
+                datetime.combine(day, time(9, 30)),
+                datetime.combine(day, time(15, 0)),
+            ),
+            batch_bars=1, bundle_id="Local", bundle_version="1",
+            bundle_fingerprint=fingerprint,
+            member_id="LocalCNFuturesContractDAY1",
+        )
+        receipts.append(run_small_catalog_replay(
+            (ReplayInput(target, "CFFEX|F|T|2403"),),
+            tmp_path / f"out-{index}", max_input_bars=2,
+        ))
+    assert [item.native_settlements for item in receipts] == [2, 2]
+    assert receipts[0].source_inputs == receipts[1].source_inputs
