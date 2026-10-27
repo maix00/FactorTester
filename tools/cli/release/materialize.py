@@ -15,10 +15,14 @@ from .app_archive import install_macos_app
 
 MAX_INSTALL_OUTPUT_BYTES = 64 * 1024
 COMMAND_MODULES = {
+    "traderesearch": ("tools.cli.app", "cli"),
+    "traderesearch-manager": ("tools.cli.manager_app", "manager_cli"),
     "factortester": ("tools.cli.app", "cli"),
     "factortester-manager": ("tools.cli.manager_app", "manager_cli"),
 }
 STABLE_COMMANDS = (
+    "traderesearch",
+    "traderesearch-manager",
     "factortester",
     "factortester-manager",
 )
@@ -210,8 +214,11 @@ def _current_version(root: Path, *, required: bool = True) -> str:
 
 
 def _launcher(root: Path, version: str, command: str) -> str:
-    standalone = root / "releases" / version / "runtime" / "standalone" / "bin" / command
-    legacy = root / "releases" / version / "runtime" / "python" / "bin" / command
+    # Canonical commands reuse the one verified runtime, including old bundles.
+    runtime_command = {"traderesearch": "factortester",
+                       "traderesearch-manager": "factortester-manager"}.get(command, command)
+    standalone = root / "releases" / version / "runtime" / "standalone" / "bin" / runtime_command
+    legacy = root / "releases" / version / "runtime" / "python" / "bin" / runtime_command
     standalone_path = shlex.quote(str(standalone))
     legacy_path = shlex.quote(str(legacy))
     return (
@@ -225,7 +232,7 @@ def _launcher(root: Path, version: str, command: str) -> str:
         "if [ -x \"$legacy\" ]; then\n"
         "  exec \"$legacy\" \"$@\"\n"
         "fi\n"
-        f"echo 'FactorTester release command is unavailable: {command}' >&2\n"
+        f"echo 'TradeResearch release command is unavailable: {command}' >&2\n"
         "exit 127\n"
     )
 

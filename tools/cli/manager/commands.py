@@ -36,7 +36,7 @@ def _authenticated_client() -> tuple[ManagerClient, ManagerCredentialStore]:
 
 @click.group("manager")
 def manager() -> None:
-    """Manage FactorTester through its authenticated 7998/7997 APIs.
+    """Manage TradeResearch through its authenticated 7998/7997 APIs.
 
     Host administration is outside this CLI.  A server may advertise
     operator-controlled connection metadata through ``server access``; the
@@ -64,7 +64,7 @@ def configure_manager(
     port: int,
     as_json: bool,
 ) -> None:
-    """Save the FactorTester Manager control endpoint."""
+    """Save the TradeResearch Manager control endpoint."""
     config = ManagerConfig.from_url(url or f"{scheme}://{host}:{port}")
     save_manager_config(config)
     _echo({"status": "configured", "manager_url": config.base_url}, as_json)
@@ -190,7 +190,7 @@ def server_info() -> None:
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def inspect_server(as_json: bool) -> None:
-    """Display FactorTester role, endpoints, features, and access metadata."""
+    """Display TradeResearch role, endpoints, features, and access metadata."""
     client, _ = _authenticated_client()
     _echo(client.identity(), as_json)
 

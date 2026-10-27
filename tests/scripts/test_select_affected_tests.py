@@ -87,7 +87,7 @@ def test_js_only_change_has_no_python_target():
 def test_mixed_python_and_js_change_selects_both_runners():
     mode, targets = selector.select({"tools/cli/app.py", "tests/js/test_report_export.js"})
     assert mode == "SCOPED"
-    assert "tests/cli" in targets
+    assert set(selector.CLI_NAMING_TESTS).issubset(targets)
     assert "tests/js/test_report_export.js" in targets
     assert all((selector.ROOT / path).exists() for path in targets)
 
@@ -413,3 +413,11 @@ def test_latex_and_intermediate_migration_selects_shared_public_contracts():
     assert mode=='SCOPED'
     assert set(targets)==set(selector.LATEX_QUERY_TESTS)
     assert 'vendor/py-alpha-lib/py-binding/python/tests/test_factor_presentation.py' in targets
+
+
+def test_cli_naming_migration_stays_scoped_to_install_config_help_contracts():
+    mode, targets = selector.select({"tools/cli/pyproject.toml", "tools/cli/http.py",
+        "tools/cli/bootstrap/__init__.py", "tools/cli/manager/config.py",
+        "tools/cli/release/materialize.py", "scripts/release/assets.py"})
+    assert mode == "SCOPED"
+    assert set(targets) == set(selector.CLI_NAMING_TESTS)

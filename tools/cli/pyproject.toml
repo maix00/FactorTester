@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "factortester"
+name = "traderesearch"
 version = "0.1.2"
-description = "HTTP command-line client for FactorTester"
+description = "HTTP command-line client for TradeResearch"
 requires-python = ">=3.11"
 dependencies = [
   "click>=8",
@@ -16,15 +16,15 @@ dependencies = [
 ]
 
 [project.scripts]
-factortester = "factortester_cli_bootstrap:main"
-factortester-manager = "factortester_cli_bootstrap:manager_main"
-traderesearch = "factortester_cli_bootstrap:main"
-traderesearch-manager = "factortester_cli_bootstrap:manager_main"
+factortester = "traderesearch_cli_bootstrap:main"
+factortester-manager = "traderesearch_cli_bootstrap:manager_main"
+traderesearch = "traderesearch_cli_bootstrap:main"
+traderesearch-manager = "traderesearch_cli_bootstrap:manager_main"
 
 [tool.setuptools]
 include-package-data = false
 packages = [
-  "factortester_cli_bootstrap",
+  "traderesearch_cli_bootstrap",
   "tools.cli",
   "tools.cli.catalog",
   "tools.cli.commands",
@@ -49,7 +49,7 @@ packages = [
 ]
 
 [tool.setuptools.package-dir]
-"factortester_cli_bootstrap" = "bootstrap"
+"traderesearch_cli_bootstrap" = "bootstrap"
 "tools.cli" = "."
 "tools.cli.catalog" = "catalog"
 "tools.cli.commands" = "commands"

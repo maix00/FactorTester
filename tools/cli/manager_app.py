@@ -1,4 +1,4 @@
-"""Click entrypoint for the separate FactorTester Manager/operator CLI."""
+"""Click entrypoint for the separate TradeResearch Manager/operator CLI."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from tools.cli.manager.factortester_commands import (
 
 @click.group()
 def manager_cli() -> None:
-    """Authenticated FactorTester application Manager/operator commands."""
+    """Authenticated TradeResearch application Manager/operator commands."""
 
 
 register_factor_tester_commands()

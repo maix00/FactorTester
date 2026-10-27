@@ -1,2 +1,2 @@
-"""Command-line client for remote FactorTester servers."""
+"""Command-line client for remote TradeResearch servers."""
 

@@ -1,6 +1,6 @@
 """Compile the authoring backtest settings into a compact Nautilus contract.
 
-The authoring registry contains many FactorTester controls.  This module is
+The authoring registry contains many TradeResearch controls.  This module is
 the explicit boundary between those controls and Nautilus execution: it only
 copies settings with a verified semantic mapping and reports every setting
 that still needs an adapter instead of passing legacy keys through.
@@ -489,10 +489,10 @@ def _authoring_setting_disposition(
     if key == "product_path_selection":
         return "mapped", "已折叠为冻结的 product_scope_refs"
     if key == "evaluation_split":
-        return "not_applicable", "样本切分保留在 FactorTester RunSpec 分析合同，不是 Nautilus 撮合参数"
+        return "not_applicable", "样本切分保留在 TradeResearch RunSpec 分析合同，不是 Nautilus 撮合参数"
     if key == "strategy_book_mode":
         if value in {"per_strategy_one_ledger", "per_account"}:
-            return "unsupported", "FactorTester 账户分账选项不对应 Nautilus 原生 Venue 账户；同 Venue 策略共用该场所账户"
+            return "unsupported", "TradeResearch 账户分账选项不对应 Nautilus 原生 Venue 账户；同 Venue 策略共用该场所账户"
         return "unsupported", "Nautilus 账户按 Venue 配置；不支持策略私有的独立现金账本"
     if key == "account_currency":
         currency = str(value or "").strip().upper()
@@ -626,7 +626,7 @@ def _authoring_setting_disposition(
         return "not_applicable", "权益曲线由 Nautilus 账户事件和原生报告提供"
     if value in (None, "", [], {}):
         return "not_applicable", "此字段未设置"
-    return "unsupported", "该 RunSpec 设置没有已验证的 Nautilus 原生映射或 FactorTester 适配器"
+    return "unsupported", "该 RunSpec 设置没有已验证的 Nautilus 原生映射或 TradeResearch 适配器"
 
 
 def _zero(value: object) -> bool:

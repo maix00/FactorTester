@@ -549,6 +549,23 @@ EXACT_PATH_TESTS["server/manager/http/job_proxy_routes.py"] = (
     *EXACT_PATH_TESTS["server/manager/http/job_proxy_routes.py"],
     "tests/server/test_alpha_formula_preview.py",
 )
+CLI_NAMING_TESTS = (
+    "tests/cli/test_traderesearch_naming.py", "tests/cli/test_entrypoint_bootstrap.py",
+    "tests/cli/test_multi_port_config.py", "tests/cli/test_http_session.py",
+    "tests/cli/test_manager_commands.py", "tests/cli/test_manager_cli_subprocess.py",
+    "tests/cli/test_manager_access.py", "tests/release/test_client_package_layout.py",
+    "tests/release/test_bundled_runtime_activation.py",
+)
+for _path in (
+    "tools/cli/app.py", "tools/cli/manager_app.py", "tools/cli/__init__.py",
+    "tools/cli/core/display.py", "tools/cli/http.py", "tools/cli/pyproject.toml",
+    "tools/cli/bootstrap/__init__.py", "tools/cli/manager/config.py",
+    "tools/cli/manager/commands.py", "tools/cli/manager/factortester_commands.py",
+    "tools/cli/commands/auth.py", "tools/cli/commands/agent.py", "tools/cli/commands/protocol.py",
+    "tools/cli/commands/client_release.py", "tools/cli/commands/research.py",
+    "tools/cli/release/materialize.py", "scripts/release/assets.py",
+):
+    EXACT_PATH_TESTS[_path] = CLI_NAMING_TESTS
 EXACT_PATH_TESTS["vendor/py-alpha-lib"] = ALPHA_RUNTIME_TESTS
 EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)

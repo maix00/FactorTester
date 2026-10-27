@@ -516,7 +516,7 @@ def workspace_snapshot_list() -> None:
 
 
 @click.group("run")
-@click.option("--port", "run_ports", multiple=True, type=click.IntRange(1, 65535), help="提交到指定 FactorTester 端口。")
+@click.option("--port", "run_ports", multiple=True, type=click.IntRange(1, 65535), help="提交到指定 TradeResearch 端口。")
 def run(run_ports: tuple[int, ...]) -> None:
     """Submit and inspect immutable research runs."""
     if len(run_ports) > 1 or len(requested_ports()) > 1:
@@ -923,7 +923,7 @@ def run_clone_workspace(run_id: str, title: str) -> None:
 
 
 @click.group("job")
-@click.option("--port", "job_ports", multiple=True, type=click.IntRange(1, 65535), help="操作指定 FactorTester 端口的任务。")
+@click.option("--port", "job_ports", multiple=True, type=click.IntRange(1, 65535), help="操作指定 TradeResearch 端口的任务。")
 def job(job_ports: tuple[int, ...]) -> None:
     """Observe and control durable job attempts."""
 
@@ -977,7 +977,7 @@ def job_list(
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
 def job_ports(as_json: bool) -> None:
-    """列出 manager 发现的 FactorTester 任务端口。"""
+    """列出 manager 发现的 TradeResearch 任务端口。"""
     ports = client_from_config().list_job_ports()
     if as_json:
         click.echo(_json({"ports": ports, "count": len(ports)}))
