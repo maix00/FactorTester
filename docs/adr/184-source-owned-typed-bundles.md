@@ -253,6 +253,13 @@ Current RunSpec records do not yet freeze the Bundle manifest/package revision.
 The existing product-keyed catalog return contract is unchanged; this tranche
 does not establish full multi-contract roll/replay acceptance.
 
+### P2 输入身份骨架（2026-10-27）
+
+新增 `FrozenBundleInput`/`freeze_bundle_input`：固定 authority、owner、device、Bundle
+版本与 metadata fingerprint、mapping_version、成员和 related_members，并生成紧凑
+`source-input:<sha256>` 引用。它尚未写入 RunSpec/报告，也没有 mutable_history 的
+数据 revision 或 live_stream 录制语义；当前只是可独立测试的身份骨架。
+
 ### P3 元数据只读描述（2026-10-27）
 
 新增 `installed_bundle_descriptors()`：只读取 `installed_bundles()` 的 JSON 清单，
