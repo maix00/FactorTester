@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Iterable, Mapping
 
-from sources.registry import load_all_sources
+from sources.registry import installed_bundles, load_all_sources
 from tools.data.source_catalog import (
     DataSourceDeclaration,
     DataSourceMember,
@@ -99,6 +99,53 @@ def _visible_source_index() -> dict[str, DataSourceDeclaration]:
         source.key: source
         for source in data_source_declarations()
     }
+
+
+def installed_bundle_descriptors() -> tuple[dict[str, Any], ...]:
+    """Return installed Bundle metadata without activating source plugins.
+
+    Availability and product counts are deliberately unknown here: they require
+    live source/product probes and belong to the runtime projection, not a
+    metadata-only catalog read.
+    """
+    rows: list[dict[str, Any]] = []
+    for bundle in installed_bundles():
+        members = tuple({
+            "id": member.id,
+            "kind": member.kind,
+            "data_type": member.data_type,
+            "frequency": member.frequency,
+            "related_members": list(member.related_members),
+            "integrations": dict(member.integrations),
+            "update_policy": {
+                "mode": member.update_policy.mode,
+                "revision_policy": member.update_policy.revision_policy,
+                "max_staleness_seconds": member.update_policy.max_staleness_seconds,
+                "replay_policy": member.update_policy.replay_policy,
+            },
+        } for member in bundle.members)
+        rows.append({
+            "id": bundle.bundle_id,
+            "bundle_id": bundle.bundle_id,
+            "version": bundle.version,
+            "label": bundle.label,
+            "provisioner": bundle.provisioner,
+            "execution_location": bundle.execution_location,
+            "members": list(members),
+            "frequencies": sorted({
+                member["frequency"] for member in members if member["frequency"]
+            }),
+            "product_bindings": [
+                {
+                    "product_ref": binding.product_ref,
+                    "source_product_ref": binding.source_product_ref,
+                    "member_id": binding.member_id,
+                }
+                for binding in bundle.product_bindings
+            ],
+            "availability": {"status": "unknown", "product_count": None},
+        })
+    return tuple(rows)
 
 
 def normalize_source_ids(

@@ -266,3 +266,19 @@ def test_public_rule_protocols_live_in_traderesearch_data():
 
     assert TradingFieldProvider.__module__ == "traderesearch_data.rules"
     assert TradingFieldValue.__module__ == "traderesearch_data.rules"
+
+
+def test_installed_bundle_descriptors_are_metadata_only(monkeypatch):
+    import pytest
+    from server.services import product_catalog_projection as projection
+
+    monkeypatch.setattr(
+        projection, "load_all_sources",
+        lambda: pytest.fail("metadata-only descriptor activated plugins"),
+    )
+    rows = projection.installed_bundle_descriptors()
+    local = next(row for row in rows if row["bundle_id"] == "Local")
+    assert local["availability"] == {"status": "unknown", "product_count": None}
+    member = next(item for item in local["members"] if item["id"] == "LocalCNFuturesContractMIN1")
+    assert "FieldHistory:market_rules:exchange" in member["related_members"]
+    assert member["update_policy"]["mode"] == "mutable_history"
