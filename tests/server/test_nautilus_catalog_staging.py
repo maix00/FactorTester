@@ -1,3 +1,4 @@
+import pytest
 from server.services.nautilus_bridge.catalog_staging import _ns
 
 
@@ -268,6 +269,12 @@ def test_staging_dispatches_source_owned_non_cn_loader(monkeypatch, tmp_path):
         target_root=tmp_path)
     assert actual is result
     assert len(captured) == 1
+    from dataclasses import FrozenInstanceError
+    from traderesearch_data.nautilus import CatalogLoadRequest
+
+    assert isinstance(captured[0], CatalogLoadRequest)
+    with pytest.raises(FrozenInstanceError):
+        captured[0].source_key = "other"
     assert captured[0].staging_requests[0].paths == ("neutral:rate",)
     assert captured[0].start_ns == 1704153600000000000
     assert captured[0].target_root is tmp_path
