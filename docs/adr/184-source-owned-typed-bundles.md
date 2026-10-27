@@ -194,8 +194,9 @@ federated catalog's runtime availability/count projection.
 - DAY1 的 `settlement_price` 已写入 catalog receipt 的 `settlement_records`（合约、交易日、
   事件时刻、价格），不再只停留在输入 `MarketBar`；`load_catalog_settlement_records`
   提供只读访问。DAY1 staging 同时通过 `to_nautilus_daily_settlement` 写入原生
-  `InstrumentClose(DAILY_SETTLEMENT)` 表；replay config 尚未把它加入 Rust 数据流，
-  DMTM/损益/保证金重估仍未验证。
+  `InstrumentClose(DAILY_SETTLEMENT)` 表。replay 已增加 InstrumentClose data config，
+  合成两日 DAY1 测试确认原生回放消费 2 个 Bar + 2 个结算事件（native_iterations=4）。
+  含持仓的损益、保证金重估与事件顺序仍未验证。
 - DAY1 不再静默复用 MIN1 `stage_contract_minute_catalog`。源 loader 使用
   `stage_contract_daily_catalog`，由 `iter_daily_bars` 读取 `TRADING_DAY`/结算列，
   由源声明的 `session_for_day` 把日期标签转换为交易所收盘时钟，并写入

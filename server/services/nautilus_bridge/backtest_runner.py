@@ -57,6 +57,7 @@ class ReplayReceipt:
     native_iterations: int
     native_orders: int
     native_positions: int
+    native_settlements: int
     probe_fill_prices: tuple[str, ...]
     execution_assumptions: tuple[str, ...]
     reports: dict[str, object]
@@ -133,7 +134,7 @@ def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes
             or query_memory_limit_bytes < 1):
         raise ValueError("query memory limit must be a positive integer")
     from nautilus_trader.config import BacktestDataConfig
-    from nautilus_trader.model import NautilusDataType
+    from nautilus_trader.model import InstrumentId, NautilusDataType
     data = [BacktestDataConfig(
         data_type=NautilusDataType.Bar, catalog_path=str(folder),
         bar_types=[str(receipt["bar_type"])],
@@ -143,16 +144,39 @@ def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes
         start_time=int(receipt["first_available_ns"]),
         end_time=int(receipt["last_available_ns"]),
     ) for folder, _catalog, receipt, _instrument in rows]
+    settlement_count = 0
+    for folder, _catalog, receipt, instrument in rows:
+        records = tuple(receipt.get("settlement_records") or ())
+        if not records:
+            continue
+        settlement_count += len(records)
+        data.append(BacktestDataConfig(
+            data_type=NautilusDataType.InstrumentClose, catalog_path=str(folder),
+            instrument_id=InstrumentId.from_str(str(instrument.id)),
+            optimize_file_loading=True,
+            start_time=min(int(item["event_ns"]) for item in records),
+            end_time=max(int(item["event_ns"]) for item in records),
+        ))
     total, batches, largest, source_counts = engine.run_catalogs(
         data=data, chunk_size=min(batch_minutes * len(rows), max_batch_bars, 1_000_000),
         max_chunk_events=max_batch_bars, start=first, end=last,
         query_memory_limit_bytes=max(1, query_memory_limit_bytes // len(rows)),
     )
-    if list(source_counts) != [int(row[2]["selected_count"]) for row in rows]:
+    if total < settlement_count:
+        raise ValueError("native replay total is smaller than settlement events")
+    total -= settlement_count
+    expected_source_counts = []
+    for row in rows:
+        expected_source_counts.append(int(row[2]["selected_count"]))
+        settlement = len(tuple(row[2].get("settlement_records") or ()))
+        if settlement:
+            expected_source_counts.append(settlement)
+    if list(source_counts) != expected_source_counts:
         raise ValueError("native per-source replay counts differ from frozen receipts")
-    if total != expected or engine.get_result().iterations != expected:
+    if total != expected or engine.get_result().iterations != expected + settlement_count:
         raise ValueError("native catalog replay count differs from the frozen receipts")
-    return {"bars": total, "batch_count": batches, "max_batch_bars": largest}
+    return {"bars": total, "settlements": settlement_count,
+            "batch_count": batches, "max_batch_bars": largest}
 
 
 def run_small_catalog_replay(
@@ -351,6 +375,7 @@ def run_small_catalog_replay(
             native_iterations=result.iterations,
             native_orders=result.total_orders,
             native_positions=result.total_positions,
+            native_settlements=int(replay.get("settlements", 0)),
             probe_fill_prices=probe_fill_prices,
             execution_assumptions=(
                 (
