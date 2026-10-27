@@ -257,7 +257,8 @@ does not establish full multi-contract roll/replay acceptance.
 
 新增 `installed_bundle_descriptors()`：只读取 `installed_bundles()` 的 JSON 清单，
 返回 Bundle/member/频率/关系/更新策略/product_bindings，`availability` 显式为
-`unknown`、`product_count=None`。该函数不调用 `load_all_sources`、不实例化 Nautilus、
-不读行情。已增加只读路由 `/api/product-library/installed-bundles`，返回
+`unknown`、`product_count=None`，并带 canonical metadata fingerprint。该函数不调用
+`load_all_sources`、不实例化 Nautilus、不读行情。fingerprint 是清单元数据身份，
+不是行情内容 revision。已增加只读路由 `/api/product-library/installed-bundles`，返回
 `metadata_only=true` 与同一描述；它尚未替换现有 `product_source_descriptors()`/目录
 UI；运行时可用性与权限投影仍需后续切换。
