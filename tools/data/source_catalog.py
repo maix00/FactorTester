@@ -71,6 +71,7 @@ class DataSourceMember:
         default=None, repr=False, compare=False,
     )
     trading_field_provider_ref: str = ""
+    trading_field_related_members: tuple[str, ...] = ()
     trading_field_effective_clock: str = "unspecified"
     trading_field_provider_loader: HistoricalFieldProviderLoader | None = field(
         default=None, repr=False, compare=False,
@@ -238,6 +239,9 @@ def _historical_member(provider: Any) -> DataSourceMember:
             getattr(provider, "naming_scheme", "canonical") or "canonical"
         ),
         instrument_scope=str(getattr(provider, "instrument_scope", "unspecified")),
+        trading_field_related_members=tuple(
+            getattr(provider, "trading_field_related_members", ()) or ()
+        ),
         asset_class_resolver=getattr(provider, "asset_class_resolver", None),
         bar_time_semantics=str(getattr(provider, "bar_time_semantics", "unspecified")),
         raw_timestamp_unit=str(getattr(provider, "raw_timestamp_unit", "unspecified")),

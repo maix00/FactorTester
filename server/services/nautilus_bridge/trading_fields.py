@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -37,6 +37,13 @@ MARKET_RULE_FIELDS = (
 )
 POSITIVE_FIELDS = frozenset({"VolumeMultiple", "PriceTick", "MinLimitOrderVolume",
                              "MaxLimitOrderVolume"})
+
+
+@runtime_checkable
+class TradingFieldProvider(Protocol):
+    """Minimal source-owned historical-field lookup contract."""
+
+    def resolve_at(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class TradingFieldContractError(ValueError):
@@ -91,10 +98,15 @@ def bind_historical_trading_fields(
             or source_member.execution_provider is not resolved_source.execution_provider):
         raise TradingFieldContractError("historical fields belong to a different source member")
     provider_ref = str(getattr(source_member, "trading_field_provider_ref", "") or "")
+    related = tuple(getattr(source_member, "trading_field_related_members", ()) or ())
     effective_clock = str(getattr(source_member, "trading_field_effective_clock", "") or "")
-    if provider_ref != "FieldHistory:market_rules:exchange":
+    if not provider_ref:
         raise TradingFieldContractError(
-            f"{source.member_key}: no verified exchange FieldHistory provider binding"
+            f"{source.member_key}: no declared historical trading-field provider binding"
+        )
+    if related and provider_ref not in related:
+        raise TradingFieldContractError(
+            f"{source.member_key}: historical provider is not a declared related member"
         )
     if effective_clock != "effective_timestamp_or_trading_day":
         raise TradingFieldContractError(
@@ -106,7 +118,7 @@ def bind_historical_trading_fields(
         raise TradingFieldContractError(
             f"{source.member_key}: historical field provider is unavailable"
         ) from exc
-    if not isinstance(provider, FieldHistoryProvider):
+    if not isinstance(provider, TradingFieldProvider):
         raise TradingFieldContractError(
             f"{source.member_key}: historical field loader returned an invalid provider"
         )

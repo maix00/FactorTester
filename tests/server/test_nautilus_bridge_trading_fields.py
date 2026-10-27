@@ -238,6 +238,28 @@ def test_one_contract_cannot_change_multiplier_during_replay() -> None:
         )
 
 
+def test_source_owned_provider_ref_is_not_hardcoded() -> None:
+    execution_provider = object()
+    capability = SimpleNamespace(
+        family_key="Local", member_key=SOURCE.member_key, timezone=SOURCE.timezone,
+        adapter_id=SOURCE.adapter_id, delivery_mode="historical_snapshot",
+    )
+    resolved = SimpleNamespace(capability=capability, execution_provider=execution_provider)
+    member = SimpleNamespace(
+        key=SOURCE.member_key, timezone=SOURCE.timezone,
+        execution_provider=execution_provider,
+        trading_field_provider_ref="SourceOwned:rules:exchange",
+        trading_field_related_members=("SourceOwned:rules:exchange",),
+        trading_field_effective_clock="effective_timestamp_or_trading_day",
+        load_trading_field_provider=lambda: _provider(),
+    )
+    binding = bind_historical_trading_fields(resolved, member)
+    assert binding.provider_ref == "SourceOwned:rules:exchange"
+    member.trading_field_related_members = ("Other:rules",)
+    with pytest.raises(TradingFieldContractError, match="not a declared related member"):
+        bind_historical_trading_fields(resolved, member)
+
+
 def test_source_owned_provider_binding_rejects_missing_or_mismatched_metadata() -> None:
     execution_provider = object()
     capability = SimpleNamespace(
@@ -251,7 +273,7 @@ def test_source_owned_provider_binding_rejects_missing_or_mismatched_metadata() 
         trading_field_provider_ref="", trading_field_effective_clock="unspecified",
         load_trading_field_provider=lambda: _provider(),
     )
-    with pytest.raises(TradingFieldContractError, match="no verified exchange"):
+    with pytest.raises(TradingFieldContractError, match="no declared historical"):
         bind_historical_trading_fields(resolved, member)
     member.trading_field_provider_ref = "FieldHistory:market_rules:exchange"
     member.trading_field_effective_clock = "wrong_clock"
