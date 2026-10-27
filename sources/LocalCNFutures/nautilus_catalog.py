@@ -27,10 +27,18 @@ def build_contract_spec(
     venue, underlying, month = parts[0], parts[2], parts[3]
     min_tick = Decimal(str(spec_fields["min_tick"]))
     precision = max(0, -min_tick.as_tuple().exponent)
-    margin = max(
-        Decimal(str(spec_fields.get("long_margin_ratio") or 0)),
-        Decimal(str(spec_fields.get("short_margin_ratio") or 0)),
-    )
+    long_margin = spec_fields.get("long_margin_ratio")
+    short_margin = spec_fields.get("short_margin_ratio")
+    if long_margin is None or short_margin is None:
+        raise ValueError(f"contract has no side-specific margin: {contract_uid}")
+    long_margin = Decimal(str(long_margin))
+    short_margin = Decimal(str(short_margin))
+    if long_margin != short_margin:
+        raise ValueError(
+            f"{contract_uid}: side-specific margin is not representable by the "
+            "current single-margin Instrument contract"
+        )
+    margin = long_margin
     resolved_source = from_server_sources().resolve(
         source_key, frequency=frequency, product=product,
     )
