@@ -50,7 +50,7 @@ export function MobileSettingDetail({ section, onBack }: { section: MobileSettin
           <div className="tr-mobile-settings-card">
             <div>
               <b>{t("settingsPanel.language")}</b>
-              
+
             </div>
             <select
               className="tr-mobile-language"

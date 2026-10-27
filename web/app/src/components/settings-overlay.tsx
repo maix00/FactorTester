@@ -124,7 +124,7 @@ export function SettingsOverlay({
             <span className="tr-settings-page-icon"><PageIcon name={current.icon} /></span>
             <div>
               <h2>{t(`settingsPanel.sections.${current.id}`)}</h2>
-              
+
             </div>
           </header>
           {current.id === "language" ? (
