@@ -1,0 +1,38 @@
+.tr-config-page { padding: 24px; height: 100%; box-sizing: border-box; overflow: auto; background: #f7f8fa; color: #1f2937; }
+.tr-config-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.tr-config-header h1 { font-size: 24px; margin: 0 0 6px; }
+.tr-config-header p { margin: 0; color: #687385; }
+.tr-config-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.tr-config-toolbar > .ant-select { min-width: 210px; flex: 1; max-width: 360px; }
+.tr-config-page > .ant-alert { margin-bottom: 12px; }
+.tr-config-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 620px; border: 1px solid #dfe3e9; border-radius: 12px; background: white; overflow: hidden; }
+.tr-config-sidebar { padding: 18px 14px; background: #f9fafc; border-right: 1px solid #e5e7eb; min-width: 0; }
+.tr-config-sidebar h2, .tr-config-field-editor h2 { margin: 0 0 14px; font-size: 17px; }
+.tr-config-sidebar > .ant-select { display: block; width: 100%; margin: 12px 0; }
+.tr-config-catalog { display: flex; flex-direction: column; gap: 3px; margin: 10px 0 16px; }
+.tr-config-catalog > button { text-align: left; cursor: pointer; border: 1px solid transparent; background: transparent; border-radius: 7px; padding: 9px; color: inherit; }
+.tr-config-catalog > button:hover, .tr-config-catalog > button.is-selected { background: #edf4ff; border-color: #c6dcff; }
+.tr-config-catalog > button:disabled { cursor: default; opacity: .5; }
+.tr-config-field-title { display: block; font-weight: 550; }
+.tr-config-catalog small { display: block; color: #718096; font-size: 11px; overflow-wrap: anywhere; margin-top: 4px; }
+.tr-config-content { padding: 20px; min-width: 0; }
+.tr-config-sections, .tr-config-present { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.tr-config-field-editor > code { display: block; color: #7a8596; margin: 0 0 20px; overflow-wrap: anywhere; font-size: 12px; }
+.tr-config-field-editor fieldset { min-width: 0; }
+.tr-config-field-editor .ant-form { margin-top: 16px; }
+.tr-config-code { min-height: 500px; position: relative; }
+.tr-config-monaco { height: 570px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+.tr-config-code textarea { box-sizing: border-box; width: 100%; min-height: 400px; font-family: monospace; }
+.tr-config-validation { margin-top: 16px; color: #b42318; font-size: 13px; }
+.tr-config-validation ul { padding-left: 20px; max-height: 160px; overflow: auto; }
+@media (max-width: 700px) {
+  .tr-config-page { padding: 14px; }
+  .tr-config-header { align-items: flex-start; }
+  .tr-config-header h1 { font-size: 21px; }
+  .tr-config-layout { grid-template-columns: minmax(0, 1fr); }
+  .tr-config-sidebar { border-right: 0; border-bottom: 1px solid #e5e7eb; }
+  .tr-config-catalog { max-height: 220px; overflow: auto; }
+  .tr-config-content { padding: 16px; }
+  .tr-config-toolbar > .ant-select { max-width: none; }
+  .tr-config-monaco { height: 460px; }
+}

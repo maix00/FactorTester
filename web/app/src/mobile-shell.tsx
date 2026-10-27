@@ -9,6 +9,7 @@ import { MobileSettingDetail, MobileSettingsPage, type MobileSettingSection } fr
 import { MobileJobsPage } from "./pages/mobile-jobs.tsx";
 import { PageErrorBoundary } from "./error-boundary.tsx";
 import { MobileNotificationHost } from "./notifications/mobile-host.tsx";
+import { TestConfigurationPage } from "./pages/test-configuration.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
@@ -18,7 +19,7 @@ export function MobileShell(): React.ReactElement {
   const { t } = useTranslation();
   const [active, setActive] = useState(tabs[0]?.id ?? "research");
   const [setting, setSetting] = useState<MobileSettingSection | null>(null);
-  const page = tabs.find((item) => item.id === active) ?? tabs[0];
+  const page = pagesForScope("mobile").find((item) => item.id === active) ?? tabs[0];
 
   useEffect(() => {
     const onPop = (): void => setSetting(null);
@@ -60,6 +61,8 @@ export function MobileShell(): React.ReactElement {
             <MobileJobsPage />
           ) : page?.id === "settings" ? (
             <MobileSettingsPage onOpen={openSetting} />
+          ) : page?.id === "configuration" ? (
+            <TestConfigurationPage />
           ) : (
             <PageFrame pageId={page?.id ?? "research"} />
           )}
