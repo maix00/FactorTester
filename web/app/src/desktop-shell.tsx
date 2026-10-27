@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Tooltip } from "antd";
 import {
   DockviewReact,
@@ -8,6 +8,7 @@ import {
 } from "dockview-react";
 import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.ts";
 import { PageIcon } from "./icon.tsx";
+import { PageInstanceProvider, newPageInstanceId, type PageArguments } from "./page-instance.ts";
 import { PageSurface } from "./surface.tsx";
 import { AppTheme } from "./components/app-theme.tsx";
 import { Brand } from "./components/brand.tsx";
@@ -18,22 +19,29 @@ import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
-function Panel(props: IDockviewPanelProps<{ pageId: string }>): React.ReactElement {
+function Panel(props: IDockviewPanelProps<{ pageId: string; args?: PageArguments; ordinal?: number }>): React.ReactElement {
+  const [visible, setVisible] = useState(props.api.isVisible);
+  useEffect(() => { const subscription = props.api.onDidVisibilityChange((event) => setVisible(event.isVisible)); return () => subscription.dispose(); }, [props.api]);
   return (
     <div className="tr-tab-layer" data-tab-layer={props.params.pageId}>
-      <PageErrorBoundary label={props.params.pageId}><PageSurface pageId={props.params.pageId} /></PageErrorBoundary>
+      <PageInstanceProvider value={{ id: props.api.id, pageId: props.params.pageId, args: props.params.args || {}, mobile: false, active: visible,
+        open: (pageId, args) => {
+          const page = getPage(pageId); if (!page) return;
+          props.containerApi.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: page.title,
+            params: { pageId, args, ordinal: props.containerApi.panels.filter((p) => p.params?.pageId === pageId).length + 1 }, renderer: "always" });
+        } }}><PageErrorBoundary label={props.params.pageId}><PageSurface pageId={props.params.pageId} /></PageErrorBoundary></PageInstanceProvider>
     </div>
   );
 }
 
-function Tab(props: IDockviewPanelHeaderProps<{ pageId: string }>): React.ReactElement {
+function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number }>): React.ReactElement {
   const page = getPage(props.params.pageId);
   const { t } = useTranslation();
   const title = page ? t(`nav.${page.id}`, { defaultValue: page.title }) : (props.api.title ?? props.params.pageId);
   return (
     <span className="tr-dock-tab" title={title}>
       <PageIcon name={page?.icon} />
-      <span className="tr-dock-tab-title" title={title}>{title}</span>
+      <span className="tr-dock-tab-title" title={title}>{title}{(props.params.ordinal || 1) > 1 ? ` ${props.params.ordinal}` : ""}</span>
       <button type="button" className="tr-dock-close" aria-label={t("close")} onClick={() => props.api.close()}>×</button>
     </span>
   );
@@ -46,7 +54,7 @@ type DockviewApi = DockviewReadyEvent["api"];
 
 export function DesktopShell(): React.ReactElement {
   const { t } = useTranslation();
-  const pages = pagesForScope("desktop");
+  const pages = pagesForScope("desktop").filter((page) => page.sidebarVisible !== false);
   const label = (page: { id: string; title: string }): string => t(`nav.${page.id}`, { defaultValue: page.title });
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [active, setActive] = useState(pages[0]?.id ?? "research");
@@ -79,17 +87,16 @@ export function DesktopShell(): React.ReactElement {
     if (!api) return;
     const page = pages.find((item) => item.id === pageId);
     if (!page) return;
-    const panel = api.getPanel(page.id);
-    if (panel) panel.api.setActive();
-    else api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
+    api.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: page.title,
+      params: { pageId, ordinal: api.panels.filter((panel) => panel.params?.pageId === pageId).length + 1 }, renderer: "always" });
   };
 
   const resetLayout = (): void => {
     if (!api) return;
     localStorage.removeItem(LAYOUT_KEY);
     api.clear();
-    for (const page of pages.filter((item) => ["research", "jobs", "trading"].includes(item.id))) {
-      api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
+    for (const page of pages.filter((item) => ["research", "configuration"].includes(item.id))) {
+      api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id }, renderer: "always" });
     }
   };
 
@@ -100,14 +107,18 @@ export function DesktopShell(): React.ReactElement {
       const raw = localStorage.getItem(LAYOUT_KEY);
       if (raw) {
         event.api.fromJSON(JSON.parse(raw));
-        restored = true;
+        for (const panel of [...event.api.panels]) {
+          if (panel.params?.pageId === "account") panel.api.close();
+          else if (panel.params?.pageId === "catalog") panel.api.updateParameters({ pageId: "products" });
+        }
+        restored = event.api.panels.length > 0;
       }
     } catch {
       restored = false;
     }
     if (!restored) {
-      for (const page of pages.filter((item) => ["research", "jobs", "trading"].includes(item.id))) {
-        event.api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
+      for (const page of pages.filter((item) => ["research", "configuration"].includes(item.id))) {
+        event.api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id }, renderer: "always" });
       }
     }
     event.api.onDidActivePanelChange(({ panel }) => {

@@ -1,19 +1,23 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DetailsPanel } from "../components/details-panel.tsx";
+import { ResultView } from "../components/result-view.tsx";
+import { Button } from "antd";
+import { LibraryCreate } from "../components/library-create.tsx";
 import { notify } from "../notifications/core.ts";
 
 type Group = { id?: string; name?: string; title?: string; description?: string; member_count?: number; product_count?: number };
 type Product = { id?: string; name?: string; title?: string; data_source?: string };
 type Payload<T> = { groups?: T[]; products?: T[]; sources?: { id: string; name?: string }[] };
 
-export function CatalogPage(): React.ReactElement {
+export function CatalogPage({ domain = "products" }: { domain?: "products" | "factors" | "strategies" }): React.ReactElement {
   const { t } = useTranslation();
+  const [creating, setCreating] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
-  const [legacy, setLegacy] = useState(false);
-  const [tab, setTab] = useState<"products" | "factors" | "families" | "sets" | "strategies" | "sources" | "categories" | "reference">("products");
+  const [tab, setTab] = useState<"products" | "factors" | "families" | "sets" | "strategies" | "sources" | "categories" | "reference">(domain);
   const [sources, setSources] = useState<{ id: string; name?: string; visitor_data_accessible?: boolean }[]>([]);
   const [categories, setCategories] = useState<{ id?: string; name?: string; title?: string }[]>([]);
   const [families, setFamilies] = useState<Record<string, unknown>[]>([]);
@@ -141,21 +145,23 @@ export function CatalogPage(): React.ReactElement {
       .finally(() => setLoading(false));
   }, [selected, tab, t]);
 
+  if (creating && domain !== "products") return <section className="tr-function-page"><div className="tr-function-body"><LibraryCreate kind={domain === "factors" ? "factor" : "strategy"} onCancel={() => setCreating(false)} onCreated={() => { setCreating(false); if (domain === "strategies") setStrategyPage(1); }} /></div></section>;
+
   return (
     <section className="tr-catalog-page">
       <header>
-        <div><h1>{t("nav.catalog")}</h1><p>{t("catalog.hint")}</p></div>
-        <button type="button" className="tr-toolbar-button" onClick={() => setLegacy(true)}>{t("catalog.legacy")}</button>
+        <div><h1>{t(`nav.${domain}`)}</h1></div>
+        {domain !== "products" ? <Button type="primary" onClick={() => setCreating(true)}>{t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}</Button> : null}
       </header>
       <div className="tr-catalog-tabs">
-        <button type="button" className={tab === "products" ? "is-active" : ""} onClick={() => setTab("products")}>{t("catalog.products")}</button>
-        <button type="button" className={tab === "factors" ? "is-active" : ""} onClick={() => setTab("factors")}>{t("catalog.factors")}</button>
-        <button type="button" className={tab === "strategies" ? "is-active" : ""} onClick={() => { setTab("strategies"); setStrategyPage(1); }}>{t("catalog.strategies")}</button>
-        <button type="button" className={tab === "families" ? "is-active" : ""} onClick={() => setTab("families")}>{t("catalog.families")}</button>
-        <button type="button" className={tab === "sets" ? "is-active" : ""} onClick={() => setTab("sets")}>{t("catalog.sets")}</button>
-        <button type="button" className={tab === "sources" ? "is-active" : ""} onClick={() => setTab("sources")}>{t("catalog.sources")}</button>
-        <button type="button" className={tab === "categories" ? "is-active" : ""} onClick={() => setTab("categories")}>{t("catalog.categories")}</button>
-        <button type="button" className={tab === "reference" ? "is-active" : ""} onClick={() => setTab("reference")}>{t("catalog.reference")}</button>
+        {["products", "sources", "categories", "reference"].includes("products") && domain === "products" ? <button type="button" className={tab === "products" ? "is-active" : ""} onClick={() => setTab("products")}>{t("catalog.products")}</button> : null}
+        {["factors", "families", "sets"].includes("factors") && domain === "factors" ? <button type="button" className={tab === "factors" ? "is-active" : ""} onClick={() => setTab("factors")}>{t("catalog.factors")}</button> : null}
+        {["strategies"].includes("strategies") && domain === "strategies" ? <button type="button" className={tab === "strategies" ? "is-active" : ""} onClick={() => { setTab("strategies"); setStrategyPage(1); }}>{t("catalog.strategies")}</button> : null}
+        {["factors", "families", "sets"].includes("families") && domain === "factors" ? <button type="button" className={tab === "families" ? "is-active" : ""} onClick={() => setTab("families")}>{t("catalog.families")}</button> : null}
+        {["factors", "families", "sets"].includes("sets") && domain === "factors" ? <button type="button" className={tab === "sets" ? "is-active" : ""} onClick={() => setTab("sets")}>{t("catalog.sets")}</button> : null}
+        {["products", "sources", "categories", "reference"].includes("sources") && domain === "products" ? <button type="button" className={tab === "sources" ? "is-active" : ""} onClick={() => setTab("sources")}>{t("catalog.sources")}</button> : null}
+        {["products", "sources", "categories", "reference"].includes("categories") && domain === "products" ? <button type="button" className={tab === "categories" ? "is-active" : ""} onClick={() => setTab("categories")}>{t("catalog.categories")}</button> : null}
+        {["products", "sources", "categories", "reference"].includes("reference") && domain === "products" ? <button type="button" className={tab === "reference" ? "is-active" : ""} onClick={() => setTab("reference")}>{t("catalog.reference")}</button> : null}
       </div>
       {tab === "products" ? <div className="tr-catalog-groups">
         <button type="button" className={selected ? "" : "is-active"} onClick={() => setSelected("")}>{t("catalog.all")}</button>
@@ -242,60 +248,14 @@ export function CatalogPage(): React.ReactElement {
       {tab === "strategies" && strategies.length < strategyTotal ? (
         <button type="button" className="tr-mobile-load-more" disabled={loading} onClick={() => setStrategyPage((value) => value + 1)}>{t("more")}</button>
       ) : null}
-      {familySelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label="factor-family">
-          <div className="tr-legacy-bar"><strong>{String(familySelected.name ?? familySelected.family_ref ?? "")}</strong><button type="button" onClick={() => setFamilySelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(familySelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {factorSetSelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label="factor-set">
-          <div className="tr-legacy-bar"><strong>{String(factorSetSelected.name ?? factorSetSelected.set_ref ?? "")}</strong><button type="button" onClick={() => setFactorSetSelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(factorSetSelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {sourceSelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={String(sourceSelected.name ?? sourceSelected.id ?? "")}>
-          <div className="tr-legacy-bar"><strong>{String(sourceSelected.name ?? sourceSelected.id ?? "")}</strong><button type="button" onClick={() => setSourceSelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(sourceSelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {categorySelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={String(categorySelected.name ?? categorySelected.id ?? "")}>
-          <div className="tr-legacy-bar"><strong>{String(categorySelected.name ?? categorySelected.id ?? "")}</strong><button type="button" onClick={() => setCategorySelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(categorySelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {productSelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={String(productSelected.name ?? productSelected.id ?? "")}>
-          <div className="tr-legacy-bar"><strong>{String(productSelected.name ?? productSelected.id ?? "")}</strong><button type="button" onClick={() => setProductSelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(productSelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {groupDetail ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={groupDetail}>
-          <div className="tr-legacy-bar"><strong>{groupDetail}</strong><button type="button" onClick={() => setGroupDetail("")}>{t("notifications.close")}</button></div>
-          {groupData ? <pre className="tr-job-detail">{JSON.stringify(groupData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
-        </div>
-      ) : null}
-      {factorDetail ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={factorDetail}>
-          <div className="tr-legacy-bar"><strong>{factorDetail}</strong><button type="button" onClick={() => setFactorDetail("")}>{t("notifications.close")}</button></div>
-          {factorData ? <pre className="tr-job-detail">{JSON.stringify(factorData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
-        </div>
-      ) : null}
-      {strategyDetail ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={t("catalog.strategies")}>
-          <div className="tr-legacy-bar"><strong>{strategyDetail}</strong><button type="button" onClick={() => setStrategyDetail("")}>{t("notifications.close")}</button></div>
-          {strategyData ? <pre className="tr-job-detail">{JSON.stringify(strategyData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
-        </div>
-      ) : null}
-      {legacy ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={t("catalog.legacy")}>
-          <div className="tr-legacy-bar"><strong>{t("catalog.legacy")}</strong><button type="button" onClick={() => setLegacy(false)}>{t("notifications.close")}</button></div>
-          <iframe title={t("catalog.legacy")} src="/products?presentation=embedded" />
-        </div>
-      ) : null}
+      {familySelected ? <DetailsPanel title={String(familySelected.name || familySelected.family_ref || t("catalog.families"))} onClose={() => setFamilySelected(null)}><ResultView value={familySelected} /></DetailsPanel> : null}
+      {factorSetSelected ? <DetailsPanel title={t("catalog.sets")} onClose={() => setFactorSetSelected(null)}><ResultView value={factorSetSelected} /></DetailsPanel> : null}
+      {sourceSelected ? <DetailsPanel title={String(sourceSelected.name || sourceSelected.id)} onClose={() => setSourceSelected(null)}><ResultView value={sourceSelected} /></DetailsPanel> : null}
+      {categorySelected ? <DetailsPanel title={t("catalog.categories")} onClose={() => setCategorySelected(null)}><ResultView value={categorySelected} /></DetailsPanel> : null}
+      {productSelected ? <DetailsPanel title={String(productSelected.name || productSelected.id)} onClose={() => setProductSelected(null)}><ResultView value={productSelected} /></DetailsPanel> : null}
+      {groupDetail ? <DetailsPanel title={groupDetail} onClose={() => setGroupDetail("")}><ResultView value={groupData} /></DetailsPanel> : null}
+      {factorDetail ? <DetailsPanel title={t("catalog.factors")} onClose={() => setFactorDetail("")}><ResultView value={factorData} /></DetailsPanel> : null}
+      {strategyDetail ? <DetailsPanel title={t("catalog.strategies")} onClose={() => setStrategyDetail("")}><ResultView value={strategyData} /></DetailsPanel> : null}
     </section>
   );
 }

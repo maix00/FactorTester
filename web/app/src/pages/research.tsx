@@ -54,7 +54,7 @@ export function ResearchPage(): React.ReactElement {
   return (
     <section className="tr-research-page">
       <header>
-        <div><h1>{t("nav.research")}</h1><p>{t("research.hint")}</p></div>
+        <div><h1>{t("nav.research")}</h1></div>
         <button type="button" className="tr-toolbar-button" onClick={() => setLegacy(true)}>{t("research.legacy")}</button>
       </header>
       <div className="tr-catalog-tabs">

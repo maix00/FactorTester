@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { usePageInstance } from "../page-instance.ts";
 import type { Path } from "./draft.ts";
 
 export type ConfigurationView = { page: "overview" | "strategies" | "catalog" | "settings" | "json" | "preview"; id?: string; path?: Path }
@@ -21,19 +22,20 @@ export function configurationURL(href: string, view: ConfigurationView): string 
   return url.href;
 }
 export function useConfigurationNavigation(): { view: ConfigurationView; navigate: (view: ConfigurationView, replace?: boolean) => void; back: () => void } {
-  const [view, setView] = useState(() => readConfigurationView(location.search));
+  const instance = usePageInstance();
+  const [view, setView] = useState<ConfigurationView>(() => instance.mobile ? readConfigurationView(location.search) : { page: "overview" });
   useEffect(() => {
-    const update = (): void => setView(readConfigurationView(location.search));
+    const update = (event: PopStateEvent): void => { if (instance.mobile && event.state?.trPage === instance.id) setView(readConfigurationView(location.search)); };
     window.addEventListener("popstate", update);
     return () => window.removeEventListener("popstate", update);
-  }, []);
+  }, [instance.id, instance.mobile]);
   const navigate = useCallback((next: ConfigurationView, replace = false) => {
-    history[replace ? "replaceState" : "pushState"]({ ...history.state, trConfiguration: true }, "", configurationURL(location.href, next));
+    if (instance.mobile) history[replace ? "replaceState" : "pushState"]({ ...history.state, trPage: instance.id, trConfiguration: true }, "", configurationURL(location.href, next));
     setView(next);
-  }, []);
+  }, [instance.id, instance.mobile]);
   const back = useCallback(() => {
-    if (history.state?.trConfiguration && view.page !== "overview") history.back();
+    if (instance.mobile && history.state?.trConfiguration && view.page !== "overview") history.back();
     else navigate({ page: "overview" }, true);
-  }, [navigate, view.page]);
+  }, [navigate, view.page, instance.mobile]);
   return { view, navigate, back };
 }

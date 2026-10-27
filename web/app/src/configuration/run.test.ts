@@ -9,3 +9,10 @@ test("run requests reference the saved workspace revision and require a strategy
   assert.throws(() => runRequest("w", { ...draft, text: "{}" }), /Save/);
   assert.throws(() => runRequest("w", createDraft({}, 1)), /strategy/);
 });
+
+
+test("factor tests submit their selected analysis without requiring a trading strategy", () => {
+  const draft = createDraft({ analyses: { ic: { configuration_groups: [{ factor_ref: "factor:v2:fixture" }] } } }, 7);
+  assert.deepEqual(runRequest("w", draft, "ic"), { workspace_id: "w", configuration_revision: 7, analyses: ["ic"] });
+  assert.throws(() => runRequest("w", { ...draft, text: "{}" }, "ic"), /Save/);
+});

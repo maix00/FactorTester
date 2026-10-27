@@ -1,10 +1,14 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Empty, Input, Modal, Pagination, Select, Switch } from "antd";
+import { Alert, Button, Empty, Input, Modal, Pagination, Select, Switch, Tabs } from "antd";
 import Form from "@rjsf/antd";
 import validator from "@rjsf/validator-ajv8";
 import type { RJSFSchema } from "@rjsf/utils";
 import { useTranslation } from "react-i18next";
 import { notify } from "../notifications/core.ts";
+import { usePageInstance } from "../page-instance.ts";
+import { JobDetail } from "../components/job-detail.tsx";
+import type { JobReference } from "../job-model.ts";
+import { TestInputs } from "../configuration/test-inputs.tsx";
 import { runRequest } from "../configuration/run.ts";
 import { request } from "../configuration/api.ts";
 import { PlusOutlined, ReloadOutlined, ArrowLeftOutlined, CodeOutlined, CalendarOutlined, BarChartOutlined, DatabaseOutlined } from "@ant-design/icons";
@@ -27,8 +31,13 @@ interface Configuration { payload: JSONObject; revision: number }
 
 export function TestConfigurationPage(): React.ReactElement {
   const { t, i18n } = useTranslation();
+  const instance = usePageInstance();
+  const [analysis, setAnalysis] = useState("backtest");
+  const [tab, setTab] = useState("configuration");
+  const [jobs, setJobs] = useState<JobReference[]>([]);
+  const [selectedJob, setSelectedJob] = useState(0);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [workspace, setWorkspace] = useState(() => new URLSearchParams(location.search).get("workspace_id") || "");
+  const [workspace, setWorkspace] = useState(() => instance.args.workspaceId || (instance.id === "standalone" ? new URLSearchParams(location.search).get("workspace_id") || "" : ""));
   const [contract, setContract] = useState<Contract | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const mobile = useCompactLayout();
@@ -40,8 +49,8 @@ export function TestConfigurationPage(): React.ReactElement {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
-  const [preview, setPreview] = useState<{ workspace: string; revision: number; text: string; result: JSONObject } | null>(null);
-  const previewMatches = !!draft && !!preview && preview.workspace === workspace && preview.revision === draft.revision && preview.text === draft.text && draft.text === draft.savedText;
+  const [preview, setPreview] = useState<{ workspace: string; revision: number; text: string; analysis: string; result: JSONObject } | null>(null);
+  const previewMatches = !!draft && !!preview && preview.analysis === analysis && preview.workspace === workspace && preview.revision === draft.revision && preview.text === draft.text && draft.text === draft.savedText;
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
   const [discard, setDiscard] = useState<{ workspace?: string; reload?: boolean } | null>(null);
@@ -49,11 +58,12 @@ export function TestConfigurationPage(): React.ReactElement {
   const activeWorkspace = useRef(workspace);
   activeWorkspace.current = workspace;
   useEffect(() => {
+    if (!instance.mobile || instance.active === false) return;
     const url = new URL(location.href);
     if (workspace) url.searchParams.set("workspace_id", workspace);
     else url.searchParams.delete("workspace_id");
     history.replaceState(history.state, "", url.href);
-  }, [workspace]);
+  }, [workspace, instance.mobile, instance.active]);
   const parsed = useMemo(() => parseDraft(draft?.text ?? "{}"), [draft?.text]);
   const deferredText = useDeferredValue(draft?.text ?? "{}");
   const validationErrors = useMemo(() => {
@@ -149,10 +159,10 @@ export function TestConfigurationPage(): React.ReactElement {
     const currentDraft = draft;
     setRunning(true); setError("");
     try {
-      const value = await request(submit ? "/api/runs" : "/api/runs/preview", { method: "POST", body: JSON.stringify(runRequest(workspace, draft)) });
+      const value = await request(submit ? "/api/runs" : "/api/runs/preview", { method: "POST", body: JSON.stringify(runRequest(workspace, draft, analysis)) });
       if (activeWorkspace.current !== currentWorkspace) return;
-      if (submit) notify({ code: "configuration.submitted", type: "success", message: t("configuration.submitted"), description: String(value.run_id || "") });
-      else { setPreview({ workspace: currentWorkspace, revision: currentDraft.revision, text: currentDraft.text, result: value }); navigate({ page: "preview" }); }
+      if (submit) { setJobs(value.jobs || []); setSelectedJob(0); setTab("results"); notify({ code: "configuration.submitted", type: "success", message: t("configuration.submitted"), description: String(value.run_id || "") }); }
+      else { setPreview({ workspace: currentWorkspace, revision: currentDraft.revision, text: currentDraft.text, analysis, result: value }); navigate({ page: "preview" }); }
     } catch (reason) { if (activeWorkspace.current === currentWorkspace) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setRunning(false); }
   };
@@ -166,8 +176,8 @@ export function TestConfigurationPage(): React.ReactElement {
     },
     onChange: (text) => setDraft((current) => current ? { ...current, text, source: "form" } : current) });
   const selection = view.path;
-  const allFields = (contract?.catalog ?? []).filter((field) => field.analysis === "backtest" && field.scope_policy !== "group_only" && !strategy.parameterKeys.has(field.key));
-  const runtimeCatalog = catalog.filter((field) => field.analysis === "backtest" && !strategy.parameterKeys.has(field.key));
+  const allFields = (contract?.catalog ?? []).filter((field) => field.analysis === analysis && field.scope_policy !== "group_only" && (analysis !== "backtest" || !strategy.parameterKeys.has(field.key)));
+  const runtimeCatalog = catalog.filter((field) => field.analysis === analysis && (analysis !== "backtest" || !strategy.parameterKeys.has(field.key)));
   const order = ["data", "execution", "funds", "other"];
   const groups = [...new Map(runtimeCatalog.map((field) => [`${field.analysis}:${settingsSection(field.group)}`, field])).entries()].sort((a, b) => order.indexOf(settingsSection(a[1].group)) - order.indexOf(settingsSection(b[1].group)));
   const selectedField = selection ? allFields.find((field) => field.path.join(".") === selection.join(".")) : undefined;
@@ -177,7 +187,7 @@ export function TestConfigurationPage(): React.ReactElement {
   const groupName = groups.find(([id]) => id === groupID)?.[1];
   const detail = view.page !== "overview";
   const panelTitle = view.page === "json" ? "JSON" : view.page === "preview" ? "RunSpec" : ["strategy", "strategies", "catalog", "overview"].includes(view.page)
-    ? strategy.title : (groupName ? groupLabel(groupName) : t("configuration.runSettings"));
+    ? (analysis === "backtest" ? strategy.title : t("configuration.inputs")) : (groupName ? groupLabel(groupName) : t("configuration.runSettings"));
   const openField = (field: Field): void => {
     if (parsed.value && readPath(parsed.value, field.path) === undefined) edit(field.path, field.value);
     navigate({ page: view.page === "json" ? "json" : "field", path: field.path });
@@ -219,11 +229,12 @@ export function TestConfigurationPage(): React.ReactElement {
     {conflict ? <Alert type="warning" showIcon message={t("configuration.conflict")} /> : null}
     {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError("")} /> : null}
     {loading ? <p className="tr-config-loading" role="status">{t("configuration.loading")}</p> : null}
-    {!draft ? !loading ? <Empty description={false} /> : null : contract ? <div className="tr-config-layout">
+    {!draft ? !loading ? <Empty description={false} /> : null : contract ? <><Tabs activeKey={tab} onChange={setTab} items={[{ key: "configuration", label: t("configuration.setup") }, { key: "results", label: t("jobs.results"), disabled: !jobs.length }]} />{tab === "results" ? <div className="tr-config-results">{jobs.length > 1 ? <Select value={selectedJob} options={jobs.map((job, index) => ({ value: index, label: job.task_name || job.job_id }))} onChange={setSelectedJob} /> : null}{jobs[selectedJob] ? <JobDetail job={jobs[selectedJob]} /> : null}</div> : <div className="tr-config-layout">
       <aside className="tr-config-sidebar" hidden={mobile && detail}>
-        <div className="tr-config-nav-heading"><button type="button" onClick={() => navigate({ page: "strategies" })}>{t("configuration.strategies")}</button>
+        <div className="tr-config-test-type"><Select aria-label={t("configuration.analysis")} value={analysis} options={Object.keys((readPath(contract.schema, ["properties", "analyses", "properties"]) as JSONObject) || {}).map((key) => ({ value: key, label: t(`configuration.analysisNames.${key}`, { defaultValue: key }) }))} onChange={(value) => { setAnalysis(value); navigate({ page: "overview" }); }} /></div>
+        {analysis === "backtest" ? <><div className="tr-config-nav-heading"><button type="button" onClick={() => navigate({ page: "strategies" })}>{t("configuration.strategies")}</button>
           <Button type="text" size="small" icon={<PlusOutlined />} aria-label={t("configuration.addStrategy")} onClick={() => navigate({ page: "catalog" })} /></div>
-        {strategy.navigation}
+        {strategy.navigation}</> : <button className="tr-config-input-nav" onClick={() => navigate({ page: "overview" })}>{t("configuration.inputs")}</button>}
         <div className="tr-config-nav-heading tr-config-settings-heading"><button type="button" onClick={() => navigate({ page: "settings" })}>{t("configuration.runSettings")}</button></div>
         <Input.Search aria-label={t("configuration.search")} placeholder={t("configuration.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} allowClear />
         <div className="tr-config-nav-list">{groups.map(([id, field]) => <button type="button" key={id} className={groupID === id ? "is-selected" : ""}
@@ -234,14 +245,14 @@ export function TestConfigurationPage(): React.ReactElement {
         {view.page === "json" ? <CodeView text={draft.text} schema={contract.schema} path={view.path} onChange={change} applyExternal={draft.source !== "json"} /> :
           view.page === "preview" ? <pre className="tr-config-preview">{JSON.stringify(preview?.result || {}, null, 2)}</pre> :
           parsed.error ? <Alert type="error" showIcon message={t("configuration.invalidJSON")} action={<Button onClick={() => navigate({ page: "json" })}>JSON</Button>} /> :
-          ["overview", "strategy", "strategies", "catalog"].includes(view.page) ? strategy.content : groupFields.length ? <div className="tr-config-field-editor">{groupFields.map(fieldRow)}</div> :
+          ["overview", "strategy", "strategies", "catalog"].includes(view.page) ? analysis === "backtest" ? strategy.content : <TestInputs analysis={analysis} text={draft.text} onChange={change} /> : groupFields.length ? <div className="tr-config-field-editor">{groupFields.map(fieldRow)}</div> :
           <div className="tr-config-setting-catalog"><Input.Search aria-label={t("configuration.search")} placeholder={t("configuration.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} allowClear />
             <div className="tr-config-choice-list">{runtimeCatalog.slice((page - 1) * 12, page * 12).map((field) => <button type="button" key={field.path.join(".")} onClick={() => openField(field)}><span>{field.title}</span><span className="tr-config-chevron">{readPath(parsed.value, field.path) === undefined ? "＋" : "›"}</span></button>)}</div>
             <Pagination simple size="small" current={page} total={runtimeCatalog.length} pageSize={12} onChange={setPage} hideOnSinglePage /></div>}
         {validationErrors.length ? <div className="tr-config-validation" role="status"><strong>{t("configuration.validation", { count: validationErrors.length })}</strong>
           <ul>{validationErrors.map((item, index) => <li key={index}>{item.stack || item.message}</li>)}</ul></div> : null}
       </main>
-    </div> : <p role="status">{t("configuration.loading")}</p>}
+    </div>}</> : <p role="status">{t("configuration.loading")}</p>}
     {mobile && draft ? <footer className="tr-config-mobile-actions">{["strategy", "field", "json"].includes(view.page) ? saveAction : actions}</footer> : null}
     <Modal open={discard !== null} title={t("configuration.discardTitle")} onCancel={() => setDiscard(null)}
       okText={t("configuration.discard")} cancelText={t("configuration.keepEditing")} onOk={() => {

@@ -1,6 +1,7 @@
 import React from "react";
 import { pagesForScope } from "../registry.ts";
 import { useTranslation } from "react-i18next";
+import { usePageInstance } from "../page-instance.ts";
 import { PageIcon } from "../icon.tsx";
 
 const RECENT_KEY = "tr.mobile.recent";
@@ -16,9 +17,10 @@ function recentIds(): string[] {
 
 export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): React.ReactElement {
   const { t } = useTranslation();
+  const instance = usePageInstance();
   const recent = recentIds();
   const pages = pagesForScope("mobile")
-    .filter((page) => page.id !== "workspace")
+    .filter((page) => !page.mobileTab && page.id !== "job-detail")
     .sort((a, b) => {
       const ai = recent.indexOf(a.id);
       const bi = recent.indexOf(b.id);
@@ -28,17 +30,16 @@ export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): Re
     <section className="tr-mobile-workspace">
       <header className="tr-mobile-workspace-header">
         <div>
-          <h1>{t("workspace.title")}</h1>
-          <p>{t("workspace.desc")}</p>
+          <h1>{t("nav.more")}</h1>
         </div>
 
       </header>
       <div className="tr-mobile-open-list">
         {pages.map((page) => (
-          <button key={page.id} type="button" className="tr-mobile-open-row" onClick={() => onOpen?.(page.id)}>
+          <button key={page.id} type="button" className="tr-mobile-open-row" onClick={() => onOpen ? onOpen(page.id) : instance.open(page.id)}>
             <span className="tr-mobile-open-icon"><PageIcon name={page.icon} /></span>
             <span>{t(`nav.${page.id}`, { defaultValue: page.title })}</span>
-            <span className="tr-mobile-open-route">{page.route.split("?")[0]}</span>
+            <span aria-hidden="true">›</span>
           </button>
         ))}
       </div>

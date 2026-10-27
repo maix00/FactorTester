@@ -6,6 +6,8 @@ import type { RJSFSchema, WidgetProps } from "@rjsf/utils";
 import { useTranslation } from "react-i18next";
 import { request } from "./api.ts";
 import { parseDraft, readPath, writePath, type JSONObject } from "./draft.ts";
+import { FactorPicker } from "../components/library-picker.tsx";
+import { LibraryCreate } from "../components/library-create.tsx";
 import { NO_DEFAULTS } from "./form-options.ts";
 import type { ConfigurationView } from "./navigation.ts";
 import { appendStrategy, attachFrozenFactors, configurationStrategies, patchStrategy, templateInputs, strategyDefaults, strategySchema, type StrategyChoice } from "./strategies.ts";
@@ -16,6 +18,7 @@ function ReferenceWidget(props: WidgetProps): React.ReactElement {
   const [loading, setLoading] = useState(false);
   const factor = props.options.referenceType === "factor_ref";
   useEffect(() => {
+    if (factor) return;
     const controller = new AbortController(); setLoading(true);
     request(factor ? "/api/factor-library/factors" : "/api/product-library/product-groups?view=summary", { signal: controller.signal })
       .then((data) => setRows(factor ? data.factors ?? [] : data.groups ?? []))
@@ -26,6 +29,7 @@ function ReferenceWidget(props: WidgetProps): React.ReactElement {
   const reference = (row: JSONObject): string => String(factor ? row.ref || row.factor_ref || "" : row.ref || row.group_ref || row.id || "");
   const options = [...new Map(rows.map((row) => [reference(row), { value: reference(row), label: String(row.name || row.title || row.factor_alias || row.alias || reference(row)) }])).values()];
   if (props.value && !options.some((item) => item.value === props.value)) options.unshift({ value: props.value, label: props.value });
+  if (factor) return <FactorPicker label={props.label} value={props.value} disabled={props.disabled || props.readonly} onSelect={(record) => { props.formContext?.rememberFactor?.(String(record.ref), record); props.onChange(String(record.ref)); }} />;
   return <><Select id={props.id} aria-label={props.label} value={props.value || undefined} showSearch optionFilterProp="label" style={{ width: "100%" }}
     options={options} loading={loading} disabled={props.disabled || props.readonly} onChange={(value: string) => {
       const row = rows.find((item) => reference(item) === value);
@@ -47,6 +51,7 @@ export function useStrategyEditor({ scope, text, onChange, view, navigate }: Str
   const [error, setError] = useState("");
   const [pending, setPending] = useState(0);
   const [reading, setReading] = useState(false);
+  const [creating, setCreating] = useState(false);
   const factorRows = useRef(new Map<string, JSONObject>());
   const latest = useRef({ text, onChange, scope, page: view.page }); latest.current = { text, onChange, scope, page: view.page };
   const detailRequests = useRef(new Map<string, Promise<JSONObject>>());
@@ -151,7 +156,8 @@ export function useStrategyEditor({ scope, text, onChange, view, navigate }: Str
     <span>{String(binding.strategy_id || binding.target_strategy_id)}</span><span className="tr-config-chevron">›</span></button>)}</div>;
   const errors = error ? <div className="tr-config-validation" role="alert">{error}</div> : null;
   let content: React.ReactNode;
-  if (catalog) content = <div className="tr-config-strategy-catalog">
+  if (catalog && creating) content = <LibraryCreate kind="strategy" onCancel={() => setCreating(false)} onCreated={(value) => { setCreating(false); void add(value as unknown as StrategyChoice); }} />;
+  else if (catalog) content = <div className="tr-config-strategy-catalog"><Button type="primary" onClick={() => setCreating(true)}>{t("editor.newStrategy")}</Button>
     <Input.Search aria-label={t("configuration.strategies")} placeholder={t("configuration.searchStrategies")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
     <Spin spinning={reading || pending > 0}><div className="tr-config-choice-list">{[...templates.filter((item) => !query || `${item.name} ${item.strategy_ref}`.toLowerCase().includes(query.toLowerCase())), ...users].map((item) =>
       <button type="button" key={item.strategy_ref} disabled={pending > 0} onClick={() => void add(item)}><span><strong>{name(item)}</strong><small>{t(`configuration.scope.${item.library_scope || "user_custom"}`, { defaultValue: item.library_scope || "user" })}</small></span><span className="tr-config-chevron">＋</span></button>)}</div></Spin>

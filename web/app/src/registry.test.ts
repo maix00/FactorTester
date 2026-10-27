@@ -4,9 +4,11 @@ import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.
 
 test("builtin pages preserve desktop/mobile scopes", () => {
   for (const page of BUILTIN_PAGES) registerPage(page);
-  assert.equal(getPage("workspace")?.scope, "mobile");
-  assert.ok(pagesForScope("desktop").some((page) => page.id === "catalog"));
-  assert.ok(!pagesForScope("mobile").some((page) => page.id === "catalog"));
+  assert.equal(getPage("more")?.scope, "mobile");
+  const desktop = pagesForScope("desktop").filter((page) => page.sidebarVisible !== false);
+  assert.ok(["products", "factors", "strategies", "jobs"].every((id) => desktop.some((page) => page.id === id)));
+  assert.ok(!desktop.some((page) => page.id === "account" || page.id === "settings"));
+  assert.deepEqual(pagesForScope("mobile").filter((page) => page.mobileTab).map((page) => page.id), ["research", "configuration", "trading", "more"]);
 });
 
 test("duplicate page ids are rejected", () => {
@@ -21,5 +23,5 @@ test("every registered page has a title, icon and route", () => {
     assert.match(page.route, /^\//);
   }
   assert.ok(pagesForScope("mobile").some((page) => page.id === "settings"));
-  assert.ok(pagesForScope("desktop").some((page) => page.id === "account"));
+  assert.ok(!pagesForScope("desktop").some((page) => page.id === "account"));
 });
