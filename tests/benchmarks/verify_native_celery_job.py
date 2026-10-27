@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -138,14 +140,26 @@ class VersionProbe(FactorFamily):
             (args.root/'couch-report.json').write_text(json.dumps(report,indent=2))
             assert report['job_id']==job_id and report['owner']=='alice'
             assert set(report['attachments']) >= {'tearsheet.html','orders.csv','fills.csv','positions.csv','account.csv'}
+            closed_positions=None
             for name,stored in report['attachments'].items():
                 from server.jobs.storage.couchdb_reports import CouchDBObjectStore
                 store=CouchDBObjectStore(args.couch_url,database,username=credentials['username'],password=credentials['password'])
                 data=store.get_attachment(ref,stored)
                 assert hashlib.sha256(data).hexdigest()==stored.split('.')[0]
+                if args.complex_match and name=='positions.csv':
+                    rows=list(csv.DictReader(io.StringIO(data.decode())))
+                    closed_positions=sum(bool(row['ts_closed']) for row in rows)
+                    assert closed_positions>0,'target changes must close native HEDGING positions'
+                    assert sum(not row['ts_closed'] for row in rows)<=len(ids)*len(receipts)
+                if args.complex_match and name=='fills.csv':
+                    fills=list(csv.DictReader(io.StringIO(data.decode())))
+                    first=min(int(r['first_available_ns']) for r in receipts)
+                    first_signal=-(-first//1800000000000)*1800000000000
+                    assert all(pd.Timestamp(row['ts_event']).value>first_signal for row in fills)
+
             receipt={'complex_match':args.complex_match,'family_mode':args.family_mode,'job_id':job_id,'task_id':task.id,'status':current.status.value,'seconds':time.perf_counter()-started,
                 'sampled_worker_rss_max_bytes':max(sampled_rss,default=0),'worker_pid':worker.pid,'terminal_worker_pid':current.worker_pid,'result':result,
-                'couchdb_database':database,'verified_attachments':sorted(report['attachments']),
+                'closed_positions':closed_positions,'couchdb_database':database,'verified_attachments':sorted(report['attachments']),
                 'limits':'local isolated execution of frozen plan; authoring/planning HTTP and production deployment not covered'}
             (args.root/'receipt.json').write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt))
         finally:

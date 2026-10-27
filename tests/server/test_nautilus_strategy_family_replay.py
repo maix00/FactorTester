@@ -164,3 +164,25 @@ def test_group_and_threshold_with_same_suffix_have_traceable_unique_runtime_ids(
     mapping=result['strategy_runtime_ids']
     assert mapping=={'Group-1':'Group-1','Group-2':'Group-2','Threshold-1':'Threshold-1-factor2'}
     assert len({name.rsplit('-',1)[-1] for name in mapping.values()})==3
+
+
+def test_hedging_target_reversals_close_existing_native_position(tmp_path):
+    """A reversing target must not accumulate offsetting HEDGING positions."""
+    import pandas as pd
+    from tools.factors.expr import scope_bars
+    from tools.factors.expr.bar_search import bar_since
+    from tools.factors.expr.conditional import where
+    require_nautilus()
+    age=bar_since(CLOSE>0,scope=scope_bars(4),select='farthest')
+    signal=where(age<2,-1,1)
+    output=tmp_path/'reports'
+    from server.services.nautilus_bridge.strategy_backtest import run_strategy_families_replay
+    strategies=[dict(strategy_id=f'Reverse-{i}',factor_bindings={'signal':signal},
+        factor_refs={'signal':'factor:v2:'+'a'*43},family=ThresholdState(entry=1,exit=0)) for i in (1,2)]
+    result=run_strategy_families_replay(inputs={'T':_real_catalog(tmp_path,count=32)},
+        strategies=strategies,output_dir=output,max_bars=32,batch_minutes=8)
+    positions=pd.read_csv(output/'positions.csv')
+    assert result['orders']>=10
+    assert positions['ts_closed'].notna().sum()>=10
+    assert positions['ts_closed'].isna().sum()==2
+    assert positions.loc[positions['ts_closed'].isna(),'quantity'].astype(float).sum()==2
