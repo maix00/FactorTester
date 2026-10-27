@@ -324,3 +324,19 @@ def test_strict_provider_loading_is_single_flight(monkeypatch, tmp_path):
         assert results == [sentinel, sentinel]
     finally:
         CNFutures._clear_rule_provider_cache()
+
+
+def test_rule_revision_query_uses_primary_key_not_history_scan(tmp_path):
+    import sqlite3
+    from tools.data import field_history
+
+    db = tmp_path / "rules.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        field_history.ensure_historical_field_schema(conn)
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN SELECT revision FROM historical_field_revision WHERE id = 1"
+        ).fetchall()
+    detail = " ".join(str(row["detail"]) for row in plan)
+    assert "historical_field_values" not in detail
+    assert "SEARCH" in detail.upper()
