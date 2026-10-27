@@ -184,8 +184,9 @@ federated catalog's runtime availability/count projection.
   并调用源提供的 loader；`TradingFieldProvider` 只要求 `resolve_at` 协议，
   `TradingFieldValue` 只要求字段，不再以具体 `FieldHistoryProvider`/
   `HistoricalFieldValue` 类作为准入条件，也不再导入规则 fallback 枚举/异常类。
-  协议现位于公共 `traderesearch_data.rules`；源 loader 仍返回现有 FieldHistory
-  实现，完整规则数据协议迁移尚未完成。
+  协议现位于公共 `traderesearch_data.rules`。`ResolvedSource` 携带选定 Bundle 成员的
+  `related_members`，规则绑定要求 provider_ref 必须在该冻结关系中；空关系不再放行。
+  源 loader 仍返回现有 FieldHistory 实现，完整规则数据协议迁移尚未完成。
 - 多合约目录显式失败。`stage_catalogs` 在写任何 catalog 前检查同一品种的多个合约
   并拒绝；这是防止错误结果的 fail-closed，不是多合约已完成。
 - DAY1 不再静默复用 MIN1 `stage_contract_minute_catalog`。源 loader 使用

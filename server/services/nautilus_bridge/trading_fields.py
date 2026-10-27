@@ -46,6 +46,7 @@ class TradingFieldSource:
     member_key: str
     timezone: str
     adapter_id: str
+    related_members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,9 +69,14 @@ def bind_trading_field_source(resolved_source: Any) -> TradingFieldSource:
         ZoneInfo(capability.timezone)
     except KeyError as exc:
         raise TradingFieldContractError("source timezone is unknown") from exc
+    related = tuple(getattr(resolved_source, "bundle_related_members", ()) or ())
+    if not related or any(not isinstance(value, str) or not value for value in related):
+        raise TradingFieldContractError(
+            "frozen Bundle member has no valid related historical members"
+        )
     return TradingFieldSource(
         capability.family_key, capability.member_key,
-        capability.timezone, capability.adapter_id,
+        capability.timezone, capability.adapter_id, related,
     )
 
 
@@ -88,21 +94,14 @@ def bind_historical_trading_fields(
             or source_member.execution_provider is not resolved_source.execution_provider):
         raise TradingFieldContractError("historical fields belong to a different source member")
     provider_ref = str(getattr(source_member, "trading_field_provider_ref", "") or "")
-    related = tuple(getattr(source_member, "trading_field_related_members", ()) or ())
     effective_clock = str(getattr(source_member, "trading_field_effective_clock", "") or "")
     if not provider_ref:
         raise TradingFieldContractError(
             f"{source.member_key}: no declared historical trading-field provider binding"
         )
-    if not related:
+    if provider_ref not in source.related_members:
         raise TradingFieldContractError(
-            f"{source.member_key}: no declared related historical member"
-        )
-    if any(not isinstance(value, str) or not value for value in related):
-        raise TradingFieldContractError("related historical members must be non-empty strings")
-    if provider_ref not in related:
-        raise TradingFieldContractError(
-            f"{source.member_key}: historical provider is not a declared related member"
+            f"{source.member_key}: historical provider is not declared by the frozen Bundle"
         )
     if effective_clock != "effective_timestamp_or_trading_day":
         raise TradingFieldContractError(
