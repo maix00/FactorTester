@@ -170,6 +170,7 @@ def test_nautilus_run_spec_and_source_ui_select_focused_tests():
         "tests/products/test_product_source_projection.py",
         "tests/scripts/test_nautilus_source_overlay.py",
         "tests/server/test_nautilus_preview_routes.py",
+        "tests/server/test_alpha_formula_preview.py",
     }
     assert all((selector.ROOT / path).is_file() for path in targets)
 
@@ -324,7 +325,7 @@ def test_factor_expr_streaming_changes_select_bounded_contract_tests():
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
         "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
-    } | set(selector.FACTOR_PLAN_TESTS)
+    } | set(selector.LATEX_QUERY_TESTS)
 
 
 def test_nautilus_fee_benchmark_edit_selects_fee_contract_tests():
@@ -404,3 +405,11 @@ def test_native_catalog_runtime_changes_keep_python_hook_scoped():
                                      "native/nautilus_factor_bridge/Cargo.lock"})
     assert mode == "SCOPED"
     assert set(targets) == set(selector.FACTOR_PLAN_TESTS)
+
+
+def test_latex_and_intermediate_migration_selects_shared_public_contracts():
+    mode,targets=selector.select({'tools/factors/expr/presentation.py',
+        'tools/factors/FactorRunResult.py','server/modules/single_factor_test/evaluation.py'})
+    assert mode=='SCOPED'
+    assert set(targets)==set(selector.LATEX_QUERY_TESTS)
+    assert 'vendor/py-alpha-lib/py-binding/python/tests/test_factor_presentation.py' in targets

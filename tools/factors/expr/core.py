@@ -4,6 +4,8 @@
 # =============================================================================
 from __future__ import annotations
 
+from alpha.factor.annotations import ExpressionAnnotations
+
 import hashlib
 import json
 import math
@@ -154,7 +156,7 @@ def _lazy():
 
 
 @factor_workspace
-class FactorExpr:
+class FactorExpr(ExpressionAnnotations):
     """
     因子表达式抽象基类。
 
@@ -174,22 +176,7 @@ class FactorExpr:
 
     # ── 中间因子标记 ──
 
-    _is_intermediate: bool = False
-    _intermediate_name: 'str | None' = None
-    _intermediate_factor: Optional[FactorExpr] = None
 
-    @factor_workspace
-    def as_intermediate(self, name: 'str | None' = None, factor: Optional['FactorExpr'] = None) -> 'FactorExpr':
-        """标记此表达式节点为中间因子，evaluate 时自动创建 FactorData。
-
-        name: 可选名称，用于后续查询（如 'FE', 'RE'）。
-              None 表示匿名中间因子（仅创建 FactorData 不做命名映射）。
-        """
-        factor = factor or self
-        self._is_intermediate = True
-        self._intermediate_name = name
-        self._intermediate_factor = factor
-        return self
 
     # ── 可哈希（用于 set/dict 中的依赖追踪和缓存） ──
 
@@ -311,10 +298,11 @@ class FactorExpr:
                 warmup_window=kwargs.get('warmup_window', None),
                 run_result=kwargs.get('run_result', None),
                 panel_timeline=kwargs.get('panel_timeline', None),
+                shared_cache_keys=kwargs.get('shared_cache_keys', None),
             )
         cache = ctx.cache
         sk = self._structural_key()
-        cacheable = self._is_intermediate or (
+        cacheable = (
             ctx.shared_cache_keys is not None and sk in ctx.shared_cache_keys
         )
         if cacheable and cache is not None and sk in cache:
@@ -342,110 +330,12 @@ class FactorExpr:
         """表达式操作名，用于生成别名和 LaTeX。"""
         raise NotImplementedError
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        """生成 LaTeX 数学表达式（内部，不做 intermediate 展开）。
 
-        subst: structural_key → symbol 映射，用于将 intermediate 替换为符号。
-        """
-        raise NotImplementedError
 
-    def iter_intermediate_nodes(self) -> 'Iterator[FactorExpr]':
-        """遍历表达式树，按后序（子依赖在前）产出所有 _is_intermediate 节点。
 
-        Yields:
-            node: 每个唯一的 intermediate 节点（按 structural_key 去重）。
-        """
-        seen: set[tuple] = set()
-
-        def visit(node: 'FactorExpr') -> 'Iterator[FactorExpr]':
-            sk = node._structural_key()
-            if sk in seen:
-                return
-            seen.add(sk)
-
-            for operand in getattr(node, '_operands', ()):
-                yield from visit(operand)
-
-            if node._is_intermediate:
-                yield node
-
-        yield from visit(self)
-
-    def to_latex(self, final_name: str = 'X') -> str:
-        """生成含 intermediate 分行定义的 LaTeX。
-
-        当表达式树中存在 .as_intermediate() 标记节点时，输出:
-                    \\begin{aligned}
-            A_t &:= ... \\
-            B_t &:= ... \\
-            X_t &:= ...
-                    \\end{aligned}
-        其中 X_t 的定义中，已定义的 intermediate 用其符号替代。
-        否则退化为 _to_latex()。
-        """
-        nodes = list(self.iter_intermediate_nodes())
-        if not nodes:
-            return self._to_latex()
-
-        # 1) 为每个 intermediate 分配符号，生成定义行
-        used: Set[str] = set()
-        name_to_sk: Dict[str, tuple] = {}
-        sk_to_sym: Dict[tuple, str] = {}   # structural_key → symbol
-        lines: List[str] = []
-        unnamed_idx = 1
-        for node in nodes:
-            if node._intermediate_name:
-                sk = node._structural_key()
-                prev_sk = name_to_sk.get(node._intermediate_name)
-                if prev_sk is not None and prev_sk != sk:
-                    raise ValueError(
-                        f"Intermediate 名称冲突: {node._intermediate_name} 被用于不同表达式。"
-                    )
-                name_to_sk[node._intermediate_name] = sk
-                raw = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(node._intermediate_name)).strip('_')
-                base = raw or 'I'
-            else:
-                # An explicit anonymous intermediate is still a definition,
-                # including a family return value below SignalAlign.
-                base = f"I{unnamed_idx}"
-                unnamed_idx += 1
-            sym = base
-            i = 2
-            while sym in used:
-                sym = f"{base}_{i}"
-                i += 1
-            used.add(sym)
-            # A non-ASCII name (families name their intermediates in Chinese)
-            # is text, not a math identifier: \\mathrm leaves CJK inside math
-            # mode, which KaTeX reports as LaTeX-incompatible and then renders
-            # as raw source.
-            latex_sym = (
-                f"\\text{{{sym}}}" if not sym.isascii() else f"\\mathrm{{{sym}}}"
-            )
-            lines.append(f"{latex_sym}_t &:= {node._to_latex(subst=sk_to_sym)},")
-            sk_to_sym[node._structural_key()] = latex_sym
-
-        # When the root itself is the final intermediate, its definition is
-        # already the complete formula.  Emitting ``X := intermediate`` adds
-        # no information and makes the UI appear to calculate it twice.
-        if self._is_intermediate and self._structural_key() in sk_to_sym:
-            lines[-1] = lines[-1].removesuffix(",") + "."
-            return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
-
-        # 2) 最后一行 X_t，用符号映射递归生成
-        raw = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(final_name)).strip('_')
-        final_base = raw or 'X'
-        final_sym = final_base
-        i = 2
-        while final_sym in used:
-            final_sym = f"{final_base}_{i}"
-            i += 1
-        used.add(final_sym)
-
-        # 递归遍历 self，遇到已映射的 intermediate 就用符号替代
-        lines.append(f"{final_sym}_t &:= {self._to_latex(subst=sk_to_sym)}.")
-
-        return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
+    def _presentation_fields(self):
+        from .presentation import describe
+        return describe(self)
 
     def _get_alias(self) -> str:
         """生成唯一别名，用于 Factor 注册。"""

@@ -116,3 +116,40 @@ def test_native_actor_session_reset_and_missing_calendar_failure(tmp_path):
                 expected=[[np.mean([float(bar.close) for bar in source[(0 if i<4 else 4):i+1]]) for source in bars] for i in range(8)]
                 np.testing.assert_allclose(actual,expected)
         finally:engine.dispose()
+
+
+def test_native_intermediate_lookup_reads_existing_latest_slot(tmp_path):
+    import pytest
+    from alpha.factor import ColumnRef, compile_factor_outputs
+    from nautilus_trader._libnautilus import attach_factor_family
+    require_nautilus()
+    inputs=_inputs(tmp_path);rows=[_load_input(item) for item in inputs.values()]
+    mean=ColumnRef('CLOSE').rolling(2).semantics(min_periods=1).mean().as_intermediate('mean')
+    outer=mean+mean
+    plain,_,_=compile_factor_outputs({'signal':outer},tuple(inputs))
+    spec,_,_=compile_factor_outputs({'signal':outer},tuple(inputs),intermediates=('mean',))
+    assert len(spec['nodes'])==len(plain['nodes'])==3
+    engine=_engine(rows)
+    try:
+        consumers=[{'strategy_id':'query-1','signal_output':0,'rule':{
+            'kind':'threshold','entry':1,'exit':0,'side_mode':'long_only'}}]
+        runtime=attach_factor_family(engine,json.dumps(spec),list(inputs),
+            [row[2]['bar_type'] for row in rows],json.dumps(consumers))
+        with pytest.raises(RuntimeError,match='no factor output'):
+            runtime.latest_output(spec['intermediates']['mean'])
+        replay_catalog_batches(engine,rows,max_input_bars=16,batch_minutes=1)
+        runtime.ensure_success()
+        ts,available,values=runtime.latest_output(spec['intermediates']['mean'])
+        bars=[row[1].query_bars(identifiers=[row[2]['bar_type']]) for row in rows]
+        expected=[np.mean([float(bar.close) for bar in source[-2:]]) for source in bars]
+        np.testing.assert_allclose(values,expected)
+        np.testing.assert_allclose(runtime.latest_output(0)[2],np.asarray(expected)*2)
+        assert ts==int(bars[0][-1].ts_event)
+        assert available==max(int(source[-1].ts_init) for source in bars)
+        for _ in range(10):
+            assert runtime.latest_output(1)==(ts,available,values)
+        assert runtime.slice_count==8 and runtime.node_count==3
+        with pytest.raises(RuntimeError,match='outside plan'):
+            runtime.latest_output(100)
+    finally:
+        engine.dispose()

@@ -23,6 +23,8 @@ from typing import Any, ClassVar, Optional, Sequence, Union
 
 import pandas as pd
 
+from alpha.factor.annotations import copy_annotation
+
 from .core import EvaluateContext, FactorExpr
 from .groupby_scope_eval import GROUPED_AGGREGATIONS, apply_grouped
 from .leaf import _to_expr
@@ -47,14 +49,6 @@ def _bound_value(expr: Optional[FactorExpr], ctx: EvaluateContext) -> Optional[i
     return int(value)
 
 
-def _scope_latex(scope: LookbackScope) -> str:
-    if isinstance(scope, TradingDayScope):
-        return r'\text{trading\_day}'
-    if isinstance(scope, SessionScope):
-        return r'\text{session}(' + str(scope.gap) + ')'
-    if isinstance(scope, BarCountScope):
-        return r'\text{bars}(K)'
-    return r'\text{scope}'
 
 
 class GroupByScopeExpr(FactorExpr):
@@ -148,19 +142,6 @@ class GroupByScopeExpr(FactorExpr):
     def _get_alias(self) -> str:
         return 'groupby_scope'
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        scope = _scope_latex(self.scope)
-        start = self.trunc_start
-        end = self.trunc_end
-        if start is not None or end is not None:
-            left = start._to_latex(subst) if isinstance(start, FactorExpr) else str(start)
-            right = end._to_latex(subst) if isinstance(end, FactorExpr) else str(end)
-            return (r'\mathrm{R}^{' + scope
-                    + r',\mathrm{trunc}(' + left + ',' + right + ')}')
-        return r'\mathrm{R}^{' + scope + '}'
 
 
 class GroupByScopeOp(OperandExpr):
@@ -188,9 +169,9 @@ class GroupByScopeOp(OperandExpr):
         ``GroupByScopeOp.__init__() missing 1 required positional argument: 'scope'``。
         """
         resolved_operands = [opnd.resolve(*args, **kwargs) for opnd in self.operands]
-        return type(self)(self.op, self.scope, *resolved_operands,
+        return copy_annotation(self,type(self)(self.op, self.scope, *resolved_operands,
                           min_periods=self.min_periods,
-                          nan_policy=self.nan_policy)
+                          nan_policy=self.nan_policy))
 
     @property
     def _has_truncate(self) -> bool:
@@ -236,18 +217,6 @@ class GroupByScopeOp(OperandExpr):
             self.min_periods, self.nan_policy.value,
         )
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        scope = _scope_latex(self.scope)
-        start, end = self.trunc_start, self.trunc_end
-        if start is not None or end is not None:
-            left = start._to_latex(subst) if isinstance(start, FactorExpr) else str(start)
-            right = end._to_latex(subst) if isinstance(end, FactorExpr) else str(end)
-            return (r'\mathrm{R}^{' + scope
-                    + r',\mathrm{trunc}(' + left + ',' + right + ')}')
-        return r'\mathrm{R}^{' + scope + '}'
 
     def _allocate(self, *operands: FactorExpr) -> 'GroupByScopeOp':
         return type(self)(self.op, *operands)

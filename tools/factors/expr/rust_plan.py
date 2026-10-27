@@ -437,7 +437,7 @@ class _PlanBuilder:
 
 def evaluate_rust_plan(expressions: list[FactorExpr], ctx: EvaluateContext) -> list[pd.DataFrame] | None:
     """Execute once for all products and outputs, sharing repeated subgraphs."""
-    if not expressions or any(isinstance(e, (ColumnRef, ConstExpr)) for e in expressions):
+    if not expressions or any(isinstance(e, ConstExpr) for e in expressions) or (len(expressions)==1 and isinstance(expressions[0],ColumnRef)):
         return None
     if any(unsupported_plan_nodes(e) for e in expressions):
         return None

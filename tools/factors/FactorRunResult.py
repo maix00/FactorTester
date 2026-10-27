@@ -54,6 +54,7 @@ class FactorRunResult:
         # Fast-path: whether data_present_mask is all True (dense panel, no inserted rows).
         "data_present_all",
         "panel_timeline",
+        "intermediate_results",
         "provenance",
         # Explicit temporal contract used by IC/HAC diagnostics.  This is
         # deliberately separate from provenance so consumers cannot mistake a
@@ -75,6 +76,7 @@ class FactorRunResult:
         self.data_present_mask: pd.DataFrame = pd.DataFrame()
         self.data_present_all: Optional[bool] = None
         self.panel_timeline: Optional[PanelTimeline] = None
+        self.intermediate_results = None
         self.provenance: dict = {}
         self.temporal_support: Optional[TemporalSupport | dict[str, Any]] = None
         self.hac_diagnostics: Optional[dict[str, Any]] = None
@@ -167,6 +169,10 @@ class FactorRunResult:
         self.data_present_mask = pd.DataFrame()
         self.data_present_all = None
         self.panel_timeline = None
+        store=getattr(self,'intermediate_results',None)
+        if store is not None:
+            store.clear()
+        self.intermediate_results = None
         self.provenance = {}
         self.temporal_support = None
         self.hac_diagnostics = None

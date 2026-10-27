@@ -26,164 +26,62 @@
     const formulaMount = document.createElement("div");
     formulaMount.className = "factor-detail-parameter-formula display-math";
     let mode = "parameters";
-    const render = () => {
-      const source = mode === "parameters"
-        ? expression(value)
-        : previewExpression(value, values, {includeNestedDefinitions: false});
-      formulaMount.replaceChildren?.();
-      if (window.katex) window.FTUI?.renderMath?.(formulaMount, source || "", {display: true});
-      else formulaMount.textContent = source;
+    let revision = 0;
+    const render = async () => {
+      const current = ++revision;
+      try {
+        if (mode !== "parameters") {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          if (current !== revision) return;
+        }
+        const source = mode === "parameters" ? expression(value)
+          : await previewExpression(value, values, {api: context.api, includeNestedDefinitions: false});
+        if (current !== revision) return;
+        formulaMount.replaceChildren?.();
+        if (window.katex) window.FTUI?.renderMath?.(formulaMount, source || "", {display: true});
+        else formulaMount.textContent = source;
+      } catch (error) {
+        if (current === revision) formulaMount.textContent = context.t("公式预览失败");
+      }
     };
     [["parameters", context.t("参数")], ["values", context.t("值")]].forEach(([modeName, label]) => {
       const button = document.createElement("button");
       button.type = "button"; button.className = "factor-detail-local-formula-toggle";
       button.textContent = label;
-      button.addEventListener("click", () => { mode = modeName; render(); });
+      button.addEventListener("click", () => { mode = modeName; return render(); });
       controls.append(button);
     });
     root.append(controls, formulaMount); render();
-    return {root, update: next => { values = next || {}; render(); }};
+    return {root, update: next => { values = next || {}; return render(); }};
   }
 
+  const formulaRequests = new Map();
   function previewExpression(value, parameterValues = {}, options = {}) {
-    const state = {
-      active: new Set(), emitted: new Set(),
-      includeNestedDefinitions: options.includeNestedDefinitions !== false,
-    };
-    const root = unwrapFamilyDraft(value);
-    const rootKey = previewNodeKey(root, parameterValues);
-    if (rootKey) state.active.add(rootKey);
-    const rendered = renderPreviewNode(root, parameterValues, state);
-    if (rootKey) state.active.delete(rootKey);
-    if (!rendered.body) return "";
-    if (!rendered.lines.length) return rendered.body;
-    const separator = " " + "\\" + "\\";
-    return [
-      "\\begin{aligned}",
-      [...rendered.lines, stripFormulaEnvironment(rendered.body)]
-        .join(separator),
-      "\\end{aligned}",
-    ].join("\n");
+    if (!value || !expression(value)) return Promise.resolve("");
+    const payload = {factor: value, parameter_values: parameterValues,
+      include_nested_definitions: options.includeNestedDefinitions !== false};
+    const key = JSON.stringify(payload);
+    if (formulaRequests.has(key)) return formulaRequests.get(key);
+    const request = (options.api
+      ? options.api("/api/factor-library/families/formula-preview", {method: "POST", body: JSON.stringify(payload)})
+      : fetch("/api/factor-library/families/formula-preview", {method: "POST",
+        headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)})
+        .then(response => response.json()))
+      .then(result => {
+        if (result?.success === false) throw new Error(result.error || "Formula preview failed");
+        return String(result?.latex || "");
+      }).finally(() => { if (formulaRequests.get(key) === request) formulaRequests.delete(key); });
+    formulaRequests.set(key, request);
+    // Bounded in-flight deduplication only; no retained formula/value history.
+    while (formulaRequests.size > 16) formulaRequests.delete(formulaRequests.keys().next().value);
+    return request;
   }
 
   // Nested factors are displayed as intermediate definitions. We recurse only
   // through the dependency graph to collect those definitions; the parent
   // expression keeps the child family as a named intermediate value.
-  function renderPreviewNode(value, parameterValues = {}, state) {
-    const item = unwrapFamilyDraft(value);
-    const resultValue = expression(item);
-    if (!resultValue) return {body: "", lines: []};
-    // Resolve the template's direction switch below; $Rev=0 is not zero times X.
-    let result = resultValue.split("\\textcolor{red}{\\$Rev}\\cdot ").join("");
-    const lines = [];
-    const rows = parameterRows(item);
-    const reverseValue = Object.prototype.hasOwnProperty.call(parameterValues, "$Rev")
-      ? parameterValues.$Rev : rows.find(row => row.alias === "$Rev")?.value;
-    const reversed = ["1", "-1", "true", "t", "yes", "y", "rev", "reverse"]
-      .includes(String(reverseValue).trim().toLowerCase());
-    const signal = "\\operatorname{Resample}_{\\textcolor{red}{\\$F}}";
-    const signalPrefix = "\\operatorname{Resample}_";
-    const reverseSignal = reversed && result.includes(signalPrefix);
-    if (reverseSignal) result = result.replace(signal, "\\textcolor{red}{-}" + signal);
-    if (reverseSignal && !result.includes("\\textcolor{red}{-}" + signal)) {
-      const position = result.indexOf(signalPrefix);
-      result = result.slice(0, position)
-        + "\\textcolor{red}{-}" + result.slice(position);
-    }
-    for (const parameter of rows) {
-      const alias = String(parameter.alias || "").trim();
-      if (!alias) continue;
-      const raw = Object.prototype.hasOwnProperty.call(parameterValues || {}, alias)
-        ? parameterValues[alias] : parameter.value;
-      const nested = nestedPreviewValue(raw, parameter);
-      let shown;
-      if (nested) {
-        shown = state.includeNestedDefinitions
-          ? blue(familySymbol(nested.value))
-          : `\\textcolor{red}{${familySymbol(nested.value)}}`;
-        if (state.includeNestedDefinitions) {
-          appendPreviewDefinition(lines, nested, state);
-        }
-      } else {
-        shown = alias === "$F" && (raw === "" || raw == null)
-          ? "\\$F"
-          : latexValue(raw === "" || raw == null ? alias : previewScalarValue(raw));
-      }
-      for (const spelling of new Set([alias, alias.replace(/\$/g, "\\$")])) {
-        const token = "\\textcolor{red}{" + spelling + "}";
-        result = result.split(token).join(nested ? shown : "\\textcolor{red}{" + shown + "}");
-      }
-    }
-    if (reversed && !reverseSignal) {
-      const body = stripFormulaEnvironment(result);
-      const parts = body.split(/\\\\/);
-      const last = parts.pop().trim();
-      const assignment = last.indexOf(":=");
-      const prefix = assignment < 0 ? "" : last.slice(0, assignment + 2) + " ";
-      const operand = (assignment < 0 ? last : last.slice(assignment + 2)).trim();
-      const punctuation = /[.,;]$/.test(operand) ? operand.slice(-1) : "";
-      parts.push(prefix + "\\textcolor{red}{-}\\left("
-        + (punctuation ? operand.slice(0, -1) : operand) + "\\right)" + punctuation);
-      const aligned = body !== result.trim() || parts.length > 1;
-      result = parts.join(" \\\\ ");
-      if (aligned) {
-        result = "\\begin{aligned}\n" + result + "\n\\end{aligned}";
-      }
-    }
-    return {body: result, lines};
-  }
 
-  function appendPreviewDefinition(lines, nested, state) {
-    const key = previewNodeKey(nested.value, nested.values);
-    if (key && (state.active.has(key) || state.emitted.has(key))) return;
-    if (key) {
-      state.active.add(key);
-      state.emitted.add(key);
-    }
-    const rendered = renderPreviewNode(nested.value, nested.values, state);
-    if (key) state.active.delete(key);
-    lines.push(...rendered.lines);
-    const body = stripFormulaEnvironment(rendered.body);
-    if (body) {
-      const bodyLines = body.split(/\s*\\\\\s*/).map(line => line.trim())
-        .filter(Boolean);
-      if (bodyLines.length > 1) {
-        bodyLines[bodyLines.length - 1] = childDefinition(
-          blue(familySymbol(nested.value)), bodyLines[bodyLines.length - 1], false, ";",
-        );
-        lines.push(...bodyLines);
-      } else {
-        lines.push(childDefinition(
-          blue(familySymbol(nested.value)), body, true, ";",
-        ));
-      }
-    }
-  }
 
-  function nestedPreviewValue(raw, parameter) {
-    if (raw?.__factor_family_draft === true && raw.__factor_family) {
-      return {
-        value: raw.__factor_family,
-        values: raw.parameter_values || {},
-      };
-    }
-    if (isNestedPreviewValue(raw)) {
-      return {value: raw, values: nestedParameterValues(raw)};
-    }
-    if (isNestedPreviewValue(raw?.nested_factor)) {
-      return {
-        value: raw.nested_factor,
-        values: nestedParameterValues(raw.nested_factor),
-      };
-    }
-    if (isNestedPreviewValue(parameter?.nested_factor)) {
-      return {
-        value: parameter.nested_factor,
-        values: nestedParameterValues(parameter.nested_factor),
-      };
-    }
-    return null;
-  }
 
   function isNestedPreviewValue(value) {
     return Boolean(value && typeof value === "object" && (
@@ -194,82 +92,13 @@
     ));
   }
 
-  function nestedParameterValues(value) {
-    if (value?.__factor_family_draft === true) {
-      return value.parameter_values || {};
-    }
-    const identityValues = value?.identity?.params || {};
-    return Object.fromEntries(parameterRows(value).map(parameter => {
-      const alias = parameter.alias;
-      const valueFromRow = parameter.value;
-      return [alias, valueFromRow !== undefined && valueFromRow !== ""
-        ? valueFromRow : identityValues[alias] ?? ""];
-    }).filter(([alias]) => alias));
-  }
 
-  function previewScalarValue(value) {
-    if (!value || typeof value !== "object") return value;
-    for (const key of ["alias", "factor_alias", "value"]) {
-      if (value[key] !== undefined && value[key] !== null) return value[key];
-    }
-    return value;
-  }
 
-  function previewNodeKey(value, parameterValues = {}) {
-    const item = unwrapFamilyDraft(value);
-    const identity = item?.ref || item?.factor_ref || item?.factor_alias
-      || item?.alias || item?.family_ref || item?.factor_family_alias
-      || item?.family_alias || "";
-    if (!identity) return "";
-    let values = "";
-    try {
-      values = JSON.stringify(parameterValues || {});
-    } catch (_) {
-      values = "";
-    }
-    return String(identity) + "|" + values;
-  }
 
-  function unwrapFamilyDraft(value) {
-    return value?.__factor_family_draft === true && value.__factor_family
-      ? value.__factor_family : value;
-  }
 
-  function stripFormulaEnvironment(value) {
-    let result = String(value || "").trim();
-    for (const [opening, closing] of [
-      ["\\begin{aligned}", "\\end{aligned}"],
-      ["\\begin{align*}", "\\end{align*}"],
-    ]) {
-      if (result.startsWith(opening) && result.endsWith(closing)) {
-        result = result.slice(opening.length, -closing.length).trim();
-        break;
-      }
-    }
-    return result;
-  }
 
-  function familySymbol(value) {
-    const item = unwrapFamilyDraft(value);
-    const alias = String(
-      item?.factor_family_alias || item?.family_alias
-      || item?.identity?.family_alias || item?.name || "Factor",
-    );
-    const safe = alias.replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "");
-    return String.raw`\mathrm{${safe || "Factor"}}`;
-  }
 
-  function blue(value) {
-    return `\\textcolor{blue}{${value}}`;
-  }
 
-  function latexValue(value) {
-    const text = String(value ?? "");
-    const duration = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(ns|us|ms|s|min|m|h|d|w)$/i
-      .exec(text);
-    if (duration) return String.raw`${duration[1]}\,\mathrm{${duration[2]}}`;
-    return String.raw`\mathrm{${text.replace(/([_{}%&#$])/g, "\\$1")}}`;
-  }
 
   function summary(context, value, options = {}) {
     const expressionValue = options.descriptionOnly ? "" : expression(value, options);
@@ -744,16 +573,6 @@
     return root;
   }
 
-  function childDefinition(symbol, line, align, punctuation = "") {
-    const clean = String(line).trim().replace(/[.;]\s*$/, "");
-    const output = clean.match(/^(?:X|\\mathrm{X})_t\s*&?\s*:=\s*(.+)$/);
-    if (output) return `${symbol}_t &:= ${output[1]}${punctuation}`;
-    // If the nested definition line already carries an alignment `&` (it is an
-    // aligned intermediate definition), do not add another `&` prefix for the
-    // referring family-name symbol — otherwise we get a duplicate/misaligned &.
-    const prefix = (output || /&/.test(clean)) ? "" : align ? "& " : "";
-    return `${prefix}${symbol}_t := ${output ? output[1] : clean}${punctuation}`;
-  }
 
   function formula(context, value) {
     const root = document.createElement("div");

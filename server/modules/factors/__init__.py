@@ -5,4 +5,4 @@ factors_bp = Blueprint('factors', __name__)
 
 
 def register_routes() -> None:
-    from . import candidates, data  # noqa: F401
+    from . import candidates, data, formula  # noqa: F401

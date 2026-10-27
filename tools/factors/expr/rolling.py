@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from tools.parameters.Parameter import Parameter
 
 
+from alpha.factor.annotations import copy_annotation
+
 from .core import FactorExpr, EvaluateContext
 from .operands import OperandExpr
 from .leaf import ConstExpr, _to_expr
@@ -196,8 +198,8 @@ class RollingExpr(FactorExpr):
         resolved_te = self._trunc_end.resolve(*args, **kwargs) if self._trunc_end is not None else None
         resolved_mp = (self._min_periods.resolve(*args, **kwargs)
                        if isinstance(self._min_periods, FactorExpr) else self._min_periods)
-        return RollingExpr(resolved_data, resolved_window, resolved_ts, resolved_te,
-                           resolved_mp, self._nan_policy)
+        return copy_annotation(self,RollingExpr(resolved_data, resolved_window, resolved_ts, resolved_te,
+                           resolved_mp, self._nan_policy))
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         # RollingExpr 本身不求值——聚合由 RollingOp 完成
@@ -230,16 +232,6 @@ class RollingExpr(FactorExpr):
             result.update(self._min_periods.get_ref_types(typ, leaf_only))
         return result
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        w_str = self._window._to_latex(subst) if isinstance(self._window, FactorExpr) else str(self._window)
-        if self._trunc_start is not None and self._trunc_end is not None:
-            ts_str = self._trunc_start._to_latex(subst) if isinstance(self._trunc_start, FactorExpr) else str(self._trunc_start)
-            te_str = self._trunc_end._to_latex(subst) if isinstance(self._trunc_end, FactorExpr) else str(self._trunc_end)
-            return f'\\mathrm{{R}}_{{{w_str},\\mathrm{{trunc}}({ts_str},{te_str})}}'
-        return f'\\mathrm{{R}}_{{{w_str}}}'
 
     def _get_alias(self) -> str:
         return 'rolling'
@@ -260,7 +252,7 @@ class WindowBarsExpr(FactorExpr):
         return 'window_bars'
 
     def resolve(self, *args, **kwargs) -> 'WindowBarsExpr':
-        return WindowBarsExpr(self.window.resolve(*args, **kwargs))
+        return copy_annotation(self,WindowBarsExpr(self.window.resolve(*args, **kwargs)))
 
     def _evaluate(self, ctx: EvaluateContext) -> int:
         value = self.window.value if isinstance(self.window, ConstExpr) else self.window.evaluate(ctx=ctx)
@@ -274,9 +266,6 @@ class WindowBarsExpr(FactorExpr):
             )
         return periods
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        window_latex = self.window._to_latex(subst)
-        return f'\\mathrm{{Bars}}\\left({window_latex}\\right)'
 
     def _get_alias(self) -> str:
         return f'BARS_{self.window._get_alias()}'
@@ -563,58 +552,6 @@ class RollingOp(OperandExpr):
         label = str(p.value) if isinstance(p, ConstExpr) else str(p)
         return f"{self.op.upper()}_{label}"
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        w_str = self.window._to_latex(subst) if isinstance(self.window, FactorExpr) else str(self.window)
-
-        # 截断后缀
-        trunc_suffix = ''
-        if self._trunc_start is not None and self._trunc_end is not None:
-            ts_str = self._trunc_start._to_latex(subst) if isinstance(self._trunc_start, FactorExpr) else str(self._trunc_start)
-            te_str = self._trunc_end._to_latex(subst) if isinstance(self._trunc_end, FactorExpr) else str(self._trunc_end)
-            trunc_suffix = f',\\mathrm{{trunc}}({ts_str},{te_str})'
-
-        if self._n_data == 1:
-            operand_latex = self.operands[self._data_start]._to_latex(subst)
-            _LATEX_MAP = {
-                'rolling_mean': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Mean}}\\left({operand_latex}\\right)',
-                'rolling_std': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Std}}\\left({operand_latex}\\right)',
-                'rolling_var': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Var}}\\left({operand_latex}\\right)',
-                'rolling_min': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Min}}\\left({operand_latex}\\right)',
-                'rolling_max': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Max}}\\left({operand_latex}\\right)',
-                'rolling_sum': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Sum}}\\left({operand_latex}\\right)',
-                'rolling_ema': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{EMA}}\\left({operand_latex}\\right)',
-                'rolling_skew': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Skew}}\\left({operand_latex}\\right)',
-                'rolling_median': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Median}}\\left({operand_latex}\\right)',
-                'rolling_mad': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{MAD}}\\left({operand_latex}\\right)',
-                'rolling_linreg_slope': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegSlope}}\\left({operand_latex}\\right)',
-                'rolling_linreg_r2': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegR2}}\\left({operand_latex}\\right)',
-                'rolling_linreg_tstat': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegT}}\\left({operand_latex}\\right)',
-                'rolling_linreg_resid_std': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegResidStd}}\\left({operand_latex}\\right)',
-                'rolling_argmax': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMax}}\\left({operand_latex}\\right)',
-                'rolling_argmin': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMin}}\\left({operand_latex}\\right)',
-                'rolling_argmax_raw': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMaxRaw}}\\left({operand_latex}\\right)',
-                'rolling_argmin_raw': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMinRaw}}\\left({operand_latex}\\right)',
-            }
-            if self.op == 'rolling_quantile':
-                q_expr = self.quantile_expr
-                q_latex = (
-                    q_expr._to_latex(subst)
-                    if isinstance(q_expr, FactorExpr)
-                    else str(q_expr)
-                )
-                return (
-                    f'\\text{{R}}_{{{w_str}{trunc_suffix}}}'
-                    f'\\text{{Quantile}}_{{{q_latex}}}'
-                    f'\\left({operand_latex}\\right)'
-                )
-            return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}{operand_latex}')
-        else:
-            left_latex = self.operands[self._data_start]._to_latex(subst)
-            right_latex = self.operands[self._data_start + 1]._to_latex(subst)
-            return f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{{self.op.replace("rolling_", "").capitalize()}}}\\left({left_latex}, {right_latex}\\right)'
 
     def _get_alias(self) -> str:
         parts = [self.op]
@@ -639,10 +576,10 @@ class RollingOp(OperandExpr):
         resolved = [opnd.resolve(*args, **kwargs) for opnd in self._operands]
         mp = (self.min_periods.resolve(*args, **kwargs)
               if isinstance(self.min_periods, FactorExpr) else self.min_periods)
-        return type(self)(
+        return copy_annotation(self,type(self)(
             self.op, *resolved,
             min_periods=mp, nan_policy=self.nan_policy,
-        )
+        ))
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
 
@@ -912,8 +849,6 @@ class IntervalBarsExpr(FactorExpr):
         counts[~observed] = np.nan
         return pd.DataFrame(counts.T, index=index, columns=ctx.products)
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        return f'\\operatorname{{bars}}[{self.start_ns},{self.end_ns}]'
 
 
 def interval_bars(start: Any, end: Any) -> IntervalBarsExpr:

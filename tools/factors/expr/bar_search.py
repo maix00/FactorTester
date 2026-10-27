@@ -7,6 +7,8 @@ from typing import Any, Literal, cast
 import pandas as pd
 
 from .bar_search_eval import evaluate_bar_distance, evaluate_bar_since, scalar_default
+from alpha.factor.annotations import copy_annotation
+
 from .core import EvaluateContext, FactorExpr
 from .leaf import _to_expr
 from .lookback_scope import BarCountScope, LookbackScope
@@ -16,21 +18,6 @@ from .window_semantics import DEFAULT_NAN_POLICY, NanPolicy
 Selection = Literal["nearest", "farthest"]
 
 
-def _search_latex(
-    *, scope: LookbackScope, select: Selection, body: str,
-    subst: dict | None = None,
-) -> str:
-    # nearest selects the smallest k, farthest the largest k — render as the
-    # ordinary \min / \max with the scope as a subscript.  argmin/argmax
-    # (with \underset stacking) is not what is being computed and reads wrong.
-    operator = "\\min" if select == "nearest" else "\\max"
-    subscript = f"[t-k,t]\\in{scope.to_latex(subst)}"
-    return (
-        f"{operator}_{{{subscript}}}"
-        "\\left\\{k\\middle|"
-        f"\\begin{{aligned}}{body}\\end{{aligned}}"
-        "\\right\\}"
-    )
 
 
 class ScopeLengthDefault(FactorExpr):
@@ -46,8 +33,6 @@ class ScopeLengthDefault(FactorExpr):
     def op_name(self) -> str:
         return "scope_length"
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        return r"\operatorname{ScopeLength}"
 
     def _get_alias(self) -> str:
         return "SCOPE_LENGTH"
@@ -109,24 +94,12 @@ class BarSinceOp(OperandExpr):
             include_current=self.include_current,
             nan_policy=self.nan_policy,
         )
-        if self._is_intermediate:
-            resolved = resolved.as_intermediate(
-                self._intermediate_name, factor=kwargs.get("caller"),
-            )
-        return resolved
+        return copy_annotation(self,resolved)
 
     def _structural_extra(self) -> tuple[Any, ...]:
         return (self.scope.structural_key(), self.select, self.include_current,
                 self.nan_policy.value)
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        condition = self.condition._to_latex(subst)
-        return _search_latex(
-            scope=self.scope,
-            select=self.select,
-            body=condition,
-            subst=subst,
-        )
 
     def _get_alias(self) -> str:
         return f"BAR_SINCE_{self.select.upper()}_{self.condition._get_alias()}"
@@ -206,27 +179,11 @@ class BarDistanceOp(OperandExpr):
             default=self.operands[2].resolve(*args, **kwargs),
             nan_policy=self.nan_policy,
         )
-        if self._is_intermediate:
-            resolved = resolved.as_intermediate(
-                self._intermediate_name, factor=kwargs.get("caller"),
-            )
-        return resolved
+        return copy_annotation(self,resolved)
 
     def _structural_extra(self) -> tuple[Any, ...]:
         return (self.scope.structural_key(), self.select, self.nan_policy.value)
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        value = self.value._to_latex(subst)
-        condition = self.condition._to_latex(subst)
-        return _search_latex(
-            scope=self.scope,
-            select=self.select,
-            # Keep the search body as a single-column continuation.  The
-            # surrounding aligned environment is only a line-break container;
-            # this formula must not contain alignment markers.
-            body=f"X_t:={value},\\\\{condition}",
-            subst=subst,
-        )
 
     def _get_alias(self) -> str:
         return f"BAR_DISTANCE_{self.select.upper()}_{self.value._get_alias()}"

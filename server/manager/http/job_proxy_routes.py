@@ -325,6 +325,7 @@ class JobProxyRoutesMixin:
                 {
                     "families/operators": "operators",
                     "families/validate": "validate",
+                    "families/formula-preview": "formula-preview",
                     "families/custom": "families/custom",
                     "families/public": "families/public",
                 },
@@ -363,7 +364,7 @@ class JobProxyRoutesMixin:
             re.fullmatch(pattern, suffix)
             for pattern in (
                 r"overview",
-                r"families/(?:operators|validate|custom|public)",
+                r"families/(?:operators|validate|formula-preview|custom|public)",
                 r"families/(?:custom|public)/[^/]+(?:/(?:impact|transfer))?",
                 r"configurations/[^/]+(?:/[^/]+|/factors)?",
                 r"configuration-scopes(?:/[^/]+)?",
@@ -461,7 +462,7 @@ class JobProxyRoutesMixin:
                 502,
             )
             return True
-        if method != "GET" and 200 <= response.status < 300:
+        if method != "GET" and suffix != "families/formula-preview" and 200 <= response.status < 300:
             refresh = getattr(getattr(self.state, "client_state", None), "_refresh_account_domain_async", None)
             if callable(refresh) and response.json_object().get("success", True):
                 refresh(str(session["username"]), force=True)

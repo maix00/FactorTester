@@ -15,6 +15,10 @@ struct FactorRuntimeHandle {
 
 #[pymethods]
 impl FactorRuntimeHandle {
+    fn latest_output(&self, output: usize) -> PyResult<(i64, i64, Vec<f64>)> {
+        self.inner.latest_output(output).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     fn raise_if_failed(&self) -> PyResult<()> {
         self.inner
             .raise_if_failed()

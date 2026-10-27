@@ -1,16 +1,4 @@
-"""Cross-end consistency: backend preview LaTeX must equal the frontend.
-
-The browser composes the factor preview LaTeX in
-``server/manager/web/catalog/factor-detail-shared.js`` (``previewExpression``).
-This test proves the backend port in
-``server/modules/shared/factor_preview_latex.py`` produces the byte-identical
-string for the same factor object, by running both implementations and
-asserting equality.
-
-The frontend is executed in ``node`` with a minimal ``window`` stub so the IIFE
-can install ``window.FTFactorDetailShared``; ``previewExpression`` is then
-called on the same factor objects the backend port receives.
-"""
+"""Browser transport/KaTeX contracts for the single alpha formula composer."""
 
 from __future__ import annotations
 
@@ -27,7 +15,7 @@ from server.modules.shared import factor_preview_latex as fpl  # noqa: E402
 
 def test_resolved_formula_version_covers_operator_grouping_semantics():
     """Changing persisted LaTeX layout must invalidate old resolved formulas."""
-    assert fpl.RESOLVED_MATH_EXPR_VERSION == 6
+    assert fpl.RESOLVED_MATH_EXPR_VERSION == 7
 
 
 def _rows(params):
@@ -139,7 +127,9 @@ def _cases():
 
 def _node_previews(factor_objects, values_list):
     payload = [
-        {"factor": factor, "values": values}
+        {"factor": factor, "values": values,
+         "rendered":fpl.preview_expression(factor,values),
+         "flat":fpl.preview_expression(factor,values,include_nested_definitions=False)}
         for factor, values in zip(factor_objects, values_list)
     ]
     proc = subprocess.run(
@@ -151,7 +141,7 @@ def _node_previews(factor_objects, values_list):
     return json.loads(proc.stdout)
 
 
-def test_backend_preview_matches_frontend_for_every_case():
+def test_browser_renders_alpha_response_for_every_case():
     cases = _cases()
     factors = [c[1] for c in cases]
     values = [c[2] for c in cases]
@@ -281,3 +271,43 @@ def test_signal_alignment_intermediates_and_reverse_match_real_metadata():
     reversed_family = ReversedReturn()
     assert r"\mathrm{Returned}_t &:=" in reversed_family.math_expr
     assert r"\left(\mathrm{Returned}_t\right)" in reversed_family.math_expr
+
+
+def test_browser_only_transports_previews_and_ignores_stale_responses():
+    code = r'''
+const fs=require('fs');
+global.window={};
+global.document={createElement:()=>({children:[],handlers:{},append(...nodes){this.children.push(...nodes)},addEventListener(k,f){this.handlers[k]=f},replaceChildren(){}})};
+eval(fs.readFileSync(process.argv[1],'utf8'));
+const shared=window.FTFactorDetailShared;
+const factor={math_expr:'TEMPLATE',factor_family_alias:'Race'};
+let show='', calls=0, firstStarted, secondStarted, firstReply, secondReply;
+const first=new Promise(resolve=>{firstStarted=resolve});
+const second=new Promise(resolve=>{secondStarted=resolve});
+const api=(path,options)=>new Promise(resolve=>{if(path!=="/api/factor-library/families/formula-preview"||JSON.parse(options.body).parameter_values.N!==calls+1)throw Error("invalid HTTP payload");calls++;if(calls===1){firstReply=resolve;firstStarted()}else{secondReply=resolve;secondStarted()}});
+window.katex={};window.FTUI={renderMath:(_node,value)=>{show=value}};
+(async()=>{
+ const local=shared.localFormula({t:x=>x,api},factor,{N:1});
+ const old=local.root.children[0].children[1].handlers.click();
+ await first;
+ const latest=local.update({N:2});
+ await second;
+ secondReply({success:true,latex:'NEW'});await latest;
+ firstReply({success:true,latex:'OLD'});await old;
+ if(show!=='NEW'||calls!==2)throw Error('stale response overwrote current preview');
+ let requestCount=0,reply;
+ const options={api:()=>{requestCount++;return new Promise(r=>{reply=r})}};
+ const a=shared.previewExpression(factor,{N:99},options);
+ const b=shared.previewExpression(factor,{N:99},options);
+ reply({success:true,latex:'ONE'});
+ if((await a)!=='ONE'||(await b)!=='ONE'||requestCount!==1)throw Error('in-flight request not shared');
+ process.stdout.write('ok');
+})().catch(error=>{console.error(error);process.exit(1)});
+'''
+    result=subprocess.run(['node','-e',code,str(SHARED_JS)],capture_output=True,text=True)
+    assert result.returncode==0,result.stderr
+    assert result.stdout=='ok'
+    source=SHARED_JS.read_text()
+    assert 'function renderPreviewNode' not in source
+    assert 'function latexValue' not in source
+    assert 'function appendPreviewDefinition' not in source

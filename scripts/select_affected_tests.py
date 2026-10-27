@@ -505,6 +505,50 @@ for _path in (
 ALPHA_RUNTIME_TESTS = (*FACTOR_PLAN_TESTS,
     "tests/scripts/test_nautilus_extension_build.py",
     "tests/server/test_nautilus_strategy_family_replay.py")
+LATEX_QUERY_TESTS = (*FACTOR_PLAN_TESTS,
+    "tests/server/test_alpha_formula_preview.py",
+    "tests/scripts/test_factor_preview_latex_consistency.py",
+    "vendor/py-alpha-lib/py-binding/python/tests/test_factor_presentation.py",
+    "tests/factors/test_alpha_intermediate_queries.py",
+    "tests/factors/test_latex_operator_semantics.py",
+    "tests/factors/test_parameter_latex.py",
+    "tests/factors/test_intermediate_latex_name.py",
+    "tests/factors/test_factor_expr_contracts.py",
+    "tests/factors/test_factor_family_alias.py",
+    "tests/factors/test_factor_run_result.py",
+    "tests/factors/test_ic_batch_evaluation.py",
+    "tests/factors/test_ic_batch_release.py",
+    "tests/factors/test_test_result_lifecycle.py",
+    "tests/server/test_factor_series_nested_layers.py",
+    "tests/server/test_factor_evaluation_frozen_input.py",
+    "tests/server/test_nautilus_strategy_family_replay.py")
+ALPHA_RUNTIME_TESTS = (*ALPHA_RUNTIME_TESTS,*LATEX_QUERY_TESTS)
+for _path in (
+    "tools/factors/FactorFamily.py", "tools/factors/Factors.py",
+    "tools/factors/FactorRunResult.py", "tools/factors/FactorTester.py",
+    "tools/factors/factor_tester_tasks.py", "tools/factors/evaluation/batch.py",
+    "tools/factors/tester_calc/single_factor_test/ic.py",
+    "server/modules/single_factor_test/ic.py", "server/modules/single_factor_test/evaluation.py",
+    "tools/factors/expr/presentation.py", "tools/factors/expr/core.py",
+    "tools/factors/expr/bar_search.py", "tools/factors/expr/composite.py",
+    "tools/factors/expr/cross_sectional.py", "tools/factors/expr/groupby_scope.py",
+    "tools/factors/expr/leaf.py", "tools/factors/expr/lookback_scope.py",
+    "tools/factors/expr/match_refs.py", "tools/factors/expr/operands.py",
+    "tools/factors/expr/rolling.py", "tools/factors/expr/shift.py",
+    "tools/factors/expr/signal_align.py", "tools/factors/expr/term_structure.py",
+):
+    EXACT_PATH_TESTS[_path] = LATEX_QUERY_TESTS
+for _path in (
+    "server/modules/shared/factor_preview_latex.py", "server/modules/factors/formula.py",
+    "server/modules/factors/__init__.py", "server/manager/web/catalog/factor-detail-shared.js",
+    "server/manager/web/catalog/factor-editor.js", "tests/scripts/fixtures/factor_preview_latex_probe.js",
+):
+    EXACT_PATH_TESTS[_path] = ("tests/server/test_alpha_formula_preview.py",
+        "tests/scripts/test_factor_preview_latex_consistency.py")
+EXACT_PATH_TESTS["server/manager/http/job_proxy_routes.py"] = (
+    *EXACT_PATH_TESTS["server/manager/http/job_proxy_routes.py"],
+    "tests/server/test_alpha_formula_preview.py",
+)
 EXACT_PATH_TESTS["vendor/py-alpha-lib"] = ALPHA_RUNTIME_TESTS
 EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)
