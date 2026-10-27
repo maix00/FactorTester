@@ -43,12 +43,20 @@ def test_daily_settlement_events_are_consumed_by_native_replay(tmp_path):
             datetime.combine(day, time(9, 30)),
             datetime.combine(day, time(15, 0)),
         ),
-        batch_bars=1,
+        batch_bars=1, bundle_id="Local", bundle_version="1",
+        bundle_fingerprint="sha256:" + "c" * 64,
+        member_id="LocalCNFuturesContractDAY1",
     )
     receipt = run_small_catalog_replay(
         (ReplayInput(target, "CFFEX|F|T|2403"),),
         tmp_path / "out", max_input_bars=2,
     )
+    assert receipt.source_inputs == ({
+        "bundle_id": "Local", "bundle_version": "1",
+        "bundle_fingerprint": "sha256:" + "c" * 64,
+        "member_id": "LocalCNFuturesContractDAY1",
+        "contract_uid": "CFFEX|F|T|2403",
+    },)
     assert receipt.input_bars == 2
     assert receipt.native_settlements == 2
     assert receipt.native_iterations == 4

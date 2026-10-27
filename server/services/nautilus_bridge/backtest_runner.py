@@ -58,6 +58,7 @@ class ReplayReceipt:
     native_orders: int
     native_positions: int
     native_settlements: int
+    source_inputs: tuple[dict[str, str], ...]
     probe_fill_prices: tuple[str, ...]
     execution_assumptions: tuple[str, ...]
     reports: dict[str, object]
@@ -175,7 +176,15 @@ def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes
         raise ValueError("native per-source replay counts differ from frozen receipts")
     if total != expected or engine.get_result().iterations != expected + settlement_count:
         raise ValueError("native catalog replay count differs from the frozen receipts")
+    source_inputs = tuple({
+        "bundle_id": str(receipt.get("bundle_id") or ""),
+        "bundle_version": str(receipt.get("bundle_version") or ""),
+        "bundle_fingerprint": str(receipt.get("bundle_fingerprint") or ""),
+        "member_id": str(receipt.get("member_id") or ""),
+        "contract_uid": str(receipt.get("contract_uid") or ""),
+    } for _folder, _catalog, receipt, _instrument in rows)
     return {"bars": total, "settlements": settlement_count,
+            "source_inputs": source_inputs,
             "batch_count": batches, "max_batch_bars": largest}
 
 
@@ -376,6 +385,7 @@ def run_small_catalog_replay(
             native_orders=result.total_orders,
             native_positions=result.total_positions,
             native_settlements=int(replay.get("settlements", 0)),
+            source_inputs=tuple(replay.get("source_inputs", ())),
             probe_fill_prices=probe_fill_prices,
             execution_assumptions=(
                 (
