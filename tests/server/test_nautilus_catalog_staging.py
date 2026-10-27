@@ -204,8 +204,8 @@ def test_staging_dispatches_source_owned_non_cn_loader(monkeypatch, tmp_path):
     monkeypatch.setattr(catalog_staging, "installed_bundles", lambda: (bundle,))
     captured = []
     result = {"EXAMPLE": {"catalog_dir": str(tmp_path), "contract_uid": "neutral:rate"}}
-    def stage(**kwargs):
-        captured.append(kwargs)
+    def stage(request):
+        captured.append(request)
         return result
     def activate(name):
         assert name == "external_rates.catalog"
@@ -218,9 +218,10 @@ def test_staging_dispatches_source_owned_non_cn_loader(monkeypatch, tmp_path):
         target_root=tmp_path)
     assert actual is result
     assert len(captured) == 1
-    assert captured[0]["staging_requests"] is requests
-    assert captured[0]["start_ns"] == 1704153600000000000
-    assert captured[0]["target_root"] is tmp_path
+    assert captured[0].staging_requests[0].paths == ("neutral:rate",)
+    assert captured[0].start_ns == 1704153600000000000
+    assert captured[0].target_root is tmp_path
+    assert captured[0].frequency == "MIN15"
 
 
 def test_invalid_source_selection_never_activates_or_creates_catalog(monkeypatch, tmp_path):

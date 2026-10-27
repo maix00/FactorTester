@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from sources.registry import installed_bundles
-from traderesearch_data.nautilus import NautilusCatalogLoader
+from traderesearch_data.nautilus import (
+    CatalogLoadRequest, CatalogStagingRequest, NautilusCatalogLoader,
+)
 
 
 def _ns(value: str) -> int:
@@ -75,8 +77,15 @@ def stage_run_spec_catalogs(
     if not callable(loader):
         raise ValueError(f"source catalog entrypoint is not callable: {source_key}")
     load_catalog = cast(NautilusCatalogLoader, loader)
-    return load_catalog(
-        staging_requests=staging_requests, source_key=source_key,
-        frequency=frequency, start_utc=start_utc, end_utc=end_utc,
+    try:
+        requests = tuple(
+            CatalogStagingRequest(tuple(str(path) for path in item.get("paths", ())))
+            for item in staging_requests
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("invalid catalog staging request") from exc
+    return load_catalog(CatalogLoadRequest(
+        source_key=source_key, frequency=frequency,
+        staging_requests=requests, start_utc=start_utc, end_utc=end_utc,
         start_ns=start_ns, end_ns=end_ns, target_root=target_root,
-    )
+    ))

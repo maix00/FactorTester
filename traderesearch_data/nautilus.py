@@ -38,14 +38,46 @@ class NautilusAdapterContract:
     supported_book_types: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class CatalogStagingRequest:
+    """One immutable set of source contract references to stage."""
+
+    paths: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.paths or any(not isinstance(path, str) or not path for path in self.paths):
+            raise ValueError("catalog staging paths must be non-empty strings")
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogLoadRequest:
+    """Immutable, bounded request handed to a source-owned catalog loader."""
+
+    source_key: str
+    frequency: str
+    staging_requests: tuple[CatalogStagingRequest, ...]
+    start_utc: str
+    end_utc: str
+    start_ns: int
+    end_ns: int
+    target_root: Path
+
+    def __post_init__(self) -> None:
+        if not self.source_key or not self.frequency:
+            raise ValueError("catalog source and frequency are required")
+        if self.start_ns > self.end_ns:
+            raise ValueError("catalog range ends before its start")
+
+
 # The loader is source-owned; no engine or platform domain objects cross this
 # boundary. Paths identify the output catalog, never a centrally guessed input.
 class NautilusCatalogLoader(Protocol):
-    def __call__(
-        self, *, staging_requests: list[dict[str, Any]], source_key: str,
-        frequency: str, start_utc: str, end_utc: str, start_ns: int, end_ns: int,
-        target_root: Path,
-    ) -> dict[str, dict[str, str]]: ...
+    def __call__(self, request: CatalogLoadRequest) -> dict[str, dict[str, str]]: ...
 
 
-__all__ = ["NautilusAdapterContract", "NautilusCatalogLoader"]
+__all__ = [
+    "CatalogLoadRequest",
+    "CatalogStagingRequest",
+    "NautilusAdapterContract",
+    "NautilusCatalogLoader",
+]

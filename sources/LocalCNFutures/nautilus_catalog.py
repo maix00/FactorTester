@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from server.services.nautilus_bridge.catalog import (
     stage_contract_daily_catalog, stage_contract_minute_catalog,
 )
+from traderesearch_data.nautilus import CatalogLoadRequest
 from server.services.nautilus_bridge.market_data import FuturesContractSpec
 from server.modules.shared.price_services import (
     cn_futures_trading_spec_fields, contract_data_path_for, find_contract_product,
@@ -91,15 +92,18 @@ def _session_for_day(product: Any):
     return session
 
 
-def stage_catalogs(
-    *, staging_requests: list[dict[str, Any]], source_key: str, frequency: str,
-    start_utc: str, end_utc: str, start_ns: int, end_ns: int, target_root: Path,
-) -> dict[str, dict[str, str]]:
+def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
+    frequency = request.frequency
+    source_key = request.source_key
+    start_utc, end_utc = request.start_utc, request.end_utc
+    start_ns, end_ns = request.start_ns, request.end_ns
+    target_root = request.target_root
+    staging_requests = request.staging_requests
     if frequency not in {"MIN1", "DAY1"}:
         raise ValueError(f"{frequency}: unsupported source-owned catalog frequency")
     product_contracts: dict[str, str] = {}
     for request in staging_requests:
-        for contract_uid in request["paths"]:
+        for contract_uid in request.paths:
             product_key = str(contract_uid).split("|")[2]
             previous = product_contracts.get(product_key)
             if previous is not None and previous != str(contract_uid):
@@ -112,7 +116,7 @@ def stage_catalogs(
     catalogs: dict[str, dict[str, str]] = {}
     seen_contracts: set[str] = set()
     for request in staging_requests:
-        for contract_uid in request["paths"]:
+        for contract_uid in request.paths:
             if contract_uid in seen_contracts:
                 continue
             seen_contracts.add(contract_uid)
