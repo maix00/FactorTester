@@ -1,7 +1,8 @@
 """Engine-neutral installed Bundle metadata. Discovery never imports plugins."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -47,6 +48,14 @@ class BundleManifest:
     entrypoints: tuple[str, ...]
     members: tuple[BundleMember, ...]
     product_bindings: tuple[ProductBinding, ...]
+
+
+def bundle_content_fingerprint(bundle: BundleManifest) -> str:
+    """Canonical metadata fingerprint; not a market-content revision."""
+    payload = json.dumps(
+        asdict(bundle), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _object(value: Any, keys: set[str], name: str) -> dict[str, Any]:

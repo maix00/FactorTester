@@ -312,3 +312,15 @@ def test_catalog_staging_request_rejects_blank_paths():
 
     with pytest.raises(ValueError, match="non-empty strings"):
         CatalogStagingRequest(("  ",))
+
+
+def test_bundle_content_fingerprint_is_stable_and_metadata_only():
+    from dataclasses import replace
+    from sources.registry import installed_bundles
+    from traderesearch_data.bundles import bundle_content_fingerprint
+
+    bundle = installed_bundles()[0]
+    first = bundle_content_fingerprint(bundle)
+    assert first.startswith("sha256:")
+    assert first == bundle_content_fingerprint(bundle)
+    assert first != bundle_content_fingerprint(replace(bundle, version="changed"))

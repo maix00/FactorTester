@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Any, Iterable, Mapping
 
 from sources.registry import installed_bundles, load_all_sources
+from traderesearch_data.bundles import bundle_content_fingerprint
 from tools.data.source_catalog import (
     DataSourceDeclaration,
     DataSourceMember,
@@ -134,6 +135,7 @@ def installed_bundle_descriptors(
             "id": bundle.bundle_id,
             "bundle_id": bundle.bundle_id,
             "version": bundle.version,
+            "content_fingerprint": bundle_content_fingerprint(bundle),
             "label": bundle.label,
             "provisioner": bundle.provisioner,
             "execution_location": bundle.execution_location,
