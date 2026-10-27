@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--broker',type=localhost,required=True)
     parser.add_argument('--couch-url',type=localhost,required=True)
     parser.add_argument('--credentials-file',type=Path,required=True)
+    parser.add_argument('--complex-match',action='store_true',help='exercise nested SignalAlign/Where and partitioned Rust search')
     parser.add_argument('--family-mode',choices=['mixed','group','threshold'],default='mixed')
     args=parser.parse_args();args.root.mkdir(parents=True,exist_ok=False)
     credentials=json.loads(args.credentials_file.read_text())
@@ -63,6 +64,9 @@ class VersionProbe(FactorFamily):
     def factor_expr():
         return SignalAlign(ColumnRef(DataColumn.CLOSE).rolling('20m').mean(),'30m')
 '''
+    if args.complex_match:
+        source=source.replace("from tools.factors.expr.signal_align import SignalAlign", "from tools.factors.expr.signal_align import SignalAlign\nfrom tools.factors.expr import CURRENT,CANDIDATE,scope_bars\nfrom tools.factors.expr.conditional import where")
+        source=source.replace("return SignalAlign(ColumnRef(DataColumn.CLOSE).rolling('20m').mean(),'30m')", "price=ColumnRef(DataColumn.CLOSE)\n        formed=SignalAlign(price.rolling(2).mean(),'3m')\n        predicate=where(CURRENT>CANDIDATE,(CURRENT-CANDIDATE)>formed/100000,False)\n        return price.bar_distance(predicate,scope=scope_bars(120),lookback=60,default=60)")
     frozen={**_frozen_probe(source),'source_kind':'transient','source_code':source,'temporary':True}
     manifest=json.loads(args.manifest.read_text());catalogs={};receipts=[]
     for item in manifest['products']:
@@ -85,7 +89,7 @@ class VersionProbe(FactorFamily):
             'nautilus_contract':{'settings':settings}}}}}}
     families=[dict(strategy_id=f'Group-{i}',kind='cross_sectional_group',parameters=dict(split_count=2,group_index=i),
                    factor_roles={'signal':{'ref':frozen['ref']}}) for i in (1,2)]
-    families.append(dict(strategy_id='Threshold-1',kind='threshold',parameters={'entry_threshold':100,'exit_threshold':99},factor_roles={'signal':{'ref':frozen['ref']}}))
+    families.append(dict(strategy_id='Threshold-1',kind='threshold',parameters={'entry_threshold':2 if args.complex_match else 100,'exit_threshold':1 if args.complex_match else 99},factor_roles={'signal':{'ref':frozen['ref']}}))
     families=[family for family in families if family['strategy_id'] in ids]
     plan={'plan_version':1,'kind':'nautilus_strategy_family','strategy_families':families,
           'catalog_inputs':catalogs,'max_input_bars':manifest['expected_slices']}
@@ -123,6 +127,9 @@ class VersionProbe(FactorFamily):
             if current.status is not JobStatus.SUCCEEDED:raise AssertionError(f'Job {current.status}: {current.error}')
             result=current.result_summary
             assert result['factor_actors']==1 and result['python_factor_bar_callbacks']==0
+            if args.complex_match:
+                assert result['factor_plan_nodes']==5
+                assert {slots['signal'] for slots in result['strategy_output_slots'].values()}=={0}
             assert result['strategy_publications']==[manifest['expected_slices']]*len(ids)
             assert result['rank_passes']==(0 if args.family_mode=='threshold' else manifest['expected_slices'])
             assert result['orders']>0
@@ -136,7 +143,7 @@ class VersionProbe(FactorFamily):
                 store=CouchDBObjectStore(args.couch_url,database,username=credentials['username'],password=credentials['password'])
                 data=store.get_attachment(ref,stored)
                 assert hashlib.sha256(data).hexdigest()==stored.split('.')[0]
-            receipt={'family_mode':args.family_mode,'job_id':job_id,'task_id':task.id,'status':current.status.value,'seconds':time.perf_counter()-started,
+            receipt={'complex_match':args.complex_match,'family_mode':args.family_mode,'job_id':job_id,'task_id':task.id,'status':current.status.value,'seconds':time.perf_counter()-started,
                 'sampled_worker_rss_max_bytes':max(sampled_rss,default=0),'worker_pid':worker.pid,'terminal_worker_pid':current.worker_pid,'result':result,
                 'couchdb_database':database,'verified_attachments':sorted(report['attachments']),
                 'limits':'local isolated execution of frozen plan; authoring/planning HTTP and production deployment not covered'}

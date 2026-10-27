@@ -65,7 +65,7 @@ def stage_real(root, rows):
         label="REAL local T/TL prices/clocks; synthetic instrument probe rules; not paper-return reproduction")))
 
 
-def replay(root,out):
+def replay(root,out,complex_match=False):
     from tools.factors.expr import CLOSE
     from server.services.nautilus_bridge.strategy_backtest import run_strategy_families_replay
     from server.services.nautilus_bridge.strategy_families import CrossSectionalGroup
@@ -75,23 +75,40 @@ def replay(root,out):
         inputs[item['product']]=ReplayInput(folder,receipt['contract_uid'])
     mean=CLOSE.rolling(20).semantics(min_periods=1).mean()
     median=CLOSE.rolling(4096).semantics(min_periods=1).median()
+    if complex_match:
+        from tools.factors.expr import CURRENT,CANDIDATE,scope_bars,SignalAlign
+        from tools.factors.expr.conditional import where
+        formed=SignalAlign(CLOSE.rolling(2).mean(),'3m')
+        median=CLOSE.bar_distance(where(CURRENT>CANDIDATE,(CURRENT-CANDIDATE)>formed/100000,False),scope=scope_bars(120),lookback=60,default=60)
     refs={'signal':'factor:v2:'+'a'*43,'confirm':'factor:v2:'+'b'*43}
     strategies=[dict(strategy_id=f'Group-{i}',factor_bindings={'signal':mean,'confirm':median},factor_refs=refs,family=CrossSectionalGroup(2,i)) for i in (1,2)]
     out.mkdir(exist_ok=False,parents=True);started=time.perf_counter()
     result=run_strategy_families_replay(inputs=inputs,strategies=strategies,output_dir=out/'reports',max_bars=rows,
         batch_minutes=1024,inspect_outputs=True)
     elapsed=time.perf_counter()-started
-    assert result['factor_actors']==1 and result['factor_plan_nodes']==3
+    assert result['factor_actors']==1
+    assert result['factor_plan_nodes']==(5 if complex_match else 3)
     assert result['strategy_publications']==[rows,rows] and result['rank_passes']==rows
     assert result['bars']==rows*len(inputs) and result['max_batch_bars']<=2048
     for role,window,operation in [('signal',20,np.mean),('confirm',4096,np.median)]:
         actual=result['latest_outputs']['Group-1'][role][2]
         expected=[]
         for item in manifest['products']:
-            base=item['base_closes'];expected.append(operation([base[i%len(base)] for i in range(max(0,rows-window),rows)]))
+            base=item['base_closes']
+            if complex_match and role=='confirm':
+                # Synthetic continuous minute grid, exact clock phase from catalog receipt.
+                receipt=json.loads((Path(item['catalog_path'])/'factor_tester_catalog_receipt.json').read_text())
+                end=int(receipt['last_event_ns']);start=int(receipt['first_event_ns'])
+                target=end//180000000000*180000000000
+                pos=(target-start)//60000000000
+                threshold=np.mean([base[j%len(base)] for j in range(max(0,pos-1),pos+1)])/100000
+                current=base[(rows-1)%len(base)]
+                lo=max(((rows-1)//120)*120,rows-1-60)
+                expected.append(next((rows-1-j for j in range(rows-2,lo-1,-1) if current>base[j%len(base)] and current-base[j%len(base)]>threshold),60))
+            else:expected.append(operation([base[i%len(base)] for i in range(max(0,rows-window),rows)]))
         np.testing.assert_allclose(actual,expected,rtol=0,atol=1e-9)
     peak=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*(1024 if sys.platform.startswith('linux') else 1)
-    value=dict(label=manifest['label'],rows_per_product=rows,seconds=elapsed,peak_rss_bytes=peak,
+    value=dict(complex_match=complex_match,label=manifest['label'],rows_per_product=rows,seconds=elapsed,peak_rss_bytes=peak,
         runtime=dict(platform=platform.platform(),python=sys.version.split()[0]),result=result,
         cache='Nautilus defaults; unchanged; system cache not cleared',scope='local native long replay; staging excluded; no Celery/public claim')
     (out/'measurements.json').write_text(json.dumps(value,indent=2));print(json.dumps(value))
@@ -99,6 +116,7 @@ def replay(root,out):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--stage-base',type=Path)
+    parser.add_argument('--complex-match',action='store_true')
     parser.add_argument('--stage-real',action='store_true')
     parser.add_argument('--root',required=True,type=Path);parser.add_argument('--rows',type=int,default=10000)
     parser.add_argument('--output',type=Path);args=parser.parse_args()
@@ -106,7 +124,7 @@ def main():
     elif args.stage_base:stage(args.stage_base,args.root,args.rows)
     else:
         if args.output is None:parser.error('--output required for replay')
-        replay(args.root,args.output)
+        replay(args.root,args.output,args.complex_match)
 
 
 if __name__=='__main__':main()

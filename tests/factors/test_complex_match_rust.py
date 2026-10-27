@@ -1,5 +1,6 @@
 """Independent causal/scope oracle; production must not use Python search math."""
 import json
+import pytest
 import numpy as np
 import pandas as pd
 from alpha import FactorPlanState
@@ -37,11 +38,15 @@ def test_night_belongs_to_frozen_trading_day_and_lookback_stays_inside_scope():
     np.testing.assert_equal(limited['A'].to_numpy(),[9,9,1,1])
 
 
-def test_where_with_nested_signal_matches_every_prefix_and_incremental_core():
+@pytest.mark.parametrize("missing_bar", [(),(2,),(3,),(2,3,7)])
+def test_where_with_nested_signal_matches_every_prefix_and_incremental_core(missing_bar):
     from tools.factors.expr.leaf import ColumnRef
     from tools.data.types import DataColumn
     index=pd.date_range('2026-01-01 09:01',periods=12,freq='min',name='MIN1')
     prices=np.array([1,2,5,3,8,7,9,2,4,12,1,15.],dtype=float)
+    if missing_bar:
+        index=index.delete(list(missing_bar))
+        prices=np.delete(prices,list(missing_bar))
     # Keep a real shared source column so the same expression serializes to the native bridge.
     price=ColumnRef(DataColumn.CLOSE)
     formed=SignalAlign(price.rolling(2).mean(),'3m')
@@ -49,8 +54,8 @@ def test_where_with_nested_signal_matches_every_prefix_and_incremental_core():
     expression=price.bar_distance(predicate,scope=scope_bars(5),lookback=3,default=9)
     expected=[]
     for i,current in enumerate(prices):
-        target=((i+1)//3)*3-1
-        threshold=np.mean(prices[max(0,target-1):target+1])/10 if target>=0 else np.nan
+        target=int(np.searchsorted(index.as_unit('ns').asi8,index[i].value//180000000000*180000000000,side='right')-1)
+        threshold=np.mean(prices[max(0,target-1):target+1])/10 if target>=0 and index[i].value//180000000000*180000000000>=index[0].value else np.nan
         found=[i-j for j in range(max((i//5)*5,i-3),i) if current>prices[j] and current-prices[j]>threshold]
         expected.append(min(found) if found else 9)
     spec=alpha_plan_spec(expression,source_freq=DataFreq.MIN1,products=('A',))
@@ -62,3 +67,13 @@ def test_where_with_nested_signal_matches_every_prefix_and_incremental_core():
         state=FactorPlanState(json.dumps({k:v for k,v in spec.items() if k!='key_tuples'}),1)
         for t,value,want in zip(index[:end],prices[:end],expected):
             np.testing.assert_equal(state.update_at(t.value,np.array([value]))[0],want)
+
+
+def test_since_partition_resets_and_lookback_does_not_cross_barrier():
+    from tools.factors.expr.bar_search import bar_since
+    index=pd.date_range('2026-01-01 09:01',periods=6,freq='min',name='MIN1')
+    condition=_FrameExpr(pd.DataFrame({'A':[1.,0.,0.,0.,1.,0.]},index=index))
+    partition=bar_since(condition,scope=scope_bars(3),default=9).evaluate(ctx=ctx(index))
+    sliding=bar_since(condition,lookback=3,default=9).evaluate(ctx=ctx(index))
+    np.testing.assert_equal(partition['A'].to_numpy(),[0,1,2,9,0,1])
+    np.testing.assert_equal(sliding['A'].to_numpy(),[0,1,2,3,0,1])
