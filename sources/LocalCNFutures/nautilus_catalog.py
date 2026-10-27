@@ -146,6 +146,10 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
     start_ns, end_ns = request.start_ns, request.end_ns
     target_root = request.target_root
     staging_requests = request.staging_requests
+    bundle_identity = dict(
+        bundle_id=request.bundle_id, bundle_version=request.bundle_version,
+        bundle_fingerprint=request.bundle_fingerprint, member_id=request.member_id,
+    )
     if frequency not in {"MIN1", "DAY1"}:
         raise ValueError(f"{frequency}: unsupported source-owned catalog frequency")
     if "FieldHistory:market_rules:exchange" not in request.related_members:
@@ -194,6 +198,7 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
                     contract_data_path_for(contract_uid, product), target,
                     contract_uid=contract_uid, instrument_spec=spec,
                     start_ns=clipped_start, end_ns=clipped_end,
+                    **bundle_identity,
                 )
             else:
                 if parent is None:
@@ -211,6 +216,7 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
                     session_for_day=_session_for_day(
                         parent, _trading_day_map(term_path),
                     ),
+                    **bundle_identity,
                 )
             product_key = str(contract_uid).split("|")[2]
             catalogs[product_key] = {

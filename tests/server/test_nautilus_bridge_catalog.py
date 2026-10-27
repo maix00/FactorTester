@@ -110,6 +110,7 @@ def test_daily_catalog_uses_trading_day_labels_and_exchange_close(tmp_path):
         Decimal("0.02"), "test-only fixture", resolved_contract_minute_source(),
     )
     target = tmp_path / "daily-catalog"
+    bundle_fingerprint = "sha256:" + "a" * 64
     receipt = stage_contract_daily_catalog(
         source, target, contract_uid="CFFEX|F|T|2403", instrument_spec=spec,
         start_ns=0, end_ns=2_000_000_000_000_000_000,
@@ -117,8 +118,12 @@ def test_daily_catalog_uses_trading_day_labels_and_exchange_close(tmp_path):
         session_for_day=lambda day: (
             datetime.combine(day, time(9, 30)), datetime.combine(day, time(15, 0))
         ),
-        batch_bars=1,
+        batch_bars=1, bundle_id="Local", bundle_version="1",
+        bundle_fingerprint=bundle_fingerprint,
+        member_id="LocalCNFuturesContractDAY1",
     )
+    assert receipt.bundle_fingerprint == bundle_fingerprint
+    assert receipt.member_id == "LocalCNFuturesContractDAY1"
     assert receipt.bar_type.endswith("1-DAY-LAST-EXTERNAL")
     assert receipt.selected_count == 2
     assert receipt.session_summaries[0]["trading_day"] == "2024-01-02"

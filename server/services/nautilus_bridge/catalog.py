@@ -99,6 +99,10 @@ class CatalogReceipt:
     max_batch_bars: int
     session_summaries: tuple[dict[str, str | int], ...] = ()
     settlement_records: tuple[dict[str, str | int], ...] = ()
+    bundle_id: str = ""
+    bundle_version: str = ""
+    bundle_fingerprint: str = ""
+    member_id: str = ""
 
 
 def _stage_contract_catalog(
@@ -107,6 +111,8 @@ def _stage_contract_catalog(
     start_ns: int, end_ns: int,
     bars: Iterator[MarketBar], bar_type_suffix: str,
     batch_bars: int = 4_096, max_bars: int = 100_000,
+    bundle_id: str = "", bundle_version: str = "",
+    bundle_fingerprint: str = "", member_id: str = "",
 ) -> CatalogReceipt:
     """Shared bounded NT writer for one source-owned Bar contract.
 
@@ -237,6 +243,8 @@ def _stage_contract_catalog(
                 "bar_count": item.bar_count,
             } for item in session_summary.sessions()),
             settlement_records=tuple(settlement_records),
+            bundle_id=bundle_id, bundle_version=bundle_version,
+            bundle_fingerprint=bundle_fingerprint, member_id=member_id,
         )
         receipt_path = staged / "factor_tester_catalog_receipt.json"
         receipt_path.write_text(json.dumps(asdict(receipt), ensure_ascii=False,
@@ -270,6 +278,8 @@ def stage_contract_minute_catalog(
     contract_uid: str, instrument_spec: FuturesContractSpec,
     start_ns: int, end_ns: int,
     batch_bars: int = 4_096, max_bars: int = 100_000,
+    bundle_id: str = "", bundle_version: str = "",
+    bundle_fingerprint: str = "", member_id: str = "",
 ) -> CatalogReceipt:
     """Write one contract's unadjusted MIN1 bars in bounded NT batches."""
     return _stage_contract_catalog(
@@ -279,6 +289,8 @@ def stage_contract_minute_catalog(
                               batch_size=batch_bars),
         bar_type_suffix="1-MINUTE-LAST-EXTERNAL",
         batch_bars=batch_bars, max_bars=max_bars,
+        bundle_id=bundle_id, bundle_version=bundle_version,
+        bundle_fingerprint=bundle_fingerprint, member_id=member_id,
     )
 
 
@@ -288,6 +300,8 @@ def stage_contract_daily_catalog(
     start_ns: int, end_ns: int, product_codes: set[str],
     session_for_day: Callable, source_time_unit: str = "validated",
     batch_bars: int = 4_096, max_bars: int = 100_000,
+    bundle_id: str = "", bundle_version: str = "",
+    bundle_fingerprint: str = "", member_id: str = "",
 ) -> CatalogReceipt:
     """Write one contract's date-labelled DAY1 bars in bounded NT batches.
 
@@ -305,4 +319,6 @@ def stage_contract_daily_catalog(
         ),
         bar_type_suffix="1-DAY-LAST-EXTERNAL",
         batch_bars=batch_bars, max_bars=max_bars,
+        bundle_id=bundle_id, bundle_version=bundle_version,
+        bundle_fingerprint=bundle_fingerprint, member_id=member_id,
     )

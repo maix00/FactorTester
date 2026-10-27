@@ -292,6 +292,8 @@ def test_catalog_load_request_rejects_mutable_or_invalid_fields(tmp_path):
     with pytest.raises(TypeError, match="related_members"):
         CatalogLoadRequest(
             source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+            bundle_id="Local", bundle_version="1",
+            bundle_fingerprint="sha256:" + "a" * 64, member_id="LocalCNFuturesContractMIN1",
             related_members=[], staging_requests=(request,),
             start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
             start_ns=0, end_ns=1, target_root=tmp_path,
@@ -299,6 +301,8 @@ def test_catalog_load_request_rejects_mutable_or_invalid_fields(tmp_path):
     with pytest.raises(TypeError, match="target_root"):
         CatalogLoadRequest(
             source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+            bundle_id="Local", bundle_version="1",
+            bundle_fingerprint="sha256:" + "a" * 64, member_id="LocalCNFuturesContractMIN1",
             related_members=("FieldHistory:market_rules:exchange",),
             staging_requests=(request,), start_utc="2024-01-02T00:00:00Z",
             end_utc="2024-01-03T00:00:00Z", start_ns=0, end_ns=1,

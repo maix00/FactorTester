@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from sources.registry import installed_bundles
+from traderesearch_data.bundles import bundle_content_fingerprint
 from traderesearch_data.nautilus import (
     CatalogLoadRequest, CatalogStagingRequest, NautilusCatalogLoader,
 )
@@ -61,7 +62,7 @@ def stage_run_spec_catalogs(
                for member in bundle.members if member.id == source_key]
     if len(matches) != 1:
         raise ValueError(f"expected one server-installed source member: {source_key}")
-    _, member = matches[0]
+    bundle, member = matches[0]
     if member.kind != "market_data" or member.data_type != "bar" or member.frequency != frequency:
         raise ValueError(f"source member does not provide requested Bar frequency: {source_key}")
     entrypoint = dict(member.integrations).get("nautilus_catalog")
@@ -88,6 +89,9 @@ def stage_run_spec_catalogs(
         raise ValueError("invalid catalog staging request") from exc
     return load_catalog(CatalogLoadRequest(
         source_key=source_key, frequency=frequency,
+        bundle_id=bundle.bundle_id, bundle_version=bundle.version,
+        bundle_fingerprint=bundle_content_fingerprint(bundle),
+        member_id=member.id,
         related_members=tuple(member.related_members),
         staging_requests=requests, start_utc=start_utc, end_utc=end_utc,
         start_ns=start_ns, end_ns=end_ns, target_root=target_root,

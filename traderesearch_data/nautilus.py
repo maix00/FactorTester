@@ -116,6 +116,10 @@ class CatalogLoadRequest:
 
     source_key: str
     frequency: str
+    bundle_id: str
+    bundle_version: str
+    bundle_fingerprint: str
+    member_id: str
     related_members: tuple[str, ...]
     staging_requests: tuple[CatalogStagingRequest, ...]
     start_utc: str
@@ -129,6 +133,12 @@ class CatalogLoadRequest:
             raise ValueError("catalog source is required")
         if not isinstance(self.frequency, str) or not self.frequency:
             raise ValueError("catalog frequency is required")
+        for name in ("bundle_id", "bundle_version", "member_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"catalog {name} is required")
+        if not isinstance(self.bundle_fingerprint, str) or not self.bundle_fingerprint.startswith("sha256:"):
+            raise ValueError("catalog bundle_fingerprint must be sha256")
         if not isinstance(self.related_members, tuple) or any(
             not isinstance(value, str) or not value.strip() for value in self.related_members
         ):
