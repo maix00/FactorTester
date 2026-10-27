@@ -17,7 +17,10 @@ def test_installed_bundles_route_is_metadata_only(monkeypatch):
               "execution_location": "client"}
     monkeypatch.setattr(
         product_catalog_projection, "installed_bundle_descriptors",
-        lambda: (descriptor, client),
+        lambda **kwargs: tuple(
+            row for row in (descriptor, client)
+            if kwargs.get("execution_location") in {None, row["execution_location"]}
+        ),
     )
     monkeypatch.setattr(
         catalog_routes, "json_response",

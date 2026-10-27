@@ -101,15 +101,21 @@ def _visible_source_index() -> dict[str, DataSourceDeclaration]:
     }
 
 
-def installed_bundle_descriptors() -> tuple[dict[str, Any], ...]:
+def installed_bundle_descriptors(
+    *, execution_location: str | None = None,
+) -> tuple[dict[str, Any], ...]:
     """Return installed Bundle metadata without activating source plugins.
 
     Availability and product counts are deliberately unknown here: they require
     live source/product probes and belong to the runtime projection, not a
     metadata-only catalog read.
     """
+    if execution_location not in {None, "server", "client"}:
+        raise ValueError("execution_location must be server, client, or None")
     rows: list[dict[str, Any]] = []
     for bundle in installed_bundles():
+        if execution_location is not None and bundle.execution_location != execution_location:
+            continue
         members = tuple({
             "id": member.id,
             "kind": member.kind,

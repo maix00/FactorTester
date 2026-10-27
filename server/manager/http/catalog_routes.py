@@ -184,10 +184,9 @@ class CatalogRoutesMixin:
                     "success": True,
                     "origin": "server",
                     "metadata_only": True,
-                    "sources": [
-                        row for row in installed_bundle_descriptors()
-                        if row.get("execution_location") == "server"
-                    ],
+                    "sources": list(
+                        installed_bundle_descriptors(execution_location="server")
+                    ),
                 }
             elif parsed.path == "/api/product-library/data-sources":
                 sources = self.state.federated_source_descriptors(
