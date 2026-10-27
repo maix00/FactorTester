@@ -90,6 +90,18 @@ def test_field_history_is_lazy_strict_historical_and_preserves_raw_mapping(monke
     }]
 
 
+def test_rule_provider_can_use_caller_owned_frame_without_store_reader(monkeypatch):
+    from tools.data import field_history
+
+    frame = field_history.load_historical_field_frame()
+    monkeypatch.setattr(
+        field_history, "load_historical_field_frame",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must use caller frame")),
+    )
+    provider = field_history.load_market_rule_field_provider(frame=frame)
+    assert provider.frame is not None
+
+
 def test_strict_rule_provider_is_cached_per_sqlite_revision(monkeypatch):
     from tools.data import field_history
     from sources.LocalCNFutures import CNFutures

@@ -742,7 +742,24 @@ def save_historical_field_records(
     return path
 
 
-def load_historical_field_frame(*, store_key: str = "openctp") -> pd.DataFrame:
+def ensure_historical_field_schema(connection: sqlite3.Connection) -> None:
+    """Create/migrate the history table without loading its rows."""
+    _ensure_schema(connection)
+
+
+def load_historical_field_frame(
+    *, store_key: str = "openctp",
+    connection: sqlite3.Connection | None = None,
+    ensure_schema: bool = True,
+) -> pd.DataFrame:
+    """Load the history table, optionally through a caller-owned transaction."""
+    if connection is not None:
+        try:
+            if ensure_schema:
+                _ensure_schema(connection)
+            return pd.read_sql_query(f'SELECT * FROM "{HISTORICAL_FIELD_TABLE}"', connection)
+        except sqlite3.Error:
+            return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
     hub = DataHub.get_instance()
     _ensure_store_registered(hub, store_key)
     try:
@@ -819,6 +836,7 @@ def load_market_rule_field_provider(
     store_key: str = "openctp",
     include_openctp_latest: bool = True,
     transaction_fee_source: str = TRANSACTION_FEE_SOURCE_EXCHANGE,
+    frame: pd.DataFrame | None = None,
 ) -> FieldHistoryProvider:
     """Load FieldHistory rows plus OpenCTP's latest contract specs.
 
@@ -830,7 +848,8 @@ def load_market_rule_field_provider(
     through its term structure and then matches the fee/spec row for the active
     contract.
     """
-    frame = load_historical_field_frame(store_key=store_key)
+    if frame is None:
+        frame = load_historical_field_frame(store_key=store_key)
     frame = _filter_transaction_fee_source_frame(
         frame,
         transaction_fee_source=transaction_fee_source,
