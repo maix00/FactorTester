@@ -188,6 +188,9 @@ federated catalog's runtime availability/count projection.
   同一品种的多个合约并拒绝；`LocalCNFuturesContractDAY1` 不再静默复用 MIN1
   `stage_contract_minute_catalog`，而是报告 `DAY1 catalog loader is not implemented`。
   这是防止错误结果的 fail-closed，不是多合约或 DAY1 已完成。
+- 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
+  不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
+  仍相同，完整历史规则/执行路径尚未接入。
 
 仍未完成：显式多 catalog 消费者契约、DAY1 reader/时钟/结算、无损保证金、同一规则源
 单次加载、非 CN/非 Parquet 独立 Bundle、RunSpec 输入身份冻结。
