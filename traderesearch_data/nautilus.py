@@ -39,6 +39,54 @@ class NautilusAdapterContract:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogMemberRef:
+    """One staged contract catalog with explicit source and product identity."""
+
+    authority: str
+    bundle_id: str
+    member_id: str
+    product_ref: str
+    source_product_ref: str
+    contract_uid: str
+    catalog_dir: Path
+    bar_type: str
+    source_revision: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "authority", "bundle_id", "member_id", "product_ref",
+            "source_product_ref", "contract_uid", "bar_type",
+        ):
+            if not str(getattr(self, name)).strip():
+                raise ValueError(f"catalog member {name} is required")
+        if not isinstance(self.catalog_dir, Path):
+            raise TypeError("catalog_dir must be a Path")
+        if self.source_revision is not None and not str(self.source_revision).strip():
+            raise ValueError("source_revision must be non-empty when present")
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogSet:
+    """Explicit multi-contract staging result; never silently drops a contract."""
+
+    refs: tuple[CatalogMemberRef, ...]
+
+    def __post_init__(self) -> None:
+        identities = [
+            (item.source_product_ref, item.contract_uid, item.bar_type)
+            for item in self.refs
+        ]
+        if len(set(identities)) != len(identities):
+            raise ValueError("duplicate catalog member reference")
+
+    def products(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(item.product_ref for item in self.refs))
+
+    def by_product(self, product_ref: str) -> tuple[CatalogMemberRef, ...]:
+        return tuple(item for item in self.refs if item.product_ref == product_ref)
+
+
+@dataclass(frozen=True, slots=True)
 class CatalogStagingRequest:
     """One immutable set of source contract references to stage."""
 
@@ -77,6 +125,8 @@ class NautilusCatalogLoader(Protocol):
 
 
 __all__ = [
+    "CatalogMemberRef",
+    "CatalogSet",
     "CatalogLoadRequest",
     "CatalogStagingRequest",
     "NautilusAdapterContract",

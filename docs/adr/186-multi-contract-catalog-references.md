@@ -1,6 +1,6 @@
 # ADR-186: 显式多合约 catalog 引用
 
-状态：提议，未实现。关联 #447、ADR-184。
+状态：提议；公共不可变类型已加入，源/消费者尚未切换。关联 #447、ADR-184。
 
 ## 问题
 
@@ -76,6 +76,14 @@ CatalogSet
 - 消费者能明确选择合约，report 能列出每个合约；
 - 缺失/重复/越界请求失败且不写部分 catalog；
 - 不读取未请求合约的行情。
+
+## 当前进展
+
+`traderesearch_data.nautilus` 已加入不可变 `CatalogMemberRef` 与 `CatalogSet`：
+保留 authority、bundle/member、product/source_product、contract_uid、catalog_dir、
+bar_type、可选 source_revision；同 `(source_product_ref, contract_uid, bar_type)`
+重复引用会失败。当前 staging 和消费者仍未返回/使用 `CatalogSet`，因此多合约路径
+仍是 fail-closed。
 
 本 ADR 不改变当前 `product -> ReplayInput` 兼容路径；该路径在多合约能力落地前
 继续 fail-closed。

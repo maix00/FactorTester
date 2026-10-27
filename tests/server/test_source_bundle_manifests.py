@@ -216,3 +216,29 @@ def test_lazy_bundle_paths_preserve_existing_artifact_resolution():
     assert source.TERM_STRUCTURE_PATH == str(artifact_path("LocalCNFutures", "term_structure-listed_contracts.parquet"))
     with pytest.raises(AttributeError):
         getattr(source, "nonexistent_bundle_attribute")
+
+
+def test_catalog_set_preserves_multiple_contracts_per_product(tmp_path):
+    import pytest
+    from traderesearch_data.nautilus import CatalogMemberRef, CatalogSet
+
+    def ref(contract, bar_type):
+        return CatalogMemberRef(
+            authority="Local", bundle_id="Local", member_id="LocalCNFuturesContractMIN1",
+            product_ref="T", source_product_ref="T.SHFE", contract_uid=contract,
+            catalog_dir=tmp_path / contract, bar_type=bar_type,
+        )
+
+    first = ref("CFFEX|F|T|2403", "T2403.CFFEX-1-MINUTE-LAST-EXTERNAL")
+    second = ref("CFFEX|F|T|2406", "T2406.CFFEX-1-MINUTE-LAST-EXTERNAL")
+    catalog_set = CatalogSet((first, second))
+    assert catalog_set.products() == ("T",)
+    assert catalog_set.by_product("T") == (first, second)
+    with pytest.raises(ValueError, match="duplicate catalog member reference"):
+        CatalogSet((first, first))
+    with pytest.raises(TypeError, match="catalog_dir"):
+        CatalogMemberRef(
+            authority="Local", bundle_id="Local", member_id="m", product_ref="T",
+            source_product_ref="T.SHFE", contract_uid="CFFEX|F|T|2403",
+            catalog_dir="not-a-path", bar_type="T2403.CFFEX-1-MINUTE-LAST-EXTERNAL",
+        )
