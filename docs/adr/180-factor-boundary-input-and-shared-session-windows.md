@@ -275,3 +275,17 @@ mtime，避免相同版本号的旧扩展直接被判定为已构建；增量依
 独立 Rust FactorActor 尚未替换该真实 Job 的因子消费端；Celery/RabbitMQ、原研报
 策略、公网及持久化端到端验收仍须继续。当前路径已移除 Python 行情合并，但不能
 称整条 Job 为零 Python per-Bar。
+
+本地测量（parent d22606240 / Nautilus 01a1e56793）：
+`tests/benchmarks/bench_strategy_catalog_runtime.py` 使用已冻结的真实 T/TL 各
+2,000 根分钟 Bar，共 4,000 根、100 批、最大 40 根；共享 rolling20 信号，
+分组家族产生 1 笔订单及 2,000 次因子发布，并导出 Nautilus 报告。macOS arm64、
+GTHT Python 3.14、native dev opt-level=1，Cache 保持现有默认设置；没有清空文件
+缓存。3 个独立进程的回放/策略/报告耗时为 0.829、0.679、0.687 秒，中位数
+0.687 秒，整进程峰值最大 331,759,616 字节（约 316 MiB）。这包含 Python
+策略适配、输入收据校验及报告依赖，不含首次源转换与 Celery/broker；因子引用
+和账户为验收夹具，不能当成已注册研报因子的真实公网 Job。没有保留旧合并器
+作性能基准，也不据不同边界的历史样本声称提速比例或泄漏上界。
+
+验证：原生 node 23 项、Python 聚焦 74 项、提交 hook 121 项通过，均非全仓测试。
+子模块与父仓库均本地提交，未推送或部署。
