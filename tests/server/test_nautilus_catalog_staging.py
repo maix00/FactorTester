@@ -160,6 +160,32 @@ def test_stage_run_spec_catalogs_dispatches_day1_reader(monkeypatch, tmp_path):
     assert (close_dt.hour, close_dt.minute) == (15, 0)
 
 
+def test_build_contract_spec_rejects_missing_or_side_specific_margin():
+    import pytest
+    from sources.LocalCNFutures import nautilus_catalog
+
+    row = {"start_ts": 1700611200000, "end_ts": 1708387200000}
+    base = {"point_value": 10000, "min_tick": 0.005, "trading_spec_source": "test"}
+    with pytest.raises(ValueError, match="no side-specific margin"):
+        nautilus_catalog.build_contract_spec(
+            "CFFEX|F|T|2403", product=object(), contract_row=row,
+            spec_fields=dict(base), source_key="LocalCNFuturesContractMIN1",
+            frequency="MIN1",
+        )
+    with pytest.raises(ValueError, match="non-numeric margin"):
+        nautilus_catalog.build_contract_spec(
+            "CFFEX|F|T|2403", product=object(), contract_row=row,
+            spec_fields={**base, "long_margin_ratio": "bad", "short_margin_ratio": 0.02},
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+        )
+    with pytest.raises(ValueError, match="side-specific margin is not representable"):
+        nautilus_catalog.build_contract_spec(
+            "CFFEX|F|T|2403", product=object(), contract_row=row,
+            spec_fields={**base, "long_margin_ratio": 0.02, "short_margin_ratio": 0.03},
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+        )
+
+
 def _bundle_with_loader():
     from dataclasses import replace
     from sources.registry import installed_bundles

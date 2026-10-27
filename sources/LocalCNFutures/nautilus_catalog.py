@@ -36,8 +36,11 @@ def build_contract_spec(
     short_margin = spec_fields.get("short_margin_ratio")
     if long_margin is None or short_margin is None:
         raise ValueError(f"contract has no side-specific margin: {contract_uid}")
-    long_margin = Decimal(str(long_margin))
-    short_margin = Decimal(str(short_margin))
+    try:
+        long_margin = Decimal(str(long_margin))
+        short_margin = Decimal(str(short_margin))
+    except (ArithmeticError, TypeError, ValueError) as exc:
+        raise ValueError(f"contract has a non-numeric margin: {contract_uid}") from exc
     if long_margin != short_margin:
         raise ValueError(
             f"{contract_uid}: side-specific margin is not representable by the "
