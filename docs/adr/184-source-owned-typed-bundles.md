@@ -196,8 +196,11 @@ federated catalog's runtime availability/count projection.
 - DAY1 不再静默复用 MIN1 `stage_contract_minute_catalog`。源 loader 使用
   `stage_contract_daily_catalog`，由 `iter_daily_bars` 读取 `TRADING_DAY`/结算列，
   由源声明的 `session_for_day` 把日期标签转换为交易所收盘时钟，并写入
-  `1-DAY-LAST-EXTERNAL`。当前 session 来自产品日盘时段字段，尚未用真实异常交易日历
-  验证；不能据此声称 DAY1 已完成。一次本机只读检查使用真实
+  `1-DAY-LAST-EXTERNAL`。当前可用前一交易日夜盘起点：从 term-structure 的唯一
+  `TRADING_DAY` 序列取前一个标签，若源声明 night session 则起点为前一日夜盘开盘，
+  终点为当日日盘收盘；这比“当天日盘拼接”覆盖了周末/长假后的前一交易日夜盘。
+  它仍使用当前产品时段字段，没有历史时段变更/版本化异常日历，不能据此声称 DAY1
+  已完成。一次本机只读检查使用真实
   `term_structure-listed_contracts.parquet` 的 `A1001`，写入 10 根 DAY1 Bar，
   Nautilus readback 数量/OHLC/事件时刻一致；首个事件为 2010-01-04 15:00
   Asia/Shanghai。该检查是合成/真实小窗口的局部证据，不是完整验收，也没有

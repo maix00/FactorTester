@@ -92,8 +92,23 @@ def build_contract_spec(
 _SESSION_RE = re.compile(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})")
 
 
-def _session_for_day(product: Any):
-    """Resolve the source-declared day-session bounds for one daily label."""
+def _trading_day_map(path: str) -> dict[Any, Any]:
+    """Read the source's trading-day labels once and map each to its predecessor."""
+    try:
+        import pyarrow.dataset as ds
+        table = ds.dataset(path, format="parquet").to_table(columns=["TRADING_DAY"])
+        values = sorted({
+            value.date() if isinstance(value, datetime) else value
+            for value in table.column("TRADING_DAY").to_pylist()
+            if value is not None
+        })
+    except Exception:
+        return {}
+    return dict(zip(values[1:], values[:-1]))
+
+
+def _session_for_day(product: Any, previous_days: dict[Any, Any] | None = None):
+    """Resolve day-session bounds and, when available, the preceding night open."""
     text = str(getattr(product, "trading_day_sessions", "") or "")
     intervals = _SESSION_RE.findall(text)
     if not intervals:
@@ -105,11 +120,19 @@ def _session_for_day(product: Any):
         close_hour, close_minute = (int(value) for value in close_match.groups())
     else:
         close_hour, close_minute = (int(value) for value in intervals[-1][2:])
+    night = _SESSION_RE.findall(str(getattr(product, "night_session", "") or ""))
+    previous_days = previous_days or {}
     timezone = ZoneInfo("Asia/Shanghai")
 
     def session(day):
+        open_day, open_hour, open_minute = day, start_hour, start_minute
+        if night:
+            night_hour, night_minute = (int(value) for value in night[0][:2])
+            previous = previous_days.get(day)
+            if previous is not None:
+                open_day, open_hour, open_minute = previous, night_hour, night_minute
         return (
-            datetime.combine(day, time(start_hour, start_minute), tzinfo=timezone),
+            datetime.combine(open_day, time(open_hour, open_minute), tzinfo=timezone),
             datetime.combine(day, time(close_hour, close_minute), tzinfo=timezone),
         )
 
@@ -185,7 +208,9 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
                     term_path, target, contract_uid=contract_uid,
                     instrument_spec=spec, start_ns=clipped_start, end_ns=clipped_end,
                     product_codes=set(codes),
-                    session_for_day=_session_for_day(parent),
+                    session_for_day=_session_for_day(
+                        parent, _trading_day_map(term_path),
+                    ),
                 )
             product_key = str(contract_uid).split("|")[2]
             catalogs[product_key] = {

@@ -314,3 +314,21 @@ assert not any(name.startswith(('tools.', 'sources.LocalCNFutures', 'nautilus_tr
 """
     subprocess.run([sys.executable, "-S", "-c", code], check=True, capture_output=True,
                    cwd=Path(__file__).resolve().parents[2], text=True)
+
+
+def test_day1_session_starts_at_previous_night_trading_day():
+    from datetime import date
+    from types import SimpleNamespace
+    from sources.LocalCNFutures.nautilus_catalog import _session_for_day
+
+    product = SimpleNamespace(
+        trading_day_sessions="09:00-11:30,13:30-15:00",
+        night_session="21:00-02:30",
+        trading_day_close_time="15:00",
+    )
+    session = _session_for_day(product, {date(2024, 1, 2): date(2024, 1, 1)})
+    open_dt, close_dt = session(date(2024, 1, 2))
+    assert (open_dt.year, open_dt.month, open_dt.day, open_dt.hour, open_dt.minute) == (
+        2024, 1, 1, 21, 0,
+    )
+    assert (close_dt.day, close_dt.hour, close_dt.minute) == (2, 15, 0)
