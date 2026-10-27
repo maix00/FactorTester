@@ -259,13 +259,18 @@
 
   function compactCoverageCell(context, descriptor) {
     const value = descriptor?.availability || {};
-    const available = value.product_count ?? descriptor?.product_count ?? 0;
+    const rawAvailable = value.product_count ?? descriptor?.product_count;
+    const known = rawAvailable !== null && rawAvailable !== undefined
+      && Number.isFinite(Number(rawAvailable));
+    const available = known ? Number(rawAvailable) : null;
     const catalog = descriptor?.catalog_product_count ?? available;
     const visitor = descriptor.visitor_data_accessible === false
       ? context.t("访客只读") : "";
     return multilineCell([
       availabilityStatus(context, value.status),
-      `${context.t("有数据")} ${available} / ${catalog} ${context.t("个产品")}`,
+      known
+        ? `${context.t("有数据")} ${available} / ${catalog} ${context.t("个产品")}`
+        : context.t("产品数量未报告"),
       visitor,
     ], "catalog-source-lines catalog-source-availability");
   }
