@@ -108,6 +108,9 @@ def test_daily_settlement_posts_pnl_and_revalues_margin_on_open_position(tmp_pat
     assert [item["pnl_change"] for item in adjustments] == [
         "400.00 CNY", "1000.00 CNY", "1000.00 CNY",
     ]
+    timestamps = [int(item["ts_event"]) for item in adjustments]
+    assert timestamps == sorted(timestamps)
+    assert len(set(timestamps)) == 3
     assert positions.loc[0, "realized_pnl"] == "3000.00 CNY"
     account = pd.read_csv(output / "account.csv")
     assert account.iloc[-1]["total"] == 1003000.0
