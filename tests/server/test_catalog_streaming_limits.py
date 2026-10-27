@@ -46,6 +46,7 @@ def test_native_replay_receives_frozen_bounds_without_python_queries():
     assert calls[0]["end"] == catalog.bars[-1].ts_init
     assert calls[0]["chunk_size"] == 3
     assert calls[0]["max_chunk_events"] == 250_000
+    assert all(config.optimize_file_loading for config in calls[0]["data"])
     assert catalog.queries == []
 
 

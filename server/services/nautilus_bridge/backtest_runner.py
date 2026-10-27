@@ -137,6 +137,9 @@ def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes
     data = [BacktestDataConfig(
         data_type=NautilusDataType.Bar, catalog_path=str(folder),
         bar_types=[str(receipt["bar_type"])],
+        # One streaming table per homogeneous catalog directory. The native
+        # default opens one buffered query per file, multiplying prefetch/RSS.
+        optimize_file_loading=True,
         start_time=int(receipt["first_available_ns"]),
         end_time=int(receipt["last_available_ns"]),
     ) for folder, _catalog, receipt, _instrument in rows]

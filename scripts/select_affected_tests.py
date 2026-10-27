@@ -522,7 +522,8 @@ LATEX_QUERY_TESTS = (*FACTOR_PLAN_TESTS,
     "tests/server/test_factor_series_nested_layers.py",
     "tests/server/test_factor_evaluation_frozen_input.py",
     "tests/server/test_nautilus_strategy_family_replay.py")
-ALPHA_RUNTIME_TESTS = (*ALPHA_RUNTIME_TESTS,*LATEX_QUERY_TESTS)
+ALPHA_RUNTIME_TESTS = (*ALPHA_RUNTIME_TESTS, *LATEX_QUERY_TESTS,
+    "vendor/py-alpha-lib/py-binding/python/tests/test_batch_signal_term.py")
 for _path in (
     "tools/factors/FactorFamily.py", "tools/factors/Factors.py",
     "tools/factors/FactorRunResult.py", "tools/factors/FactorTester.py",
@@ -575,6 +576,26 @@ EXACT_PATH_TESTS["tests/server/test_catalog_streaming_limits.py"] = ("tests/serv
 EXACT_PATH_TESTS["tests/factors/_scope_extrema_oracle.py"] = ("tests/factors/test_groupby_scope.py", "tests/factors/test_groupby_scope_arg_extreme_edges.py")
 EXACT_PATH_TESTS["tests/factors/rolling_benchmarks/extrema.py"] = ("tests/factors/test_groupby_scope_arg_extreme_edges.py",)
 EXACT_PATH_TESTS["tests/factors/test_shared_timeline.py"] = ("tests/factors/test_shared_timeline.py",)
+
+# Shared native factor execution: retain precise hook selection for new benches
+# (tests/benchmarks is intentionally not a catch-all test module).
+SHARED_STRATEGY_TESTS = (
+    "tests/server/test_nautilus_strategy_family_replay.py",
+    "tests/server/test_nautilus_strategy_runspec.py",
+    "tests/server/test_strategy_plan_freeze.py",
+    "tests/server/test_catalog_streaming_limits.py",
+)
+EXACT_PATH_TESTS["server/modules/single_factor_test/planning.py"] = (
+    *SHARED_STRATEGY_TESTS, "tests/server/test_job_dispatch_planning.py",
+)
+EXACT_PATH_TESTS["tests/benchmarks/bench_shared_strategy_long_replay.py"] = SHARED_STRATEGY_TESTS
+EXACT_PATH_TESTS["tests/benchmarks/bench_public_batch_signal_term.py"] = (
+    "vendor/py-alpha-lib/py-binding/python/tests/test_batch_signal_term.py",
+    "tests/factors/test_alpha_factor_public_api.py",
+)
+for _path in ("tests/server/test_nautilus_strategy_family_replay.py",
+              "tests/server/test_nautilus_strategy_runspec.py", "tests/server/test_strategy_plan_freeze.py"):
+    EXACT_PATH_TESTS[_path] = (_path,)
 
 PREFIX_PATH_TESTS = {
     "vendor/py-alpha-lib/": ALPHA_RUNTIME_TESTS,

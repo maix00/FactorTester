@@ -187,7 +187,7 @@ def test_unsupported_plan_nodes_are_explicit():
     from alpha.factor import plan_blockers
 
     expression = ColumnRef('CLOSE').signal_align('2min')
-    assert 'SignalAlign' in plan_blockers(expression)
+    assert plan_blockers(expression) == ()
 
 
 def test_signal_align_rejects_unsupported_basepoint_explicitly():
@@ -441,7 +441,8 @@ def test_trading_day_scope_anchor_end_enters_rust_plan():
         for timestamp, value in [(0, 0.0), (100, 1.0), (200, 2.0), (250, 3.0)]
     ]
     assert np.isnan(values[0])
-    assert values[2] == 2.0
+    assert values[2] == 1.0  # target 150 cannot use observation 200
+    assert values[3] == 3.0
 
 
 def test_tools_incremental_uses_rust_facade_for_simple_rolling():
@@ -648,7 +649,7 @@ def test_alpha_factor_term_structure_public_leaf():
     )
     expression = term_spread()
     np.testing.assert_allclose(expression.evaluate(ctx)['A'].to_numpy(), [2.0, 2.0])
-    assert 'TermStructureExpr' in plan_blockers(expression)
+    assert plan_blockers(expression) == ()
 
 
 def test_lightweight_category_and_term_inputs_without_product_objects():

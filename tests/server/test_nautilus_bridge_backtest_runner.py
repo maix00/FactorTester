@@ -23,11 +23,11 @@ from tests.nautilus_source_fixture import resolved_contract_minute_source
 ROOT = Path("/Users/maxdeux/Documents/GTHT/data/sources/LocalCNFutures")
 
 
-def _real_catalog(tmp_path, code="T", month="2403", count=8):
+def _real_catalog(tmp_path, code="T", month="2403", count=8, *, batch_bars=3):
     source = ROOT / f"data_mink_product/CFFEX_F_{code}_{month}.parquet"
     if not source.is_file():
         pytest.skip("read-only local T/TL source unavailable")
-    original = list(islice(iter_minute_bars(source, batch_size=4), count))
+    original = list(islice(iter_minute_bars(source, batch_size=max(4, batch_bars)), count))
     assert len(original) == count
     spec = FuturesContractSpec(
         instrument_code=f"{code}{month}", venue="CFFEX", underlying=code,
@@ -45,7 +45,7 @@ def _real_catalog(tmp_path, code="T", month="2403", count=8):
         instrument_spec=spec,
         start_ns=original[0].clock.interval_end_ns,
         end_ns=original[-1].clock.interval_end_ns,
-        batch_bars=3, max_bars=count,
+        batch_bars=batch_bars, max_bars=count,
     )
     return ReplayInput(catalog, receipt.contract_uid)
 

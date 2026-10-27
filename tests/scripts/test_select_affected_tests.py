@@ -421,3 +421,13 @@ def test_cli_naming_migration_stays_scoped_to_install_config_help_contracts():
         "tools/cli/release/materialize.py", "scripts/release/assets.py"})
     assert mode == "SCOPED"
     assert set(targets) == set(selector.CLI_NAMING_TESTS)
+
+
+def test_shared_factor_benchmarks_and_planning_remain_scoped():
+    for path in ("tests/benchmarks/bench_shared_strategy_long_replay.py",
+                 "tests/benchmarks/bench_public_batch_signal_term.py",
+                 "server/modules/single_factor_test/planning.py"):
+        mode, targets = selector.select({path})
+        assert mode == "SCOPED"
+        assert targets and all((selector.ROOT / target).is_file() for target in targets)
+        assert "tests/server" not in targets and "tests/factors" not in targets
