@@ -185,3 +185,53 @@ def test_rule_revision_tracks_wal_commit_and_database_path(monkeypatch, tmp_path
     assert first is not None and second is not None
     assert first[0] == db.resolve().as_posix()
     assert first != second
+
+
+def test_strict_provider_loads_one_caller_owned_frame_per_revision(monkeypatch, tmp_path):
+    from tools.data import field_history, hub
+    from sources.LocalCNFutures import CNFutures
+
+    db = tmp_path / "rules.sqlite"
+
+    class FakeHub:
+        def get_store_path(self, key):
+            return db
+
+        def connect_store(self, key):
+            return _FakeConnection()
+
+    class _FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, *args):
+            return self
+
+        def rollback(self):
+            return None
+
+    frame = field_history.pd.DataFrame()
+    monkeypatch.setattr(hub.DataHub, "get_instance", classmethod(lambda cls: FakeHub()))
+    monkeypatch.setattr(CNFutures, "_rule_revision_for", lambda conn, path: (1, 1))
+    monkeypatch.setattr(field_history, "ensure_historical_field_schema", lambda conn: None)
+    monkeypatch.setattr(field_history, "load_historical_field_frame",
+                        lambda **kwargs: frame)
+    frames = []
+    sentinel = object()
+    monkeypatch.setattr(
+        field_history, "load_market_rule_field_provider",
+        lambda **kwargs: (frames.append(kwargs["frame"]), sentinel)[-1],
+    )
+    CNFutures._clear_rule_provider_cache()
+    try:
+        assert CNFutures._strict_exchange_field_history() is sentinel
+        assert CNFutures._strict_exchange_field_history() is sentinel
+        assert len(frames) == 1 and frames[0] is frame
+        monkeypatch.setattr(CNFutures, "_rule_revision_for", lambda conn, path: (2, 2))
+        assert CNFutures._strict_exchange_field_history() is sentinel
+        assert len(frames) == 2
+    finally:
+        CNFutures._clear_rule_provider_cache()
