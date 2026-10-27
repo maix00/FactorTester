@@ -2,6 +2,7 @@ import type { JSONObject } from "./draft.ts";
 
 export interface CodeEditor {
   setValue(text: string): void;
+  revealPath(path: string[]): void;
   dispose(): void;
 }
 export type CodeFactory = (element: HTMLElement, text: string, schema: JSONObject,

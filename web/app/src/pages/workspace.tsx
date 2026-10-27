@@ -37,7 +37,7 @@ export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): Re
         {pages.map((page) => (
           <button key={page.id} type="button" className="tr-mobile-open-row" onClick={() => onOpen?.(page.id)}>
             <span className="tr-mobile-open-icon"><PageIcon name={page.icon} /></span>
-            <span>{t(`common.nav.${page.id}`, { defaultValue: page.title })}</span>
+            <span>{t(`nav.${page.id}`, { defaultValue: page.title })}</span>
             <span className="tr-mobile-open-route">{page.route.split("?")[0]}</span>
           </button>
         ))}

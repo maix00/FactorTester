@@ -18,6 +18,10 @@ def test_registry_projection_preserves_each_registered_execution_field():
                 if setting.execution_policy == "include" and not setting.adapter_managed}
     assert set(fields) == expected
     assert fields["split_count"]["default"] == app.settings["split_count"].default
+    for row in contract["catalog"]:
+        if row["analysis"] == "backtest":
+            assert row["scope_policy"] == app.settings[row["key"]].scope_policy.value
+            assert row["group_title"] == app.tabs[row["group"]].label
     assert contract["schema"]["additionalProperties"] is True
     assert len({tuple(row["path"]) for row in contract["catalog"]}) == len(contract["catalog"])
 

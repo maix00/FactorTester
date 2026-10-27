@@ -9,6 +9,7 @@ import { MobileSettingDetail, MobileSettingsPage, type MobileSettingSection } fr
 import { MobileJobsPage } from "./pages/mobile-jobs.tsx";
 import { PageErrorBoundary } from "./error-boundary.tsx";
 import { MobileNotificationHost } from "./notifications/mobile-host.tsx";
+import { AppTheme } from "./components/app-theme.tsx";
 import { TestConfigurationPage } from "./pages/test-configuration.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
@@ -48,7 +49,7 @@ export function MobileShell(): React.ReactElement {
   };
 
   return (
-    <IonApp>
+    <AppTheme><IonApp>
       <MobileNotificationHost />
       {page?.id === "settings" && setting ? (
         <MobileSettingDetail section={setting} onBack={backSetting} />
@@ -73,16 +74,16 @@ export function MobileShell(): React.ReactElement {
                 key={item.id}
                 tab={item.id}
                 selected={active === item.id}
-                aria-label={t(`common.nav.${item.id}`, { defaultValue: item.title })}
+                aria-label={t(`nav.${item.id}`, { defaultValue: item.title })}
                 onClick={() => selectTab(item.id)}
               >
                 <PageIcon name={item.icon} />
-                <span>{t(`common.nav.${item.id}`, { defaultValue: item.title })}</span>
+                <span>{t(`nav.${item.id}`, { defaultValue: item.title })}</span>
               </IonTabButton>
             ))}
           </IonTabBar>
         </div>
       )}
-    </IonApp>
+    </IonApp></AppTheme>
   );
 }

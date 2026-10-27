@@ -3,7 +3,7 @@ import { notification } from "antd";
 import { bindNotificationSink } from "./core.ts";
 
 export function DesktopNotificationHost(): React.ReactElement {
-  const [api, holder] = notification.useNotification();
+  const [api, holder] = notification.useNotification({ top: 112 });
   useEffect(() => {
     bindNotificationSink((notice, done) => {
       api.open({

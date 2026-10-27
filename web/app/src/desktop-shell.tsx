@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Tooltip } from "antd";
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -8,10 +9,9 @@ import {
 import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.ts";
 import { PageIcon } from "./icon.tsx";
 import { PageSurface } from "./surface.tsx";
-import { ConfigProvider } from "antd";
+import { AppTheme } from "./components/app-theme.tsx";
+import { Brand } from "./components/brand.tsx";
 import { useTranslation } from "react-i18next";
-import zhCN from "antd/locale/zh_CN";
-import enUS from "antd/locale/en_US";
 import { SettingsOverlay } from "./components/settings-overlay.tsx";
 import { PageErrorBoundary } from "./error-boundary.tsx";
 import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
@@ -34,7 +34,7 @@ function Tab(props: IDockviewPanelHeaderProps<{ pageId: string }>): React.ReactE
     <span className="tr-dock-tab" title={title}>
       <PageIcon name={page?.icon} />
       <span className="tr-dock-tab-title" title={title}>{title}</span>
-      <button type="button" className="tr-dock-close" aria-label="关闭" onClick={() => props.api.close()}>×</button>
+      <button type="button" className="tr-dock-close" aria-label={t("close")} onClick={() => props.api.close()}>×</button>
     </span>
   );
 }
@@ -45,7 +45,7 @@ const LAYOUT_KEY = "tr.workspace.layout.v2";
 type DockviewApi = DockviewReadyEvent["api"];
 
 export function DesktopShell(): React.ReactElement {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const pages = pagesForScope("desktop");
   const label = (page: { id: string; title: string }): string => t(`nav.${page.id}`, { defaultValue: page.title });
   const [api, setApi] = useState<DockviewApi | null>(null);
@@ -120,18 +120,14 @@ export function DesktopShell(): React.ReactElement {
   };
 
   return (
-    <ConfigProvider locale={i18n.language.startsWith("en") ? enUS : zhCN} theme={{ token: {
-      colorPrimary: "#087cff", colorBorder: "#d9d9de", borderRadius: 8,
-      colorBgContainer: "#ffffff", colorText: "#1d1d1f", colorTextSecondary: "#74747a",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
-    } }}>
+    <AppTheme>
     <DesktopNotificationHost />
     <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
     <div className={`tr-app-shell${collapsed ? " is-collapsed" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
-      <aside className="tr-sidebar" aria-label="主导航">
+      <aside className="tr-sidebar" aria-label={t("mainNavigation")}>
         <div className="tr-sidebar-header">
           <button type="button" className="tr-sidebar-brand" onClick={() => open(pages[0]?.id ?? "research")}>
-            <span className="tr-sidebar-title">TradeResearch</span>
+            <span className="tr-sidebar-title"><Brand /></span>
           </button>
           <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? t("expand") : t("collapse")} title={collapsed ? t("expand") : t("collapse")} onClick={() => {
               setCollapsed((value) => {
@@ -143,27 +139,25 @@ export function DesktopShell(): React.ReactElement {
             <PageIcon name="sidebar" />
           </button>
         </div>
-        <div className="tr-sidebar-resize" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" onPointerDown={startResize} />
+        <div className="tr-sidebar-resize" role="separator" aria-orientation="vertical" aria-label={t("resizeSidebar")} onPointerDown={startResize} />
         <nav className="tr-module-nav">
           {pages.map((page) => (
+            <Tooltip key={page.id} title={collapsed ? label(page) : undefined} placement="right">
             <button
               key={page.id}
               type="button"
               className={`tr-nav-item${active === page.id ? " is-active" : ""}`}
-              data-tooltip={page.title}
-              aria-label={page.title}
-              title={page.title}
+              aria-label={label(page)}
               onClick={() => open(page.id)}
             >
               <PageIcon name={page.icon} />
               <span className="tr-nav-label">{label(page)}</span>
-            </button>
+            </button></Tooltip>
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
-        <button type="button" className="tr-sidebar-reset" onClick={() => setSettingsOpen(true)}>{t("settings")}</button>
         <button type="button" className="tr-account-button" onClick={() => setSettingsOpen(true)}>
-          <PageIcon name="account" />
+          <PageIcon name="settings" />
           <span className="tr-nav-label">{t("settings")}</span>
         </button>
       </aside>
@@ -173,6 +167,6 @@ export function DesktopShell(): React.ReactElement {
         </section>
       </main>
     </div>
-    </ConfigProvider>
+    </AppTheme>
   );
 }

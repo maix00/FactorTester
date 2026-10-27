@@ -1,38 +1,127 @@
-.tr-config-page { padding: 24px; height: 100%; box-sizing: border-box; overflow: auto; background: #f7f8fa; color: #1f2937; }
-.tr-config-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-.tr-config-header h1 { font-size: 24px; margin: 0 0 6px; }
-.tr-config-header p { margin: 0; color: #687385; }
-.tr-config-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
-.tr-config-toolbar > .ant-select { min-width: 210px; flex: 1; max-width: 360px; }
-.tr-config-page > .ant-alert { margin-bottom: 12px; }
-.tr-config-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 620px; border: 1px solid #dfe3e9; border-radius: 12px; background: white; overflow: hidden; }
-.tr-config-sidebar { padding: 18px 14px; background: #f9fafc; border-right: 1px solid #e5e7eb; min-width: 0; }
-.tr-config-sidebar h2, .tr-config-field-editor h2 { margin: 0 0 14px; font-size: 17px; }
-.tr-config-sidebar > .ant-select { display: block; width: 100%; margin: 12px 0; }
-.tr-config-catalog { display: flex; flex-direction: column; gap: 3px; margin: 10px 0 16px; }
-.tr-config-catalog > button { text-align: left; cursor: pointer; border: 1px solid transparent; background: transparent; border-radius: 7px; padding: 9px; color: inherit; }
-.tr-config-catalog > button:hover, .tr-config-catalog > button.is-selected { background: #edf4ff; border-color: #c6dcff; }
-.tr-config-catalog > button:disabled { cursor: default; opacity: .5; }
-.tr-config-field-title { display: block; font-weight: 550; }
-.tr-config-catalog small { display: block; color: #718096; font-size: 11px; overflow-wrap: anywhere; margin-top: 4px; }
-.tr-config-content { padding: 20px; min-width: 0; }
-.tr-config-sections, .tr-config-present { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-.tr-config-field-editor > code { display: block; color: #7a8596; margin: 0 0 20px; overflow-wrap: anywhere; font-size: 12px; }
-.tr-config-field-editor fieldset { min-width: 0; }
-.tr-config-field-editor .ant-form { margin-top: 16px; }
+.tr-config-page { --tr-config-line: #e8ecf1; --tr-config-muted: #697587; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; color: #202b3c; background: #fff; }
+.tr-config-topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 17px 24px; border-bottom: 1px solid var(--tr-config-line); background: #fff; }
+.tr-config-topbar h1 { margin: 0; font-size: 18px; font-weight: 650; line-height: 32px; white-space: nowrap; }
+.tr-config-workspace { display: flex; align-items: center; gap: 2px; }
+.tr-config-workspace > .ant-select { width: 205px; }
+.tr-config-status { width: 7px; height: 7px; margin-left: 8px; border-radius: 50%; background: #36a269; flex: none; }
+.tr-config-status.is-dirty { background: #d99a29; }
+.tr-config-top-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.tr-config-top-actions > [aria-pressed="true"] { color: #1677ff; background: #edf4ff; }
+.tr-config-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
+.tr-config-sidebar { padding: 23px 14px; border-right: 1px solid var(--tr-config-line); background: #fafbfd; overflow: auto; min-width: 0; }
+.tr-config-sidebar[hidden], .tr-config-content[hidden] { display: none; }
+.tr-config-nav-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 9px; margin-bottom: 10px; }
+.tr-config-nav-heading > button:first-child { border: 0; background: none; padding: 0; font-size: 13px; font-weight: 650; color: #344158; cursor: pointer; }
+.tr-config-nav-heading > .ant-btn { color: #1677ff; }
+.tr-config-settings-heading { margin-top: 28px; padding-top: 23px; border-top: 1px solid var(--tr-config-line); }
+.tr-config-sidebar > .ant-input-search { margin: 0 0 12px; }
+.tr-config-nav-list { display: flex; flex-direction: column; gap: 2px; }
+.tr-config-nav-list > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; border: 0; border-radius: 5px; padding: 14px 12px; min-height: 52px; color: #43516a; background: none; cursor: pointer; text-align: left; font-size: 13px; }
+.tr-config-nav-list > button > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.tr-config-nav-list > button:hover { background: #f0f3f8; }
+.tr-config-nav-list > button.is-selected { color: #1264d9; background: #eaf2ff; box-shadow: inset 3px 0 #1677ff; font-weight: 550; }
+.tr-config-chevron { color: #9aa4b3; flex: none; }
+.tr-config-content { padding: 26px 32px 40px; min-width: 0; overflow: auto; }
+.tr-config-panel-heading { display: flex; align-items: center; margin-bottom: 18px; }
+.tr-config-panel-heading h2 { font-size: 21px; line-height: 30px; margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.tr-config-strategy-form, .tr-config-field-editor, .tr-config-overview-list, .tr-config-strategy-catalog, .tr-config-setting-catalog { max-width: 940px; }
+.tr-config-inline-row, .tr-config-setting-row { display: grid; grid-template-columns: minmax(110px, 24%) minmax(0, 1fr); align-items: center; column-gap: 24px; padding: 17px 0; min-height: 72px; box-sizing: border-box; border-bottom: 1px solid #edf0f4; }
+.tr-config-inline-row > label, .tr-config-setting-row > label { color: #4b586d; font-size: 13px; line-height: 22px; }
+.tr-config-inline-row > span { font-size: 14px; overflow-wrap: anywhere; }
+.tr-config-setting-row { grid-template-columns: minmax(110px, 24%) minmax(0, 1fr) 25px; }
+.tr-config-setting-row > label { overflow-wrap: anywhere; }
+.tr-config-setting-control { min-width: 0; }
+.tr-config-setting-control .ant-form-item { margin-bottom: 0; }
+.tr-config-setting-control .ant-form-item-label { display: none; }
+.tr-config-setting-control .ant-col { max-width: 100%; }
+.tr-config-setting-control .ant-input-number, .tr-config-setting-control .ant-select { width: 100%; }
+.tr-config-remove { color: #9aa4b3; padding-inline: 4px; }
+.tr-config-remove:hover { color: #cf3749 !important; }
+.tr-config-strategy-form fieldset, .tr-config-field-editor fieldset { min-width: 0; border: 0; margin: 0; padding: 0; }
+.tr-config-strategy-form legend:empty, .tr-config-field-editor legend:empty { display: none; }
+.tr-config-strategy-form .ant-form-item { margin: 0; padding: 17px 0; border-bottom: 1px solid #edf0f4; }
+.tr-config-strategy-form .ant-form-item-row { display: grid; grid-template-columns: minmax(110px, 24%) minmax(0, 1fr); column-gap: 24px; align-items: center; }
+.tr-config-strategy-form .ant-form-item-label { text-align: left; padding: 0; max-width: none; white-space: normal; }
+.tr-config-strategy-form .ant-form-item-label > label { color: #4b586d; font-size: 13px; height: auto; }
+.tr-config-strategy-form .ant-form-item-control { max-width: 100%; min-width: 0; width: 100%; }
+.tr-config-strategy-form .ant-input-number, .tr-config-strategy-form .ant-select { width: 100%; }
+.tr-config-strategy-form > .ant-btn { margin-top: 22px; }
+.tr-config-choice-list { display: flex; flex-direction: column; margin: 20px 0; }
+.tr-config-choice-list > button { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; text-align: left; cursor: pointer; background: #fff; border: 0; border-bottom: 1px solid var(--tr-config-line); padding: 20px 12px; color: inherit; }
+.tr-config-choice-list > button:hover { background: #f6f9ff; }
+.tr-config-choice-list strong { display: block; font-size: 14px; font-weight: 550; }
+.tr-config-choice-list small { display: block; color: var(--tr-config-muted); margin-top: 6px; font-size: 12px; }
+.tr-config-choice-list > button:disabled { opacity: .5; cursor: wait; }
+.tr-config-overview-list > .ant-btn { margin-top: 14px; }
 .tr-config-code { min-height: 500px; position: relative; }
-.tr-config-monaco { height: 570px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
-.tr-config-code textarea { box-sizing: border-box; width: 100%; min-height: 400px; font-family: monospace; }
+.tr-config-monaco { height: max(500px, calc(100dvh - 220px)); border: 1px solid var(--tr-config-line); border-radius: 5px; overflow: hidden; }
+.tr-config-code textarea { box-sizing: border-box; width: 100%; min-height: 65dvh; border: 1px solid var(--tr-config-line); padding: 14px; border-radius: 5px; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.6; }
 .tr-config-validation { margin-top: 16px; color: #b42318; font-size: 13px; }
 .tr-config-validation ul { padding-left: 20px; max-height: 160px; overflow: auto; }
-@media (max-width: 700px) {
-  .tr-config-page { padding: 14px; }
-  .tr-config-header { align-items: flex-start; }
-  .tr-config-header h1 { font-size: 21px; }
-  .tr-config-layout { grid-template-columns: minmax(0, 1fr); }
-  .tr-config-sidebar { border-right: 0; border-bottom: 1px solid #e5e7eb; }
-  .tr-config-catalog { max-height: 220px; overflow: auto; }
-  .tr-config-content { padding: 16px; }
-  .tr-config-toolbar > .ant-select { max-width: none; }
-  .tr-config-monaco { height: 460px; }
+.tr-config-preview { max-height: 75dvh; overflow: auto; white-space: pre; font-size: 12px; line-height: 1.7; }
+.tr-config-loading { padding: 16px 24px; }
+.tr-config-page > .ant-alert { margin: 12px 20px 0; }
+.tr-config-mobile-actions { display: none; }
+@media (max-width: 760px) {
+  .tr-config-page { height: calc(100dvh - 64px); min-height: 0; overflow: hidden; padding-bottom: 0; }
+  .tr-config-topbar { position: sticky; top: 0; z-index: 4; padding: 12px 16px; gap: 8px; }
+  .tr-config-topbar h1 { flex: 1; min-width: 0; font-size: 18px; overflow: hidden; text-overflow: ellipsis; }
+  .tr-config-top-actions { margin-left: auto; margin-right: 35px; }
+  .tr-config-workspace { order: 3; width: 100%; padding-top: 8px; }
+  .tr-config-workspace > .ant-select { flex: 1; width: auto; min-width: 0; }
+  .tr-config-layout { display: block; flex: 1; min-height: 0; overflow: auto; padding-bottom: 84px; }
+  .tr-config-sidebar { padding: 24px 16px; border-right: 0; background: #fff; overflow: visible; }
+  .tr-config-nav-heading { padding: 0; }
+  .tr-config-nav-heading > button:first-child { font-size: 15px; }
+  .tr-config-nav-list > button { min-height: 52px; border-bottom: 1px solid #edf0f4; border-radius: 0; padding: 14px 0; font-size: 15px; }
+  .tr-config-nav-list > button.is-selected { box-shadow: none; background: transparent; }
+  .tr-config-content { padding: 8px 20px 24px; overflow: visible; }
+  .tr-config-inline-row, .tr-config-setting-row { grid-template-columns: minmax(0, 1fr); gap: 7px; padding: 10px 0; border-bottom: 0; min-height: auto; }
+  .tr-config-inline-row > label, .tr-config-setting-row > label { font-size: 13px; color: #697587; }
+  .tr-config-setting-row { position: relative; padding-right: 26px; }
+  .tr-config-setting-row .tr-config-remove { position: absolute; right: -5px; top: 44px; }
+  .tr-config-strategy-form .ant-form-item { padding: 10px 0; border-bottom: 0; }
+  .tr-config-strategy-form .ant-form-item-row { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  .tr-config-strategy-form .ant-form-item-label > label { color: #697587; }
+  .tr-config-strategy-form .ant-col { max-width: 100%; width: 100%; }
+  .tr-config-strategy-form .ant-form-item-label > label::before { display: none; }
+  .tr-config-page .ant-input, .tr-config-page .ant-select, .tr-config-page .ant-input-number { min-height: 38px; }
+  .tr-config-mobile-actions { display: flex; position: fixed; z-index: 8; bottom: calc(64px + env(safe-area-inset-bottom, 0px)); left: 0; right: 0; gap: 10px; background: #fff; border-top: 1px solid var(--tr-config-line); padding: 12px 20px; }
+  .tr-config-mobile-actions > .ant-btn { flex: 1; height: 40px; }
+  .tr-mobile-shell:has(.tr-config-page[data-detail="true"]) { padding-bottom: 0; }
+  .tr-mobile-shell:has(.tr-config-page[data-detail="true"]) > .tr-mobile-tabs { display: none; }
+  .tr-config-page[data-detail="true"] { height: 100dvh; min-height: 0; }
+  .tr-config-page[data-detail="true"] .tr-config-mobile-actions { bottom: 0; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
+}
+/* RJSF's responsive object grid must occupy one full-width row per field. */
+.tr-config-strategy-form .ant-col { flex-basis: 100%; max-width: 100%; width: 100%; }
+.tr-config-strategy-form .ant-form-item-row > .ant-form-item-label,
+.tr-config-strategy-form .ant-form-item-row > .ant-form-item-control { min-width: 0; }
+.tr-config-strategy-form .rjsf-field-object > .ant-form-item { padding: 0; border: 0; }
+.tr-config-strategy-form .rjsf-field-object > .ant-form-item > .ant-form-item-row { display: block; }
+.tr-config-strategy-form .rjsf-field-object > .ant-form-item > .ant-form-item-row > .ant-form-item-control { width: 100%; }
+
+
+.tr-config-json-toggle { display: inline-flex; align-items: center; gap: 7px; color: #697587; font-size: 12px; margin-right: 10px; cursor: pointer; }
+.tr-config-back { color: #1677ff; padding-inline: 0; }
+@media (max-width: 760px) { .tr-config-panel-heading { margin: 8px 0 12px; } .tr-config-panel-heading h2 { font-size: 21px; } }
+
+.tr-config-nav-item-label { display: inline-flex; align-items: center; gap: 11px; min-width: 0; }
+.tr-config-nav-item-label > .anticon { font-size: 16px; }
+/* Keep required semantics on controls without adding marks absent in the design. */
+.tr-config-strategy-form .ant-form-item-label > label.ant-form-item-required::before { display: none !important; }
+.tr-config-nav-list > button:focus-visible, .tr-config-choice-list > button:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+.tr-config-strategy-form .rjsf-field:not(.rjsf-field-object) > .ant-form-item { min-height: 72px; box-sizing: border-box; }
+@media (max-width: 760px) {
+  .tr-config-inline-row, .tr-config-setting-row { gap: 6px; padding-block: 9px; min-height: 84px; }
+  .tr-config-strategy-form .rjsf-field:not(.rjsf-field-object) > .ant-form-item { padding-block: 9px; min-height: 84px; }
+  .tr-config-strategy-form .ant-form-item-row { gap: 6px; }
+}
+@media (max-width: 760px) {
+  .tr-config-page .ant-input-number-affix-wrapper { height: 38px; min-height: 38px; padding-block: 0; box-sizing: border-box; }
+  .tr-config-page .ant-input-number-affix-wrapper > .ant-input-number { min-height: 0; height: 36px; }
+  .tr-config-page .ant-input-number-affix-wrapper .ant-input-number-input { height: 36px; }
+}
+@media (max-width: 760px) {
+  .tr-config-page .tr-config-strategy-form .ant-form-item .ant-form-item-label { padding: 0; }
 }

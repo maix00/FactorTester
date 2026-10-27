@@ -25,6 +25,7 @@
     "dockview-react": "8.6.1",
     "i18next": "^25.10.10",
     "ionicons": "8.0.13",
+    "jsonc-parser": "3.3.1",
     "monaco-editor": "0.57.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",

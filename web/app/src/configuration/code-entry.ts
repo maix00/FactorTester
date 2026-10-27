@@ -1,5 +1,6 @@
 /** Independent bundle: Monaco and workers never enter desktop/mobile startup. */
 import * as monaco from "monaco-editor";
+import { parseTree, findNodeAtLocation } from "jsonc-parser";
 import type { CodeFactory } from "./code-loader.ts";
 
 let modelSequence = 0;
@@ -25,6 +26,20 @@ const mount: CodeFactory = (element, text, schema, onChange) => {
       external = true;
       editor.executeEdits("configuration-view", [{ range: model.getFullModelRange(), text: value }]);
       external = false;
+    },
+    revealPath(path) {
+      const root = parseTree(model.getValue());
+      if (!root) return;
+      let node = root;
+      for (const part of path) {
+        const next = findNodeAtLocation(node, [node.type === "array" ? Number(part) : part]);
+        if (!next) return;
+        node = next;
+      }
+      const start = model.getPositionAt(node.offset);
+      const end = model.getPositionAt(node.offset + node.length);
+      editor.setSelection(new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column));
+      editor.revealLineInCenter(start.lineNumber); editor.focus();
     },
     dispose() {
       defaults.setDiagnosticsOptions({ ...defaults.diagnosticsOptions,

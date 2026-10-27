@@ -1,4 +1,5 @@
 import React from "react";
+import { SettingOutlined } from "@ant-design/icons";
 
 const paths: Record<string, React.ReactNode> = {
   research: <><path d="M5 3h9l3 3v11H5z"/><path d="M14 3v4h4M8 11h6M8 14h4"/></>,
@@ -12,6 +13,7 @@ const paths: Record<string, React.ReactNode> = {
 };
 
 export function PageIcon({ name, className = "" }: { name?: string; className?: string }): React.ReactElement {
+  if (name === "settings") return <SettingOutlined className={`tr-icon ${className}`} aria-hidden="true" />;
   const key = name && paths[name] ? name : "research";
   return (
     <svg className={`tr-icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

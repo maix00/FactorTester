@@ -72,6 +72,8 @@ def configuration_editor_contract(*, locale: str = "zh") -> dict[str, Any]:
             properties[key] = _field_schema(setting, english=english)
             catalog.append({"path": ["analyses", kind, "execution", "settings", key],
                             "key": key, "analysis": kind, "group": setting.tab,
+                            "group_title": setting.tab if english else app.tabs[setting.tab].label,
+                            "scope_policy": setting.scope_policy.value,
                             "title": properties[key]["title"],
                             "description": properties[key].get("description", ""),
                             "value": deepcopy(setting.default)})

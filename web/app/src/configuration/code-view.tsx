@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useCompactLayout } from "./layout.ts";
 import type { JSONObject } from "./draft.ts";
 import { loadCodeEditor, type CodeEditor } from "./code-loader.ts";
 
-export function CodeView({ text, schema, onChange, applyExternal = true }: {
-  text: string; schema: JSONObject; onChange: (text: string) => void; applyExternal?: boolean;
+export function CodeView({ text, schema, onChange, path, applyExternal = true }: {
+  text: string; schema: JSONObject; onChange: (text: string) => void; path?: string[]; applyExternal?: boolean;
 }): React.ReactElement {
   const { t } = useTranslation();
   const host = useRef<HTMLDivElement>(null);
@@ -13,7 +14,7 @@ export function CodeView({ text, schema, onChange, applyExternal = true }: {
   const currentText = useRef(text);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
-  const mobile = window.matchMedia("(max-width: 760px)").matches;
+  const mobile = useCompactLayout();
   callback.current = onChange;
   currentText.current = text;
   useEffect(() => {
@@ -29,6 +30,7 @@ export function CodeView({ text, schema, onChange, applyExternal = true }: {
   }, [schema, mobile]);
   // Do not echo asynchronous React renders back over more recent Monaco input.
   useEffect(() => { if (applyExternal) instance.current?.setValue(text); }, [text, applyExternal]);
+  useEffect(() => { if (ready && path) instance.current?.revealPath(path); }, [ready, path]);
   return <div className="tr-config-code">
     {!ready && !mobile ? <p role="status">{error || t("configuration.loadingEditor")}</p> : null}
     {error || mobile ? <textarea aria-label={t("configuration.json")} value={text} onChange={(event) => onChange(event.target.value)} /> : null}
