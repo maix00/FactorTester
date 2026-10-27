@@ -507,18 +507,18 @@ def _strict_exchange_field_history():
 
     loader = load_market_rule_field_provider
     revision = _rule_store_revision()
-    if revision is not None:
-        with _RULE_PROVIDER_LOCK:
-            cached = _RULE_PROVIDER_CACHE
-            if cached is not None and cached[0] is loader and cached[1] == revision:
-                return cached[2]
-    provider = loader(
-        include_openctp_latest=False, transaction_fee_source='exchange',
-    )
-    if revision is not None and _rule_store_revision() == revision:
-        with _RULE_PROVIDER_LOCK:
+    if revision is None:
+        return loader(include_openctp_latest=False, transaction_fee_source='exchange')
+    with _RULE_PROVIDER_LOCK:
+        cached = _RULE_PROVIDER_CACHE
+        if cached is not None and cached[0] is loader and cached[1] == revision:
+            return cached[2]
+        provider = loader(
+            include_openctp_latest=False, transaction_fee_source='exchange',
+        )
+        if _rule_store_revision() == revision:
             _RULE_PROVIDER_CACHE = (loader, revision, provider)
-    return provider
+        return provider
 
 
 def _declare_source_semantics(
