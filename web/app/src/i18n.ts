@@ -4,6 +4,7 @@ import { initReactI18next } from "react-i18next";
 export const resources = {
   zh: {
     common: {
+      panelLayout: { menu: "排列页面", right: "移到右侧区域", below: "移到下方区域", maximize: "最大化区域", restore: "恢复区域" },
       brand: { name: "TradeResearch", first: "Trade", second: "Research" }, mainNavigation: "主导航", resizeSidebar: "调整侧栏宽度", resetLayout: "重置布局", settings: "设置", close: "关闭", pages: "{{count}} 个页面",
       details: "详情", loading: "正在加载…", loadFailed: "读取失败", empty: "暂无数据", language: "语言",
       configuration: {
@@ -51,6 +52,7 @@ export const resources = {
   },
   en: {
     common: {
+      panelLayout: { menu: "Arrange page", right: "Move to right region", below: "Move to lower region", maximize: "Maximize region", restore: "Restore regions" },
       brand: { name: "TradeResearch", first: "Trade", second: "Research" }, mainNavigation: "Main navigation", resizeSidebar: "Resize sidebar", resetLayout: "Reset layout", settings: "Settings", close: "Close", pages: "{{count}} pages",
       details: "Details", loading: "Loading…", loadFailed: "Load failed", empty: "No data", language: "Language",
       configuration: {

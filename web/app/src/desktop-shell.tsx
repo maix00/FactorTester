@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Tooltip } from "antd";
+import { Dropdown, Tooltip } from "antd";
+import { MoreOutlined } from "@ant-design/icons";
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -43,6 +44,13 @@ function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number
     <span className="tr-dock-tab" title={title}>
       <PageIcon name={page?.icon} />
       <span className="tr-dock-tab-title" title={title}>{title}{(props.params.ordinal || 1) > 1 ? ` ${props.params.ordinal}` : ""}</span>
+      <Dropdown trigger={["click"]} menu={{ items: [
+        { key: "right", label: t("panelLayout.right") }, { key: "bottom", label: t("panelLayout.below") },
+        { key: "maximize", label: t("panelLayout.maximize") }, { key: "restore", label: t("panelLayout.restore") },
+      ], onClick: ({ key }) => {
+        if (key === "right" || key === "bottom") props.api.moveTo({ group: props.api.group, position: key });
+        else if (key === "maximize") props.api.maximize(); else props.api.exitMaximized();
+      } }}><button type="button" className="tr-dock-arrange" aria-label={t("panelLayout.menu")} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}><MoreOutlined /></button></Dropdown>
       <button type="button" className="tr-dock-close" aria-label={t("close")} onClick={() => props.api.close()}>×</button>
     </span>
   );

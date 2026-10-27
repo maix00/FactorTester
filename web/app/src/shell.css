@@ -474,3 +474,33 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-chart-host .ft-chart-popover header button { border:0; background:transparent; padding:4px; color:var(--muted); cursor:pointer; font-size:20px; }
 /* Each DockView page owns its scroll area, so long charts/tables remain reachable. */
 .tr-tab-layer > .tr-function-page { height:100%; overflow:auto; box-sizing:border-box; }
+/* Breakpoints follow each DockView region, not the outer browser width. */
+.tr-tab-layer { container: tr-panel / inline-size; }
+@container tr-panel (max-width: 760px) {
+ .tr-function-header { min-height:64px; padding:18px 20px; flex-wrap:wrap; }
+ .tr-function-header h1 { font-size:20px; min-width:0; overflow-wrap:anywhere; }
+ .tr-function-body { padding:20px; }
+ .tr-function-actions,.tr-page-filters,.tr-library-filters { flex-wrap:wrap; min-width:0; }
+ .tr-library-filters > * { max-width:100%; }
+ .tr-market-toolbar { align-items:flex-start; padding:12px; gap:8px; }
+ .tr-market-heading { gap:4px 8px; }
+ .tr-market-heading .ant-tag { flex-basis:100%; width:fit-content; margin:0; white-space:normal; }
+ .tr-market-actions { gap:0; }
+ .tr-market-frame { padding:4px; }
+ .tr-job-state { padding:14px; gap:8px; }
+ .tr-factor-results > header { gap:12px; flex-wrap:wrap; }
+ .tr-factor-result-formulas > div { overflow-wrap:anywhere; }
+}
+@container tr-panel (max-width: 480px) {
+ .tr-function-header { padding:16px; }
+ .tr-function-body { padding:16px; }
+ .tr-function-actions { flex-wrap:wrap; }
+ .tr-market-toolbar { flex-wrap:wrap; }
+ .tr-market-actions { margin-left:auto; }
+ .tr-library-meta { flex-wrap:wrap; }
+ .tr-factor-results > header .ant-select { width:100%; }
+}
+.tr-dock-arrange { display:grid; place-items:center; width:20px; height:20px; border:0; border-radius:4px; background:transparent; color:var(--muted); cursor:pointer; padding:0; }
+.tr-dock-arrange:hover,.tr-dock-arrange:focus-visible { background:#eaf2ff; color:var(--accent); }
+.dv-inactive-tab .tr-dock-arrange { visibility:hidden; }
+.dv-inactive-tab:hover .tr-dock-arrange,.dv-inactive-tab:focus-within .tr-dock-arrange { visibility:visible; }

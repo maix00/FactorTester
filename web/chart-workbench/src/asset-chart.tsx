@@ -1,3 +1,4 @@
+import {chartInteraction} from "./chart-interaction";
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {mergeBars} from "./range-data";
@@ -210,8 +211,7 @@ function AssetChart({bars, events, indicators = [], frequencyMs, runWindow,
         }},
       localization: {timeFormatter: (time: number) =>
         new Date(Number(time) * 1000).toLocaleString()},
-      handleScale: {mouseWheel: true, pinch: true, axisPressedMouseMove: true},
-      handleScroll: {mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true},
+      ...chartInteraction,
     });
     chart.current = instance;
     const rollLayer = document.createElement("div");

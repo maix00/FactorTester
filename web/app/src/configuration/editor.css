@@ -125,3 +125,21 @@
 @media (max-width: 760px) {
   .tr-config-page .tr-config-strategy-form .ant-form-item .ant-form-item-label { padding: 0; }
 }
+@container tr-panel (max-width: 760px) {
+ .tr-config-topbar { gap:8px; padding:14px 16px; }
+ .tr-config-top-actions { flex-wrap:wrap; gap:6px; }
+ .tr-config-workspace { min-width:0; }
+ .tr-config-workspace > .ant-select { width:180px; max-width:100%; }
+ .tr-config-layout { grid-template-columns:180px minmax(0,1fr); }
+ .tr-config-content { padding:20px 16px; }
+ .tr-config-inline-row,.tr-config-setting-row { grid-template-columns:1fr; gap:8px; }
+ .tr-config-strategy-form .ant-form-item-row { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
+}
+@container tr-panel (max-width: 480px) {
+ .tr-config-layout { display:flex; flex-direction:column; overflow:auto; }
+ .tr-config-sidebar { flex:none; max-height:190px; border-right:0; border-bottom:1px solid var(--tr-config-line); padding:12px; }
+ .tr-config-content { flex:1; overflow:visible; }
+ .tr-config-top-actions { width:100%; margin-left:0; }
+ .tr-config-workspace { flex:1; }
+ .tr-config-workspace > .ant-select { width:100%; }
+}
