@@ -15,6 +15,9 @@ def test_environment_pins_the_vendor_maturin_build_backend():
     environment = yaml.safe_load((ROOT / "environment.yml").read_text())
     pip_packages = environment["dependencies"][-1]["pip"]
     assert "maturin==1.15.0" in pip_packages
+    assert "celery==5.6.3" in pip_packages
+    import celery
+    assert celery.__version__ == "5.6.3"
     assert "plotly>=7.0.0,<8.0.0" in pip_packages
 
     vendor = (ROOT / "vendor/nautilus_trader/python/pyproject.toml").read_text()

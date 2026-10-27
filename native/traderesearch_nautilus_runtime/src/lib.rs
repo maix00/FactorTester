@@ -38,6 +38,10 @@ impl FactorRuntimeHandle {
         self.inner.rank_passes()
     }
     #[getter]
+    fn consumer_strategy_ids(&self) -> Vec<(String,String)> {
+        self.inner.consumer_strategy_ids.clone()
+    }
+    #[getter]
     fn node_count(&self) -> usize {
         self.inner.node_count
     }

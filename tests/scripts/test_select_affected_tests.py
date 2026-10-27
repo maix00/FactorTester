@@ -45,7 +45,7 @@ def test_shared_and_unclassified_paths_fail_closed():
 def test_factor_plan_changes_select_concrete_consumers_without_full_suite():
     mode, targets = selector.select({"tools/factors/alpha_plan.py", "vendor/py-alpha-lib/alpha-algo/src/algo/panel_plan.rs"})
     assert mode == "SCOPED"
-    assert set(targets) == set(selector.FACTOR_PLAN_TESTS)
+    assert set(targets) == set(selector.FACTOR_PLAN_TESTS) | {"tests/server/test_nautilus_strategy_runspec.py"}
     assert selector.select({"tools/cli/app.py", "mystery/new.py"}) == ("FULL", [])
 
 

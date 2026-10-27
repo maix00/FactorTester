@@ -164,7 +164,7 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
             factor_plan_nodes=runtime.node_count,factor_actors=1,strategy_publications=runtime.consumer_counts,
             python_factor_bar_callbacks=0,rank_passes=runtime.rank_passes,
             strategy_output_slots=strategy_slots,
-            strategy_factor_refs=role_refs,orders=engine.get_result().total_orders,reports=reports)
+            strategy_factor_refs=role_refs,strategy_runtime_ids=dict(runtime.consumer_strategy_ids),orders=engine.get_result().total_orders,reports=reports)
     finally:
         engine.dispose()
 

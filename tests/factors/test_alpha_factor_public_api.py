@@ -545,7 +545,7 @@ def test_alpha_factor_category_bool_leaf_evaluates_publicly():
     result = CategoryBoolRef(Category(), 'metal').evaluate(ctx)
     np.testing.assert_array_equal(result['A'].to_numpy(), [True, True])
     np.testing.assert_array_equal(result['B'].to_numpy(), [False, False])
-    assert 'CategoryBoolRef' in plan_blockers(CategoryBoolRef(Category(), 'metal'))
+    assert plan_blockers(CategoryBoolRef(Category(), 'metal')) == ()
 
 
 def test_alpha_factor_unary_pointwise_compiles_to_rust():

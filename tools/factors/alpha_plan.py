@@ -90,8 +90,10 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             window = expr.window
             if isinstance(window, ConstExpr) and isinstance(window.value, int):
                 window_count = int(window.value)
-            elif type(window).__name__ == "WindowBarsExpr" and source_freq is not None and products:
-                value = window.window.value
+            elif source_freq is not None and products and (
+                isinstance(window, WindowBarsExpr) or isinstance(window, ConstExpr) and isinstance(window.value,str)
+            ):
+                value = window.window.value if isinstance(window,WindowBarsExpr) else window.value
                 if session_calendar is not None and isinstance(value, str) and value.strip().lower().endswith("d"):
                     lookback = int(value.strip().lower().removesuffix("d"))
                     sessions = [

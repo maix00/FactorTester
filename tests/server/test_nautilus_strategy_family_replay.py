@@ -147,3 +147,20 @@ def test_invalid_consumer_scope_or_identity_fails_before_catalog_read(monkeypatc
                  family=ThresholdState(1,0),**strategy) for strategy in strategies]
     with pytest.raises(ValueError,match=message):
         module.run_strategy_families_replay(inputs={"T":None},strategies=values,output_dir=tmp_path)
+
+
+def test_group_and_threshold_with_same_suffix_have_traceable_unique_runtime_ids(tmp_path):
+    from server.services.nautilus_bridge.strategy_backtest import run_strategy_families_replay
+    require_nautilus()
+    for p in ('T','TL'):(tmp_path/p).mkdir()
+    inputs={'T':_real_catalog(tmp_path/'T',code='T',month='2403'),
+            'TL':_real_catalog(tmp_path/'TL',code='TL',month='2406')}
+    specs=[dict(strategy_id=name,family=family,factor_bindings={'signal':CLOSE},
+                factor_refs={'signal':'factor:v2:'+'a'*43}) for name,family in
+           [('Group-1',CrossSectionalGroup(2,1)),('Group-2',CrossSectionalGroup(2,2)),('Threshold-1',ThresholdState(1,0))]]
+    result=run_strategy_families_replay(inputs=inputs,strategies=specs,output_dir=tmp_path/'reports',max_bars=8)
+    assert result['factor_actors']==1 and result['factor_plan_nodes']==1
+    assert result['strategy_publications']==[8,8,8] and result['orders']==4
+    mapping=result['strategy_runtime_ids']
+    assert mapping=={'Group-1':'Group-1','Group-2':'Group-2','Threshold-1':'Threshold-1-factor2'}
+    assert len({name.rsplit('-',1)[-1] for name in mapping.values()})==3

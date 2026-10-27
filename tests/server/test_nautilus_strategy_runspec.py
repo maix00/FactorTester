@@ -136,3 +136,27 @@ def test_overlapping_netting_targets_fail_before_engine_construction(monkeypatch
     monkeypatch.setattr('server.services.nautilus_bridge.engine_factory.build_backtest_engine',lambda *a,**kw:pytest.fail('no engine should be constructed'))
     with pytest.raises(ValueError,match='HEDGING'):
         strategy_backtest._build_strategy_family_engine(plan,[instrument],by_strategy={'A':[instrument],'B':[instrument]})
+
+
+def test_real_transient_frozen_family_duration_window_compiles_to_shared_native_plan():
+    from tests.server.test_factor_param_resolver import _frozen_probe
+    from server.modules.shared.run_spec_resolution.factors import RunFactorResolver
+    from tools.factors.alpha_plan import alpha_plan_spec
+    from tools.data.types import DataFreq
+    source="""from tools.factors import FactorFamily
+from tools.data.types import DataColumn
+from tools.factors.FactorExpr import ColumnRef
+from tools.factors.expr.signal_align import SignalAlign
+class VersionProbe(FactorFamily):
+    signal_freq='30m'
+    @staticmethod
+    def factor_expr():
+        return SignalAlign(ColumnRef(DataColumn.CLOSE).rolling('20m').mean(),'30m')
+"""
+    frozen={**_frozen_probe(source),'source_kind':'transient','source_code':source,'temporary':True}
+    factor=RunFactorResolver(owner='alice',frozen_factors=[frozen]).resolve(factor_ref=frozen['ref'])
+    spec=alpha_plan_spec(factor.expr,source_freq=DataFreq.MIN1,products=('T','TL'))
+    assert spec is not None
+    rolling=[x for x in spec['nodes'] if x['kind']=='rolling']
+    assert len(rolling)==1 and rolling[0]['window']==20
+    assert len([x for x in spec['nodes'] if x['kind']=='signal'])==2

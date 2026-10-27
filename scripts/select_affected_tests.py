@@ -523,7 +523,8 @@ LATEX_QUERY_TESTS = (*FACTOR_PLAN_TESTS,
     "tests/server/test_factor_evaluation_frozen_input.py",
     "tests/server/test_nautilus_strategy_family_replay.py")
 ALPHA_RUNTIME_TESTS = (*ALPHA_RUNTIME_TESTS, *LATEX_QUERY_TESTS,
-    "vendor/py-alpha-lib/py-binding/python/tests/test_batch_signal_term.py")
+    "vendor/py-alpha-lib/py-binding/python/tests/test_batch_signal_term.py",
+    "vendor/py-alpha-lib/py-binding/python/tests/test_batch_category_distance.py")
 for _path in (
     "tools/factors/FactorFamily.py", "tools/factors/Factors.py",
     "tools/factors/FactorRunResult.py", "tools/factors/FactorTester.py",
@@ -568,6 +569,7 @@ for _path in (
 ):
     EXACT_PATH_TESTS[_path] = CLI_NAMING_TESTS
 EXACT_PATH_TESTS["vendor/py-alpha-lib"] = ALPHA_RUNTIME_TESTS
+EXACT_PATH_TESTS["tools/factors/alpha_plan.py"] = (*FACTOR_PLAN_TESTS,"tests/server/test_nautilus_strategy_runspec.py")
 EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["tests/factors/test_bar_counts.py"] = ("tests/factors/test_bar_counts.py",)
@@ -589,6 +591,11 @@ EXACT_PATH_TESTS["server/modules/single_factor_test/planning.py"] = (
     *SHARED_STRATEGY_TESTS, "tests/server/test_job_dispatch_planning.py",
 )
 EXACT_PATH_TESTS["tests/benchmarks/bench_shared_strategy_long_replay.py"] = SHARED_STRATEGY_TESTS
+EXACT_PATH_TESTS["tests/benchmarks/verify_native_celery_job.py"] = (
+    *SHARED_STRATEGY_TESTS,"tests/server/test_job_dispatch_celery.py",
+    "tests/server/test_nautilus_job_executor.py",
+)
+
 EXACT_PATH_TESTS["tests/benchmarks/bench_public_batch_signal_term.py"] = (
     "vendor/py-alpha-lib/py-binding/python/tests/test_batch_signal_term.py",
     "tests/factors/test_alpha_factor_public_api.py",
