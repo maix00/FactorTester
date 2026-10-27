@@ -58,20 +58,10 @@ def build_contract_spec(
             f"{contract_uid}: side-specific margin is not representable by the "
             "current single-margin Instrument contract"
         )
-    initial_margin = spec_fields.get("initial_margin_ratio")
-    maintenance_margin = spec_fields.get("maintenance_margin_ratio")
-    if initial_margin is None:
-        raise ValueError(f"{contract_uid}: missing initial_margin_ratio")
-    if maintenance_margin is None:
-        raise ValueError(f"{contract_uid}: missing maintenance_margin_ratio")
-    initial_margin = _finite_decimal(
-        initial_margin, "initial_margin_ratio", contract_uid,
-    )
-    maintenance_margin = _finite_decimal(
-        maintenance_margin, "maintenance_margin_ratio", contract_uid,
-    )
-    if initial_margin < 0 or maintenance_margin < 0:
+    if long_margin < 0:
         raise ValueError(f"{contract_uid}: margin ratios must be non-negative")
+    # This Bundle uses one trading-margin rate. It supplies both Nautilus
+    # requirements directly; raw data need not invent two independent columns.
 
     resolved_source = from_server_sources().resolve(
         source_key, frequency=frequency, product=product,
@@ -84,7 +74,7 @@ def build_contract_spec(
         price_increment=min_tick, price_precision=precision,
         multiplier=multiplier, currency="CNY",
         activation_ns=start_ns, expiration_ns=end_ns,
-        margin_init=initial_margin, margin_maint=maintenance_margin,
+        margin_init=long_margin, margin_maint=long_margin,
         provenance=str(spec_fields.get("trading_spec_source") or "run_spec_product_catalog"),
         resolved_source=resolved_source,
     )

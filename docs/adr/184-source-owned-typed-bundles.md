@@ -225,10 +225,11 @@ federated catalog's runtime availability/count projection.
   约 2.1155ms；这是修订键步骤，不是整个任务耗时。并发首次装载测试确认只调用一次
   loader。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
-  不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
-  改为分别读取 `initial_margin_ratio` / `maintenance_margin_ratio`；缺任一条即失败，
-  不再复制同一值。所有金额/比例/乘数/步长先拒绝 NaN/Infinity。当前真实 Local 源没有
-  这两条字段时 staging 会 fail-closed，需补规则来源。
+  不相等或缺一侧时报告“single-margin Instrument contract”不可表示。按用户明确的简化
+  边界，由 Bundle 直接设置 Nautilus `margin_init` / `margin_maint`。本 Bundle 对统一
+  交易保证金率将两者设置为同一值，不要求原始数据增加两条不存在的字段；bridge 不再
+  做保证金语义映射。仍检查有限值和非负值，不把多空差异压成最大值。此修正不代表
+  当前快照已成为历史规则，也不代表完整保证金/强平已验收。
 
 多合约的显式引用形状与消费者迁移条件见
 [ADR-186](186-multi-contract-catalog-references.md)；在消费者契约确认前保持
@@ -283,3 +284,16 @@ receipt 只记录本次观察作为 provenance，不跨运行比较内容。
 不是行情内容 revision。已增加只读路由 `/api/product-library/installed-bundles`，返回
 `metadata_only=true` 与同一描述；它尚未替换现有 `product_source_descriptors()`/目录
 UI；运行时可用性与权限投影仍需后续切换。
+
+
+### 用户确认的直接执行字段边界（2026-10-27）
+
+Bundle 的可选 Nautilus 集成直接提供 Nautilus 字段和数据类型；平台的展示字段据此补全，
+不另建执行字段翻译表。JSON 目录、权限和产品说明属于平台控制面；历史回放与在线交易的
+行情/事件属于执行数据面。保留现有 `engine.run_catalogs` Rust 原生读取/合并回放，
+不能为了目录展示把行情转成 Python 行列表或增加一份缓存。源格式必要的转换归 Bundle，
+只在数据确实尚非 Nautilus 可读格式时发生一次；实时连接仍由对应 DataClient/适配器负责。
+
+此次只修复 Bundle 保证金初始化的错误原始字段要求；平台产品字段补全和完整源包外置
+仍需继续接入，不能将本次提交称为所有字段已对齐。研究依据和下一步范围见
+[source-bundle-takeover-2026-10-27.md](../audits/source-bundle-takeover-2026-10-27.md)。
