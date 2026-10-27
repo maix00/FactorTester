@@ -269,8 +269,10 @@ does not establish full multi-contract roll/replay acceptance.
 版本与 metadata fingerprint、mapping_version、成员和 related_members，并生成紧凑
 `source-input:<sha256>` 引用。CatalogLoadRequest 现携带 bundle_id/version/fingerprint/
 member_id，staged catalog receipt 和 replay receipt 的 `source_inputs` 都记录同一
-身份；这已进入实际 staging/replay receipt，但尚未写入 RunSpec，也没有
-mutable_history 数据 revision 或 live_stream 录制语义。
+身份；这已进入实际 staging/replay receipt，但尚未写入 RunSpec。实时/可变数据源
+每轮可以有不同数据 revision：FrozenBundleInput 固定的是来源选择、Bundle/member
+代码与映射身份，不是本轮行情字节；不得因为本轮数据与上次不同而拒绝运行。每轮
+receipt 只记录本次观察作为 provenance，不跨运行比较内容。
 
 ### P3 元数据只读描述（2026-10-27）
 
