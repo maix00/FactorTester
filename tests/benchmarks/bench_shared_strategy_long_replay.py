@@ -5,6 +5,7 @@ paper-return result, a real exchange calendar, or production/Celery acceptance.
 """
 from __future__ import annotations
 import argparse
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -47,14 +48,14 @@ def stage(base_manifest,root,rows):
 
 
 
-def stage_real(root, rows):
+def stage_real(root, rows, contract_month=None):
     """Unaltered local T/TL minute prices and clocks; isolated metadata probe."""
     from tests.server.test_nautilus_bridge_backtest_runner import _real_catalog
     root.mkdir(exist_ok=False, parents=True)
     products=[]
     for code, month in (("T", "2403"), ("TL", "2406")):
         folder=root/code; folder.mkdir()
-        replay_input=_real_catalog(folder, code=code, month=month, count=rows, batch_bars=2048)
+        replay_input=_real_catalog(folder, code=code, month=contract_month or month, count=rows, batch_bars=2048)
         _,catalog,receipt,_=_load_input(replay_input)
         # Only the small real acceptance fixture is retained by this benchmark's
         # independent oracle; production replay and long stress retain no history.
@@ -108,7 +109,16 @@ def replay(root,out,complex_match=False):
             else:expected.append(operation([base[i%len(base)] for i in range(max(0,rows-window),rows)]))
         np.testing.assert_allclose(actual,expected,rtol=0,atol=1e-9)
     peak=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*(1024 if sys.platform.startswith('linux') else 1)
-    value=dict(complex_match=complex_match,label=manifest['label'],rows_per_product=rows,seconds=elapsed,peak_rss_bytes=peak,
+    inventory=None
+    if complex_match:
+        opened=closed=0
+        with (out/'reports'/'positions.csv').open() as handle:
+            for position in csv.DictReader(handle):
+                if position['ts_closed']:closed+=1
+                else:opened+=1
+        assert opened<=len(strategies)*len(inputs),'HEDGING targets accumulated offsetting positions'
+        inventory=dict(open_positions=opened,closed_positions=closed)
+    value=dict(inventory=inventory,complex_match=complex_match,label=manifest['label'],rows_per_product=rows,seconds=elapsed,peak_rss_bytes=peak,
         runtime=dict(platform=platform.platform(),python=sys.version.split()[0]),result=result,
         cache='Nautilus defaults; unchanged; system cache not cleared',scope='local native long replay; staging excluded; no Celery/public claim')
     (out/'measurements.json').write_text(json.dumps(value,indent=2));print(json.dumps(value))
@@ -117,10 +127,11 @@ def replay(root,out,complex_match=False):
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--stage-base',type=Path)
     parser.add_argument('--complex-match',action='store_true')
+    parser.add_argument('--contract-month',help='stage this real contract month for both T and TL')
     parser.add_argument('--stage-real',action='store_true')
     parser.add_argument('--root',required=True,type=Path);parser.add_argument('--rows',type=int,default=10000)
     parser.add_argument('--output',type=Path);args=parser.parse_args()
-    if args.stage_real:stage_real(args.root,args.rows)
+    if args.stage_real:stage_real(args.root,args.rows,args.contract_month)
     elif args.stage_base:stage(args.stage_base,args.root,args.rows)
     else:
         if args.output is None:parser.error('--output required for replay')

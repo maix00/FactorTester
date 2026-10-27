@@ -780,5 +780,7 @@ EXACT_PATH_TESTS["tools/factors/expr/bar_search_eval.py"] = FACTOR_PLAN_TESTS
 EXACT_PATH_TESTS["tests/benchmarks/bench_complex_match.py"] = ("tests/factors/test_complex_match_rust.py", "tests/factors/test_bar_search.py")
 
 
+EXACT_PATH_TESTS["tests/benchmarks/freeze_paper_duration.py"] = ("tests/factors/test_alpha_intermediate_queries.py", "tests/server/test_factor_param_resolver.py", "tests/server/test_nautilus_strategy_runspec.py")
+
 if __name__ == "__main__":
     raise SystemExit(main())

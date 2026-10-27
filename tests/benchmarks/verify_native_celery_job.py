@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--broker',type=localhost,required=True)
     parser.add_argument('--couch-url',type=localhost,required=True)
     parser.add_argument('--credentials-file',type=Path,required=True)
+    parser.add_argument('--frozen-factors-file',type=Path,help='use actual frozen nested family records instead of the probe')
     parser.add_argument('--complex-match',action='store_true',help='exercise nested SignalAlign/Where and partitioned Rust search')
     parser.add_argument('--family-mode',choices=['mixed','group','threshold'],default='mixed')
     args=parser.parse_args();args.root.mkdir(parents=True,exist_ok=False)
@@ -70,6 +71,11 @@ class VersionProbe(FactorFamily):
         source=source.replace("from tools.factors.expr.signal_align import SignalAlign", "from tools.factors.expr.signal_align import SignalAlign\nfrom tools.factors.expr import CURRENT,CANDIDATE,scope_bars\nfrom tools.factors.expr.conditional import where")
         source=source.replace("return SignalAlign(ColumnRef(DataColumn.CLOSE).rolling('20m').mean(),'30m')", "price=ColumnRef(DataColumn.CLOSE)\n        formed=SignalAlign(price.rolling(2).mean(),'3m')\n        predicate=where(CURRENT>CANDIDATE,(CURRENT-CANDIDATE)>formed/100000,False)\n        return price.bar_distance(predicate,scope=scope_bars(120),lookback=60,default=60)")
     frozen={**_frozen_probe(source),'source_kind':'transient','source_code':source,'temporary':True}
+    factors=[frozen]
+    if args.frozen_factors_file:
+        if args.complex_match:raise ValueError('select frozen factors or complex probe, not both')
+        frozen_input=json.loads(args.frozen_factors_file.read_text());factors=frozen_input['factors']
+        frozen=next(row for row in factors if row['ref']==frozen_input['signal_ref'])
     manifest=json.loads(args.manifest.read_text());catalogs={};receipts=[]
     for item in manifest['products']:
         folder=Path(item['catalog_path']).resolve()
@@ -85,13 +91,13 @@ class VersionProbe(FactorFamily):
         end_utc=pd.Timestamp(max(x['last_available_ns'] for x in receipts),tz='UTC').isoformat(),
         venues=[dict(name='CFFEX',account_type='MARGIN',oms_type='HEDGING',starting_balances=['1000000 CNY'],base_currency='CNY')],
         strategy_venue_bindings=[dict(strategy_id=s,venue_ids=['CFFEX'],product_scope_refs=['product-group:treasuries']) for s in ids])
-    run_spec={'run_spec_version':10,'configuration':{'shared':{'factors':[frozen],
+    run_spec={'run_spec_version':10,'configuration':{'shared':{'factors':factors,
         'product_selections':{'product-group:treasuries':{'paths':[r['contract_uid'] for r in receipts]}}},
         'analyses':{'backtest':{'execution':{'backend':'nautilus_trader','contract_version':4,
             'nautilus_contract':{'settings':settings}}}}}}
     families=[dict(strategy_id=f'Group-{i}',kind='cross_sectional_group',parameters=dict(split_count=2,group_index=i),
                    factor_roles={'signal':{'ref':frozen['ref']}}) for i in (1,2)]
-    families.append(dict(strategy_id='Threshold-1',kind='threshold',parameters={'entry_threshold':2 if args.complex_match else 100,'exit_threshold':1 if args.complex_match else 99},factor_roles={'signal':{'ref':frozen['ref']}}))
+    families.append(dict(strategy_id='Threshold-1',kind='threshold',parameters={'entry_threshold':1 if args.frozen_factors_file else 2 if args.complex_match else 100,'exit_threshold':0 if args.frozen_factors_file else 1 if args.complex_match else 99},factor_roles={'signal':{'ref':frozen['ref']}}))
     families=[family for family in families if family['strategy_id'] in ids]
     plan={'plan_version':1,'kind':'nautilus_strategy_family','strategy_families':families,
           'catalog_inputs':catalogs,'max_input_bars':manifest['expected_slices']}
@@ -157,7 +163,7 @@ class VersionProbe(FactorFamily):
                     first_signal=-(-first//1800000000000)*1800000000000
                     assert all(pd.Timestamp(row['ts_event']).value>first_signal for row in fills)
 
-            receipt={'complex_match':args.complex_match,'family_mode':args.family_mode,'job_id':job_id,'task_id':task.id,'status':current.status.value,'seconds':time.perf_counter()-started,
+            receipt={'signal_ref':frozen['ref'],'signal_alias':frozen['alias'],'complex_match':args.complex_match,'family_mode':args.family_mode,'job_id':job_id,'task_id':task.id,'status':current.status.value,'seconds':time.perf_counter()-started,
                 'sampled_worker_rss_max_bytes':max(sampled_rss,default=0),'worker_pid':worker.pid,'terminal_worker_pid':current.worker_pid,'result':result,
                 'closed_positions':closed_positions,'couchdb_database':database,'verified_attachments':sorted(report['attachments']),
                 'limits':'local isolated execution of frozen plan; authoring/planning HTTP and production deployment not covered'}

@@ -98,11 +98,13 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             if isinstance(window, ConstExpr) and isinstance(window.value, int):
                 window_count = int(window.value)
             elif source_freq is not None and products and (
-                isinstance(window, WindowBarsExpr) or isinstance(window, ConstExpr) and isinstance(window.value,str)
+                isinstance(window, WindowBarsExpr) or isinstance(window, ConstExpr) and isinstance(window.value,(str,pd.Timedelta))
             ):
                 value = window.window.value if isinstance(window,WindowBarsExpr) else window.value
-                if session_calendar is not None and isinstance(value, str) and value.strip().lower().endswith("d"):
-                    lookback = int(value.strip().lower().removesuffix("d"))
+                if session_calendar is not None and isinstance(value,(str,pd.Timedelta)) and pd.Timedelta(value)>=pd.Timedelta(days=1):
+                    duration=pd.Timedelta(value)
+                    if duration % pd.Timedelta(days=1):raise ValueError("session window must contain whole trading days")
+                    lookback=int(duration / pd.Timedelta(days=1))
                     sessions = [
                         [int(item.start_ns), int(item.end_ns), int(item.bar_count)]
                         for item in session_calendar.sessions
@@ -117,7 +119,7 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
                     node = {
                         "kind": "session_rolling", "child": child,
                         "lookback_sessions": lookback, "sessions": sessions,
-                        "op": op, "min_periods": expr._min_periods_value(1),
+                        "op": op, "quantile": expr.quantile, "min_periods": expr._min_periods_value(1),
                         "propagate_nan": expr.nan_policy.value == "propagate",
                     }
                     memo[key] = len(nodes); keys.append(repr(key)); key_tuples.append(key); nodes.append(node)
@@ -131,7 +133,7 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
                     op = op.removeprefix("rolling_")
                     node = {
                         "kind": "rolling_dynamic", "child": child, "windows": windows,
-                        "op": op, "min_periods": 1,
+                        "op": op, "quantile": expr.quantile, "min_periods": 1,
                         "propagate_nan": expr.nan_policy.value == "propagate",
                     }
                     memo[key] = len(nodes); keys.append(repr(key)); key_tuples.append(key); nodes.append(node)
@@ -168,7 +170,7 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             if isinstance(expr.scope, (SessionScope, TradingDayScope)) and (
                 session_calendar is None or isinstance(expr.scope, SessionScope)
             ):
-                if expr.trunc_start is not None or expr.trunc_end is not None or expr.op.startswith("quantile"):
+                if expr.trunc_start is not None or expr.trunc_end is not None :
                     return None
                 child = build(expr.operands[0])
                 if child is None:
@@ -192,7 +194,7 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
                 if not sessions or any(item[2] <= 0 for item in sessions):
                     return None
                 child = build(expr.operands[0])
-                if child is None or expr.op.startswith("quantile"):
+                if child is None :
                     return None
                 node = {
                     "kind": "session_rolling", "child": child, "lookback_sessions": 1,
@@ -201,8 +203,6 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
                     "propagate_nan": expr.nan_policy.value == "propagate",
                 }
             elif not isinstance(expr.scope, BarCountScope):
-                return None
-            elif expr.op.startswith("quantile"):
                 return None
             else:
                 child = build(expr.operands[0])
@@ -213,6 +213,10 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
                     "op": expr.op, "min_periods": expr.min_periods or 1,
                     "propagate_nan": expr.nan_policy.value == "propagate",
                 }
+            if expr.op=='quantile':
+                q=expr.quantile_value
+                if not isinstance(q,ConstExpr):raise TypeError('scope quantile must resolve to a scalar')
+                node['quantile']=float(q.value)
         elif isinstance(expr, SignalAlign):
             if expr.daily_basepoint is not None or expr.end_session_skip:
                 return None

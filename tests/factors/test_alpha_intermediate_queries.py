@@ -52,3 +52,14 @@ def test_batch_queries_share_one_plan_and_are_opt_in(monkeypatch):
     assert factor.get_intermediate('mean') is None
     assert factor._intermediate_factor_data=={}
     factor.clear()
+
+
+def test_nested_compat_signal_annotations_do_not_reinvoke_node_constructor():
+    from alpha.factor.annotations import scoped_annotations
+    from tools.factors.expr import SignalAlign
+    inner=SignalAlign(ColumnRef(DataColumn.CLOSE).rolling(2).mean().as_intermediate('mean'),'3m')
+    expression=inner+inner
+    annotated=scoped_annotations(expression,'nested')
+    assert annotated.semantic_fingerprint()==expression.semantic_fingerprint()
+    assert annotated.operands[0] is annotated.operands[1]
+    assert annotated.operands[0] is not inner
