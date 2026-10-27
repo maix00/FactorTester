@@ -433,3 +433,22 @@ Python 仅提供冻结分区、曲线输入和输出视图。无 Python 数学 f
 不同精度文件的原生回退仍需单独容量验证。最新测量与公开 batch 的小输入
 SignalAlign 开销回归均记录在 [本轮审计](../audits/alpha-rust-entrypoints-2026-10-27.md)。
 不以此宣称所有算子、所有时钟、Linux/Celery/公网均已验收。
+
+
+## 2026-10-27 搜索范围统一为分区
+
+用户明确确认：`bar_since`、`bar_distance` 的 `scope_bars(K)` 与 ADR155
+一致，按每个产品已观测源 Bar 每 K 根形成非重叠分区，禁止跨段搜索。
+它不是滑动窗口。夜盘使用冻结交易日标签；session 按观测间隔重置。
+独立 `lookback=N` 表示最多回看 N 根已观测 Bar，可与 scope 组合；
+`scope=None, lookback=N` 提供纯滑动搜索。两者均未提供时拒绝构造。
+
+公开 batch、兼容 DSL 和原生计划均编译至 alpha 的 Search 节点与
+BarSearchState；复杂 Where 谓词引用其他因子时，依赖在当前时刻读取，
+不是在候选历史时刻重算。内层信号仅在形成后向外层因果前填。
+搜索结构身份升为 v2，避免旧滚动语义与新分区语义共用冻结身份。
+Python 搜索数学实现删除；保留的 observed-mask 函数仅适配网格元数据。
+
+本轮聚焦测试92项通过，包括分区/回看反例、夜盘交易日、嵌套3分钟信号
+在1分钟搜索中的逐前缀 batch/增量对账。此回执尚不代表新 Search 节点
+已通过真实 Celery Job、重建后的 Nautilus 组合扩展或长任务容量验收。

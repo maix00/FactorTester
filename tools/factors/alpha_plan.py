@@ -27,17 +27,24 @@ _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 _UNARY = {"abs", "sign", "sqrt", "log", "tanh"}
 
 
-def _match_predicate(expr) -> dict:
-    if isinstance(expr, MatchValueRef):
-        return {"op": expr.role}
+def _match_predicate(expr, external=None) -> dict:
+    if isinstance(expr, MatchValueRef):return {"op":expr.role}
     if isinstance(expr, ConstExpr):
-        return {"op": "const", "value": float(expr.value)}
-    if isinstance(expr, CompositeExpr):
-        if expr.op in {"neg", "abs"}:
-            return {"op": expr.op, "a": _match_predicate(expr.operands[0])}
-        if expr.op in _BINARY:
-            return {"op": expr.op, "a": _match_predicate(expr.operands[0]),
-                    "b": _match_predicate(expr.operands[1])}
+        import math
+        value=float(expr.value)
+        return {"op":"const","value":None if math.isnan(value) else value}
+    if isinstance(expr,WhereOp):
+        c,a,b=[_match_predicate(x,external) for x in expr.operands]
+        return dict(op='where',condition=c,when_true=a,when_false=b)
+    from tools.factors.expr.pointwise import POINTWISE_OPS
+    if type(expr) is CompositeExpr and expr.op in POINTWISE_OPS:
+        args=[_match_predicate(x,external) for x in expr.operands]
+        op={'bimax':'max','bimin':'min'}.get(expr.op,expr.op)
+        if len(args)==1:return dict(op='unary',kind=op,a=args[0])
+        result=args[0]
+        for child in args[1:]:result=dict(op='binary',kind=op,a=result,b=child)
+        return result
+    if external is not None:return dict(op='input',index=external(expr))
     raise TypeError(f"unsupported match node {type(expr).__name__}")
 
 
@@ -255,39 +262,34 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
                 return None
             node = {"kind": "where", "condition": children[0],
                     "when_true": children[1], "when_false": children[2]}
-        elif isinstance(expr, BarDistanceOp):
-            if not isinstance(expr.scope, BarCountScope):
-                return None
-            child = build(expr.value)
-            if child is None:
-                return None
-            default = expr.operands[-1]
-            default_value = (float(expr.scope.resolved_count()) if isinstance(default, ScopeLengthDefault)
-                             else float(default.value))
-            node = {
-                "kind": "match_distance", "child": child,
-                "predicate": _match_predicate(expr.condition),
-                "count": int(expr.scope.resolved_count()),
-                "nearest": expr.select == "nearest",
-                "default": default_value, "include_current": False,
-            }
-        elif isinstance(expr, BarSinceOp):
-            if not isinstance(expr.scope, BarCountScope):
-                return None
-            child = build(expr.condition)
-            if child is None:
-                return None
-            default = expr.operands[-1]
-            default_scope = isinstance(default, ScopeLengthDefault)
-            node = {
-                "kind": "distance" if isinstance(expr, BarDistanceOp) else "since",
-                "condition": child,
-                "count": int(expr.scope.resolved_count()),
-                "include_current": bool(expr.include_current),
-                "nearest": expr.select == "nearest",
-                "default_scope": default_scope,
-                "default": 0.0 if default_scope else float(default.value),
-            }
+        elif isinstance(expr,(BarSinceOp,BarDistanceOp)):
+            is_match=isinstance(expr,BarDistanceOp)
+            child=build(expr.value if is_match else expr.condition)
+            if child is None:return None
+            dependencies=[]
+            def external(value):
+                index=build(value)
+                if index is None:raise TypeError('match dependency cannot compile to Rust')
+                if index not in dependencies:dependencies.append(index)
+                return dependencies.index(index)
+            predicate=_match_predicate(expr.condition,external) if is_match else None
+            partition=expr.scope.resolved_count(source_freq=source_freq,products=products) if isinstance(expr.scope,BarCountScope) else None
+            lookback=BarCountScope(expr.lookback).resolved_count(source_freq=source_freq,products=products) if expr.lookback is not None else None
+            boundary=None
+            if isinstance(expr.scope,TradingDayScope):
+                event='trading_day_start';boundary_key=('event_boundary',event)
+                if boundary_key not in memo:
+                    if event not in boundaries:boundaries.append(event)
+                    memo[boundary_key]=len(nodes);nodes.append(dict(kind='boundary',index=boundaries.index(event)))
+                    keys.append(repr(boundary_key));key_tuples.append(boundary_key)
+                boundary=memo[boundary_key]
+            default=expr.operands[-1];dynamic=isinstance(default,ScopeLengthDefault)
+            import math
+            value=0.0 if dynamic else float(default.value)
+            node=dict(kind='search',child=child,dependencies=dependencies,boundary=boundary,predicate=predicate,
+                partition=partition,lookback=lookback,gap_ns=int(pd.Timedelta(expr.scope.gap).value) if isinstance(expr.scope,SessionScope) else None,
+                nearest=expr.select=='nearest',default_scope=dynamic,default=None if math.isnan(value) else value,
+                include_current=getattr(expr,'include_current',False),propagate_nan=expr.nan_policy.value=='propagate')
         else:
             return None
         memo[key] = len(nodes)

@@ -6,7 +6,7 @@ from typing import Any, Literal, cast
 
 import pandas as pd
 
-from .bar_search_eval import evaluate_bar_distance, evaluate_bar_since, scalar_default
+from .bar_search_eval import scalar_default
 from alpha.factor.annotations import copy_annotation
 
 from .core import EvaluateContext, FactorExpr
@@ -48,11 +48,14 @@ def _validate_select(select: str) -> Selection:
 
 
 class BarSinceOp(OperandExpr):
+    _rust_only = True
+
     def __init__(
         self,
         condition: FactorExpr,
         *,
-        scope: LookbackScope,
+        scope: LookbackScope | None = None,
+        lookback: Any = None,
         select: str = "nearest",
         default: Any = SCOPE_LENGTH,
         include_current: bool = True,
@@ -60,6 +63,7 @@ class BarSinceOp(OperandExpr):
     ) -> None:
         super().__init__("bar_since", condition, _to_expr(default))
         self.scope = scope
+        self.lookback = None if lookback is None else _to_expr(lookback)
         self.select = _validate_select(select)
         self.include_current = bool(include_current)
         self.nan_policy = nan_policy
@@ -71,24 +75,19 @@ class BarSinceOp(OperandExpr):
     @property
     def _operands(self) -> tuple[FactorExpr, ...]:
         scope_refs = (self.scope.count,) if isinstance(self.scope, BarCountScope) else ()
-        return (*self.operands, *scope_refs)
+        return (*self.operands, *scope_refs, *((self.lookback,) if self.lookback is not None else ()))
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
-        condition = self.condition.evaluate(ctx=ctx)
-        return evaluate_bar_since(
-            condition,
-            scope=self.scope,
-            select=self.select,
-            default=scalar_default(self.operands[1]),
-            ctx=ctx,
-            include_current=self.include_current,
-            nan_policy=self.nan_policy,
-        )
+        from .rust_plan import evaluate_rust_plan
+        result=evaluate_rust_plan([self],ctx)
+        if result is None:raise TypeError('bar search requires Rust expressions or explicit DataFrame inputs')
+        return result[0]
 
     def resolve(self, *args: Any, **kwargs: Any) -> FactorExpr:
         resolved: FactorExpr = BarSinceOp(
             self.condition.resolve(*args, **kwargs),
-            scope=self.scope.resolve(*args, **kwargs),
+            scope=None if self.scope is None else self.scope.resolve(*args, **kwargs),
+            lookback=None if self.lookback is None else self.lookback.resolve(*args, **kwargs),
             select=self.select,
             default=self.operands[1].resolve(*args, **kwargs),
             include_current=self.include_current,
@@ -97,7 +96,8 @@ class BarSinceOp(OperandExpr):
         return copy_annotation(self,resolved)
 
     def _structural_extra(self) -> tuple[Any, ...]:
-        return (self.scope.structural_key(), self.select, self.include_current,
+        return ("partition-search:v2", None if self.scope is None else self.scope.structural_key(),
+                None if self.lookback is None else self.lookback._structural_key(), self.select, self.include_current,
                 self.nan_policy.value)
 
 
@@ -108,20 +108,22 @@ class BarSinceOp(OperandExpr):
 def bar_since(
     condition: Any,
     *,
-    scope: LookbackScope,
+    scope: LookbackScope | None = None,
+    lookback: Any = None,
     select: str = "nearest",
     default: Any = SCOPE_LENGTH,
     include_current: bool = True,
     nan_policy: NanPolicy = DEFAULT_NAN_POLICY,
 ) -> BarSinceOp:
-    if not isinstance(scope, LookbackScope):
+    if scope is None and lookback is None:raise ValueError("bar search needs a partition scope or explicit lookback")
+    if scope is not None and not isinstance(scope, LookbackScope):
         raise TypeError(
             "bar_since scope must be created by "
             "scope_bars/scope_session/scope_trading_day"
         )
     return BarSinceOp(
         _to_expr(condition),
-        scope=scope,
+        scope=scope,lookback=lookback,
         select=select,
         default=default,
         include_current=include_current,
@@ -130,18 +132,22 @@ def bar_since(
 
 
 class BarDistanceOp(OperandExpr):
+    _rust_only = True
+
     def __init__(
         self,
         value: FactorExpr,
         condition: FactorExpr,
         *,
-        scope: LookbackScope,
+        scope: LookbackScope | None = None,
+        lookback: Any = None,
         select: str = "nearest",
         default: Any = SCOPE_LENGTH,
         nan_policy: NanPolicy = DEFAULT_NAN_POLICY,
     ) -> None:
         super().__init__("bar_distance", value, condition, _to_expr(default))
         self.scope = scope
+        self.lookback = None if lookback is None else _to_expr(lookback)
         self.select = _validate_select(select)
         self.nan_policy = nan_policy
 
@@ -156,25 +162,20 @@ class BarDistanceOp(OperandExpr):
     @property
     def _operands(self) -> tuple[FactorExpr, ...]:
         scope_refs = (self.scope.count,) if isinstance(self.scope, BarCountScope) else ()
-        return (*self.operands, *scope_refs)
+        return (*self.operands, *scope_refs, *((self.lookback,) if self.lookback is not None else ()))
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
-        values = self.value.evaluate(ctx=ctx)
-        return evaluate_bar_distance(
-            values,
-            self.condition,
-            scope=self.scope,
-            select=self.select,
-            default=scalar_default(self.operands[2]),
-            ctx=ctx,
-            nan_policy=self.nan_policy,
-        )
+        from .rust_plan import evaluate_rust_plan
+        result=evaluate_rust_plan([self],ctx)
+        if result is None:raise TypeError('bar search requires Rust expressions or explicit DataFrame inputs')
+        return result[0]
 
     def resolve(self, *args: Any, **kwargs: Any) -> FactorExpr:
         resolved: FactorExpr = BarDistanceOp(
             self.value.resolve(*args, **kwargs),
             self.condition.resolve(*args, **kwargs),
-            scope=self.scope.resolve(*args, **kwargs),
+            scope=None if self.scope is None else self.scope.resolve(*args, **kwargs),
+            lookback=None if self.lookback is None else self.lookback.resolve(*args, **kwargs),
             select=self.select,
             default=self.operands[2].resolve(*args, **kwargs),
             nan_policy=self.nan_policy,
@@ -182,7 +183,8 @@ class BarDistanceOp(OperandExpr):
         return copy_annotation(self,resolved)
 
     def _structural_extra(self) -> tuple[Any, ...]:
-        return (self.scope.structural_key(), self.select, self.nan_policy.value)
+        return ("partition-search:v2", None if self.scope is None else self.scope.structural_key(),
+                None if self.lookback is None else self.lookback._structural_key(), self.select, self.nan_policy.value)
 
 
     def _get_alias(self) -> str:
@@ -193,12 +195,14 @@ def bar_distance(
     value: Any,
     condition: Any,
     *,
-    scope: LookbackScope,
+    scope: LookbackScope | None = None,
+    lookback: Any = None,
     select: str = "nearest",
     default: Any = SCOPE_LENGTH,
     nan_policy: NanPolicy = DEFAULT_NAN_POLICY,
 ) -> BarDistanceOp:
-    if not isinstance(scope, LookbackScope):
+    if scope is None and lookback is None:raise ValueError("bar search needs a partition scope or explicit lookback")
+    if scope is not None and not isinstance(scope, LookbackScope):
         raise TypeError(
             "bar_distance scope must be created by "
             "scope_bars/scope_session/scope_trading_day"
@@ -206,7 +210,7 @@ def bar_distance(
     return BarDistanceOp(
         _to_expr(value),
         _to_expr(condition),
-        scope=scope,
+        scope=scope,lookback=lookback,
         select=select,
         default=default,
         nan_policy=nan_policy,

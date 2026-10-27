@@ -445,6 +445,8 @@ EXACT_PATH_TESTS = {
     ),
 }
 FACTOR_PLAN_TESTS = (
+    "tests/factors/test_bar_search.py",
+    "tests/factors/test_complex_match_rust.py",
     "tests/factors/test_shared_timeline.py",
     "tests/factors/test_panel_timeline.py",
     "tests/factors/test_signal_alignment.py",
@@ -772,6 +774,10 @@ def main() -> int:
     print(mode)
     print(*targets, sep="\n")
     return 0
+
+
+EXACT_PATH_TESTS["tools/factors/expr/bar_search_eval.py"] = FACTOR_PLAN_TESTS
+EXACT_PATH_TESTS["tests/benchmarks/bench_complex_match.py"] = ("tests/factors/test_complex_match_rust.py", "tests/factors/test_bar_search.py")
 
 
 if __name__ == "__main__":

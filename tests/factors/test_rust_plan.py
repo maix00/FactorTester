@@ -207,7 +207,7 @@ def test_compat_plan_rejects_truncated_but_compiles_match_distance():
     from tools.factors import CANDIDATE, CURRENT, bar_distance
     condition = CURRENT - CANDIDATE > 0
     spec = alpha_plan_spec(bar_distance(close, condition, scope=scope_bars(3)))
-    assert spec['nodes'][-1]['kind'] == 'match_distance' 
+    assert spec['nodes'][-1]['kind'] == 'search' 
 
 
 def test_compat_plan_emits_per_product_dynamic_windows():

@@ -36,6 +36,7 @@ from tools.parameters import FactorParam, WindowParam
 
 
 class _FrameExpr(FactorExpr):
+    _rust_frame_input = True
     def __init__(self, frame: pd.DataFrame):
         self.frame = frame
 
@@ -79,7 +80,7 @@ def test_bar_since_defaults_to_nearest_match_in_fixed_bar_scope():
         index=index,
     ))
 
-    result = bar_since(condition, scope=scope_bars(4), default=4).evaluate(ctx=_ctx())
+    result = bar_since(condition, scope=None, lookback=4, default=4).evaluate(ctx=_ctx())
 
     np.testing.assert_allclose(result["A"], [4, 0, 1, 2, 0, 1, 2])
 
@@ -93,7 +94,7 @@ def test_bar_since_can_select_farthest_match_in_fixed_bar_scope():
 
     result = bar_since(
         condition,
-        scope=scope_bars(4),
+        scope=None, lookback=4,
         select="farthest",
         default=4,
     ).evaluate(ctx=_ctx())
@@ -105,8 +106,8 @@ def test_bar_since_omitted_default_tracks_scope_and_explicit_nan_remains_missing
     index = pd.date_range("2026-01-01 09:01", periods=4, freq="min")
     condition = _FrameExpr(pd.DataFrame({"A": [False] * 4}, index=index))
 
-    dynamic = bar_since(condition, scope=scope_bars(2)).evaluate(ctx=_ctx())
-    missing = bar_since(condition, scope=scope_bars(2), default=np.nan).evaluate(ctx=_ctx())
+    dynamic = bar_since(condition, scope=None, lookback=2).evaluate(ctx=_ctx())
+    missing = bar_since(condition, scope=None, lookback=2, default=np.nan).evaluate(ctx=_ctx())
 
     np.testing.assert_allclose(dynamic["A"], [0, 1, 2, 2])
     assert missing["A"].isna().all()
@@ -120,7 +121,7 @@ def test_bar_since_can_exclude_current_bar_without_losing_distance():
 
     result = bar_since(
         condition,
-        scope=scope_bars(2),
+        scope=None, lookback=2,
         default=8,
         include_current=False,
     ).evaluate(ctx=_ctx())
@@ -138,7 +139,7 @@ def test_bar_distance_matches_nearest_dynamic_historical_candidate():
 
     result = value.bar_distance(
         condition,
-        scope=scope_bars(3),
+        scope=None, lookback=3,
         default=3,
     ).evaluate(ctx=_ctx())
 
@@ -159,7 +160,7 @@ def test_bar_distance_condition_embedding_signal_align_evaluates_whole_expressio
 
     result = value.bar_distance(
         formed,
-        scope=scope_bars(60),
+        scope=None, lookback=60,
         default=60.0,
     ).evaluate(ctx=_ctx())
 
@@ -188,7 +189,7 @@ def test_bars_accepts_a_duration_window_without_window_bars_wrapper():
     maximum = WindowParam("K", default_value="3m")
     expr = value.bar_distance(
         CANDIDATE < CURRENT,
-        scope=scope_bars(maximum),
+        scope=None, lookback=maximum,
         default=9,
     ).resolve(param_values={"K": pd.Timedelta("3m")})
 
@@ -208,7 +209,7 @@ def test_bar_distance_can_select_farthest_dynamic_historical_candidate():
 
     result = value.bar_distance(
         CANDIDATE < CURRENT,
-        scope=scope_bars(3),
+        scope=None, lookback=3,
         select="farthest",
         default=3,
     ).evaluate(ctx=_ctx())
@@ -276,7 +277,7 @@ def test_bar_since_counts_each_products_observed_bars_on_async_panel():
         same_session=True,
     )
 
-    result = bar_since(condition, scope=scope_bars(2), default=6).evaluate(
+    result = bar_since(condition, scope=None, lookback=2, default=6).evaluate(
         ctx=EvaluateContext(
             products=("A",), freq=DataFreq.MIN1, cache={}, panel_timeline=timeline,
         ),
@@ -314,10 +315,10 @@ class _DurationFamily(FactorFamily):
             >= threshold
         )
         price_duration = CLOSE_RAW.bar_distance(
-            condition, scope=scope_bars(maximum), default=maximum,
+            condition, scope=None, lookback=maximum, default=maximum,
         )
         volume_duration = VOLUME.bar_distance(
-            condition, scope=scope_bars(maximum), default=maximum,
+            condition, scope=None, lookback=maximum, default=maximum,
         )
         return (price_duration + volume_duration) / 2.0
 

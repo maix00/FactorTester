@@ -692,7 +692,7 @@ def test_alpha_factor_current_candidate_bar_distance_plan():
     spec = expression.to_plan_spec()
     assert spec is not None
     node = spec['nodes'][-1]
-    assert node['kind'] == 'match_distance'
+    assert node['kind'] == 'search'
     assert node['predicate']['op'] == 'gt'
     state = FactorPlanState(json.dumps(spec), 1)
     values = [float(state.update(np.array([value]))[0]) for value in (10.0, 12.0, 9.0)]

@@ -49,6 +49,7 @@ def shared_factor_plan_spec(expressions: Mapping[str, Any], products: tuple[Any,
             for field in ("child", "left", "right", "condition", "when_true", "when_false", "boundary", "trunc_start_child", "trunc_end_child"):
                 if field in node and node[field] is not None:
                     node[field] = local_to_global[node[field]]
+            if "dependencies" in node:node["dependencies"]=[local_to_global[child] for child in node["dependencies"]]
             if node.get("kind") == "column":
                 name = local_columns[node["index"]]
                 if name not in columns:

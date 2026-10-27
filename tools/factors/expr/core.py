@@ -311,6 +311,7 @@ class FactorExpr(ExpressionAnnotations):
             from .rust_plan import try_evaluate_rust_plan
             planned = try_evaluate_rust_plan(self, ctx)
         except Exception:
+            if getattr(self,"_rust_only",False):raise
             planned = None
         result = planned if planned is not None else self._evaluate(ctx)
         if cacheable and cache is not None:
@@ -687,7 +688,8 @@ class FactorExpr(ExpressionAnnotations):
         self,
         condition: Any,
         *,
-        scope: Any,
+        scope: Any = None,
+        lookback: Any = None,
         select: str = "nearest",
         default: Any = None,
     ) -> 'FactorExpr':
@@ -697,7 +699,7 @@ class FactorExpr(ExpressionAnnotations):
         return bar_distance(
             self,
             condition,
-            scope=scope,
+            scope=scope,lookback=lookback,
             select=select,
             default=SCOPE_LENGTH if default is None else default,
         )

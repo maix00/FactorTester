@@ -80,6 +80,8 @@ class _PlanBuilder:
         for expr in _walk(expressions):
             if isinstance(expr, ColumnRef):
                 self.frames[expr._structural_key()] = expr._evaluate(ctx)
+            elif getattr(expr,'_rust_frame_input',False) and isinstance(getattr(expr,'frame',None),pd.DataFrame) and not getattr(expr,'_operands',()):
+                self.frames[expr._structural_key()] = expr.frame
         if ctx.panel_timeline is not None:
             index = ctx.panel_timeline.index
         elif self.frames:
@@ -186,40 +188,51 @@ class _PlanBuilder:
             return 3, 0, int(pd.Timedelta(scope.gap).value)
         raise TypeError(f'unsupported scope {scope!r}')
 
-    def predicate(self, expr, grid, dependencies, program):
-        unary = ['neg', 'abs', 'sign', 'sqrt', 'log', 'tanh', 'not']
-        binary = ['add', 'sub', 'mul', 'div', 'pow', 'max', 'min',
-                  'gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or', 'bimax', 'bimin']
-        if isinstance(expr, MatchValueRef):
-            instruction = [0 if expr.role == 'current' else 1, 0, 0, 0, 0]
-        elif isinstance(expr, ConstExpr):
-            instruction = [2, 0, 0, 0, float(expr.value)]
-        elif isinstance(expr, WhereOp):
-            operands = [self.predicate(c, grid, dependencies, program) for c in expr.operands]
-            instruction = [4, *operands, 0]
-        elif type(expr) is CompositeExpr and expr.op in POINTWISE_OPS:
-            operands = [self.predicate(c, grid, dependencies, program) for c in expr.operands]
-            if expr.op in unary:
-                instruction = [10 + unary.index(expr.op), operands[0], 0, 0, 0]
-            else:
-                # Fold variadic max/min without evaluating the predicate in Python.
-                a = operands[0]
-                for b in operands[1:-1]:
-                    program.append([20 + binary.index(expr.op), a, b, 0, 0])
-                    a = len(program) - 1
-                instruction = [20 + binary.index(expr.op), a, operands[-1], 0, 0]
-        else:
-            dependency = self.align(self.build(expr), grid)
-            dependencies.append(dependency)
-            instruction = [3, len(dependencies) - 1, 0, 0, 0]
-        program.append(instruction)
-        return len(program) - 1
+    def match_predicate(self,expr,grid,dependencies):
+        if isinstance(expr,MatchValueRef):return {'op':expr.role}
+        if isinstance(expr,ConstExpr):return {'op':'const','value':None if np.isnan(float(expr.value)) else float(expr.value)}
+        if isinstance(expr,WhereOp):
+            c,a,b=[self.match_predicate(x,grid,dependencies) for x in expr.operands]
+            return dict(op='where',condition=c,when_true=a,when_false=b)
+        if type(expr) is CompositeExpr and expr.op in POINTWISE_OPS:
+            args=[self.match_predicate(x,grid,dependencies) for x in expr.operands]
+            op={'bimax':'max','bimin':'min'}.get(expr.op,expr.op)
+            if len(args)==1:return dict(op='unary',kind=op,a=args[0])
+            result=args[0]
+            for child in args[1:]:result=dict(op='binary',kind=op,a=result,b=child)
+            return result
+        child=self.align(self.build(expr),grid)
+        if all(child.id!=old.id for old in dependencies):dependencies.append(child)
+        return dict(op='input',index=next(i for i,x in enumerate(dependencies) if x.id==child.id))
+
+    def search(self,expr):
+        import json
+        child=self.build(expr.value if isinstance(expr,BarDistanceOp) else expr.condition)
+        if child.signal is not None:child=self.align(child,self.base)
+        dependencies=[]
+        predicate=self.match_predicate(expr.condition,child.grid,dependencies) if isinstance(expr,BarDistanceOp) else None
+        refs=[child,*dependencies]
+        nodes=[dict(kind='column',index=i) for i in range(len(refs))]
+        partition=expr.scope.resolved_count(ctx=self.ctx) if isinstance(expr.scope,BarCountScope) else None
+        lookback=BarCountScope(expr.lookback).resolved_count(ctx=self.ctx) if expr.lookback is not None else None
+        day=isinstance(expr.scope,TradingDayScope)
+        if day and self.ctx.panel_timeline is None:raise ValueError('trading_day search requires frozen panel_timeline')
+        boundary=None
+        if day:boundary=len(nodes);nodes.append(dict(kind='boundary',index=0))
+        default=expr.operands[-1];dynamic=isinstance(default,ScopeLengthDefault)
+        value=0.0 if dynamic else float(default.value)
+        nodes.append(dict(kind='search',child=0,dependencies=list(range(1,len(refs))),boundary=boundary,
+            predicate=predicate,partition=partition,lookback=lookback,
+            gap_ns=int(pd.Timedelta(expr.scope.gap).value) if isinstance(expr.scope,SessionScope) else None,
+            nearest=expr.select=='nearest',default_scope=dynamic,default=None if np.isnan(value) else value,
+            include_current=getattr(expr,'include_current',False),propagate_nan=expr.nan_policy.value=='propagate'))
+        index=self.plan.add_kernel(json.dumps(dict(nodes=nodes,outputs=[len(nodes)-1]),allow_nan=False),
+            [r.id for r in refs],child.grid.id,len(self.products),day)
+        return _Ref(index,child.grid,child.signal,False,child.columns)
 
     def signal(self, expr):
         child = self.build(expr.operands[0])
         if child.signal is not None:
-            if self.ctx.panel_timeline is None:
-                raise ValueError('outer SignalAlign over a nested signal requires panel_timeline')
             child = self.align(child, self.base)
         source = child.grid
         freq = DataFreq(expr.signal_freq)
@@ -325,22 +338,8 @@ class _PlanBuilder:
             result = self.signal(expr)
         elif isinstance(expr, TermStructureOp):
             result = self.term(expr)
-        elif isinstance(expr, BarDistanceOp):
-            raise ValueError("bar_distance still uses the original CANDIDATE semantics")
-        elif isinstance(expr, BarSinceOp):
-            child = self.build(expr.condition)
-            default = expr.operands[-1]
-            fallback = 0.0 if isinstance(default, ScopeLengthDefault) else float(default.value)
-            params = [*self.scope(expr.scope), float(getattr(expr, 'include_current', False)),
-                      float(expr.select == 'nearest'), float(isinstance(default, ScopeLengthDefault)),
-                      fallback, float(expr.nan_policy.value == 'propagate')]
-            children = [child]
-            if isinstance(expr, BarDistanceOp):
-                program = []
-                self.predicate(expr.condition, child.grid, children, program)
-                params.extend(value for instruction in program for value in instruction)
-            result = self.add('distance' if isinstance(expr, BarDistanceOp) else 'since', children,
-                              params, grid=child.grid, signal=child.signal, columns=child.columns)
+        elif isinstance(expr,(BarSinceOp,BarDistanceOp)):
+            result=self.search(expr)
         elif isinstance(expr, (RollingOp, GroupByScopeOp)):
             children = [self.build(c) for c in expr.operands[expr._data_start:expr._data_start + expr._n_data]]
             grid, signal = self.common(children)
@@ -429,6 +428,9 @@ class _PlanBuilder:
                 result = children[0]
                 for child in children[1:]:
                     result = self.point(op, [result, child])
+        elif getattr(expr,'_rust_frame_input',False) and isinstance(getattr(expr,'frame',None),pd.DataFrame) and not getattr(expr,'_operands',()):
+            frame=expr.frame.reindex(index=self.index,columns=self.products)
+            result=self.add('column',params=[self.input(frame.to_numpy(dtype=float).T)])
         else:
             raise TypeError(f'unsupported Rust plan node: {type(expr).__name__}')
         self.memo[key] = result
@@ -466,4 +468,4 @@ _PLAN_SUPPORTED = (ColumnRef, ConstExpr, RollingOp, WindowBarsExpr, IntervalBars
 
 def unsupported_plan_nodes(expression: FactorExpr) -> tuple[str, ...]:
     return tuple(dict.fromkeys(type(node).__name__ for node in _walk([expression])
-                               if not isinstance(node, _PLAN_SUPPORTED)))
+                               if not isinstance(node, _PLAN_SUPPORTED) and not (isinstance(getattr(node,"frame",None),pd.DataFrame) and not getattr(node,"_operands",()))))
