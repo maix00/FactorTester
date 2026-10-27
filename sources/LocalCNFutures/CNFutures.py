@@ -195,6 +195,10 @@ def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str
 
 class CNFuturesContract(FuturesContract):
     """中国期货单个合约（固定计价货币 CNY，时区 Asia/Shanghai）。"""
+    def get_instrument_fields(self) -> dict[str, Any]:
+        from .instrument_fields import instrument_fields
+        return instrument_fields(self)
+
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY', timezone='Asia/Shanghai')
         self.DAY1 = _CNFuturesContractTermStructureView(
@@ -273,6 +277,10 @@ class CNFutures(Futures):
     """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
 
     _is_cn_futures_main_product = True
+
+    def get_instrument_fields(self) -> dict[str, Any]:
+        from .instrument_fields import instrument_fields
+        return instrument_fields(self)
 
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  roller_info_path: Optional[str] = None,

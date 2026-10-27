@@ -12,6 +12,7 @@ import { DEFAULT_MARKET_SETTINGS, marketZone, priceRequest, termBands, type Mark
 import { request } from "../configuration/api.ts";
 import { usePageInstance } from "../page-instance.ts";
 import { notify } from "../notifications/core.ts";
+import { productFieldRows } from "../product-fields.ts";
 type Row = Record<string, any>;
 const intervals = ["SOURCE", "MIN5", "MIN15", "MIN30", "HOUR1", "DAY1", "WEEK1"];
 export function ProductDetailPage(): React.ReactElement {
@@ -46,6 +47,7 @@ export function ProductDetailPage(): React.ReactElement {
   useEffect(() => {
     if (!product) return;
     const controller = new AbortController();
+    setFields(null); setFieldsError("");
     void request(`/api/product-library/product-fields?name=${encodeURIComponent(contract || product)}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setFields(data.fields || data); }).catch((reason) => { if (!controller.signal.aborted) setFieldsError(reason.message); });
     if (!contract) void request(`/api/product-library/contracts?product=${encodeURIComponent(product)}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) { setContracts(data.contracts || []); setTermAvailable(!!data.supports_term_structure); } }).catch((reason) => { if (!controller.signal.aborted) setTermError(reason.message); });
     return () => controller.abort();
@@ -83,7 +85,7 @@ export function ProductDetailPage(): React.ReactElement {
       { title: t("market.data"), key: "data", render: (_, row) => row.available_freqs?.length ? row.available_freqs.join(" · ") : t("market.noData") },
       ...["forward_adjustment_mul", "forward_adjustment_add", "backward_adjustment_mul", "backward_adjustment_add", "adjustment_ratio"].map((key) => ({ key, title: t(`market.${key}`), dataIndex: key, render: (value: unknown) => value ?? "—" })),
     ]} /></section> : null}
-    <Collapse className="tr-product-fields" items={[{ key: "fields", label: t("market.fields"), children: fieldsError ? <Alert type="error" message={fieldsError} /> : <ResultView value={fields} /> }]} />
+    <Collapse className="tr-product-fields" items={[{ key: "fields", label: t("market.fields"), children: fieldsError ? <Alert type="error" message={fieldsError} /> : <ProductFieldTable fields={fields} /> }]} />
     {settingsOpen ? <DetailsPanel title={t("market.settings")} onClose={() => { if (!loading) setSettingsOpen(false); }}><div className="tr-market-settings">
       {settingsError ? <Alert type="error" message={settingsError} /> : null}
       <label><span>{t("market.source")}</span><Select aria-label={t("market.source")} value={draft.source} options={[{ value: "", label: t("market.auto") }, ...sources.map((item) => ({ value: item.alias, label: [item.alias, item.freq, item.delivery_mode === "live_stream" ? t("market.live") : ""].filter(Boolean).join(" · ") }))]} onChange={(value) => setDraft((old) => ({ ...old, source: value }))} /></label>
@@ -96,4 +98,19 @@ export function ProductDetailPage(): React.ReactElement {
     </div></DetailsPanel> : null}
     {infoOpen ? <DetailsPanel title={t("market.info")} onClose={() => setInfoOpen(false)}><ResultView value={metadata} /></DetailsPanel> : null}
   </FunctionPage>;
+}
+
+function ProductFieldTable({ fields }: { fields: unknown }): React.ReactElement {
+  const { t } = useTranslation();
+  const rows = useMemo(() => productFieldRows(fields), [fields]);
+  const [page, setPage] = useState(1), [size, setSize] = useState(15);
+  const current = Math.min(page, Math.max(1, Math.ceil(rows.length / size)));
+  return <TRDataTable rows={rows.slice((current-1)*size, current*size)} rowKey="key"
+    pagination={{page:current,pageSize:size,total:rows.length,hideOnSinglePage:true,onChange:(p,s) => {setPage(p);setSize(s);}}}
+    columns={[
+      {key:"field",title:t("instrumentFields.field"),render:(_,row) => <><span>{t(`instrumentFields.labels.${row.key}`, {defaultValue:row.label || row.key})}</span><small className="tr-library-row-meta"><code>{row.key}</code></small></>},
+      {key:"value",title:t("instrumentFields.value"),render:(_,row) => row.value === null || row.value === undefined ? t("properties.unknown") : typeof row.value === "object" ? <ResultView value={row.value} /> : String(row.value)},
+      {dataIndex:"type",title:t("instrumentFields.type")},
+      {key:"source",title:t("instrumentFields.source"),render:(_,row) => row.source || "—"},
+    ]} />;
 }

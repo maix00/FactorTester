@@ -49,8 +49,8 @@ def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_pa
         ],
     ))
     monkeypatch.setattr(nautilus_catalog, "find_contract_product", lambda uid: product)
-    monkeypatch.setattr(nautilus_catalog, "cn_futures_trading_spec_fields",
-                        lambda product: {"point_value": 10000, "min_tick": 0.005,
+    monkeypatch.setattr(nautilus_catalog, "instrument_fields",
+                        lambda product: {"multiplier": 10000, "price_increment": 0.005,
                                          "long_margin_ratio": 0.02, "short_margin_ratio": 0.02,
                                          "trading_spec_source": "test"})
     monkeypatch.setattr(nautilus_catalog, "contract_data_path_for",
@@ -94,8 +94,8 @@ def test_stage_catalogs_rejects_multiple_contracts_for_one_product(monkeypatch, 
     ))
     calls = []
     monkeypatch.setattr(nautilus_catalog, "find_contract_product", lambda uid: product)
-    monkeypatch.setattr(nautilus_catalog, "cn_futures_trading_spec_fields",
-                        lambda product: {"point_value": 10000, "min_tick": 0.005,
+    monkeypatch.setattr(nautilus_catalog, "instrument_fields",
+                        lambda product: {"multiplier": 10000, "price_increment": 0.005,
                                          "long_margin_ratio": 0.02, "short_margin_ratio": 0.02,
                                          "trading_spec_source": "test"})
     monkeypatch.setattr(nautilus_catalog, "contract_data_path_for",
@@ -134,8 +134,8 @@ def test_stage_run_spec_catalogs_dispatches_day1_reader(monkeypatch, tmp_path):
     product = SimpleNamespace(get_parent_product=lambda: parent)
     captured = {}
     monkeypatch.setattr(nautilus_catalog, "find_contract_product", lambda uid: product)
-    monkeypatch.setattr(nautilus_catalog, "cn_futures_trading_spec_fields",
-                        lambda product: {"point_value": 10000, "min_tick": 0.005,
+    monkeypatch.setattr(nautilus_catalog, "instrument_fields",
+                        lambda product: {"multiplier": 10000, "price_increment": 0.005,
                                          "long_margin_ratio": 0.02, "short_margin_ratio": 0.02,
                                          "trading_spec_source": "test"})
     monkeypatch.setattr(nautilus_catalog, "build_contract_spec",
@@ -161,44 +161,20 @@ def test_stage_run_spec_catalogs_dispatches_day1_reader(monkeypatch, tmp_path):
     assert (close_dt.hour, close_dt.minute) == (15, 0)
 
 
-def test_build_contract_spec_rejects_missing_or_side_specific_margin():
+def test_build_contract_spec_validates_bundle_supplied_native_margin():
     import pytest
     from sources.LocalCNFutures import nautilus_catalog
-
     row = {"start_ts": 1700611200000, "end_ts": 1708387200000}
-    base = {"point_value": 10000, "min_tick": 0.005, "trading_spec_source": "test"}
-    with pytest.raises(ValueError, match="no side-specific margin"):
-        nautilus_catalog.build_contract_spec(
-            "CFFEX|F|T|2403", product=object(), contract_row=row,
-            spec_fields=dict(base), source_key="LocalCNFuturesContractMIN1",
-            frequency="MIN1",
-        )
-    with pytest.raises(ValueError, match="long_margin_ratio is not numeric"):
-        nautilus_catalog.build_contract_spec(
-            "CFFEX|F|T|2403", product=object(), contract_row=row,
-            spec_fields={**base, "long_margin_ratio": "bad", "short_margin_ratio": 0.02},
-            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
-        )
-    for invalid in (float("inf"), float("nan"), "-Infinity"):
-        with pytest.raises(ValueError, match="must be finite"):
-            nautilus_catalog.build_contract_spec(
-                "CFFEX|F|T|2403", product=object(), contract_row=row,
-                spec_fields={**base, "long_margin_ratio": invalid,
-                             "short_margin_ratio": invalid},
-                source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
-            )
-    with pytest.raises(ValueError, match="non-negative"):
-        nautilus_catalog.build_contract_spec(
-            "CFFEX|F|T|2403", product=object(), contract_row=row,
-            spec_fields={**base, "long_margin_ratio": -0.02, "short_margin_ratio": -0.02},
-            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
-        )
-    with pytest.raises(ValueError, match="side-specific margin is not representable"):
-        nautilus_catalog.build_contract_spec(
-            "CFFEX|F|T|2403", product=object(), contract_row=row,
-            spec_fields={**base, "long_margin_ratio": 0.02, "short_margin_ratio": 0.03},
-            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
-        )
+    base = {"multiplier": 10000, "price_increment": 0.005,
+            "margin_init": 0.02, "margin_maint": 0.02, "trading_spec_source": "test"}
+    for field in ("margin_init", "margin_maint"):
+        for invalid in (None, "bad", float("inf"), float("nan"), "-Infinity", -0.02):
+            with pytest.raises(ValueError):
+                nautilus_catalog.build_contract_spec(
+                    "CFFEX|F|T|2403", product=object(), contract_row=row,
+                    spec_fields={**base, field: invalid},
+                    source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+                )
 
 
 def test_market_member_must_declare_related_history_member(monkeypatch, tmp_path):
@@ -344,7 +320,7 @@ def test_day1_session_starts_at_previous_night_trading_day():
     assert (close_dt.day, close_dt.hour, close_dt.minute) == (2, 15, 0)
 
 
-def test_bundle_sets_native_margin_fields_without_invented_source_columns(monkeypatch):
+def test_bundle_native_margin_fields_reach_instrument_unchanged(monkeypatch):
     from decimal import Decimal
     from types import SimpleNamespace
     from tests.nautilus_runtime import require_nautilus
@@ -356,10 +332,9 @@ def test_bundle_sets_native_margin_fields_without_invented_source_columns(monkey
     resolved = resolved_contract_minute_source()
     monkeypatch.setattr(nautilus_catalog, "from_server_sources",
                         lambda: SimpleNamespace(resolve=lambda *args, **kwargs: resolved))
-    # Same shape supplied by the existing source, with no initial/maintenance
-    # columns. Assert actual native Instrument values, not a mocked constructor.
-    fields = {"min_tick": "0.005", "point_value": "10000",
-              "long_margin_ratio": "0.02", "short_margin_ratio": "0.02",
+    # Bundle-provided native fields must not be recomputed by the bridge.
+    fields = {"price_increment": "0.005", "multiplier": "10000",
+              "margin_init": "0.025", "margin_maint": "0.02",
               "trading_spec_source": "synthetic test fixture"}
     spec = nautilus_catalog.build_contract_spec(
         "CFFEX|F|T|2403", product=object(),
@@ -367,5 +342,5 @@ def test_bundle_sets_native_margin_fields_without_invented_source_columns(monkey
         spec_fields=fields, source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
     )
     instrument = to_nautilus_instrument(spec)
-    assert instrument.margin_init == Decimal("0.02")
+    assert instrument.margin_init == Decimal("0.025")
     assert instrument.margin_maint == Decimal("0.02")

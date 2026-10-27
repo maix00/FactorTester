@@ -297,3 +297,28 @@ Bundle 的可选 Nautilus 集成直接提供 Nautilus 字段和数据类型；�
 此次只修复 Bundle 保证金初始化的错误原始字段要求；平台产品字段补全和完整源包外置
 仍需继续接入，不能将本次提交称为所有字段已对齐。研究依据和下一步范围见
 [source-bundle-takeover-2026-10-27.md](../audits/source-bundle-takeover-2026-10-27.md)。
+
+
+### 前后端同名字段的首批接线（2026-10-27）
+
+LocalCNFutures 的 `instrument_fields.py` 现在拥有唯一字段生产实现；其产品对象通过
+`get_instrument_fields()` 提供这些值，执行准备也调用同一实现。原平台
+`cn_futures_trading_spec_fields` 及其中国期货字段转换已删除。Bundle 对原始供应格式的
+必要处理留在 Bundle 内；对外提供 `price_increment`、`multiplier`、`margin_init`、
+`margin_maint`、`min_quantity`、`max_quantity` 等 Nautilus 名称，平台不重算。
+
+平台产品详情仅调用提供器并保留同名字段，Decimal 以字符串无损 JSON 传输；React 产品页
+用公共分页表格显示相同键和值，中文/英文仅翻译标签，未知新字段也直接展示。
+多空/按手规则尚不能表达为当前单一比例时，Bundle 不伪造比例，保留原规则数据供审计。
+这仍是当前快照信息，不得当作历史交易规则冻结的完成证明；数量限额等 Instrument 其余
+属性还需要逐项完成实际执行消费，不能因页面能显示就声称全部 Nautilus 能力接通。
+原生行情回放 `run_catalogs` 未改变，没有新增 Python 行情物化或逐 Bar 字段查询。
+
+
+### Product 的目标边界
+
+平台只保留轻量产品目录记录（稳定引用、名称、分类/产品组关系和来源引用），不维护另一份
+可交易合约/保证金/行情/持仓计算模型。Bundle 的 Nautilus Instrument 与原生数据接口是
+执行入口。当前旧 Product 子类上的 get_instrument_fields 只用于迁移现有消费者；本批不
+扩充旧 Product 的计算职责。待目录、分类、因子产品维度及来源查找切到轻量引用后，删除
+对应旧 Product 执行/加载实现，不再增加一套平行的 Product→Instrument 字段转换。

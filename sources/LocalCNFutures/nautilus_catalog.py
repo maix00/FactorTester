@@ -18,9 +18,10 @@ from server.services.nautilus_bridge.catalog import (
 from traderesearch_data.nautilus import CatalogLoadRequest
 from server.services.nautilus_bridge.market_data import FuturesContractSpec
 from server.modules.shared.price_services import (
-    cn_futures_trading_spec_fields, contract_data_path_for, find_contract_product,
+    contract_data_path_for, find_contract_product,
 )
 from server.services.nautilus_bridge.source_registry import from_server_sources
+from .instrument_fields import instrument_fields
 
 
 def _finite_decimal(value: Any, name: str, contract_uid: str) -> Decimal:
@@ -41,27 +42,16 @@ def build_contract_spec(
     if len(parts) != 4 or parts[1] != "F":
         raise ValueError(f"unsupported contract UID: {contract_uid}")
     venue, underlying, month = parts[0], parts[2], parts[3]
-    min_tick = _finite_decimal(spec_fields["min_tick"], "min_tick", contract_uid)
-    multiplier = _finite_decimal(spec_fields["point_value"], "point_value", contract_uid)
+    min_tick = _finite_decimal(spec_fields["price_increment"], "price_increment", contract_uid)
+    multiplier = _finite_decimal(spec_fields["multiplier"], "multiplier", contract_uid)
     if min_tick <= 0 or multiplier <= 0:
         raise ValueError(f"{contract_uid}: tick and multiplier must be positive")
     precision = max(0, -min_tick.as_tuple().exponent)
 
-    long_raw = spec_fields.get("long_margin_ratio")
-    short_raw = spec_fields.get("short_margin_ratio")
-    if long_raw is None or short_raw is None:
-        raise ValueError(f"contract has no side-specific margin: {contract_uid}")
-    long_margin = _finite_decimal(long_raw, "long_margin_ratio", contract_uid)
-    short_margin = _finite_decimal(short_raw, "short_margin_ratio", contract_uid)
-    if long_margin != short_margin:
-        raise ValueError(
-            f"{contract_uid}: side-specific margin is not representable by the "
-            "current single-margin Instrument contract"
-        )
-    if long_margin < 0:
+    margin_init = _finite_decimal(spec_fields.get("margin_init"), "margin_init", contract_uid)
+    margin_maint = _finite_decimal(spec_fields.get("margin_maint"), "margin_maint", contract_uid)
+    if margin_init < 0 or margin_maint < 0:
         raise ValueError(f"{contract_uid}: margin ratios must be non-negative")
-    # This Bundle uses one trading-margin rate. It supplies both Nautilus
-    # requirements directly; raw data need not invent two independent columns.
 
     resolved_source = from_server_sources().resolve(
         source_key, frequency=frequency, product=product,
@@ -74,7 +64,7 @@ def build_contract_spec(
         price_increment=min_tick, price_precision=precision,
         multiplier=multiplier, currency="CNY",
         activation_ns=start_ns, expiration_ns=end_ns,
-        margin_init=long_margin, margin_maint=long_margin,
+        margin_init=margin_init, margin_maint=margin_maint,
         provenance=str(spec_fields.get("trading_spec_source") or "run_spec_product_catalog"),
         resolved_source=resolved_source,
     )
@@ -173,8 +163,8 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
             row = next((item for item in rows if str(item.get("uid")) == contract_uid), None)
             if row is None:
                 raise ValueError(f"contract has no frozen lifecycle row: {contract_uid}")
-            fields = cn_futures_trading_spec_fields(product)
-            if not fields or fields.get("point_value") is None or fields.get("min_tick") is None:
+            fields = instrument_fields(product)
+            if not fields or fields.get("multiplier") is None or fields.get("price_increment") is None:
                 raise ValueError(f"contract has no trading specification: {contract_uid}")
             spec = build_contract_spec(
                 contract_uid, product=product, contract_row=row,
