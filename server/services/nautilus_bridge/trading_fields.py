@@ -1,7 +1,7 @@
 """Freeze exchange trading rules at the event's actual effective time.
 
 The source catalog describes a market-data feed, not a historical rule book.
-Callers must bind an admitted feed to an explicit FieldHistoryProvider and
+Callers must bind an admitted feed to an explicit source-owned provider and
 provide separately versioned session/settlement rules.  No latest snapshot,
 calendar-date guess, or missing-field default is allowed into an execution run.
 """
@@ -21,10 +21,6 @@ import pandas as pd
 from tools.data.field_history import (
     OPENCTP_LATEST_FIELD_PROVIDER,
     OPENCTP_LATEST_FIELD_SOURCE_KEY,
-    FieldHistoryProvider,
-    HistoricalFieldFallbackPolicy,
-    HistoricalFieldLookupError,
-    HistoricalFieldValue,
 )
 
 MARKET_RULE_FIELDS = (
@@ -46,6 +42,18 @@ class TradingFieldProvider(Protocol):
     def resolve_at(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
+@runtime_checkable
+class TradingFieldValue(Protocol):
+    """Fields consumed from one source-owned historical lookup result."""
+
+    value: Any
+    approximated: bool
+    provider: str
+    source_key: str
+    effective_trading_day: Any
+    effective_timestamp: Any
+
+
 class TradingFieldContractError(ValueError):
     """Historical trading rules are absent, ambiguous, or non-authoritative."""
 
@@ -63,7 +71,7 @@ class HistoricalTradingFieldBinding:
     source: TradingFieldSource
     provider_ref: str
     effective_clock: str
-    provider: FieldHistoryProvider
+    provider: TradingFieldProvider
 
 
 def bind_trading_field_source(resolved_source: Any) -> TradingFieldSource:
@@ -284,7 +292,7 @@ def _rule_at(
     return max(candidates, key=lambda item: item[0])[1]
 
 
-def _field_evidence(field: str, record: HistoricalFieldValue) -> FieldEvidence:
+def _field_evidence(field: str, record: TradingFieldValue) -> FieldEvidence:
     if (record.approximated or not record.provider or not record.source_key
             or record.provider == OPENCTP_LATEST_FIELD_PROVIDER
             or record.source_key.startswith(OPENCTP_LATEST_FIELD_SOURCE_KEY)):
@@ -309,7 +317,7 @@ def _field_evidence(field: str, record: HistoricalFieldValue) -> FieldEvidence:
 
 def resolve_trading_fields_at(
     *, source: TradingFieldSource, instrument: str, event: TradingFieldEvent,
-    provider: FieldHistoryProvider, rules: Iterable[EffectiveRule],
+    provider: TradingFieldProvider, rules: Iterable[EffectiveRule],
 ) -> FrozenTradingFields:
     """Resolve every execution field against the event's exact trading day/time."""
     if not instrument or not source.adapter_id:
@@ -328,9 +336,9 @@ def resolve_trading_fields_at(
             resolved = provider.resolve_at(
                 instrument, name, timestamp,
                 trading_day_resolver=resolver,
-                fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+                fallback="strict_historical",
             )
-        except HistoricalFieldLookupError as exc:
+        except LookupError as exc:
             raise TradingFieldContractError(
                 f"{source.member_key}/{instrument}: missing {name} at {timestamp.isoformat()}: {exc}"
             ) from exc
@@ -346,7 +354,7 @@ def resolve_trading_fields_at(
 
 def iter_trading_field_timeline(
     *, source: TradingFieldSource, instrument: str,
-    events: Iterable[TradingFieldEvent], provider: FieldHistoryProvider,
+    events: Iterable[TradingFieldEvent], provider: TradingFieldProvider,
     rules: Iterable[EffectiveRule],
 ) -> Iterator[FrozenTradingFields]:
     """Stream source-aligned rules without retaining every bar's full snapshot."""
@@ -378,7 +386,7 @@ def iter_trading_field_timeline(
 
 def freeze_trading_field_timeline(
     *, source: TradingFieldSource, instrument: str,
-    events: Iterable[TradingFieldEvent], provider: FieldHistoryProvider,
+    events: Iterable[TradingFieldEvent], provider: TradingFieldProvider,
     rules: Iterable[EffectiveRule],
 ) -> tuple[FrozenTradingFields, ...]:
     """Materialize an auditable timeline when every event snapshot is needed."""
