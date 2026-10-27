@@ -2,10 +2,14 @@ import React, { useEffect, useState } from "react";
 import { Alert, Button, Form, Input, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
+import { DetailsPanel } from "./details-panel.tsx";
+import { useCompactLayout } from "../configuration/layout.ts";
 import type { JSONObject } from "../configuration/draft.ts";
 
 export function LibraryCreate({ kind, onCreated, onCancel }: { kind: "factor" | "strategy"; onCreated: (value: JSONObject) => void; onCancel: () => void }): React.ReactElement {
   const { t } = useTranslation();
+  const mobile = useCompactLayout();
+  const finish = (value: JSONObject): void => { if (mobile && history.state?.trDetail) history.back(); onCreated(value); };
   const [families, setFamilies] = useState<JSONObject[]>([]), [family, setFamily] = useState("");
   const [name, setName] = useState(""), [source, setSource] = useState(""), [entry, setEntry] = useState("Strategy"), [params, setParams] = useState("{}");
   const [newFamily, setNewFamily] = useState(false), [createdFamily, setCreatedFamily] = useState("");
@@ -24,7 +28,7 @@ export function LibraryCreate({ kind, onCreated, onCancel }: { kind: "factor" | 
       if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error(t("editor.objectRequired"));
       if (kind === "strategy") {
         const result = await request("/api/strategy-library/strategies", { method: "POST", body: JSON.stringify({ name, entrypoint: entry, source_code: source, visibility: "private", requirements: values }) });
-        onCreated(result.strategy);
+        finish(result.strategy);
       } else {
         let alias = createdFamily || family;
         if (newFamily && !createdFamily) {
@@ -36,12 +40,12 @@ export function LibraryCreate({ kind, onCreated, onCancel }: { kind: "factor" | 
         if (!factor?.ref && !factor?.factor_ref) throw new Error(t("editor.missingIdentity"));
         // Resolve the exact registered version; no browser identity reconstruction.
         const detail = await request(`/api/factor-library/factors/detail?factor_ref=${encodeURIComponent(factor.ref || factor.factor_ref)}`);
-        onCreated(detail.factor);
+        finish(detail.factor);
       }
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
   };
-  return <div className="tr-library-create"><div className="tr-inline-editor-heading"><h2>{t(kind === "factor" ? "editor.newFactor" : "editor.newStrategy")}</h2><Button type="text" onClick={onCancel}>{t("configuration.cancel")}</Button></div>
+  const content = <div className="tr-library-create">{!mobile ? <div className="tr-inline-editor-heading"><h2>{t(kind === "factor" ? "editor.newFactor" : "editor.newStrategy")}</h2><Button type="text" onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       {kind === "factor" ? <><Form.Item label={t("editor.newFamily")}><Switch checked={newFamily} disabled={!!createdFamily} onChange={setNewFamily} /></Form.Item>
@@ -53,4 +57,5 @@ export function LibraryCreate({ kind, onCreated, onCancel }: { kind: "factor" | 
       <Button type="primary" loading={busy} disabled={kind === "strategy" ? !name || !source : newFamily ? !name || !source : !family} onClick={() => void save()}>{t("configuration.save")}</Button>
     </Form>
   </div>;
+  return mobile ? <DetailsPanel title={t(kind === "factor" ? "editor.newFactor" : "editor.newStrategy")} onClose={onCancel}>{content}</DetailsPanel> : content;
 }

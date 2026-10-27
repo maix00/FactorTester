@@ -25,5 +25,5 @@ function ResultArray({ value }: { value: unknown[] }): React.ReactElement {
   return <Table rowKey="__row" size="middle" scroll={{ x: "max-content" }} dataSource={rows}
     pagination={{ current, pageSize: size, total: value.length, onChange: (next, count) => { setPage(next); setSize(count); } }}
     columns={keys.map((key) => ({ key, title: key, dataIndex: key, render: (item: unknown) => item && typeof item === "object"
-      ? <details><summary>{t("jobs.detail")}</summary><pre>{JSON.stringify(item, null, 2)}</pre></details> : String(item ?? "—") }))} />;
+      ? <details><summary>{t("details")}</summary><pre>{JSON.stringify(item, null, 2)}</pre></details> : String(item ?? "—") }))} />;
 }

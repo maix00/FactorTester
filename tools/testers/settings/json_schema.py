@@ -82,6 +82,24 @@ def configuration_editor_contract(*, locale: str = "zh") -> dict[str, Any]:
                               "settings": {"type": "object", "properties": properties,
                                            "additionalProperties": True}}, "additionalProperties": True}},
                           "additionalProperties": True}
+    from tools.testers.ic_test.configuration.horizon import ICHorizonPolicy
+    ic_defaults = {"horizon": {"sampling": ICHorizonPolicy("scale_aware").mode},
+                   "entry_delay_bars": 0, "methods": ["rank"],
+                   "return_price_basis": "next_open_to_open_adjusted"}
+    ic_inputs = {"type": "object", "additionalProperties": True, "properties": {
+        "methods": {"type": "array", "title": "IC methods" if english else "IC 类型",
+                    "minItems": 1, "uniqueItems": True,
+                    "items": {"type": "string", "oneOf": [{"const": "rank", "title": "Spearman"}, {"const": "pearson", "title": "Pearson"}]}},
+        "entry_delay_bars": {"type": "integer", "minimum": 0, "title": "Entry delay (bars)" if english else "入场延迟（Bar）"},
+        "horizon": {"type": "object", "title": "Forward horizon" if english else "前瞻区间", "properties": {
+            "sampling": {"type": "string", "title": "Sampling" if english else "采样方式", "oneOf": [{"const": "scale_aware", "title": "Scale aware" if english else "按因子频率"}, {"const": "explicit", "title": "Explicit" if english else "自定义"}]},
+        }, "required": ["sampling"], "dependencies": {"sampling": {"oneOf": [
+            {"properties": {"sampling": {"const": "scale_aware"}}},
+            {"properties": {"sampling": {"const": "explicit"},
+                "bases": {"type": "array", "title": "Base frequencies" if english else "基准频率", "minItems": 1, "items": {"type": "string"}},
+                "multipliers": {"type": "array", "title": "Multipliers" if english else "区间倍数", "minItems": 1, "items": {"type": "integer", "minimum": 1}}}, "required": ["bases", "multipliers"]},
+        ]}}},
+    }}
     schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "$id": "urn:traderesearch:configuration-editor:v1",
@@ -100,4 +118,5 @@ def configuration_editor_contract(*, locale: str = "zh") -> dict[str, Any]:
         "additionalProperties": True,
     }
     return {"schema_version": 1, "configuration_schema_version": RESEARCH_CONFIGURATION_SCHEMA_VERSION,
-            "schema": schema, "catalog": catalog}
+            "schema": schema, "catalog": catalog,
+            "input_schemas": {"ic": ic_inputs}, "input_defaults": {"ic": ic_defaults}}

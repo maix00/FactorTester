@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button, Input, Pagination, Select, Spin } from "antd";
 import Form from "@rjsf/antd";
 import validator from "@rjsf/validator-ajv8";
@@ -43,6 +43,7 @@ export function useStrategyEditor({ scope, text, onChange, view, navigate }: Str
   navigation: React.ReactNode; content: React.ReactNode; title: string; busy: boolean; invalid: boolean; parameterKeys: Set<string>;
 } {
   const { t, i18n } = useTranslation();
+  const formId = useId();
   const [templates, setTemplates] = useState<StrategyChoice[]>([]);
   const [users, setUsers] = useState<StrategyChoice[]>([]);
   const [total, setTotal] = useState(0);
@@ -171,7 +172,7 @@ export function useStrategyEditor({ scope, text, onChange, view, navigate }: Str
         const defaults = { ...strategyDefaults(next), ...((selected.binding.factor_bindings as JSONObject) || {}), product_group_ref: selected.binding.product_group_ref };
         onChange(patchStrategy(latest.current.text, String(selected.binding.binding_id), { template_ref: next.template_ref, revision_ref: next.revision_ref, ...templateInputs(next, defaults) }));
       }} /> : <span>{String((selected.binding.source as JSONObject)?.strategy_ref || selected.binding.template_ref || "")}</span>}</div>
-    {template ? <Form key={String(selected.binding.binding_id)} schema={schema as RJSFSchema} formData={values} validator={validator} uiSchema={uiSchema} widgets={{ reference: ReferenceWidget }}
+    {template ? <Form idPrefix={`tr-strategy-${formId}`} key={String(selected.binding.binding_id)} schema={schema as RJSFSchema} formData={values} validator={validator} uiSchema={uiSchema} widgets={{ reference: ReferenceWidget }}
       experimental_defaultFormStateBehavior={NO_DEFAULTS} formContext={{ rememberFactor: (ref: string, row: JSONObject) => factorRows.current.set(ref, row) }}
       onChange={(event) => {
         const next = event.formData || {};

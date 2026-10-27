@@ -74,3 +74,20 @@ def test_existing_save_api_preserves_extensions_owner_scope_and_revision():
     with pytest.raises(AuthoringError) as forbidden:
         service.get(path, owner=owner + "-other")
     assert forbidden.value.status == 404
+
+
+def test_ic_input_defaults_match_the_typed_group_authoring_contract():
+    from tools.cli.identities.factor import freeze_factor_identity
+    from tools.testers.ic_test.configuration.authoring.configuration import ICRunAuthoringConfiguration
+    factor = freeze_factor_identity(owner_ref="principal:test", family_alias="F", factor_alias="F|N:1", family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64)
+    contract = configuration_editor_contract()
+    defaults = contract["input_defaults"]["ic"]
+    group = {"config_group_id": "ic-1", "product_scope_ref": "group:test", "factor_ref": factor["ref"], **defaults}
+    request = ICRunAuthoringConfiguration.from_dict({"schema_version": 2, "configuration_groups": [group]}).core_tests[0]
+    assert request.horizon.mode == "scale_aware"
+    group["horizon"] = {"sampling": "explicit", "bases": ["signal"], "multipliers": [1, 5]}
+    request = ICRunAuthoringConfiguration.from_dict({"schema_version": 2, "configuration_groups": [group]}).core_tests[0]
+    assert request.horizon.multipliers == (1, 5)
+    schema = contract["input_schemas"]["ic"]
+    assert schema["properties"]["entry_delay_bars"]["minimum"] == 0
+    assert schema["properties"]["horizon"]["required"] == ["sampling"]

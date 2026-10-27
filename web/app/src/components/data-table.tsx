@@ -11,7 +11,7 @@ export type TRPagination = {
 };
 
 export function TRDataTable<T extends object>({
-  columns, rows, rowKey, loading = false, pagination, error = "", empty,
+  columns, rows, rowKey, loading = false, pagination, error = "", empty, rowSelection,
 }: {
   columns: TableProps<T>["columns"];
   rows: T[];
@@ -20,12 +20,14 @@ export function TRDataTable<T extends object>({
   pagination: TRPagination;
   error?: string;
   empty?: string;
+  rowSelection?: TableProps<T>["rowSelection"];
 }): React.ReactElement {
   const { t } = useTranslation();
   if (error) return <Alert type="error" showIcon message={t("loadFailed")} description={error} />;
   return (
     <Table<T>
       rowKey={rowKey}
+      rowSelection={rowSelection}
       columns={columns}
       dataSource={rows}
       loading={loading}

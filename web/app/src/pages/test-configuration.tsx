@@ -25,7 +25,7 @@ import "../configuration/editor.css";
 
 interface Workspace { workspace_id: string; title: string }
 interface Field { group_title?: string; scope_policy?: string; path: Path; key: string; analysis: string; group: string; title: string; description: string; value: unknown }
-interface Contract { schema: JSONObject; catalog: Field[] }
+interface Contract { input_schemas?: Record<string, JSONObject>; input_defaults?: Record<string, JSONObject>; schema: JSONObject; catalog: Field[] }
 interface Configuration { payload: JSONObject; revision: number }
 
 
@@ -195,7 +195,7 @@ export function TestConfigurationPage(): React.ReactElement {
   const fieldRow = (field: Field): React.ReactNode => {
     const schema = contract ? fieldSchema(contract.schema, field.path) : {};
     const included = !!parsed.value && readPath(parsed.value, field.path) !== undefined;
-    const id = `tr-field-${field.analysis}-${field.key}`;
+    const id = `tr-field-${instance.id}-${field.analysis}-${field.key}`;
     return <div key={field.path.join(".")} className={`tr-config-setting-row ${selection?.join(".") === field.path.join(".") ? "is-selected" : ""}`}>
       <label htmlFor={id}>{field.title}</label>
       <div className="tr-config-setting-control">{included ? <Form idPrefix={id} schema={schema as RJSFSchema} formData={readPath(parsed.value, field.path)} validator={validator}
@@ -245,7 +245,7 @@ export function TestConfigurationPage(): React.ReactElement {
         {view.page === "json" ? <CodeView text={draft.text} schema={contract.schema} path={view.path} onChange={change} applyExternal={draft.source !== "json"} /> :
           view.page === "preview" ? <pre className="tr-config-preview">{JSON.stringify(preview?.result || {}, null, 2)}</pre> :
           parsed.error ? <Alert type="error" showIcon message={t("configuration.invalidJSON")} action={<Button onClick={() => navigate({ page: "json" })}>JSON</Button>} /> :
-          ["overview", "strategy", "strategies", "catalog"].includes(view.page) ? analysis === "backtest" ? strategy.content : <TestInputs analysis={analysis} text={draft.text} onChange={change} /> : groupFields.length ? <div className="tr-config-field-editor">{groupFields.map(fieldRow)}</div> :
+          ["overview", "strategy", "strategies", "catalog"].includes(view.page) ? analysis === "backtest" ? strategy.content : <TestInputs schema={contract.input_schemas?.[analysis]} defaults={contract.input_defaults?.[analysis]} analysis={analysis} text={draft.text} onChange={change} /> : groupFields.length ? <div className="tr-config-field-editor">{groupFields.map(fieldRow)}</div> :
           <div className="tr-config-setting-catalog"><Input.Search aria-label={t("configuration.search")} placeholder={t("configuration.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} allowClear />
             <div className="tr-config-choice-list">{runtimeCatalog.slice((page - 1) * 12, page * 12).map((field) => <button type="button" key={field.path.join(".")} onClick={() => openField(field)}><span>{field.title}</span><span className="tr-config-chevron">{readPath(parsed.value, field.path) === undefined ? "＋" : "›"}</span></button>)}</div>
             <Pagination simple size="small" current={page} total={runtimeCatalog.length} pageSize={12} onChange={setPage} hideOnSinglePage /></div>}

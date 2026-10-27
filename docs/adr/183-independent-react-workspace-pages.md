@@ -26,11 +26,15 @@ existing data plane; object URLs are revoked on replacement/unmount.
 This does not change execution, factor calculation, Celery or RunSpec compilers.
 Local HTTP fixtures verify UI interactions, not real Nautilus execution.
 
-Remaining: complete type-specific IC horizon/group input metadata; structured
-result charts and domain result plugins; native library tables/search/version
-flows; source editor mobile navigation; complete Research/Settings redesign;
-real authenticated local Job acceptance. Trading has no broker/session management
-API in this frontend migration's verified contract: its paper/live entry must not
-pretend that broker connections or order execution are available.
+Implemented in the next design pass: native domain library tables/search,
+public/user/subordinate strategy scopes, strategy-family view, source-free factor
+formula rendering, mobile creator navigation, metadata-driven typed IC inputs,
+shared Research lists/detail and Settings presentation cleanup.
+
+Remaining: structured result charts and domain result plugins; complete version
+editing/recovery flows; the Research graph editor still uses its existing
+embedded route; real authenticated local Job acceptance. Trading has no verified
+broker/session management API in this frontend migration: its paper/live entry
+must not pretend that broker connections or order execution are available.
 
 No deployment or integration is authorized by this ADR.

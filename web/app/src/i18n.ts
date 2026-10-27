@@ -5,7 +5,7 @@ export const resources = {
   zh: {
     common: {
       brand: { name: "TradeResearch", first: "Trade", second: "Research" }, mainNavigation: "主导航", resizeSidebar: "调整侧栏宽度", resetLayout: "重置布局", settings: "设置", close: "关闭", pages: "{{count}} 个页面",
-      loading: "正在加载…", loadFailed: "读取失败", empty: "暂无数据", language: "语言",
+      details: "详情", loading: "正在加载…", loadFailed: "读取失败", empty: "暂无数据", language: "语言",
       configuration: {
         analysisNames: { backtest: "回测", ic: "IC", factor_evaluation: "因子序列", factor_type_analysis: "因子类型" }, scope: { public: "公共", user_custom: "用户" }, edit: "编辑", preview: "预览", run: "运行", submitted: "已提交运行", strategies: "策略", addStrategy: "添加策略", editStrategy: "编辑策略", add: "添加", cancel: "取消", strategyId: "策略名称",
         sections: { data: "数据与时间", execution: "场所与撮合", funds: "费用与保证金", other: "其他设置" }, runSettings: "运行设置", strategy: "策略", removeStrategy: "移除策略", searchStrategies: "搜索策略", search: "搜索设置项",
@@ -21,9 +21,10 @@ export const resources = {
         validation: "发现 {{count}} 项校验问题", conflict: "远端配置已更新。本地草稿已保留，请复制草稿或重新读取后合并；不会自动覆盖远端。",
         discardTitle: "保留当前修改？", discardHint: "当前草稿尚未保存。继续会放弃当前修改。", discard: "放弃修改并继续", keepEditing: "继续编辑",
       },
+      library: { visibility: "可见范围", type: "类型", defaultValue: "默认值", description: "说明", identity: "冻结身份", references: { contract: "产品", "continuous-contract": "连续产品", factor: "因子", strategy: "策略" }, formula: "计算公式", search: "搜索名称、家族或所有者", allFamilies: "全部因子家族", allOwners: "全部所有者", reset: "重置", version: "版本", owner: "所有者", frozen: "已冻结", scopes: { strategyFamilies: "策略家族", public: "公共策略", mine: "我的策略", subordinates: "下级用户策略", shared: "共享策略" } },
       filter: "筛选", total: "共 {{count}} 条", collapse: "收起侧栏", expand: "展开侧栏", back: "返回",
       pageRenderFailed: "页面渲染失败", retry: "重试", available: "可用",
-      catalog: { hint: "产品组与产品目录", all: "全部产品", members: "个成员", legacy: "打开完整目录", products: "产品", factors: "因子库", families: "因子家族", sets: "因子集", strategies: "策略库", sources: "数据源", categories: "分类", reference: "引用查询", referenceHint: "输入引用目标" },
+      catalog: { groups: "产品组", hint: "产品组与产品目录", all: "全部产品", members: "个成员", legacy: "打开完整目录", products: "产品", factors: "因子库", families: "因子家族", sets: "因子集", strategies: "策略库", sources: "数据源", categories: "分类", reference: "引用查询", referenceHint: "输入引用目标" },
       research: { hint: "研究报告与研究工作区", legacy: "打开完整研究页", tabResearches: "研究工作区", tabReports: "研究报告", openEditor: "打开研究编辑器" },
       report: { addParagraph: "添加段落", paragraphTitle: "段落标题", paragraphBody: "段落正文", remove: "删除", removeSelected: "批量删除 {{count}} 项", attachments: "附件", open: "打开", markdown: "Agent Markdown", operationFailed: "报告操作失败" },
       trading: { paper: "模拟交易", live: "实盘交易", noBroker: "券商接入尚未开放", capabilities: "引擎能力", hint: "策略家族与回测", open: "打开回测", legacy: "回测工作台", ic: "IC 测试", factorSeries: "因子序列", familyThreshold: "因子阈值策略家族", familyThresholdHint: "按因子阈值生成交易信号的公共规则模板。", familyGroup: "因子分组第N组策略家族", familyGroupHint: "按因子截面分组选择第 N 组的公共规则模板。" },
@@ -47,7 +48,7 @@ export const resources = {
   en: {
     common: {
       brand: { name: "TradeResearch", first: "Trade", second: "Research" }, mainNavigation: "Main navigation", resizeSidebar: "Resize sidebar", resetLayout: "Reset layout", settings: "Settings", close: "Close", pages: "{{count}} pages",
-      loading: "Loading…", loadFailed: "Load failed", empty: "No data", language: "Language",
+      details: "Details", loading: "Loading…", loadFailed: "Load failed", empty: "No data", language: "Language",
       configuration: {
         analysisNames: { backtest: "Backtest", ic: "IC", factor_evaluation: "Factor series", factor_type_analysis: "Factor type" }, scope: { public: "Public", user_custom: "User" }, edit: "Edit", preview: "Preview", run: "Run", submitted: "Run submitted", strategies: "Strategies", addStrategy: "Add strategy", editStrategy: "Edit strategy", add: "Add", cancel: "Cancel", strategyId: "Strategy name",
         groups: {"group_strategy": "Grouping", "position_policy": "Position policy", "rebalance_trigger": "Rebalancing", "target_allocation": "Target allocation", "term_carry_strategy": "Term carry", "engine": "Engine", "time": "Time range", "capital": "Capital", "order": "Order execution", "accounting": "Accounting", "delivery_force_close": "Delivery closeout", "rollover": "Rollover", "data_source": "Data source", "frequency": "Data frequency", "factor": "Factor execution", "calendar": "Backtest clock", "cost": "Fees", "volume_capacity": "Volume participation", "margin": "Margin", "strategy_book": "Strategy book", "return_frequency": "Forward returns", "delay": "Delay", "ic_method": "IC method", "summary": "Summary", "quantile_portfolio_statistics": "Group portfolio", "price_type": "Price type", "method": "Analysis method"} ,
@@ -64,9 +65,10 @@ export const resources = {
         validation: "{{count}} validation issues", conflict: "The remote configuration changed. Your draft is preserved. Copy it or reload and merge; the remote version will not be overwritten.",
         discardTitle: "Keep current changes?", discardHint: "Your draft is not saved. Continuing will discard these changes.", discard: "Discard and continue", keepEditing: "Keep editing",
       },
+      library: { visibility: "Visibility", type: "Type", defaultValue: "Default", description: "Description", identity: "Frozen identity", references: { contract: "Instrument", "continuous-contract": "Continuous product", factor: "Factor", strategy: "Strategy" }, formula: "Formula", search: "Search name, family or owner", allFamilies: "All factor families", allOwners: "All owners", reset: "Reset", version: "Version", owner: "Owner", frozen: "Frozen", scopes: { strategyFamilies: "Strategy families", public: "Public strategies", mine: "My strategies", subordinates: "Subordinate strategies", shared: "Shared strategies" } },
       filter: "Filter", total: "{{count}} items", collapse: "Collapse sidebar", expand: "Expand sidebar", back: "Back",
       pageRenderFailed: "Page render failed", retry: "Retry", available: "Available",
-      catalog: { hint: "Product groups and products", all: "All products", members: "members", legacy: "Open full catalog", products: "Products", factors: "Factor library", families: "Families", sets: "Factor sets", strategies: "Strategy library", sources: "Sources", categories: "Categories", reference: "Reference lookup", referenceHint: "Enter a reference target" },
+      catalog: { groups: "Product groups", hint: "Product groups and products", all: "All products", members: "members", legacy: "Open full catalog", products: "Products", factors: "Factor library", families: "Families", sets: "Factor sets", strategies: "Strategy library", sources: "Sources", categories: "Categories", reference: "Reference lookup", referenceHint: "Enter a reference target" },
       research: { hint: "Research reports and workspaces", legacy: "Open full research page", tabResearches: "Workspaces", tabReports: "Reports", openEditor: "Open research editor" },
       report: { addParagraph: "Add paragraph", paragraphTitle: "Paragraph title", paragraphBody: "Paragraph body", remove: "Remove", removeSelected: "Remove {{count}} selected", attachments: "Attachments", open: "Open", markdown: "Agent Markdown", operationFailed: "Report operation failed" },
       trading: { paper: "Paper trading", live: "Live trading", noBroker: "Broker connection is not available", capabilities: "Engine capabilities", hint: "Strategy families and backtests", open: "Open backtest", legacy: "Backtest workbench", ic: "IC test", factorSeries: "Factor series", familyThreshold: "Factor threshold strategy family", familyThresholdHint: "Public rule template that trades factor threshold signals.", familyGroup: "Factor group N strategy family", familyGroupHint: "Public rule template that trades the Nth cross-sectional factor group." },

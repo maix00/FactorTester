@@ -20,14 +20,15 @@ import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
 for (const page of BUILTIN_PAGES) registerPage(page);
 
 function Panel(props: IDockviewPanelProps<{ pageId: string; args?: PageArguments; ordinal?: number }>): React.ReactElement {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(props.api.isVisible);
   useEffect(() => { const subscription = props.api.onDidVisibilityChange((event) => setVisible(event.isVisible)); return () => subscription.dispose(); }, [props.api]);
   return (
-    <div className="tr-tab-layer" data-tab-layer={props.params.pageId}>
+    <div className="tr-tab-layer" data-tab-layer={props.params.pageId} aria-hidden={!visible} inert={!visible}>
       <PageInstanceProvider value={{ id: props.api.id, pageId: props.params.pageId, args: props.params.args || {}, mobile: false, active: visible,
         open: (pageId, args) => {
           const page = getPage(pageId); if (!page) return;
-          props.containerApi.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: page.title,
+          props.containerApi.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: t(`nav.${page.id}`, { defaultValue: page.title }),
             params: { pageId, args, ordinal: props.containerApi.panels.filter((p) => p.params?.pageId === pageId).length + 1 }, renderer: "always" });
         } }}><PageErrorBoundary label={props.params.pageId}><PageSurface pageId={props.params.pageId} /></PageErrorBoundary></PageInstanceProvider>
     </div>
@@ -65,6 +66,8 @@ export function DesktopShell(): React.ReactElement {
     return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
   });
 
+  useEffect(() => { if (api) for (const panel of api.panels) { const page = getPage(panel.params?.pageId); if (page) panel.api.setTitle(t(`nav.${page.id}`, { defaultValue: page.title })); } }, [api, t]);
+
   const startResize = (event: React.PointerEvent<HTMLDivElement>): void => {
     event.preventDefault();
     const startX = event.clientX;
@@ -87,7 +90,7 @@ export function DesktopShell(): React.ReactElement {
     if (!api) return;
     const page = pages.find((item) => item.id === pageId);
     if (!page) return;
-    api.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: page.title,
+    api.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: label(page),
       params: { pageId, ordinal: api.panels.filter((panel) => panel.params?.pageId === pageId).length + 1 }, renderer: "always" });
   };
 
@@ -96,7 +99,7 @@ export function DesktopShell(): React.ReactElement {
     localStorage.removeItem(LAYOUT_KEY);
     api.clear();
     for (const page of pages.filter((item) => ["research", "configuration"].includes(item.id))) {
-      api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id }, renderer: "always" });
+      api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: label(page), params: { pageId: page.id }, renderer: "always" });
     }
   };
 
@@ -118,7 +121,7 @@ export function DesktopShell(): React.ReactElement {
     }
     if (!restored) {
       for (const page of pages.filter((item) => ["research", "configuration"].includes(item.id))) {
-        event.api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id }, renderer: "always" });
+        event.api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: label(page), params: { pageId: page.id }, renderer: "always" });
       }
     }
     event.api.onDidActivePanelChange(({ panel }) => {
