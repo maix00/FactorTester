@@ -197,7 +197,10 @@ def iter_minute_bars(
     previous_time: int | None = None
     previous_uid: str | None = None
     row_number = 0
-    for batch in reader.iter_batches(batch_size=batch_size, columns=sorted(required)):
+    from traderesearch_data.shared_cache import host_input_cache
+    for batch in host_input_cache().iter_parquet_batches(
+        source, batch_size=batch_size, columns=sorted(required),
+    ):
         for row in batch.to_pylist():
             row_number += 1
             clock = minute_clock(row["trade_time"], int(row["trade_timestamp"]), raw_unit=raw_unit)

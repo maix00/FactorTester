@@ -28,6 +28,7 @@ from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
 from .ranges import latest_relative_start, range_bound
+from .shared_read import chart_request, parquet_frame
 from .sampling import bounded_ohlcv_frame, bounded_ohlcv_rows, fixed_chart_frame
 
 
@@ -79,6 +80,7 @@ def contract_listing(
     }
 
 
+@chart_request
 def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     contract_uid = str(payload.get("contract_uid") or "")
     if not contract_uid:
@@ -116,13 +118,19 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         getattr(selected_source, "contract_data_layout", "")
         == "term_structure_snapshot"
     )
+    start = range_bound(payload.get("start_date"), payload.get("start_time"),
+                        is_end=False, precision=payload.get("time_precision"))
+    end = range_bound(payload.get("end_date"), payload.get("end_time"),
+                      is_end=True, precision=payload.get("time_precision"))
     try:
         if from_term_snapshot:
-            price_frame = pd.read_parquet(
+            filters = [("CONTRACT_UID", "==", contract_uid)]
+            if start is not None: filters.append(("TRADING_DAY", ">=", start.normalize()))
+            if end is not None: filters.append(("TRADING_DAY", "<=", end.normalize()))
+            price_frame = parquet_frame(
                 selected_source.get_path(contract_product),
-                columns=["TRADING_DAY", "OPEN", "HIGH", "LOW", "CLOSE",
-                         "VOLUME", "OPEN_INTEREST"],
-                filters=[("CONTRACT_UID", "==", contract_uid)],
+                columns=["CONTRACT_UID", "TRADING_DAY", "OPEN", "HIGH", "LOW", "CLOSE",
+                         "VOLUME", "OPEN_INTEREST"], filters=filters,
             )
         else:
             contract_file = contract_data_path_for(
@@ -133,7 +141,15 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
                 raise ProductMarketDataError(
                     f"合约数据不存在: {contract_uid}", 404,
                 )
-            price_frame = pd.read_parquet(contract_file)
+            time_key = "trading_day" if frequency.is_day_multiple() else "trade_time"
+            filters = []
+            if start is not None: filters.append((time_key, ">=", start.normalize() if frequency.is_day_multiple() else start))
+            if end is not None: filters.append((time_key, "<=", end.normalize() if frequency.is_day_multiple() else end))
+            # Match the backtest input projection to reuse the same base buffers.
+            price_frame = parquet_frame(contract_file, columns=[
+                "trade_time", "trade_timestamp", "trading_day", "contract_uid", "instrument_id",
+                "open_price", "highest_price", "lowest_price", "close_price", "volume", "open_interest",
+            ], filters=filters)
     except FileNotFoundError as exc:
         raise ProductMarketDataError(
             f"合约数据不存在: {contract_uid}", 404,
@@ -236,7 +252,7 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
             c_col=columns[3],
             v_col=columns[4],
             oi_col=oi_column,
-            freq_is_daily=daily,
+            freq_is_daily=daily or (fixed_chart and str(payload.get("chart_interval") or "").upper() == "DAY1"),
             timezone=timezone,
             trading_day_close_time=getattr(contract_product, "trading_day_close_time", None)
                 or getattr(getattr(contract_product, "get_parent_product", lambda: None)(),

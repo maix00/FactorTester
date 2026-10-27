@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from threading import RLock
 from typing import Any, Mapping
 
 import pandas as pd
@@ -28,10 +27,8 @@ from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
 from .ranges import latest_relative_start, range_bound
+from .shared_read import chart_request, parquet_frame
 from .sampling import bounded_ohlcv_frame, bounded_ohlcv_rows, fixed_chart_frame
-
-
-_PRODUCT_SELECTION_LOCK = RLock()
 
 
 def _frequency(payload: Mapping[str, Any]):
@@ -65,7 +62,6 @@ def _series_product(product, product_name: str, payload: Mapping[str, Any]):
         raise ProductMarketDataError(f"品种不支持序列: {variant}")
     if series_ref.backing_product_name != product_name:
         backing = type(product)(series_ref.backing_product_name)
-        backing.desc = getattr(product, "desc", product_name)
         product = backing
     adjusted = bool(series_ref.adjusted and supports_adjusted_price(product))
     return product, variant, adjusted
@@ -73,34 +69,88 @@ def _series_product(product, product_name: str, payload: Mapping[str, Any]):
 
 def _select_product_data(product, payload: Mapping[str, Any]):
     frequency, requested_source = _frequency(payload)
-    old_frequency = getattr(product, "current_freq", None)
-    try:
-        product.set_current_freq(frequency)
-    except ValueError:
-        available = product.list_available_freqs()
-        if not available:
-            raise ProductMarketDataError("无可用数据频率")
-        frequency = available[0]
-        product.set_current_freq(frequency)
-    data_meta = getattr(product, frequency.name)
-    old_source = getattr(data_meta, "current_source", None)
-    selected_source = None
+    candidates = DataSource.available_for_product(product)
     if requested_source is not None:
-        try:
-            selected_source = data_meta.set_current_source(requested_source)
-        except Exception as exc:
-            raise ProductMarketDataError(
-                f"数据源不可用于该品种和频率: {requested_source.key}",
-            ) from exc
-    if selected_source is None:
-        try:
-            selected_source = data_meta.get_current_source()
-        except Exception:
-            selected_source = None
-    return frequency, selected_source, old_frequency, old_source, data_meta
+        if requested_source not in candidates:
+            raise ProductMarketDataError(f"数据源不可用于该品种: {requested_source.key}")
+        return requested_source.freq, requested_source
+    selected = next((source for source in candidates if source.freq == frequency), None)
+    if selected is None:
+        selected = next(iter(candidates), None)
+    if selected is None:
+        raise ProductMarketDataError("无可用数据源")
+    return selected.freq, selected
 
 
-def _price_rows(product, frame: pd.DataFrame, adjusted: bool, frequency):
+def _source_chart_frame(product, source, frequency, payload, start, end):
+    import pyarrow.parquet as pq
+    path = source.get_path(product)
+    reader = pq.ParquetFile(path)
+    schema = reader.schema_arrow
+    available = set(schema.names)
+    times = {str(raw): str(canonical) for raw, canonical in source.time_cols_mapping.items()}
+    values = {str(raw): str(canonical) for raw, canonical in source.data_cols_mapping.items()}
+    raw_time = next((raw for raw, canonical in times.items() if canonical == frequency.name), None)
+    if raw_time is None:
+        raise ProductMarketDataError("数据源缺少对应频率的时间字段")
+    columns = [raw for raw in available if raw in times or values.get(raw) in {
+        "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME", "OPEN_INTEREST",
+        "OPEN_ADJUSTED", "HIGH_ADJUSTED", "LOW_ADJUSTED", "CLOSE_ADJUSTED",
+        "ADJUSTMENT_MUL", "ADJUSTMENT_ADD"}]
+    chart_range = str(payload.get("chart_range") or "").lower()
+    if chart_range:
+        column_index = schema.get_field_index(raw_time)
+        latest = [reader.metadata.row_group(i).column(column_index).statistics
+                  for i in range(reader.metadata.num_row_groups)]
+        if not all(stats is not None and stats.has_min_max for stats in latest):
+            raise ProductMarketDataError("数据源缺少覆盖范围元数据，请指定时间范围")
+        if latest:
+            relative = latest_relative_start(pd.DatetimeIndex([max(stats.max for stats in latest)]), chart_range)
+            if relative is not None:
+                start = max(start, relative.tz_localize(None) if relative.tzinfo else relative)
+    zone = getattr(product, "timezone", None) or "Asia/Shanghai"
+    dtype = schema.field(raw_time).type
+    def bound(value):
+        if getattr(dtype, "tz", None):
+            return (value.tz_localize(zone) if value.tzinfo is None else value).tz_convert(dtype.tz)
+        return value.tz_convert(zone).tz_localize(None) if value.tzinfo else value
+    filters = [(raw_time, ">=", bound(start)), (raw_time, "<=", bound(end))]
+    adjusted = bool(payload.get("adjusted", False))
+    requested = ("OPEN_ADJUSTED", "HIGH_ADJUSTED", "LOW_ADJUSTED", "CLOSE_ADJUSTED", "VOLUME") if adjusted else ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME")
+    fixed = payload.get("chart_mode") == "fixed"
+    def fold(frame):
+        try:
+            return fixed_chart_frame(frame, payload, requested, frequency,
+                open_interest_column(frame.columns),
+                trading_day_column="__trading_day__" if "__trading_day__" in frame else None,
+                source_delivery_mode=getattr(source, "delivery_mode", "historical_snapshot"))[0]
+        except ProductMarketDataError as exc:
+            raise ProductMarketDataError("当前范围超过图表资源上限，请选择更粗频率或更短范围") from exc
+    previous_time = None
+    def shape(frame):
+        nonlocal previous_time
+        frame = frame.rename(columns={**values, **times})
+        frame.index = pd.DatetimeIndex(pd.to_datetime(frame[frequency.name]))
+        if not frame.index.is_monotonic_increasing or frame.index.has_duplicates or (
+            previous_time is not None and len(frame) and frame.index[0] <= previous_time
+        ):
+            raise ProductMarketDataError("数据源行情未按时间唯一排序")
+        if len(frame): previous_time = frame.index[-1]
+        if "DAY1" in frame and frequency.name != "DAY1":
+            frame["__trading_day__"] = pd.to_datetime(frame["DAY1"])
+        if adjusted:
+            for column in ("OPEN", "HIGH", "LOW", "CLOSE"):
+                if column+"_ADJUSTED" not in frame:
+                    if "ADJUSTMENT_MUL" not in frame or "ADJUSTMENT_ADD" not in frame:
+                        raise ProductMarketDataError("数据源没有请求的复权序列")
+                    frame[column+"_ADJUSTED"] = frame[column]*frame["ADJUSTMENT_MUL"]+frame["ADJUSTMENT_ADD"]
+        return fold(frame) if fixed else frame
+    frame = parquet_frame(path, columns=columns, filters=filters, transform=shape,
+                          combine=fold if fixed else None)
+    return frame
+
+
+def _price_rows(product, frame: pd.DataFrame, adjusted: bool, frequency, *, daily_labels=False):
     if not isinstance(frame.index, pd.DatetimeIndex):
         frame.index = pd.to_datetime(finest_index(frame.index))
     timezone = getattr(product, "timezone", None) or "Asia/Shanghai"
@@ -111,8 +161,7 @@ def _price_rows(product, frame: pd.DataFrame, adjusted: bool, frequency):
         if adjusted else ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME")
     )
     oi_column = open_interest_column(frame.columns)
-    emitted = frame.copy()
-    emitted["__time__"] = list(emitted.index)
+    emitted = frame.assign(__time__=frame.index)
     rows = [
         format_price_row(
             row=row,
@@ -123,7 +172,7 @@ def _price_rows(product, frame: pd.DataFrame, adjusted: bool, frequency):
             c_col=columns[3],
             v_col=columns[4],
             oi_col=oi_column,
-            freq_is_daily=frequency.is_day_multiple(),
+            freq_is_daily=frequency.is_day_multiple() or daily_labels,
             timezone=timezone,
             trading_day_close_time=getattr(product, "trading_day_close_time", None),
         )
@@ -172,6 +221,7 @@ def _contract_ranges(product, payload: Mapping[str, Any]) -> list[dict[str, Any]
     } for item in raw]
 
 
+@chart_request
 def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     product_name = str(payload.get("product_name") or "")
     if not product_name:
@@ -193,36 +243,9 @@ def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     if end is None:
         end = pd.Timestamp.now()
 
-    with _PRODUCT_SELECTION_LOCK:
-        frequency, source, old_frequency, old_source, data_meta = (
-            _select_product_data(product, payload)
-        )
-        try:
-            chart_range = str(payload.get("chart_range") or "").lower()
-            if chart_range:
-                try:
-                    source_frame = product.get_some_data(frequency, copy=False)
-                    source_index = pd.DatetimeIndex(pd.to_datetime(
-                        finest_index(source_frame.index)))
-                    relative_start = latest_relative_start(source_index, chart_range)
-                except ValueError as exc:
-                    raise ProductMarketDataError("不支持的图表时间范围", 400) from exc
-                if relative_start is not None:
-                    if relative_start.tzinfo is not None:
-                        relative_start = relative_start.tz_localize(None)
-                    start = max(start, relative_start)
-            frame = product.get_price_data(start, end, adjusted=adjusted)
-        finally:
-            if old_frequency:
-                try:
-                    product.set_current_freq(old_frequency)
-                except Exception:
-                    pass
-            if old_source:
-                try:
-                    data_meta.set_current_source(old_source)
-                except Exception:
-                    pass
+    frequency, source = _select_product_data(product, payload)
+    frame = _source_chart_frame(product, source, frequency,
+                                {**payload, "adjusted": adjusted}, start, end)
     if frame is None or frame.empty:
         raise ProductMarketDataError("指定范围内无价格数据", 404)
     price_columns = (
@@ -231,16 +254,13 @@ def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     )
     fixed_chart = payload.get("chart_mode") == "fixed"
     if fixed_chart:
-        frame, total_count = fixed_chart_frame(
-            frame, payload, price_columns, frequency,
-            open_interest_column(frame.columns),
-            source_delivery_mode=getattr(source, "delivery_mode", "historical_snapshot"),
-        )
+        total_count = len(frame)
     else:
         frame, total_count = bounded_ohlcv_frame(
             frame, payload, price_columns, open_interest_column(frame.columns),
         )
-    rows, has_open_interest = _price_rows(product, frame, adjusted, frequency)
+    rows, has_open_interest = _price_rows(product, frame, adjusted, frequency,
+        daily_labels=str(payload.get("chart_interval") or "").upper() == "DAY1")
     if not fixed_chart:
         rows, _ = bounded_ohlcv_rows(rows, payload)
     adjustment = _adjustment_metadata(product, adjusted)

@@ -117,6 +117,10 @@ def preflight_catalogs(opened, *, max_input_bars: int) -> tuple[int, int, int]:
     return first, last, total
 
 
+from traderesearch_data.shared_cache import batch_input_budget
+
+
+@batch_input_budget
 def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes: int = 20,
                            max_batch_bars: int = 250_000,
                            query_memory_limit_bytes: int = 128 * 1024 * 1024):

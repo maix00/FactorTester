@@ -105,6 +105,10 @@ class CatalogReceipt:
     member_id: str = ""
 
 
+from traderesearch_data.shared_cache import batch_input_budget
+
+
+@batch_input_budget
 def _stage_contract_catalog(
     source_path: str | Path, target_dir: str | Path, *,
     contract_uid: str, instrument_spec: FuturesContractSpec,

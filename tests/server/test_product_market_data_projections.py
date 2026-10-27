@@ -273,38 +273,26 @@ def test_daily_full_history_fits_explicit_chart_budget() -> None:
     assert count == 3980 and result.index[0] == dates[0]
 
 
-def test_product_recent_range_uses_source_coverage(monkeypatch) -> None:
+def test_product_recent_range_uses_source_coverage(monkeypatch, tmp_path) -> None:
     dates = pd.bdate_range("2020-01-01", "2025-05-23")
     frame = pd.DataFrame({"OPEN": 1.0, "HIGH": 2.0, "LOW": 1.0,
                           "CLOSE": 2.0, "VOLUME": 1.0}, index=dates)
-    source = SimpleNamespace(key="HistoricalTestDAY1",
-                             delivery_mode="historical_snapshot")
-
-    class DataMeta:
-        current_source = source
-
-        def get_current_source(self):
-            return source
-
+    path = tmp_path / "prices.parquet"
+    frame.rename_axis("time").reset_index().to_parquet(path)
+    source = SimpleNamespace(key="HistoricalTestDAY1", freq=DataFreq.DAY1,
+        delivery_mode="historical_snapshot", get_path=lambda _: str(path),
+        time_cols_mapping={"time": "DAY1"},
+        data_cols_mapping={key:key for key in frame.columns})
     class Product:
         name = "TEST.LOCAL"
         timezone = "Asia/Shanghai"
         current_freq = DataFreq.DAY1
-        DAY1 = DataMeta()
-
         def get_series_variants(self):
-            return [SimpleNamespace(variant="primary_raw", adjusted=False,
-                                    backing_product_name=self.name)]
-
+            return [SimpleNamespace(variant="primary_raw",adjusted=False,backing_product_name=self.name)]
         def set_current_freq(self, frequency):
-            self.current_freq = frequency
-
-        def get_some_data(self, _frequency, copy=False):
-            return frame
-
-        def get_price_data(self, start, end, adjusted=False):
-            return frame.loc[(frame.index >= start) & (frame.index <= end)].copy()
-
+            pytest.fail("web query mutated shared Product")
+        def get_price_data(self, *args, **kwargs):
+            pytest.fail("web query used legacy Product frame cache")
     product = Product()
     monkeypatch.setattr(product_projection, "cached_products", lambda: [product])
     monkeypatch.setattr(product_projection, "find_product", lambda _, __: product)
@@ -315,6 +303,8 @@ def test_product_recent_range_uses_source_coverage(monkeypatch) -> None:
                         lambda _: [])
     monkeypatch.setattr(product_projection, "available_freq_names_for_product",
                         lambda _: ["DAY1"])
+    monkeypatch.setattr(product_projection, "DataSource", SimpleNamespace(
+        available_for_product=lambda _: [source]))
     result = product_projection.product_price_series({
         "product_name": "TEST.LOCAL", "chart_mode": "fixed",
         "chart_interval": "DAY1", "chart_range": "year", "max_points": 5000,
