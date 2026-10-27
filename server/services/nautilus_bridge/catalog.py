@@ -96,6 +96,7 @@ class CatalogReceipt:
     process_peak_rss_bytes: int
     max_batch_bars: int
     session_summaries: tuple[dict[str, str | int], ...] = ()
+    settlement_records: tuple[dict[str, str | int], ...] = ()
 
 
 def _stage_contract_catalog(
@@ -141,6 +142,7 @@ def _stage_contract_catalog(
         first: MarketBar | None = None
         last: MarketBar | None = None
         selected_count = 0
+        settlement_records: list[dict[str, str | int]] = []
         batch: list[MarketBar] = []
         from tools.factors.expr.streaming.calendar_window import TradingSessionSummary
         session_summary = TradingSessionSummary()
@@ -166,6 +168,13 @@ def _stage_contract_catalog(
             if selected_count > max_bars:
                 raise ValueError("selected window exceeds explicit max_bars budget")
             selected_hash.update(_bar_digest_line(bar))
+            if bar.settlement_price is not None:
+                settlement_records.append({
+                    "contract_uid": bar.contract_uid,
+                    "trading_day": bar.trading_day.isoformat(),
+                    "event_ns": bar.clock.interval_end_ns,
+                    "settlement_price": str(bar.settlement_price),
+                })
             session_summary.add(bar.trading_day, bar.clock.interval_open_ns,
                                 bar.clock.interval_end_ns)
             if first is None:
@@ -209,6 +218,7 @@ def _stage_contract_catalog(
                 "start_ns": item.start_ns, "end_ns": item.end_ns,
                 "bar_count": item.bar_count,
             } for item in session_summary.sessions()),
+            settlement_records=tuple(settlement_records),
         )
         receipt_path = staged / "factor_tester_catalog_receipt.json"
         receipt_path.write_text(json.dumps(asdict(receipt), ensure_ascii=False,
