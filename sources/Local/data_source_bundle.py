@@ -18,10 +18,15 @@ from tools.data.source_catalog import (
 
 
 def _local_members() -> tuple[Any, ...]:
-    return tuple(
-        source for source in DataProviderProductTS.all()
-        if source is not LOCAL and str(getattr(source, "key", "")).startswith("Local")
-    )
+    from sources.registry import installed_bundles
+
+    bundle = next(item for item in installed_bundles() if item.bundle_id == "Local")
+    providers = {str(source.key): source for source in DataProviderProductTS.all()}
+    keys = [member.id for member in bundle.members if member.kind == "market_data"]
+    missing = set(keys) - providers.keys()
+    if missing:
+        raise ValueError(f"Bundle members not activated: {sorted(missing)}")
+    return tuple(providers[key] for key in keys)
 
 
 LOCAL = DataProviderProductTSBundle(

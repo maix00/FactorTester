@@ -93,6 +93,9 @@ export GTHT_SOURCE_REVISION="$revision"
 export FACTORTESTER_IMMUTABLE_SOURCE=1
 export HOME=/state/home
 export PYTHONPATH=/opt/factortester/app
+if [[ -n "${TR_BUNDLE_PACKAGES_ROOT:-}" ]]; then
+    export PYTHONPATH="${PYTHONPATH}:${TR_BUNDLE_PACKAGES_ROOT}"
+fi
 install -d -o factortester -g "$app_group" /state/home /state/logs
 install -d -o factortester -g "$app_group" /state/job-daemons
 chown -R factortester:"$app_group" /state

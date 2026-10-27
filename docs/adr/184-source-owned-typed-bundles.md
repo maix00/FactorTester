@@ -6,7 +6,7 @@
 ## 依赖边界
 
 产品与数据源属于平台中立领域，不是 Nautilus Instrument 或 DataClient 的子类。
-数据源是可独立安装的插件：只依赖可单独分发的最小公共数据契约，不依赖 Manager、
+Bundle 是可独立安装和发布的插件包，每个 Bundle 管理自己的接入代码仓库，成员不各建一套仓库：只依赖可单独分发的最小公共数据契约，不依赖 Manager、
 平台产品类、全局 DataHub 或其他数据源。其 Nautilus 集成放在同一插件的可选适配模块；
 只有执行侧显式请求时才导入 Nautilus。平台目录不导入 Nautilus，不访问数据文件。
 
@@ -101,7 +101,7 @@ RunSpec 固定来源身份、成员版本与执行位置；本机任务调用本
 ## 当前偏离与切换顺序
 
 1. `tools/data/source_catalog.py` 仍定义 NautilusAdapterContract，成员仍直接持有历史提供器。
-2. `sources/Local/data_source_bundle.py` 仍按 Local 名称前缀发现行情成员。
+2. `sources/Local/data_source_bundle.py` 已从 JSON 显式选择行情成员；历史规则成员已在清单中独立声明，但旧执行绑定尚未切换。
 3. `catalog_staging.py` 仍直接调用中国期货产品、路径、point_value/min_tick 转换。
 4. `trading_fields.py` 仍限定 FieldHistory:market_rules:exchange 及具体 FieldHistoryProvider。
 5. 当前 source-owned nautilus_adapter.py 主要是声明，尚未拥有完整加载实现。
@@ -113,3 +113,30 @@ RunSpec 固定来源身份、成员版本与执行位置；本机任务调用本
 验收包括：独立来源包和非中国/非 Parquet 合成来源；目录零数据 I/O；所有字段映射覆盖；
 时钟/夜盘/无未来函数；历史规则和结算实际路径；同输入结果、加载耗时与峰值 RSS。
 必须先记录可复现性能基线，使用聚焦测试；不在公网压测，不因 ADR 落盘声称实现完成。
+
+## 已落地的第一批 JSON 发现接口（#447）
+
+- 标准库公共包 `traderesearch_data`（独立 wheel 名称 traderesearch-data）负责 Bundle JSON
+  校验与类型，隔离 wheel 验证无需导入 sources/tools/server/Nautilus。
+- 平台 `sources.registry` 用清单替代硬编码模块表，源激活保持显式；客户端成员不在服务器
+  激活。`sources/Local/bundle.json` 显式列出四个行情和一个历史规则成员。
+- `installed_bundles` 首次发现后复用不可变快照；显式刷新先完整验证，再原子替换。
+  无效更新报错但不破坏上一份有效快照。数据字节不进入该缓存。
+- 清单大小限单文件 1 MiB、总计 16 MiB、最多 256 个 Bundle；拒绝重复键/ID、未知类型、
+  失效关系、越界符号链接和错误更新策略，不静默回退。盘点输出分页且不会实例化接入代码。
+- update_policy 区分 mutable_history/immutable_snapshot/live_stream；版本依据与回放声明独立。
+  本批仅校验声明，不据此声称底层历史数据已冻结或实时记录已实现。
+- 提供可选 Docker Bundle 只读清单/包挂载；没有执行停机、迁移、发布或数据传输。
+- 中立 ProductBinding 将平台 product_ref 对应到 Bundle 成员的 source_product_ref；分类仍引用
+  平台产品身份。既有产品和用户分类记录尚未迁移，不按同名产品自动合并。
+
+### 聚焦验证与性能边界
+
+GTHT Python3.14.0/macOS arm64，热 OS 缓存：旧模块表 5×10000 次约 0.229–0.248ms，
+JSON 不可变快照热读取同规模约 0.285–0.300ms；单次额外约 5ns，不能解释为端到端提速。
+1 Bundle/5 成员的 100 次元数据重新发现约 11.2–13.9ms（约 0.11–0.14ms/次）。
+进程峰值 RSS 为约 13.4MB → 16.8MB，包含标准库 JSON/dataclass 导入，不是行情驻留内存。
+这些是隔离元数据实验，未测公网、真实行情加载 p95 或并发任务内存；当前不改实际数据读取。
+
+现有来源声明/精确适配选择、合约 catalog staging 和新 JSON 规则聚焦测试通过；真实服务器
+安装/发现集合、客户端入口、规则数据加载与产品分类迁移仍需后续验收。

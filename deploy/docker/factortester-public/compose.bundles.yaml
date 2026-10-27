@@ -1,0 +1,19 @@
+# Opt-in only, after validating the installed Bundle inventory.
+services:
+  factortester-public:
+    environment:
+      TR_SOURCE_BUNDLE_ROOT: /opt/traderesearch/source-bundles
+      TR_BUNDLE_PACKAGES_ROOT: /opt/traderesearch/bundle-packages
+    volumes:
+      - type: bind
+        source: ${TR_SOURCE_BUNDLES_HOST_ROOT:?set TR_SOURCE_BUNDLES_HOST_ROOT}
+        target: /opt/traderesearch/source-bundles
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TR_BUNDLE_PACKAGES_HOST_ROOT:?set TR_BUNDLE_PACKAGES_HOST_ROOT}
+        target: /opt/traderesearch/bundle-packages
+        read_only: true
+        bind:
+          create_host_path: false

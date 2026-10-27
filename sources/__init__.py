@@ -1,10 +1,4 @@
-"""Source package entry points."""
-from __future__ import annotations
+"""Data-source metadata discovery and explicit runtime activation."""
+from .registry import installed_bundles, iter_source_modules, load_all_sources
 
-from .registry import iter_source_modules, load_all_sources, register_source_module
-
-__all__ = [
-    "iter_source_modules",
-    "load_all_sources",
-    "register_source_module",
-]
+__all__ = ["installed_bundles", "iter_source_modules", "load_all_sources"]

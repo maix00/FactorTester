@@ -173,6 +173,7 @@ WORKDIR /opt/factortester/app
 COPY server server
 COPY tools tools
 COPY sources sources
+COPY traderesearch_data traderesearch_data
 COPY scripts scripts
 COPY static static
 COPY docs docs
