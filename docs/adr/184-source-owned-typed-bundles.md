@@ -184,16 +184,19 @@ federated catalog's runtime availability/count projection.
   并调用源提供的 loader；`TradingFieldProvider` 只要求 `resolve_at` 协议，不再以具体
   `FieldHistoryProvider` 类作为准入条件。中央仍使用现有规则值/错误类型，完整规则协议
   迁移尚未完成。
-- 多合约目录与未实现的 DAY1 现在显式失败。`stage_catalogs` 在写任何 catalog 前检查
-  同一品种的多个合约并拒绝；`LocalCNFuturesContractDAY1` 不再静默复用 MIN1
-  `stage_contract_minute_catalog`，而是报告 `DAY1 catalog loader is not implemented`。
-  这是防止错误结果的 fail-closed，不是多合约或 DAY1 已完成。
+- 多合约目录显式失败。`stage_catalogs` 在写任何 catalog 前检查同一品种的多个合约
+  并拒绝；这是防止错误结果的 fail-closed，不是多合约已完成。
+- DAY1 不再静默复用 MIN1 `stage_contract_minute_catalog`。源 loader 使用
+  `stage_contract_daily_catalog`，由 `iter_daily_bars` 读取 `TRADING_DAY`/结算列，
+  由源声明的 `session_for_day` 把日期标签转换为交易所收盘时钟，并写入
+  `1-DAY-LAST-EXTERNAL`。当前 session 来自产品日盘时段字段，尚未用真实异常交易日历
+  验证；不能据此声称 DAY1 已完成。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
   仍相同，完整历史规则/执行路径尚未接入。
 
-仍未完成：显式多 catalog 消费者契约、DAY1 reader/时钟/结算、无损保证金、同一规则源
-单次加载、非 CN/非 Parquet 独立 Bundle、RunSpec 输入身份冻结。
+仍未完成：显式多 catalog 消费者契约、真实 DAY1 小窗口与异常日历/结算验证、无损保证金、
+同一规则源单次加载、非 CN/非 Parquet 独立 Bundle、RunSpec 输入身份冻结。
 
 ### Source-owned catalog staging entrypoint
 

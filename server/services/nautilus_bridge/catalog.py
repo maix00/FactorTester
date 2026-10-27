@@ -18,10 +18,12 @@ import time
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import Callable, Iterator
 
 from server.services.nautilus_bridge.market_data import (
     FuturesContractSpec,
     MarketBar,
+    iter_daily_bars,
     iter_minute_bars,
     to_nautilus_bar,
     to_nautilus_instrument,
@@ -96,13 +98,14 @@ class CatalogReceipt:
     session_summaries: tuple[dict[str, str | int], ...] = ()
 
 
-def stage_contract_minute_catalog(
+def _stage_contract_catalog(
     source_path: str | Path, target_dir: str | Path, *,
     contract_uid: str, instrument_spec: FuturesContractSpec,
     start_ns: int, end_ns: int,
+    bars: Iterator[MarketBar], bar_type_suffix: str,
     batch_bars: int = 4_096, max_bars: int = 100_000,
 ) -> CatalogReceipt:
-    """Write one contract's unadjusted MIN1 bars in bounded NT batches.
+    """Shared bounded NT writer for one source-owned Bar contract.
 
     A new sibling staging directory is renamed only after every chunk can be
     read back.  Neither the source nor an existing target is modified.  The
@@ -126,7 +129,7 @@ def stage_contract_minute_catalog(
     if nt_version != NAUTILUS_VERSION:
         raise RuntimeError(f"NautilusTrader pin mismatch: {nt_version}")
     instrument = to_nautilus_instrument(instrument_spec)
-    bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")
+    bar_type = BarType.from_str(f"{instrument.id}-{bar_type_suffix}")
     started = time.perf_counter()
     initial_stat = source.stat()
     source_hash = _sha256_file(source)
@@ -152,9 +155,7 @@ def stage_contract_minute_catalog(
             _assert_readback(catalog, bar_type, batch)
             batch.clear()
 
-        for bar in iter_minute_bars(
-            source, start_ns=start_ns, end_ns=end_ns, batch_size=batch_bars,
-        ):
+        for bar in bars:
             if not isinstance(bar, MarketBar):
                 raise TypeError("continuous roll marker cannot enter contract catalog")
             if bar.contract_uid != contract_uid:
@@ -217,3 +218,46 @@ def stage_contract_minute_catalog(
     except Exception:
         shutil.rmtree(staged)
         raise
+
+
+def stage_contract_minute_catalog(
+    source_path: str | Path, target_dir: str | Path, *,
+    contract_uid: str, instrument_spec: FuturesContractSpec,
+    start_ns: int, end_ns: int,
+    batch_bars: int = 4_096, max_bars: int = 100_000,
+) -> CatalogReceipt:
+    """Write one contract's unadjusted MIN1 bars in bounded NT batches."""
+    return _stage_contract_catalog(
+        source_path, target_dir, contract_uid=contract_uid,
+        instrument_spec=instrument_spec, start_ns=start_ns, end_ns=end_ns,
+        bars=iter_minute_bars(Path(source_path), start_ns=start_ns, end_ns=end_ns,
+                              batch_size=batch_bars),
+        bar_type_suffix="1-MINUTE-LAST-EXTERNAL",
+        batch_bars=batch_bars, max_bars=max_bars,
+    )
+
+
+def stage_contract_daily_catalog(
+    source_path: str | Path, target_dir: str | Path, *,
+    contract_uid: str, instrument_spec: FuturesContractSpec,
+    start_ns: int, end_ns: int, product_codes: set[str],
+    session_for_day: Callable, source_time_unit: str = "validated",
+    batch_bars: int = 4_096, max_bars: int = 100_000,
+) -> CatalogReceipt:
+    """Write one contract's date-labelled DAY1 bars in bounded NT batches.
+
+    The source label is never the event time; ``session_for_day`` supplies the
+    source-owned exchange calendar used by ``daily_clock``.
+    """
+    return _stage_contract_catalog(
+        source_path, target_dir, contract_uid=contract_uid,
+        instrument_spec=instrument_spec, start_ns=start_ns, end_ns=end_ns,
+        bars=iter_daily_bars(
+            Path(source_path), product_codes=product_codes,
+            session_for_day=session_for_day, raw_unit=source_time_unit,
+            batch_size=batch_bars, start_ns=start_ns, end_ns=end_ns,
+            contract_uids={contract_uid},
+        ),
+        bar_type_suffix="1-DAY-LAST-EXTERNAL",
+        batch_bars=batch_bars, max_bars=max_bars,
+    )

@@ -5,11 +5,16 @@ selector needs to know this source's UID syntax or physical data paths.
 """
 from __future__ import annotations
 
+from datetime import datetime, time
 from decimal import Decimal
 from pathlib import Path
+import re
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from server.services.nautilus_bridge.catalog import stage_contract_minute_catalog
+from server.services.nautilus_bridge.catalog import (
+    stage_contract_daily_catalog, stage_contract_minute_catalog,
+)
 from server.services.nautilus_bridge.market_data import FuturesContractSpec
 from server.modules.shared.price_services import (
     cn_futures_trading_spec_fields, contract_data_path_for, find_contract_product,
@@ -56,12 +61,39 @@ def build_contract_spec(
     )
 
 
+_SESSION_RE = re.compile(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})")
+
+
+def _session_for_day(product: Any):
+    """Resolve the source-declared day-session bounds for one daily label."""
+    text = str(getattr(product, "trading_day_sessions", "") or "")
+    intervals = _SESSION_RE.findall(text)
+    if not intervals:
+        raise ValueError("DAY1 source product has no trading session schedule")
+    start_hour, start_minute = (int(value) for value in intervals[0][:2])
+    close_text = str(getattr(product, "trading_day_close_time", "") or "")
+    close_match = re.fullmatch(r"(\d{1,2}):(\d{2})", close_text)
+    if close_match:
+        close_hour, close_minute = (int(value) for value in close_match.groups())
+    else:
+        close_hour, close_minute = (int(value) for value in intervals[-1][2:])
+    timezone = ZoneInfo("Asia/Shanghai")
+
+    def session(day):
+        return (
+            datetime.combine(day, time(start_hour, start_minute), tzinfo=timezone),
+            datetime.combine(day, time(close_hour, close_minute), tzinfo=timezone),
+        )
+
+    return session
+
+
 def stage_catalogs(
     *, staging_requests: list[dict[str, Any]], source_key: str, frequency: str,
     start_utc: str, end_utc: str, start_ns: int, end_ns: int, target_root: Path,
 ) -> dict[str, dict[str, str]]:
-    if frequency != "MIN1":
-        raise ValueError(f"{frequency}: source-owned DAY1 catalog loader is not implemented")
+    if frequency not in {"MIN1", "DAY1"}:
+        raise ValueError(f"{frequency}: unsupported source-owned catalog frequency")
     product_contracts: dict[str, str] = {}
     for request in staging_requests:
         for contract_uid in request["paths"]:
@@ -97,12 +129,29 @@ def stage_catalogs(
                 spec_fields=fields, source_key=source_key, frequency=frequency,
             )
             target = target_root / str(contract_uid).replace("|", "_")
-            stage_contract_minute_catalog(
-                contract_data_path_for(contract_uid, product), target,
-                contract_uid=contract_uid, instrument_spec=spec,
-                start_ns=max(start_ns, spec.activation_ns),
-                end_ns=min(end_ns, spec.expiration_ns),
-            )
+            clipped_start = max(start_ns, spec.activation_ns)
+            clipped_end = min(end_ns, spec.expiration_ns)
+            if frequency == "MIN1":
+                stage_contract_minute_catalog(
+                    contract_data_path_for(contract_uid, product), target,
+                    contract_uid=contract_uid, instrument_spec=spec,
+                    start_ns=clipped_start, end_ns=clipped_end,
+                )
+            else:
+                if parent is None:
+                    raise ValueError(f"contract has no parent product: {contract_uid}")
+                term_path = parent.get_term_structure_path()
+                if not term_path:
+                    raise ValueError(f"product has no DAY1 term-structure artifact: {contract_uid}")
+                codes = tuple(str(value) for value in (
+                    parent.name, getattr(parent, "alias", None),
+                ) if value)
+                stage_contract_daily_catalog(
+                    term_path, target, contract_uid=contract_uid,
+                    instrument_spec=spec, start_ns=clipped_start, end_ns=clipped_end,
+                    product_codes=set(codes),
+                    session_for_day=_session_for_day(parent),
+                )
             product_key = str(contract_uid).split("|")[2]
             catalogs[product_key] = {
                 "catalog_dir": str(target), "contract_uid": str(contract_uid),
