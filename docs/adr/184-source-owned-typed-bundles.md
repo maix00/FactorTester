@@ -175,6 +175,23 @@ outputs and current source admission/staging remain covered by focused tests.
 This does not yet externalize the complete source implementation or replace the
 federated catalog's runtime availability/count projection.
 
+### P1 progress：规则提供者与失败关闭（2026-10-27）
+
+第一批 P1 只完成两个可独立验证的边界，不声称源侧已独立：
+
+- 历史规则提供者不再由中央硬编码为 `FieldHistory:market_rules:exchange`。源成员声明
+  `trading_field_provider_ref` 与 `trading_field_related_members`，执行侧只验证关系
+  并调用源提供的 loader；`TradingFieldProvider` 只要求 `resolve_at` 协议，不再以具体
+  `FieldHistoryProvider` 类作为准入条件。中央仍使用现有规则值/错误类型，完整规则协议
+  迁移尚未完成。
+- 多合约目录与未实现的 DAY1 现在显式失败。`stage_catalogs` 在写任何 catalog 前检查
+  同一品种的多个合约并拒绝；`LocalCNFuturesContractDAY1` 不再静默复用 MIN1
+  `stage_contract_minute_catalog`，而是报告 `DAY1 catalog loader is not implemented`。
+  这是防止错误结果的 fail-closed，不是多合约或 DAY1 已完成。
+
+仍未完成：显式多 catalog 消费者契约、DAY1 reader/时钟/结算、无损保证金、同一规则源
+单次加载、非 CN/非 Parquet 独立 Bundle、RunSpec 输入身份冻结。
+
 ### Source-owned catalog staging entrypoint
 
 The installed market member's `integrations.nautilus_catalog` now selects the
