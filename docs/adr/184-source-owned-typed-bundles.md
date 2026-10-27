@@ -195,7 +195,9 @@ federated catalog's runtime availability/count projection.
   `term_structure-listed_contracts.parquet` 的 `A1001`，写入 10 根 DAY1 Bar，
   Nautilus readback 数量/OHLC/事件时刻一致；首个事件为 2010-01-04 15:00
   Asia/Shanghai。该检查是合成/真实小窗口的局部证据，不是完整验收，也没有
-  作为常驻慢测试加入聚焦套件。
+  作为常驻慢测试加入聚焦套件。另一次真实 MIN1 检查用 `build_contract_spec` 生成
+  `T2403`，写入 3 根 `T2403.CFFEX-1-MINUTE-LAST-EXTERNAL` 并 readback；确认大写
+  合约身份与现有源一致。该检查同样不代替完整回放验收。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
   仍相同，完整历史规则/执行路径尚未接入。
