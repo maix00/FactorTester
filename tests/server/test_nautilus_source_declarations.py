@@ -140,3 +140,36 @@ def test_new_server_source_is_projected_without_special_casing(monkeypatch):
         # Existing registry has no unregister API; restore only this test key.
         from tools.data import source_catalog
         source_catalog._DECLARATIONS.pop("SyntheticForTest", None)
+
+
+def test_rule_revision_tracks_wal_commit_and_database_path(monkeypatch, tmp_path):
+    import sqlite3
+    from tools.data import field_history, hub
+    from sources.LocalCNFutures import CNFutures
+
+    db = tmp_path / "rules.sqlite"
+    table = field_history.HISTORICAL_FIELD_TABLE
+    with sqlite3.connect(db) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(f'CREATE TABLE "{table}" (value TEXT)')
+        conn.execute(f'INSERT INTO "{table}" VALUES (?)', ("first",))
+        conn.commit()
+
+    class FakeHub:
+        def get_store_path(self, key):
+            assert key == "openctp"
+            return db
+
+        def connect_store(self, key):
+            assert key == "openctp"
+            return sqlite3.connect(db)
+
+    monkeypatch.setattr(hub.DataHub, "get_instance", classmethod(lambda cls: FakeHub()))
+    first = CNFutures._rule_store_revision()
+    with sqlite3.connect(db) as conn:
+        conn.execute(f'INSERT INTO "{table}" VALUES (?)', ("second",))
+        conn.commit()
+    second = CNFutures._rule_store_revision()
+    assert first is not None and second is not None
+    assert first[0] == db.resolve().as_posix()
+    assert first != second
