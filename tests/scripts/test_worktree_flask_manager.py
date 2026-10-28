@@ -241,7 +241,7 @@ def test_manager_serves_localhost_over_ipv6(tmp_path, monkeypatch) -> None:
     with _running_dual_loopback_manager(state) as port:
         with urlopen(f"http://[::1]:{port}/") as response:
             assert response.status == 200
-            assert b"<title>FTClient</title>" in response.read()
+            assert b"<title>TradeResearch</title>" in response.read()
 
 
 def test_direct_remote_client_cannot_spoof_loopback_forwarded_address() -> None:
@@ -1385,7 +1385,7 @@ def test_public_manager_login_returns_the_authenticated_shell(
         )
         with urlopen(shell) as response:
             assert response.status == 200
-            assert b"<title>FTClient</title>" in response.read()
+            assert b"<title>TradeResearch</title>" in response.read()
 
 
 def test_public_unregistered_device_goes_directly_to_compliance_page(
@@ -1668,7 +1668,7 @@ def test_visitor_entry_redirects_to_ip_and_limits_anonymous_capabilities(
         )
         with urlopen(shell) as response:
             assert response.status == 200
-            assert b"<title>FTClient</title>" in response.read()
+            assert b"<title>TradeResearch</title>" in response.read()
 
         jobs = Request(
             f"{base_url}/api/jobs?scope=server&limit=100",
@@ -2638,141 +2638,12 @@ def test_worktrees_skip_bare_repository_entry(tmp_path, monkeypatch) -> None:
     assert [(item.branch, item.port) for item in worktrees] == [("main", 8000)]
 
 
-def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkeypatch) -> None:
-    (tmp_path / "start_server.py").write_text("", encoding="ascii")
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "research_job_daemon.py").write_text("", encoding="ascii")
-    created = []
-
-    def fake_popen(command, **kwargs):
-        process = _Process(command)
-        created.append((process, kwargs))
-        return process
-
-    monkeypatch.setattr(manager.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(manager.subprocess, "check_output", lambda *args, **kwargs: "abc123\n")
-    monkeypatch.setattr(manager, "port_in_use", lambda port: False)
-    monkeypatch.setattr(manager.ManagerState, "_terminate", staticmethod(lambda process: setattr(process, "returncode", 0)))
-    state = manager.ManagerState(tmp_path, "python")
-
-    state.start(tmp_path, 8135)
-    bundle = state.processes[state.key(tmp_path)]
-    daemon_pid = bundle.daemon.pid
-    old_api_pid = bundle.api.pid
-    state.restart_api(tmp_path, 8135)
-
-    assert bundle.daemon.pid == daemon_pid
-    assert bundle.daemon.poll() is None
-    assert bundle.api.pid != old_api_pid
-    assert created[0][0].command[1] == "scripts/research_job_daemon.py"
-    assert created[1][1]["env"]["GTHT_DEPLOYMENT_ID"].endswith("-8135")
-    assert created[1][1]["env"]["GTHT_JOB_DAEMON_SOCKET"] == str(bundle.socket_path)
-    assert created[1][1]["env"]["FACTORTESTER_WERKZEUG_RELOADER"] == "0"
-    assert "FLASK_SECRET_KEY" not in created[1][1]["env"]
-    assert "FLASK_SECRET_KEY" not in created[2][1]["env"]
-    assert "GTHT_MANAGER_CAPABILITY_TOKEN" not in created[0][1]["env"]
-    assert created[1][1]["env"]["GTHT_MANAGER_CAPABILITY_TOKEN"]
-    assert created[2][1]["env"]["GTHT_MANAGER_CAPABILITY_TOKEN"]
-
-
-def test_manager_reclaims_services_after_control_process_restart(tmp_path, monkeypatch) -> None:
-    path = tmp_path / "issue-141-service"
-    path.mkdir()
-    state = manager.ManagerState(tmp_path, "python")
-    worktree = manager.Worktree(
-        path=path,
-        branch="fix/issue-141-service",
-        head="abc12345",
-        label="fix/issue-141-service",
-        port=8141,
-    )
-    monkeypatch.setattr(state, "worktrees", lambda: [worktree])
-    monkeypatch.setattr(manager, "port_in_use", lambda _port: True)
-    monkeypatch.setattr(
-        state,
-        "_process_listing",
-        lambda: [
-            (41001, "python start_server.py --port 8141"),
-            (41002, "python scripts/research_job_daemon.py "
-             "--deployment-id issue-141-service-8141 "
-             f"--socket {path.resolve() / '.workspace/runtime/issue-141-service-8141.sock'}"),
-        ],
-    )
-    monkeypatch.setattr(state, "_process_cwd", lambda _pid: path.resolve())
-    monkeypatch.setattr(manager.os, "kill", lambda _pid, _signal: None)
-
-    assert state.is_running(path)
-    assert state.daemon_running(path)
-    bundle = state.processes[state.key(path)]
-    assert bundle.api.pid == 41001
-    assert bundle.daemon.pid == 41002
-
-
-def test_manager_restores_desired_services_after_graceful_restart(
-    tmp_path, monkeypatch,
-) -> None:
-    path = tmp_path / "issue-141-service"
-    path.mkdir()
-    (path / "start_server.py").write_text("", encoding="ascii")
-    (path / "scripts").mkdir()
-    (path / "scripts" / "research_job_daemon.py").write_text(
-        "", encoding="ascii",
-    )
-    worktree = manager.Worktree(
-        path=path,
-        branch="fix/issue-141-service",
-        head="abc12345",
-        label="fix/issue-141-service",
-        port=8141,
-    )
-    created = []
-
-    def fake_popen(command, **kwargs):
-        process = _Process(command)
-        created.append((process, kwargs))
-        return process
-
-    monkeypatch.setattr(manager.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(
-        manager.subprocess, "check_output", lambda *args, **kwargs: "abc123\n",
-    )
-    monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
-    monkeypatch.setattr(
-        manager.ManagerState, "worktrees", lambda _self: [worktree],
-    )
-    monkeypatch.setattr(
-        manager.ManagerState,
-        "_terminate",
-        staticmethod(lambda process: setattr(process, "returncode", 0)),
-    )
-
-    first = manager.ManagerState(
-        path, "python", state_root=tmp_path / "manager-state",
-    )
-    first.start(path, 8141)
-    first.stop_all()
-
-    restarted = manager.ManagerState(
-        path, "python", state_root=tmp_path / "manager-state",
-    )
-    restored = restarted.restore_desired_services()
-
-    assert restored == [{
-        "path": str(path.resolve()),
-        "port": 8141,
-        "status": "started",
-    }]
-    assert restarted.is_running(path)
-    assert restarted.daemon_running(path)
-    assert len(created) == 4
-
-
 def test_explicit_service_stop_clears_restart_intent(tmp_path, monkeypatch) -> None:
     path = tmp_path / "issue-141-service"
     path.mkdir()
     (path / "start_server.py").write_text("", encoding="ascii")
     (path / "scripts").mkdir()
-    (path / "scripts" / "research_job_daemon.py").write_text(
+    (path / "scripts" / "research_job_planner.py").write_text(
         "", encoding="ascii",
     )
     worktree = manager.Worktree(
@@ -2834,26 +2705,6 @@ def test_service_env_adds_repo_harness_without_losing_pythonpath(
     assert env["FACTORTESTER_SERVICE_HOST"] == "127.0.0.1"
 
 
-def test_service_env_uses_native_daemon_runtime_directory(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    runtime_dir = tmp_path / "container-run"
-    monkeypatch.setenv("FACTORTESTER_JOB_DAEMON_RUNTIME_DIR", str(runtime_dir))
-    monkeypatch.setattr(
-        manager.subprocess,
-        "check_output",
-        lambda *args, **kwargs: "abc123\n",
-    )
-    repo = tmp_path / "repo"
-    state = manager.ManagerState(repo, "python")
-
-    env, deployment_id, socket_path = state._service_env(repo, 7999)
-
-    assert socket_path == runtime_dir / f"{deployment_id}.sock"
-    assert env["GTHT_JOB_DAEMON_SOCKET"] == str(socket_path)
-
-
 def test_federation_settings_offer_only_online_service_ports(
     tmp_path, monkeypatch,
 ) -> None:
@@ -2896,76 +2747,6 @@ def test_federation_settings_offer_only_online_service_ports(
             payload = json.loads(response.read())
 
     assert [item["port"] for item in payload["available_ports"]] == [8141]
-
-
-def test_bundle_restart_recovers_api_when_daemon_has_died(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    (tmp_path / "start_server.py").write_text("", encoding="ascii")
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "research_job_daemon.py").write_text(
-        "", encoding="ascii"
-    )
-    old_api = _Process(["api"])
-    dead_daemon = _Process(["daemon"])
-    dead_daemon.returncode = 1
-    state = manager.ManagerState(tmp_path, "python")
-    state.processes[state.key(tmp_path)] = manager.ServiceBundle(
-        api=old_api,
-        daemon=dead_daemon,
-        socket_path=tmp_path / "jobs.sock",
-        deployment_id="test",
-    )
-    monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
-    monkeypatch.setattr(
-        manager.subprocess,
-        "check_output",
-        lambda *args, **kwargs: "abc123\n",
-    )
-    monkeypatch.setattr(
-        manager.subprocess,
-        "Popen",
-        lambda command, **kwargs: _Process(command),
-    )
-    monkeypatch.setattr(
-        manager.ManagerState,
-        "_terminate",
-        staticmethod(lambda process: setattr(process, "returncode", 0)),
-    )
-
-    state.restart_bundle(tmp_path, 8135)
-
-    replacement = state.processes[state.key(tmp_path)]
-    assert old_api.returncode == 0
-    assert replacement.api is not old_api
-    assert replacement.api.poll() is None
-    assert replacement.daemon.poll() is None
-
-
-def test_paused_step_job_blocks_drained_bundle_restart(tmp_path, monkeypatch) -> None:
-    state = manager.ManagerState(tmp_path, "python")
-    daemon = _Process(["daemon"])
-    api = _Process(["api"])
-    bundle = manager.ServiceBundle(
-        api=api,
-        daemon=daemon,
-        socket_path=tmp_path / "jobs.sock",
-        deployment_id="test",
-    )
-    state.processes[state.key(tmp_path)] = bundle
-    actions = []
-
-    def request(current, action):
-        actions.append(action)
-        if action == "drain":
-            return {"paused_jobs": ["step-1"], "active_planners": 0, "active_executors": 1}
-        return {"paused_jobs": [], "active_planners": 0, "active_executors": 0}
-
-    monkeypatch.setattr(state, "_daemon_request", request)
-    with pytest.raises(RuntimeError, match="paused step jobs"):
-        state.restart_bundle(tmp_path, 8135)
-    assert actions == ["drain", "resume"]
 
 
 def test_manager_starts_and_stops_vibe_on_fixed_port(tmp_path, monkeypatch) -> None:

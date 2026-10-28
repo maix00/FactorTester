@@ -43,7 +43,7 @@
 
 ADR-022：作者不写第二个 evaluate_event；compiler 把同一表达式图编译成**有状态 kernel**；不支持必须抛 UnsupportedStreamingFactor，禁止静默预计算或降级。
 
-- 编译器：`tools/testers/backtest/engines/factors/incremental.py`
+- 编译器：`tools/factors/expr/streaming/incremental.py`
   - 节点协议：`StreamingNode.update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray`（全文件 931 行，节点类集中在 65–470 行）
   - 构造点：**第 713 行附近**在把表达式图转节点时构造 `RollingWindowNode(...)`；新节点应在同一分派处按 `GroupByScopeOp` 构造
   - 既有范式：`RollingWindowNode`（167 行起，带 `_update_fast` / `_aggregate`）与 `ExpandingEwmNode`（347 行起）——`groupby_scope` 更接近后者（累计型）

@@ -37,32 +37,6 @@ class RoutingStateMixin:
             return str(os.environ.get("GTHT_SOURCE_REVISION") or "").strip()
 
     @staticmethod
-    def _daemon_health_socket(path: str | Path) -> dict[str, object] | None:
-        target = Path(path).expanduser()
-        if not target.exists():
-            return None
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
-                channel.settimeout(0.5)
-                channel.connect(str(target))
-                channel.sendall(b'{"action":"health"}\n')
-                chunks = bytearray()
-                while len(chunks) < 1024 * 1024:
-                    part = channel.recv(65536)
-                    if not part:
-                        break
-                    chunks.extend(part)
-                    if b"\n" in part:
-                        break
-        except (OSError, socket.timeout):
-            return None
-        try:
-            value = json.loads(bytes(chunks).partition(b"\n")[0].decode("utf-8"))
-        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
-            return None
-        return value if isinstance(value, dict) and value.get("success", True) else None
-
-    @staticmethod
     def _load_from_health(value: dict[str, object] | None) -> dict[str, object]:
         if not value:
             return {"load": 50.0, "active_jobs": 0, "queue_depth": 0}
@@ -86,28 +60,8 @@ class RoutingStateMixin:
         return payload
 
     def local_service_load(self, port: int) -> dict[str, object]:
-        health: dict[str, object] | None = None
-        if self.fixed_port and int(port) == self.fixed_port and self.fixed_daemon_socket:
-            health = self._daemon_health_socket(self.fixed_daemon_socket)
-        else:
-            try:
-                worktrees = self.worktrees()
-            except (OSError, subprocess.CalledProcessError):
-                # A few callers provide a legacy live-port seam without a
-                # Git checkout (and it is also useful during first bootstrap).
-                worktrees = []
-            worktree = next(
-                (item for item in worktrees if item.port == int(port)),
-                None,
-            )
-            if worktree is not None:
-                bundle = self._bundle_for_path(worktree.path)
-                if bundle is not None:
-                    try:
-                        health = self._daemon_request(bundle, "health")
-                    except (OSError, RuntimeError, ValueError):
-                        health = None
-        return self._load_from_health(health)
+        # Celery owns Job concurrency now; Manager no longer probes a daemon.
+        return self._load_from_health(None)
 
     def _local_route(
         self,

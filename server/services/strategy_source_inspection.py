@@ -7,13 +7,34 @@ import hashlib
 import re
 from typing import Any
 
-from tools.testers.backtest.engines.native.strategy import STRATEGY_CALLBACKS
+# These names match NautilusTrader's Strategy callback surface. Keeping the
+# inspection list local avoids importing (or coupling the strategy library to)
+# FactorTester's retired backtest actor implementation during authoring reads.
+STRATEGY_CALLBACKS = frozenset({
+    "on_start", "on_stop", "on_resume", "on_reset", "on_dispose",
+    "on_degrade", "on_fault", "on_time_event", "on_data", "on_signal",
+    "on_instrument", "on_quote", "on_trade", "on_bar", "on_book_deltas",
+    "on_book_depth", "on_book", "on_mark_price", "on_index_price",
+    "on_funding_rate", "on_instrument_status", "on_instrument_close",
+    "on_option_greeks", "on_option_chain", "on_market_exit", "post_market_exit",
+    "on_order_initialized", "on_order_event", "on_order_denied",
+    "on_order_emulated", "on_order_released", "on_order_submitted",
+    "on_order_rejected", "on_order_accepted", "on_order_expired",
+    "on_order_triggered", "on_order_pending_update", "on_order_pending_cancel",
+    "on_order_modify_rejected", "on_order_cancel_rejected", "on_order_updated",
+    "on_order_canceled", "on_order_filled", "on_order_fill_voided",
+    "on_position_opened", "on_position_event", "on_position_changed",
+    "on_position_closed", "on_historical_data", "on_historical_book_deltas",
+    "on_historical_book_depth", "on_historical_quotes", "on_historical_trades",
+    "on_historical_funding_rates", "on_historical_bars",
+    "on_historical_mark_prices", "on_historical_index_prices",
+})
 
 
 MAX_SOURCE_BYTES = 1024 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _STRATEGY_BASES = frozenset({
-    "Strategy", "BarStrategy", "EventStrategy", "OrderAwareStrategy",
+    "Strategy",
 })
 
 

@@ -40,6 +40,12 @@ def test_cli_entrypoint_uses_safe_bootstrap() -> None:
         Path(__file__).resolve().parents[2] / "tools" / "cli" / "pyproject.toml"
     ).read_text(encoding="utf-8")
 
-    assert 'factortester = "factortester_cli_bootstrap:main"' in pyproject
-    assert 'factortester-manager = "factortester_cli_bootstrap:manager_main"' in pyproject
+    assert 'factortester = "traderesearch_cli_bootstrap:main"' in pyproject
+    assert 'factortester-manager = "traderesearch_cli_bootstrap:manager_main"' in pyproject
     assert 'factortester = "tools.cli.app:cli"' not in pyproject
+
+    import tomllib
+    parsed=tomllib.loads(pyproject)
+    assert parsed['project']['name']=='traderesearch'
+    assert parsed['project']['scripts']['traderesearch']=='traderesearch_cli_bootstrap:main'
+    assert parsed['project']['scripts']['traderesearch-manager']=='traderesearch_cli_bootstrap:manager_main'

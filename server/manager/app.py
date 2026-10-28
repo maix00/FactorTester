@@ -91,8 +91,20 @@ def build_parser(runtime_module: ModuleType | None = None) -> argparse.ArgumentP
     parser.add_argument("--server-id", default=None)
     parser.add_argument("--fixed-port", type=int, default=None)
     parser.add_argument("--fixed-branch", default=None)
+    parser.add_argument(
+        "--fixed-source", default="",
+        help="Source directory executed for --fixed-port (defaults to --repo).",
+    )
     parser.add_argument("--daemon-socket", default="")
     parser.add_argument("--feature", action="append", default=[])
+    parser.add_argument(
+        "--service-port", action="append", type=int, default=[],
+        help="Additional FactorTester service port managed by this Manager.",
+    )
+    parser.add_argument(
+        "--service-source", action="append", default=[],
+        help="Source directory paired by position with --service-port.",
+    )
     parser.add_argument("--state-root", default="")
     parser.add_argument(
         "--tls-cert",
@@ -131,6 +143,12 @@ def main(
         private_key_env="FACTORTESTER_MANAGER_TLS_KEY",
     )
 
+    if len(args.service_port) != len(args.service_source):
+        parser.error("--service-port and --service-source must be paired")
+    extra_services = tuple(
+        (port, Path(source))
+        for port, source in zip(args.service_port, args.service_source)
+    )
     runtime_module.Handler.state = runtime_module.ManagerState(
         Path(args.repo), args.python,
         Path(args.data_root) if args.data_root else None,
@@ -142,6 +160,8 @@ def main(
         state_root=Path(args.state_root) if args.state_root else None,
         fixed_daemon_socket=args.daemon_socket or None,
         session_db_path=runtime_module.configured_manager_sqlite_path(),
+        extra_services=extra_services,
+        fixed_source=Path(args.fixed_source) if args.fixed_source else None,
     )
     removed = runtime_module.Handler.state.cleanup_detached_worktrees()
     if removed:

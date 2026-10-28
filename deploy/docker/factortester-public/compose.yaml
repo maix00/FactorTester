@@ -14,6 +14,7 @@ services:
         FACTORTESTER_REVISION: ${FACTORTESTER_REVISION:?set FACTORTESTER_REVISION}
         FACTORTESTER_UID: ${FACTORTESTER_UID:-1000}
         FACTORTESTER_GID: ${FACTORTESTER_GID:-1000}
+        NAUTILUS_VENDOR_REVISION: ${FACTORTESTER_NAUTILUS_VENDOR_REVISION:-unknown}
         PIP_INDEX_URL: ${FACTORTESTER_PIP_INDEX_URL:-https://pypi.org/simple}
         CODEX_VERSION: ${FACTORTESTER_CODEX_VERSION:-0.147.0}
         CODEX_NPM_REGISTRY: ${FACTORTESTER_CODEX_NPM_REGISTRY:-https://registry.npmjs.org}
@@ -41,6 +42,13 @@ services:
     # file gives the kernel somewhere to page under pressure).
     mem_limit: ${FACTORTESTER_PUBLIC_MEMORY_LIMIT:-0}
     environment:
+      TR_DATA_HOST_ROLE: server
+      TR_EXECUTION_NODE_ID: ${TR_EXECUTION_NODE_ID:?set stable execution node identity}
+      TR_DATA_DEVICE_REF: ${TR_SHARED_STORAGE_ID:?set shared kernel and storage domain identity}
+      TR_SHARED_DATA_CACHE_ROOT: /state/shared-columnar
+      TR_SHARED_DATA_CACHE_BYTES: ${TR_SHARED_DATA_CACHE_BYTES:-536870912}
+      TR_SHARED_DATA_ENTRY_BYTES: ${TR_SHARED_DATA_ENTRY_BYTES:-67108864}
+      TR_DATA_QUERY_CONCURRENCY: ${TR_DATA_QUERY_CONCURRENCY:-4}
       FACTORTESTER_ALLOW_PUBLIC_REGISTRATION: "0"
       FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT: ${FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT:?set FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT}
       FACTORTESTER_FEDERATION_CA_FILE: /run/trust/federation-ca.crt
@@ -49,6 +57,8 @@ services:
       FACTORTESTER_MIHOMO_BIN: /usr/local/bin/mihomo
       FACTORTESTER_MIHOMO_CONFIG_FILE: /state/mihomo.yaml
       FACTORTESTER_MANAGED_ORGANIZATIONS: ${FACTORTESTER_MANAGED_ORGANIZATIONS:-default}
+      FACTORTESTER_COUCHDB_URL: ${FACTORTESTER_COUCHDB_URL:-}
+      FACTORTESTER_COUCHDB_DB: ${FACTORTESTER_COUCHDB_DB:-ft_objects}
       # The job pool keeps 1 planner + 2 execution workers alive, and each
       # worker only recycles after its peak RSS passes this ceiling (upstream
       # default 3 GiB, i.e. 9 GiB for the pool alone).  On a small public host
@@ -91,6 +101,9 @@ services:
       # requests; the public deployment raises it through the env file.
       FACTORTESTER_WAITRESS_THREADS: ${FACTORTESTER_WAITRESS_THREADS:-}
       GTHT_JOB_ARTIFACT_ROOT: /data/job-results
+      FACTORTESTER_FIXED_SOURCE: ${FACTORTESTER_FIXED_SOURCE:-}
+      FACTORTESTER_EXTRA_SERVICE_PORTS: ${FACTORTESTER_EXTRA_SERVICE_PORTS:-}
+      FACTORTESTER_EXTRA_SERVICE_SOURCES: ${FACTORTESTER_EXTRA_SERVICE_SOURCES:-}
     healthcheck:
       test:
         - CMD-SHELL
@@ -126,6 +139,14 @@ services:
     sysctls:
       net.ipv4.ip_forward: "1"
     volumes:
+      - type: bind
+        source: ${FACTORTESTER_SERVICES_ROOT:?set FACTORTESTER_SERVICES_ROOT}
+        target: /opt/factortester/services
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_RELEASES_ROOT:?set FACTORTESTER_RELEASES_ROOT}
+        target: /opt/factortester/releases
+        read_only: true
       - type: bind
         source: ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
         target: /data

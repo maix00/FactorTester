@@ -2,16 +2,26 @@
   const tabLabels = Object.freeze({
     overview: "回测表现", strategy_stats: "策略统计", time_series: "时变指标",
     execution_account: "交易与账户", return_analysis: "收益与风险",
-    runtime_summary: "运行摘要",
+    runtime_summary: "运行摘要", nautilus_report: "NautilusTrader 报告",
   });
+
+  function nautilusTearsheet(artifacts) {
+    const active = (artifacts || []).filter(item => item.state === "active");
+    const receipt = active.some(item => [item.name, item.file_name]
+      .includes("nautilus_receipt.json"));
+    return receipt ? active.find(item => (
+      String(item.file_name || item.name || "").toLowerCase() === "tearsheet.html"
+    )) : null;
+  }
 
   function relevantArtifacts(artifacts) {
     const names = new Set([
       ...window.FTBacktestResultModel.payloadNames,
       "factor_series_data",
     ]);
+    const tearsheet = nautilusTearsheet(artifacts);
     return (artifacts || []).filter(item => (
-      item.state === "active" && names.has(String(item.name || ""))
+      item.state === "active" && (names.has(String(item.name || "")) || item === tearsheet)
     ));
   }
 
@@ -317,6 +327,29 @@
         return target;
       }
     }
+    if (state.activeTab === "nautilus_report" && state.nautilusTearsheet) {
+      if (!state.nautilusPreview) {
+        const target = document.createElement("div");
+        target.className = "artifact-preview";
+        target.append(window.FTUI.loading(context.t("正在读取回测报告…")));
+        state.nautilusPreview = target;
+        void (async () => {
+          await window.FTStaticLoader?.loadGroups?.(["job-detail-previews"]);
+          if (!window.FTJobArtifactViewers) {
+            throw new Error(context.t("生成物查看器不可用"));
+          }
+          await window.FTJobArtifactViewers.mount(context, target, {
+            jobID: state.options.jobID,
+            artifact: state.nautilusTearsheet,
+            artifactQuery: state.options.artifactQuery,
+            declaration: {viewer: "nautilus_tearsheet"},
+          });
+        })().catch(error => {
+          target.textContent = error?.message || String(error);
+        });
+      }
+      return state.nautilusPreview;
+    }
     if (state.activeTab === "overview") {
       const root = document.createElement("div");
       root.className = "backtest-overview-surface";
@@ -495,7 +528,11 @@
       },
     }) || [];
     const composedTabs = FTJobResultTabs.compose({
-      tabs: state.model.tabs.map(key => ({key, label: tabLabels[key]})),
+      tabs: [
+        ...state.model.tabs.map(key => ({key, label: tabLabels[key]})),
+        ...(state.nautilusTearsheet
+          ? [{key: "nautilus_report", label: tabLabels.nautilus_report}] : []),
+      ],
       resultSummary: state.model.summary, customTabs,
     });
     const hasOverview = state.model.tabs.includes("overview");
@@ -544,6 +581,7 @@
     queueMicrotask(() => {
       try {
         const relevant = relevantArtifacts(options.artifacts);
+        const tearsheet = nautilusTearsheet(options.artifacts);
         const artifactsByName = new Map(relevant.map(item => [String(item.name), item]));
         const model = window.FTBacktestResultModel.build(
           {}, options.resultSummary || {}, [...artifactsByName.keys()],
@@ -569,6 +607,7 @@
           selectedAsset: null, assetPlotCleanup: null,
           dimensionSelections: {},
           customAnalyses: options.customAnalyses || null,
+          nautilusTearsheet: tearsheet, nautilusPreview: null,
           requestedSupplemental: options.supplementalRequest || null,
           supplementalRequestConsumed: false,
           options: {...options, resultSummary: model.summary},

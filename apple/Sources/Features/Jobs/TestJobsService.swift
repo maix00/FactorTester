@@ -158,6 +158,7 @@ struct TestJobDetail {
     let submissionContextFields: [TestJobField]
     let submissionContextJSON: String
     let resultSections: [TestJobResultSection]
+    let reportRef: String
 }
 
 struct TestJobChartPoint: Identifiable {
@@ -379,12 +380,32 @@ final class TestJobsService {
             researchBindingJSON: residualJSON(detail["research_binding"] ?? response["research_binding"]),
             submissionContextFields: scalarFieldRows(detail["caller"] ?? response["submission_context"], prefix: "调用方"),
             submissionContextJSON: residualJSON(detail["caller"] ?? response["submission_context"]),
-            resultSections: resultSections(rows: rows, chart: chart, resultText: prettyJSON(result))
+            resultSections: resultSections(rows: rows, chart: chart, resultText: prettyJSON(result)),
+            reportRef: response["report_ref"] as? String ?? ""
         )
     }
 
     func clearArtifacts(jobID: String, port: Int) async throws {
         _ = try await request(path: "/api/jobs/\(jobID)/artifacts", method: "DELETE", port: port)
+    }
+
+    func reportAttachments(reportRef: String, port: Int) async throws -> [TestJobReportAttachment] {
+        let encodedRef = reportRef.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? reportRef
+        let response = try await request(path: "/api/job-test-reports/\(encodedRef)/attachments", port: port)
+        return (response["attachments"] as? [[String: Any]] ?? []).compactMap { item in
+            guard let name = item["name"] as? String, !name.isEmpty else { return nil }
+            return TestJobReportAttachment(
+                name: name,
+                contentType: item["content_type"] as? String ?? "",
+                length: item["length"] as? Int ?? 0
+            )
+        }
+    }
+
+    func reportAttachment(reportRef: String, name: String, port: Int) async throws -> Data {
+        let encodedRef = reportRef.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? reportRef
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        return try await requestData(path: "/api/job-test-reports/\(encodedRef)/attachments/\(encodedName)", port: port)
     }
 
     func request(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> [String: Any] {

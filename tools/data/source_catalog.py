@@ -11,11 +11,14 @@ from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any, Callable
 
+from traderesearch_data.nautilus import NautilusAdapterContract
 from tools.data.availability.schema import availability_dimensions
 
 
 ProductPredicate = Callable[[Any], bool]
 MemberLoader = Callable[[], tuple["DataSourceMember", ...]]
+AssetClassResolver = Callable[[Any], str | None]
+HistoricalFieldProviderLoader = Callable[[], Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +63,21 @@ class DataSourceMember:
     data_columns: dict[str, str] = field(default_factory=dict)
     execution_provider: Any | None = field(default=None, repr=False, compare=False)
     naming_scheme: str = "canonical"
+    instrument_scope: str = "unspecified"
+    asset_class_resolver: AssetClassResolver | None = field(default=None, repr=False, compare=False)
+    bar_time_semantics: str = "unspecified"
+    raw_timestamp_unit: str = "unspecified"
+    nautilus_adapter: NautilusAdapterContract | None = field(
+        default=None, repr=False, compare=False,
+    )
+    trading_field_provider_ref: str = ""
+    trading_field_related_members: tuple[str, ...] = ()
+    trading_field_latest_provider: str = ""
+    trading_field_latest_source_prefix: str = ""
+    trading_field_effective_clock: str = "unspecified"
+    trading_field_provider_loader: HistoricalFieldProviderLoader | None = field(
+        default=None, repr=False, compare=False,
+    )
 
     @property
     def frequency(self) -> str:
@@ -81,6 +99,23 @@ class DataSourceMember:
 
     def has_available_data(self, product: Any) -> bool:
         return _safe_predicate(self.available, product)
+
+    def asset_class_for_product(self, product: Any) -> str | None:
+        """Resolve source-owned NT asset class; unknowns never default to DEBT."""
+        resolver = self.asset_class_resolver
+        if resolver is None:
+            return None
+        try:
+            value = resolver(product)
+        except Exception:
+            return None
+        return value if value in {"COMMODITY", "EQUITY", "DEBT"} else None
+
+    def load_trading_field_provider(self) -> Any:
+        """Load historical rules only for execution, never for catalog lists."""
+        if not self.trading_field_provider_ref or self.trading_field_provider_loader is None:
+            raise ValueError(f"{self.key}: no historical trading-field provider")
+        return self.trading_field_provider_loader()
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +240,25 @@ def _historical_member(provider: Any) -> DataSourceMember:
         naming_scheme=str(
             getattr(provider, "naming_scheme", "canonical") or "canonical"
         ),
+        instrument_scope=str(getattr(provider, "instrument_scope", "unspecified")),
+        trading_field_related_members=tuple(
+            getattr(provider, "trading_field_related_members", ()) or ()
+        ),
+        trading_field_latest_provider=str(
+            getattr(provider, "trading_field_latest_provider", "") or ""
+        ),
+        trading_field_latest_source_prefix=str(
+            getattr(provider, "trading_field_latest_source_prefix", "") or ""
+        ),
+        asset_class_resolver=getattr(provider, "asset_class_resolver", None),
+        bar_time_semantics=str(getattr(provider, "bar_time_semantics", "unspecified")),
+        raw_timestamp_unit=str(getattr(provider, "raw_timestamp_unit", "unspecified")),
+        nautilus_adapter=getattr(provider, "nautilus_adapter", None),
+        trading_field_provider_ref=str(getattr(provider, "trading_field_provider_ref", "")),
+        trading_field_effective_clock=str(
+            getattr(provider, "trading_field_effective_clock", "unspecified")
+        ),
+        trading_field_provider_loader=getattr(provider, "trading_field_provider_loader", None),
     )
 
 

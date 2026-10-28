@@ -8,8 +8,51 @@ import pytest
 import settings as Settings
 
 from server.services import research_runs
-from server.services.research_run_identity import RUN_SPEC_VERSION, hash_run_spec
+from server.services.research_run_identity import (
+    NAUTILUS_RUN_SPEC_VERSION, RUN_SPEC_VERSION, hash_run_spec,
+)
+from tools.data.sqlite.db import connect_sqlite
 from tests.server.trial_plan_fixtures import run_spec
+
+
+def _valid_nautilus_contract():
+    from server.services.nautilus_bridge.config import freeze_instrument_execution_policy
+    from server.services.nautilus_bridge.run_spec import freeze_execution_contract
+
+    backtest = {
+        "groups": [{
+            "id": "strategy:treasuries",
+            "product_path_selection_id": "product-group:treasuries",
+        }],
+        "venues": [{
+            "name": "CFFEX", "account_type": "MARGIN", "oms_type": "NETTING",
+            "starting_balance": "1000000", "currency": "CNY",
+        }],
+        "strategy_venue_bindings": [{
+            "strategy_id": "strategy:treasuries", "venue_ids": ["CFFEX"],
+        }],
+    }
+    from server.services.nautilus_bridge.venues import freeze_native_venues
+
+    settings = {
+        "data_source_mode": "list", "data_source": ["Local"],
+        "freq_mode": "fixed", "freq_fixed": "MIN1",
+        "start_date": "2025-04-01", "start_time": "09:00",
+        "end_date": "2025-04-02", "end_time": "15:00",
+        "time_precision": "exact", "timezone": "Asia/Shanghai",
+        "order_type": "market", "matching_model": "auto",
+        "liquidity_mode": "infinite", "fee_mode": "zero",
+        "slippage_mode": "none", "initial_capital_major": "1000000",
+        "base_currency": "CNY",
+    }
+    venue_plan = freeze_native_venues(backtest, settings)
+    policy = freeze_instrument_execution_policy(preset="basic").manifest()
+    contract = freeze_execution_contract(settings,
+       product_scope_refs=["product-group:treasuries"],
+       native_venue_plan=venue_plan,
+       instrument_execution_policy=policy)
+    assert contract["blockers"] == []
+    return contract, venue_plan, policy
 
 
 def test_new_run_has_no_trial_plan_identity_or_empty_sentinels(
@@ -389,12 +432,25 @@ def test_run_spec_persistence_preserves_semantic_field_order(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "ordered-run.sqlite")
+    contract, venue_plan, policy = _valid_nautilus_contract()
+
     run_spec_value = {
-        "run_spec_version": RUN_SPEC_VERSION,
+        "run_spec_version": NAUTILUS_RUN_SPEC_VERSION,
         "workspace_id": "workspace-1",
         "configuration_revision": 3,
         "analyses": ["backtest"],
-        "configuration": {"shared": {}, "analyses": {"backtest": {}}},
+        "configuration": {"shared": {}, "analyses": {"backtest": {
+            "execution": {
+                "backend": "nautilus_trader", "contract_version": 4,
+                "settings": {
+                    "product_scope_refs": ["product-group:treasuries"],
+                    "instrument_execution_policy": policy,
+                    "venues": venue_plan["venues"],
+                    "strategy_venue_bindings": venue_plan["strategy_bindings"],
+                },
+                "nautilus_contract": contract,
+            },
+        }}},
         "retention_mode": "summary",
     }
 
@@ -431,7 +487,7 @@ def test_run_spec_hash_is_order_independent() -> None:
 
 
 @pytest.mark.parametrize(
-    "version", [None, 1, RUN_SPEC_VERSION - 1, RUN_SPEC_VERSION + 1],
+    "version", [None, 1, RUN_SPEC_VERSION - 1, NAUTILUS_RUN_SPEC_VERSION + 1],
 )
 def test_run_creation_rejects_unsupported_run_spec_versions(
     tmp_path, monkeypatch, version,
@@ -449,3 +505,75 @@ def test_run_creation_rejects_unsupported_run_spec_versions(
             configuration_revision=1,
             run_spec=run_spec_value,
         )
+
+
+def test_nautilus_run_spec_requires_complete_frozen_execution_contract(tmp_path, monkeypatch):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "nautilus-contract.sqlite")
+    value = run_spec()
+    value["run_spec_version"] = NAUTILUS_RUN_SPEC_VERSION
+    with pytest.raises(ValueError, match="does not match execution backend"):
+        research_runs.create_run(
+            owner="alice", workspace_id="workspace-1",
+            configuration_id="configuration-1", configuration_revision=1,
+            run_spec=value,
+        )
+    value["analyses"] = ["backtest"]
+    contract, venue_plan, policy = _valid_nautilus_contract()
+    value["configuration"]["analyses"] = {"backtest": {"execution": {
+        "backend": "nautilus_trader", "contract_version": 4,
+        "settings": {
+            "product_scope_refs": ["product-group:treasuries"],
+            "instrument_execution_policy": policy,
+            "venues": venue_plan["venues"],
+            "strategy_venue_bindings": venue_plan["strategy_bindings"],
+        },
+        "nautilus_contract": contract,
+    }}}
+    created = research_runs.create_run(
+        owner="alice", workspace_id="workspace-1",
+        configuration_id="configuration-1", configuration_revision=1,
+        run_spec=value,
+    )
+    assert created["run_spec_version"] == NAUTILUS_RUN_SPEC_VERSION
+    assert research_runs.load_run(
+        run_id=created["run_id"], owner="alice",
+    )["run_spec_version"] == NAUTILUS_RUN_SPEC_VERSION
+
+
+def test_v4_backtest_creation_is_retired_but_v4_ic_remains_available(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "v4-read-only.sqlite")
+    value = run_spec()
+    ic = research_runs.create_run(
+        owner="alice", workspace_id="workspace-1",
+        configuration_id="configuration-1", configuration_revision=1,
+        run_spec=value,
+    )
+    assert research_runs.load_run(
+        run_id=ic["run_id"], owner="alice",
+    )["run_spec_version"] == RUN_SPEC_VERSION
+    value["analyses"] = ["backtest"]
+    value["configuration"]["analyses"] = {"backtest": {"execution": {
+        "settings": {},
+    }}}
+    with pytest.raises(ValueError, match="read-only"):
+        research_runs.create_run(
+            owner="alice", workspace_id="workspace-1",
+            configuration_id="configuration-1", configuration_revision=1,
+            run_spec=value,
+        )
+    # Represent an already persisted historical backtest without creating one
+    # through the retired write path.
+    historic_hash = hash_run_spec(value)
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            "UPDATE research_runs SET run_spec_json=?, run_spec_hash=? "
+            "WHERE run_id=?",
+            (orjson.dumps(value).decode(), historic_hash, ic["run_id"]),
+        )
+    historic = research_runs.load_run(run_id=ic["run_id"], owner="alice")
+    assert historic["run_spec"] == value
+    assert research_runs.load_run_spec(
+        run_spec_hash=historic_hash, owner="alice",
+    )["run_spec_version"] == RUN_SPEC_VERSION

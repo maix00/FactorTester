@@ -210,8 +210,11 @@ class ManagerState(
         state_root: Path | None = None,
         fixed_daemon_socket: str | Path | None = None,
         session_db_path: Path | None = None,
+        extra_services: tuple[tuple[int, Path], ...] = (),
+        fixed_source: Path | None = None,
     ) -> None:
         self.repo = repo.resolve()
+        self.fixed_source = (fixed_source or repo).resolve()
         self.runtime_source_root = _REPO_ROOT.resolve()
         self.technical_docs = TechnicalDocsLibrary(
             self.runtime_source_root / "product_docs",
@@ -243,6 +246,15 @@ class ManagerState(
             or os.environ.get("FACTORTESTER_FIXED_BRANCH")
             or ("main" if self.server_role == "main" else "")
         ).strip()
+        self.extra_services = tuple(
+            (int(port), Path(path).resolve())
+            for port, path in extra_services
+        )
+        for port, path in self.extra_services:
+            if not 1 <= port <= 65535:
+                raise ValueError("service port must be between 1 and 65535")
+            if not path.is_dir():
+                raise ValueError(f"service source does not exist: {path}")
         self.fixed_daemon_socket = (
             str(
                 fixed_daemon_socket
@@ -423,11 +435,24 @@ class ManagerState(
             self,
             PublicFactorReplicationStore(self.sessions_db_path),
         )
+        research_report_reader = None
+        from server.jobs.storage.couchdb_authority import research_reports_read_enabled
+
+        if research_reports_read_enabled():
+            couch_url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+            if couch_url:
+                from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+                from server.jobs.storage.couchdb_research_reader import CouchDBResearchReader
+
+                research_report_reader = CouchDBResearchReader(CouchDBObjectStore(
+                    couch_url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+                ))
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",
             storage_server_id=self.server_id,
             read_authorizer=self.research_catalog.can_read_publication,
             authoring_authorizer=self.research_catalog.can_read_authoring_publication,
+            couchdb_reader=research_report_reader,
         )
         self.client_state = ClientStateService(
             control_store=self.control_store,

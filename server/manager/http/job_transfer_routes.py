@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 import secrets
-from urllib.parse import parse_qs, unquote
+import hashlib
+from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from server.manager.domain.federation import TargetNotFound, TargetUnavailable
 from server.manager.http.job_public_projection import (
@@ -30,9 +32,95 @@ _STATUS_PATH = re.compile(
     r"^/api/transfers/([A-Za-z0-9._-]{1,128})$"
 )
 _SUBMISSION_ACCESS_PATH = "/api/transfers/submissions/access"
+_NAUTILUS_REPORT_PATH = re.compile(
+    r"^/api/jobs/([A-Za-z0-9._-]{1,128})/artifacts/tearsheet\.html$"
+)
+_MAX_REPORT_BYTES = 32 * 1024 * 1024
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class JobTransferRoutesMixin:
+    def _serve_isolated_nautilus_report(self, parsed) -> bool:
+        """Render only a verified NT tearsheet in an opaque sandbox document."""
+        match = _NAUTILUS_REPORT_PATH.fullmatch(parsed.path)
+        if match is None or parse_qs(parsed.query).get("view") != ["isolated"]:
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        job_id = match.group(1)
+        principal = str(session["username"])
+        try:
+            routes = self._job_routes(parsed, principal, for_artifact_storage=True)
+            selected = self._artifact_metadata(
+                routes, job_id=job_id, name="tearsheet.html", principal=principal,
+            )
+            receipt = self._artifact_metadata(
+                routes, job_id=job_id, name="nautilus_receipt.json", principal=principal,
+            )
+            if selected is None or receipt is None:
+                raise KeyError("NautilusTrader report was not found")
+            route, artifact, owner = selected
+            if receipt[0].server_id != route.server_id or receipt[2] != owner:
+                raise ValueError("report receipt origin does not match")
+            size = int(artifact.get("size_bytes") or 0)
+            digest = str(artifact.get("content_hash") or "").lower()
+            if (size <= 0 or size > _MAX_REPORT_BYTES or len(digest) != 64
+                    or any(char not in "0123456789abcdef" for char in digest)):
+                raise ValueError("report size or digest is invalid")
+            access = self.state.prepare_artifact_download(
+                principal=owner, storage_server_id=route.server_id,
+                job_id=job_id, artifact=artifact,
+                idempotency_key=secrets.token_hex(16),
+            )
+            url = str(access.get("url") or "")
+            address = urlsplit(url)
+            if address.scheme not in {"https", "http"} or not address.netloc:
+                raise ValueError("invalid report data endpoint")
+            bearer = str(access.get("bearer") or "")
+            if not bearer:
+                raise ValueError("report download ticket is missing")
+            request = Request(url, headers={
+                "Authorization": f"Bearer {bearer}",
+                "Accept-Encoding": "identity",
+            })
+            with build_opener(_NoRedirect()).open(request, timeout=20) as response:
+                if response.status != 200:
+                    raise RuntimeError("report download failed")
+                body = response.read(size + 1)
+            if len(body) != size or hashlib.sha256(body).hexdigest() != digest:
+                raise ValueError("report bytes do not match retained metadata")
+        except KeyError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 404)
+            return True
+        except (
+            ConnectionError, OSError, RuntimeError, TypeError, ValueError,
+            TargetNotFound, TargetUnavailable, NodeUnavailable, PeerControlError,
+        ) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Disposition", 'inline; filename="tearsheet.html"')
+        self.send_header("Cache-Control", "private, no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", (
+            "sandbox allow-scripts; default-src 'none'; "
+            "script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+            "img-src data:; font-src data:; connect-src 'none'; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+        ))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
     def _query_artifact_projection(self, parsed) -> bool:
         match = _QUERY_PATH.fullmatch(parsed.path)
         if match is None:

@@ -26,8 +26,29 @@ class StrategyLibraryRoutesMixin:
             return True
         principal = str(session.get("username") or "").strip()
         parts = [unquote(item) for item in parsed.path.split("/") if item]
-        # api / strategy-library / strategies / ...
-        if len(parts) < 3 or parts[:3] != ["api", "strategy-library", "strategies"]:
+        # Keep the read-only public factor templates separate from user-authored
+        # Nautilus Strategy source and revision CRUD.
+        if len(parts) < 3 or parts[:2] != ["api", "strategy-library"]:
+            json_response(self, {"success": False, "error": "strategy library route not found"}, 404)
+            return True
+        if parts[2] == "factor-strategies":
+            if method != "GET":
+                json_response(self, {"success": False, "error": "public factor strategies are read-only"}, 405)
+                return True
+            from server.services.factor_strategy_templates import factor_strategy_catalog
+
+            catalog = factor_strategy_catalog()
+            if len(parts) == 3:
+                json_response(self, catalog)
+                return True
+            item = next((value for value in catalog["items"]
+                         if value["template_ref"] == parts[3]), None)
+            if item is None or len(parts) != 4:
+                json_response(self, {"success": False, "error": "factor strategy template not found"}, 404)
+                return True
+            json_response(self, {"success": True, "template": item})
+            return True
+        if parts[2] != "strategies":
             json_response(self, {"success": False, "error": "strategy library route not found"}, 404)
             return True
         try:

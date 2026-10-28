@@ -114,6 +114,8 @@ selection ID；`shared.product_selections` 保存唯一的规范路径，现场�
 
 每个 `sources/<Source>` 模块负责声明自己的可见运行位置、支持产品、数据形态、采样方式、频率、市场深度、交付方式、当前可用性和执行适配器。Manager、客户端目录、可用性审计与测试配置只投影这份声明，不按数据源名称猜测能力，也不在界面或服务层为某个供应商硬编码 MIN1、DAY1、L2 或实时/历史语义。历史 K 线 provider 与实时 connector 可以属于同一声明，但只有具备历史执行适配器的成员才能进入历史 IC/回测数据源选择器。
 
+Nautilus 行情适配器由具体数据源成员声明，并对该成员的物理列、时间戳单位、bar 时间语义、交易日历需求和产品范围负责。通用注册器只校验并冻结来源声明，不内置某供应商的列名或日期规则。当前 LocalCNFutures 合约 DAY1 的 `TRADING_DAY` 是日期标签，结算价列和交易日收盘时间来自该来源的适配器；这些语义不能推定为其他来源的通用能力。新来源必须声明并验证自己的适配器，才能进入 Nautilus 执行链。
+
 研究执行以数据源的稳定身份 key 加产品、频率、字段和日期范围标识所选行情输入。同一数据源内部的行情可以追加、修订或实时变化；新计算应读取该源当前提供的数据，不得因源内数据更新而要求平台冻结旧字节。数据源自身管理数据版本、保留、刷新与缓存失效；平台不要求统一 immutable revision、内容哈希或 DataSnapshotManifest。Availability profile 记录某次检查中的 source 身份与覆盖观察，不代表行情内容快照或逐字节可重放。只有当数据源自己提供历史版本读取能力时，才可使用该源自己的版本引用。详见 [ADR-158](docs/adr/158-source-identity-and-source-managed-market-data.md)。
 
 ### 因子族 (FactorFamily)
@@ -150,6 +152,16 @@ FactorExpr 是唯一作者接口，执行方式属于编译器后端：
 - **Batch backend**：`evaluate(ctx)` 对完整时间区间做向量化研究计算。
 - **Incremental backend**：编译为有状态 kernel，随行情或完整横截面逐 bar 更新，
   直接在回测框架生命周期内产生同一种 `FactorSignal`。
+
+增量数值状态的唯一实现是 `alpha-algo::FactorPlanKernel`；
+`tools/factors/expr/streaming/` 负责编译与字段适配。实际内置家族回测中，
+Nautilus Rust Catalog/DataEngine 将 Bar 分发给共享 FactorActor，原生策略借用
+发布结果，不经过 Python 因子回调。`native/traderesearch_nautilus_runtime/` 将
+alpha 的 `adapters/nautilus`（包含阈值/分组公共策略）与 Nautilus 组合为
+同一个扩展，不让 Nautilus core 依赖因子库。行情读取、
+撮合、持仓、费用及账本仍由 Nautilus 管理。状态及验收边界见
+[ADR-180](docs/adr/180-factor-boundary-input-and-shared-session-windows.md)。正式回测不能另走 FactorTester
+旧撮合器；旧 Job worker 的切换状态见 [ADR-162](docs/adr/162-nautilus-execution-and-results.md)。
 
 逐点、固定 Shift、有限 Rolling 和横截面算子可以拥有两种等价 Implementation；
 不支持增量 kernel 的算子必须在编译阶段报错，不得静默调用 batch backend。依赖
@@ -201,12 +213,17 @@ LocalCNFutures 已完成迁移；运行时只读 provider-scoped canonical path�
 去重层：相同表达式树（按 `structural_key`）产生相同结果 — 只算一次，全局复用。
 - `Factor._source_data`：表达式求值的原始结果（高频，未对齐）
 - `Factor._data`：信号对齐后的结果
-- `Factor._intermediate_factor_data`：中间因子缓存，按 structural_key 索引
+- `alpha.factor.IntermediateResults`：显式选择的中间输出引用；按节点身份查询，按运行隔离
 - `FactorTester.results`：仅持有当前可交互的 `FactorRunResult`；IC scratch 因子及被同 alias 新结果替换的旧因子必须及时释放
 
 ### 中间因子 (Intermediate Factor)
 
-因子树中的命名子表达式。`as_intermediate(name)` 标记节点 — 其结果存入 `Factor._intermediate_factor_data`，可在不同品种 / 时间范围间复用。规则：相同 `as_intermediate(name)` 必须映射到相同 `structural_key`；冲突直接报错（不自动加后缀）。
+因子树中的命名子表达式。`as_intermediate(name)` 是 alpha 的非计算节点注解，
+不改变计算身份或自动保存历史；规则是相同名称必须映射到同一节点身份，否则报错。
+公式排版、嵌套参数作用域、模板/参数值公式与各层查询索引均由 alpha 提供。
+TradeResearch 仅适配字段、管理版本和显示结果。显式请求的中间输出与根结果在
+同一 DAG 中计算；流式查询只保留最近帧，批量图表/IC 必须显式收集所需序列，
+不得跨品种、时间范围或独立运行复用结果。
 
 ### 参数空间 (Parameter Space)
 
@@ -294,7 +311,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 1. `_factor_family_cache` — 公共因子全局单例（线程安全）
 2. `_custom_factor_cache` — 自定义因子按用户缓存，键为 `(username, id)`
 3. `_chinese_names_cache` — 因子描述一次性加载
-4. `Factor._source_data` / `_intermediate_factor_data` — 表达式结果按 `structural_key` 去重
+4. 本次运行 shared cache 按 `structural_key` 去重；alpha `IntermediateResults` 只保留显式请求的输出引用，流式仅最新帧。旧 `_intermediate_factor_data` 不再写入
 5. `IdleResourceManager` — DataFrame 缓存，5 分钟 TTL，namespace=`datameta`
 
 IC / 分组测试结果的保留边界见 ADR-008：保留最新图表与分组详情所需结果，不保留内部 scratch 或重跑后被替换的大表；页面暂时未显示不等于可删除提交。

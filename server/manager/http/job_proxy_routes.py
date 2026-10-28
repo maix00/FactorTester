@@ -54,6 +54,98 @@ _PRODUCT_DATA_POST_PATHS = frozenset({
 class JobProxyRoutesMixin:
     """Forward execution requests after selection and preserve provenance."""
 
+    def _proxy_node_job_control(self, parsed, *, method):
+        query = parse_qs(parsed.query)
+        if query.get("node_execution") != ["1"]:
+            return False
+        match = re.fullmatch(r"/api/jobs/([A-Za-z0-9._-]{1,128})(/result|/artifacts|/cancel|/stream)?", parsed.path)
+        if match is None:
+            return False
+        suffix = match.group(2) or ""
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        if suffix == "/stream":
+            # Remote Job facts are durable; existing frontend polling is the
+            # fallback until a node-safe shared notification stream exists.
+            json_response(self, {"success": False, "error": "use Job polling"}, 501)
+            return True
+        if method != ("POST" if suffix == "/cancel" else "GET"):
+            return False
+        owner = str(session["username"])
+        manager = query.get("server_id", [self.state.server_id])[0]
+        try:
+            if manager not in {"", "local", self.state.server_id}:
+                from server.modules.single_factor_test.execution_nodes import peer_execution_route
+                route = peer_execution_route(self.state, manager)
+                value = self.state.federation_gateway.public_data(route, kind="execution", operation="job",
+                    principal=owner, payload={"job_id": match.group(1), "suffix": suffix})
+                json_response(self, value["response"], int(value["status"]))
+            else:
+                value = self.state.test_authoring.node_job_operation(job_id=match.group(1), suffix=suffix, owner=owner)
+                json_response(self, value.payload, value.status)
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+        except (ConnectionError, OSError, RuntimeError, ValueError, KeyError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+        return True
+
+    def _proxy_nautilus_preview(self, parsed, *, method: str) -> bool:
+        """Forward only read-only Nautilus capability/configuration previews.
+
+        Keep this allowlist separate from the broad execution proxy: the
+        Nautilus namespace must not become an accidental live-order tunnel.
+        """
+        allowed = {
+            ("GET", "/api/nautilus/capabilities"),
+            ("POST", "/api/nautilus/config/preview"),
+        }
+        if (method, parsed.path) not in allowed:
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        body = None
+        if method == "POST":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except (TypeError, ValueError):
+                length = -1
+            if length < 0 or length > 1024 * 1024:
+                json_response(self, {"success": False, "error": "invalid request body"}, 400)
+                return True
+            body = self.rfile.read(length) if length else b""
+        try:
+            # This staged feature is local to the selected Manager's business
+            # instance.  Explicit remote/unknown server IDs are not accepted.
+            requested = str(parse_qs(parsed.query).get("server_id", [""])[0]).strip()
+            if requested not in {"", "local", self.state.server_id}:
+                json_response(self, {"success": False, "error": "local service required"}, 403)
+                return True
+            route = self._service_route(parsed)
+            if route is None:
+                return True
+            if route.server_id != self.state.server_id:
+                json_response(self, {
+                    "success": False, "error": "local service required",
+                }, 403)
+                return True
+            response = self.state.route_request(
+                route, path=parsed.path,
+                principal=str(session["username"]), method=method,
+                body=body,
+                content_type=str(self.headers.get("Content-Type") or "application/json"),
+            )
+        except (ConnectionError, OSError, RuntimeError, ValueError):
+            json_response(self, {
+                "success": False, "error": "business service is unavailable",
+            }, 503)
+            return True
+        self._send_gateway_response(response, route=route)
+        return True
+
     def _deferred_job_cleanup_route(self, parsed, *, method: str) -> bool:
         """Keep reversible offline deletion commands on the quota authority."""
         base = "/api/storage/deferred-job-cleanup"
@@ -270,6 +362,7 @@ class JobProxyRoutesMixin:
                 {
                     "families/operators": "operators",
                     "families/validate": "validate",
+                    "families/formula-preview": "formula-preview",
                     "families/custom": "families/custom",
                     "families/public": "families/public",
                 },
@@ -308,7 +401,7 @@ class JobProxyRoutesMixin:
             re.fullmatch(pattern, suffix)
             for pattern in (
                 r"overview",
-                r"families/(?:operators|validate|custom|public)",
+                r"families/(?:operators|validate|formula-preview|custom|public)",
                 r"families/(?:custom|public)/[^/]+(?:/(?:impact|transfer))?",
                 r"configurations/[^/]+(?:/[^/]+|/factors)?",
                 r"configuration-scopes(?:/[^/]+)?",
@@ -406,7 +499,7 @@ class JobProxyRoutesMixin:
                 502,
             )
             return True
-        if method != "GET" and 200 <= response.status < 300:
+        if method != "GET" and suffix != "families/formula-preview" and 200 <= response.status < 300:
             refresh = getattr(getattr(self.state, "client_state", None), "_refresh_account_domain_async", None)
             if callable(refresh) and response.json_object().get("success", True):
                 refresh(str(session["username"]), force=True)
@@ -454,6 +547,8 @@ class JobProxyRoutesMixin:
         )
 
     def _proxy_service_write(self, parsed, *, method: str) -> bool:
+        if self._proxy_node_job_control(parsed, method=method):
+            return True
         patterns = _SERVICE_WRITE_PATTERNS.get(method, ())
         registered_route = any(
             re.fullmatch(pattern, parsed.path) for pattern in patterns
@@ -877,6 +972,8 @@ class JobProxyRoutesMixin:
         }
 
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
+        if self._proxy_node_job_control(parsed, method=method):
+            return True
         if self._proxy_job_collection_request(parsed, method=method):
             return True
         match = re.fullmatch(
@@ -1192,6 +1289,8 @@ class JobProxyRoutesMixin:
         return True
 
     def _proxy_job_stream(self, parsed) -> bool:
+        if self._proxy_node_job_control(parsed, method="GET"):
+            return True
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})/stream", parsed.path,
         )

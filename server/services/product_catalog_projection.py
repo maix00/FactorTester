@@ -10,7 +10,8 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Iterable, Mapping
 
-from sources.registry import load_all_sources
+from sources.registry import installed_bundles, load_all_sources
+from traderesearch_data.bundles import bundle_content_fingerprint
 from tools.data.source_catalog import (
     DataSourceDeclaration,
     DataSourceMember,
@@ -99,6 +100,60 @@ def _visible_source_index() -> dict[str, DataSourceDeclaration]:
         source.key: source
         for source in data_source_declarations()
     }
+
+
+def installed_bundle_descriptors(
+    *, execution_location: str | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Return installed Bundle metadata without activating source plugins.
+
+    Availability and product counts are deliberately unknown here: they require
+    live source/product probes and belong to the runtime projection, not a
+    metadata-only catalog read.
+    """
+    if execution_location not in {None, "server", "client"}:
+        raise ValueError("execution_location must be server, client, or None")
+    rows: list[dict[str, Any]] = []
+    for bundle in installed_bundles():
+        if execution_location is not None and bundle.execution_location != execution_location:
+            continue
+        members = tuple({
+            "id": member.id,
+            "kind": member.kind,
+            "data_type": member.data_type,
+            "frequency": member.frequency,
+            "related_members": list(member.related_members),
+            "integrations": dict(member.integrations),
+            "update_policy": {
+                "mode": member.update_policy.mode,
+                "revision_policy": member.update_policy.revision_policy,
+                "max_staleness_seconds": member.update_policy.max_staleness_seconds,
+                "replay_policy": member.update_policy.replay_policy,
+            },
+        } for member in bundle.members)
+        rows.append({
+            "id": bundle.bundle_id,
+            "bundle_id": bundle.bundle_id,
+            "version": bundle.version,
+            "content_fingerprint": bundle_content_fingerprint(bundle),
+            "label": bundle.label,
+            "provisioner": bundle.provisioner,
+            "execution_location": bundle.execution_location,
+            "members": list(members),
+            "frequencies": sorted({
+                member["frequency"] for member in members if member["frequency"]
+            }),
+            "product_bindings": [
+                {
+                    "product_ref": binding.product_ref,
+                    "source_product_ref": binding.source_product_ref,
+                    "member_id": binding.member_id,
+                }
+                for binding in bundle.product_bindings
+            ],
+            "availability": {"status": "unknown", "product_count": None},
+        })
+    return tuple(rows)
 
 
 def normalize_source_ids(
@@ -203,6 +258,7 @@ def _tree_has_products(value: Any) -> bool:
 def _member_descriptor(
     member: DataSourceMember,
     products: tuple[Any, ...],
+    nautilus_capability: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     available = _available_products(member, products)
     supported = _supported_products(member, products)
@@ -218,6 +274,10 @@ def _member_descriptor(
         "dimensions": dict(member.dimensions),
         "data_modes": [mode],
         "naming_scheme": member.naming_scheme,
+        # Preserve the source server's verified NT adapter admission in the
+        # federated catalog snapshot. The UI can still show accurate details
+        # when this member is supplied by another server.
+        "nautilus_capability": dict(nautilus_capability or {}),
         "product_paths": sorted({
             classifier_class_path(type(product)) for product in supported
         }),
@@ -248,10 +308,29 @@ def product_source_descriptors() -> tuple[dict[str, Any], ...]:
     # empty merely because they are not ordinary Product objects.
     catalog_objects = (*products, *tuple(cached_contracts()))
     categories = available_product_categories()
+    try:
+        from server.services.nautilus_bridge.capabilities import (
+            market_data_source_capabilities,
+        )
+
+        nautilus_member_capabilities = {
+            str(item.get("member_key") or ""): item
+            for item in market_data_source_capabilities().get("members", [])
+            if isinstance(item, Mapping) and str(item.get("member_key") or "")
+        }
+    except Exception:
+        # Source metadata remains available if the execution bridge is absent;
+        # its adapter status is then unknown rather than inferred.
+        nautilus_member_capabilities = {}
     result: list[dict[str, Any]] = []
     for source in _visible_source_index().values():
         members = tuple(
-            _member_descriptor(member, catalog_objects)
+            _member_descriptor(
+                member, catalog_objects,
+                _catalog_nautilus_capability(
+                    nautilus_member_capabilities.get(member.key),
+                ),
+            )
             for member in source.members
         )
         naming_schemes = sorted({
@@ -300,6 +379,19 @@ def product_source_descriptors() -> tuple[dict[str, Any], ...]:
             "catalog_product_count": len(supported),
         })
     return tuple(result)
+
+
+def _catalog_nautilus_capability(
+    capability: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep federated source metadata compact; full mappings stay in detail API."""
+    if not isinstance(capability, Mapping) or not capability:
+        return {}
+    keys = (
+        "adapter_available", "adapter_id", "supported_book_types", "reason",
+        "instrument_scope", "bar_time_semantics", "raw_timestamp_unit", "layout",
+    )
+    return {key: capability[key] for key in keys if key in capability}
 
 
 @lru_cache(maxsize=1)

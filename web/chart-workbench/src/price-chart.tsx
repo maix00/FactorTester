@@ -1,3 +1,4 @@
+import {chartInteraction} from "./chart-interaction";
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {mergeBars} from "./range-data";
@@ -156,8 +157,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
         tickMarkFormatter: (time: number, kind: number, locale: string) =>
           localTick(time, kind, locale, activeTimeZone)},
       localization: {timeFormatter: formatTime},
-      handleScroll: {mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true},
-      handleScale: {mouseWheel: true, pinch: true, axisPressedMouseMove: true},
+      ...chartInteraction,
     });
     const candle = chart.addSeries(api.CandlestickSeries, {
       upColor: "#19a47b", downColor: "#e14f5b",

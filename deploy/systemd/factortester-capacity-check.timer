@@ -1,0 +1,11 @@
+[Unit]
+Description=Run FactorTester public capacity check every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=factortester-capacity-check.service
+
+[Install]
+WantedBy=timers.target

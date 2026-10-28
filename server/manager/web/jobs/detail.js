@@ -384,10 +384,35 @@
     const resultGroupName = FTJobResultViewers.group(
       job, activeArtifacts, results,
     );
+    const reportRef = String(payload.report_ref || "");
+    if (reportRef) {
+      const report = document.createElement("div");
+      report.className = "job-report-link";
+      resultsPanel.append(report);
+      context.api(`/api/job-test-reports/${encodeURIComponent(reportRef)}/attachments`).then(payload => {
+        const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+        if (!attachments.length) return;
+        for (const attachment of attachments) {
+          const link = document.createElement("a");
+          link.href = `/api/job-test-reports/${encodeURIComponent(reportRef)}/attachments/${encodeURIComponent(attachment.name)}`;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = attachment.name;
+          report.append(link);
+        }
+      }).catch(() => {
+        const link = document.createElement("a");
+        link.href = `/api/job-test-reports/${encodeURIComponent(reportRef)}/attachments/tearsheet.html`;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = context.t("打开测试报告");
+        report.append(link);
+      });
+    }
     const resultHost = document.createElement("div");
     resultHost.className = "job-result-host";
     if (!localRun) resultHost.append(FTUI.loading(context.t("正在加载结果查看器…")));
-    resultsPanel.append(resultHost);
+    if (!reportRef) resultsPanel.append(resultHost);
     // Domain result viewers own their result tabs and load canonical JSON on
     // demand. Generic artifact previews here would duplicate those tabs and
     // eagerly introduce a second, inconsistent rendering path.
@@ -466,7 +491,7 @@
     context.content.replaceChildren(root);
     let resultsLoaded = false;
     const loadResults = () => {
-      if (resultsLoaded || localRun) return;
+      if (reportRef || resultsLoaded || localRun) return;
       resultsLoaded = true;
       Promise.all([
         resultGroupName

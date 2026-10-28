@@ -155,8 +155,9 @@ def test_quantile_and_truncate_bounds():
     assert quantile.iloc[BARS_PER_DAY + 2] == 1001.0
 
 
-def test_arg_extreme_vectorised_and_per_bar_paths_agree(monkeypatch):
-    """向量化路径与逐根路径必须逐点相等（并列取最早、截断后 span 继续增长）。"""
+def test_arg_extreme_rust_batch_matches_scalar_oracle():
+    """Rust 批量路径对账独立标量 oracle；不再切换已经删除的生产分支。"""
+    from tests.factors._scope_extrema_oracle import _prefix_arg_extreme_loop
     from tools.factors.expr import groupby_scope_eval as gse
 
     index, _ = _two_days(np.zeros(BARS_PER_DAY * 2))
@@ -177,14 +178,16 @@ def test_arg_extreme_vectorised_and_per_bar_paths_agree(monkeypatch):
         for start, end in ((0, None), (0, 119), (3, 40), (0, 0))
     ]
     for op, scope, start, end in cases:
-        monkeypatch.setattr(gse, "_ARG_EXTREME_VECTOR_FLOOR", 1)
         vectorised = gse.apply_grouped(
-            op, scope, frame, ctx=ctx, trunc_start=start, trunc_end=end
+            op, scope, frame, ctx=ctx, trunc_start=start, trunc_end=end, propagate_nan=False
         )["A"].to_numpy(dtype=float)
-        monkeypatch.setattr(gse, "_ARG_EXTREME_VECTOR_FLOOR", 10 ** 9)
-        per_bar = gse.apply_grouped(
-            op, scope, frame, ctx=ctx, trunc_start=start, trunc_end=end
-        )["A"].to_numpy(dtype=float)
+        per_bar = np.full(len(frame), np.nan)
+        width = BARS_PER_DAY if scope.kind == "trading_day" else 5
+        for base in range(0, len(frame), width):
+            group = values[base:base + width]
+            if start >= len(group):
+                continue
+            per_bar[base:base + len(group)] = _prefix_arg_extreme_loop(group, op, start, end)
         label = f"{op}/trunc({start},{end})"
         assert np.array_equal(np.isnan(vectorised), np.isnan(per_bar)), label
         np.testing.assert_allclose(

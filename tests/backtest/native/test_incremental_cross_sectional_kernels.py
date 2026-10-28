@@ -6,7 +6,7 @@ import pandas as pd
 from tools.data.types import DataColumn, DataFreq
 from tools.factors.expr import ColumnRef, EvaluateContext
 from tools.products.categories.Category import Category
-from tools.testers.backtest.engines.factors.cross_sectional_kernels import (
+from tools.factors.expr.streaming.cross_sectional_kernels import (
     ordinal_rank,
     rank_percent,
     zscore,

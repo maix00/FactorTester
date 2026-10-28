@@ -33,6 +33,31 @@ from server.manager.web.assets import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _admin_capabilities(username: str, role: str) -> list[str]:
+    if str(role or "") == "super_admin":
+        return ["admin_console:read", "admin_console:manage"]
+    import os
+    from server.permissions.entries import PermissionStore
+
+    db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get(
+        "FACTORTESTER_PERMISSIONS_DB", ""
+    )
+    if not db:
+        return []
+    from server.permissions.subjects import subjects_for_user
+
+    store = PermissionStore(db)
+    subjects = subjects_for_user(username)
+    allowed = []
+    for capability in ("read", "manage"):
+        if any(store.allows(
+            subject=subject, resource_type="admin_console",
+            resource_ref="dispatch", action=capability,
+        ) for subject in subjects):
+            allowed.append(f"admin_console:{capability}")
+    return allowed
+
+
 class CoreGetRoutesMixin:
     """Order focused GET route families without owning their implementations."""
 
@@ -374,7 +399,55 @@ class CoreGetRoutesMixin:
             if session is None:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return True
-            json_response(self, {"success": True, **session})
+            capability_session = dict(session)
+            capability_session["admin_capabilities"] = _admin_capabilities(
+                str(session.get("username") or ""), str(session.get("role") or ""),
+            )
+            json_response(self, {"success": True, **capability_session})
+            return True
+        if parsed.path == "/api/dispatch/overview":
+            if not self._has_api_authorization():
+                self._require_capability()
+                return True
+            browser_session = self._session()
+            if browser_session is not None:
+                capabilities = _admin_capabilities(
+                    str(browser_session.get("username") or ""),
+                    str(browser_session.get("role") or ""),
+                )
+                if "admin_console:read" not in capabilities:
+                    json_response(self, {
+                        "success": False,
+                        "error": "admin console permission required",
+                    }, 403)
+                    return True
+            from server.jobs.repository import JobRepository
+            from server.manager.services.dispatch_overview import dispatch_overview
+
+            session = self._session()
+            principal = str((session or {}).get("username") or "")
+            def remote_status(server_id: str):
+                routes = [
+                    route for route in self.state.federation_registry.routes(include_offline=False)
+                    if str(route.server_id) == str(server_id)
+                ]
+                if not routes:
+                    return None
+                route = next((item for item in routes if int(item.port) == 8000), routes[0])
+                return self.state.federation_gateway.json(
+                    route, path="/api/dispatch/status", principal=principal,
+                )
+            try:
+                payload = dispatch_overview(
+                    self.state, JobRepository(), remote_status=remote_status,
+                )
+            except Exception as exc:
+                json_response(self, {
+                    "success": False,
+                    "error": f"dispatch overview unavailable: {type(exc).__name__}",
+                }, 503)
+                return True
+            json_response(self, payload)
             return True
         if parsed.path == "/api/worktrees":
             if not self._has_api_authorization():
@@ -409,6 +482,33 @@ class CoreGetRoutesMixin:
                     ),
                 },
             })
+            return True
+        if parsed.path == "/sw.js":
+            body, content_type = static_file("sw.js")
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Service-Worker-Allowed", "/")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        if parsed.path in {"/app", "/app/"}:
+            body, content_type = static_file("vendor/web-app/index.html")
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; img-src 'self' blob: data: https:; "
+                "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                "frame-src 'self'; connect-src 'self' http: https:",
+            )
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return True
         shell_paths = {
             "/", "/research", "/researches", "/evidence", "/reference",

@@ -22,11 +22,14 @@ if TYPE_CHECKING:
     from tools.parameters.Parameter import Parameter
 
 
+from alpha.factor.annotations import copy_annotation
+
 from .core import FactorExpr, EvaluateContext
 from .operands import OperandExpr
 from .leaf import ConstExpr, _to_expr
 from .rolling_arg_extrema import rolling_argmaxmin as _rolling_argmaxmin
 from .rolling_statistics import ROLLING_STATISTICS, apply_rolling_statistic
+from .window_semantics import DEFAULT_MIN_PERIODS, DEFAULT_NAN_POLICY, NanPolicy, default_min_periods
 
 class RollingExpr(FactorExpr):
     """
@@ -48,11 +51,15 @@ class RollingExpr(FactorExpr):
 
     def __init__(self, data: FactorExpr, window: FactorExpr,
                  trunc_start: Optional[FactorExpr] = None,
-                 trunc_end: Optional[FactorExpr] = None):
+                 trunc_end: Optional[FactorExpr] = None,
+                 min_periods: int | None = DEFAULT_MIN_PERIODS,
+                 nan_policy: NanPolicy = DEFAULT_NAN_POLICY):
         self._data = data
         self._window = window
         self._trunc_start = trunc_start
         self._trunc_end = trunc_end
+        self._min_periods = _to_expr(min_periods) if min_periods is not None else None
+        self._nan_policy = nan_policy
 
     @property
     def _operands(self) -> Sequence[FactorExpr]:
@@ -76,12 +83,19 @@ class RollingExpr(FactorExpr):
         """将窗口长度解析为可参与截断边界运算的 bar 数表达式。"""
         return WindowBarsExpr(self._window)
 
+    def semantics(self, *, min_periods: int | None = DEFAULT_MIN_PERIODS,
+                  nan_policy: NanPolicy = DEFAULT_NAN_POLICY) -> 'RollingExpr':
+        """Return a rolling expression with explicit window semantics."""
+        return RollingExpr(self._data, self._window, self._trunc_start,
+                           self._trunc_end, min_periods, nan_policy)
+
     # ── 截断 ──
 
     def truncate(self, start: Any, end: Any) -> 'RollingExpr':
         """返回带截断的新 RollingExpr."""
         return RollingExpr(self._data, self._window,
-                           _to_expr(start), _to_expr(end))
+                           _to_expr(start), _to_expr(end),
+                           self._min_periods, self._nan_policy)
 
     # ── 聚合方法 → RollingOp ──
 
@@ -156,10 +170,14 @@ class RollingExpr(FactorExpr):
         if extra is not None:
             return RollingOp(op_key, self._window, self._data, _to_expr(extra),
                              trunc_start=self._trunc_start,
-                             trunc_end=self._trunc_end)
+                             trunc_end=self._trunc_end,
+                             min_periods=self._min_periods,
+                             nan_policy=self._nan_policy)
         return RollingOp(op_key, self._window, self._data,
                          trunc_start=self._trunc_start,
-                         trunc_end=self._trunc_end)
+                         trunc_end=self._trunc_end,
+                         min_periods=self._min_periods,
+                         nan_policy=self._nan_policy)
 
     # ── 结构等价 ──
 
@@ -169,14 +187,19 @@ class RollingExpr(FactorExpr):
             base += (self._trunc_start._structural_key(),)
         if self._trunc_end is not None:
             base += (self._trunc_end._structural_key(),)
-        return base
+        mp = (self._min_periods._structural_key()
+              if isinstance(self._min_periods, FactorExpr) else self._min_periods)
+        return base + (mp, self._nan_policy.value)
 
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         resolved_data = self._data.resolve(*args, **kwargs)
         resolved_window = self._window.resolve(*args, **kwargs)
         resolved_ts = self._trunc_start.resolve(*args, **kwargs) if self._trunc_start is not None else None
         resolved_te = self._trunc_end.resolve(*args, **kwargs) if self._trunc_end is not None else None
-        return RollingExpr(resolved_data, resolved_window, resolved_ts, resolved_te)
+        resolved_mp = (self._min_periods.resolve(*args, **kwargs)
+                       if isinstance(self._min_periods, FactorExpr) else self._min_periods)
+        return copy_annotation(self,RollingExpr(resolved_data, resolved_window, resolved_ts, resolved_te,
+                           resolved_mp, self._nan_policy))
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         # RollingExpr 本身不求值——聚合由 RollingOp 完成
@@ -191,6 +214,8 @@ class RollingExpr(FactorExpr):
             deps.update(self._trunc_start.dependencies)
         if self._trunc_end is not None:
             deps.update(self._trunc_end.dependencies)
+        if isinstance(self._min_periods, FactorExpr):
+            deps.update(self._min_periods.dependencies)
         return deps
 
     def get_ref_types(self, typ: type, leaf_only: bool = False) -> Set[Any]:
@@ -203,18 +228,10 @@ class RollingExpr(FactorExpr):
             result.update(self._trunc_start.get_ref_types(typ, leaf_only))
         if self._trunc_end is not None:
             result.update(self._trunc_end.get_ref_types(typ, leaf_only))
+        if isinstance(self._min_periods, FactorExpr):
+            result.update(self._min_periods.get_ref_types(typ, leaf_only))
         return result
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        w_str = self._window._to_latex(subst) if isinstance(self._window, FactorExpr) else str(self._window)
-        if self._trunc_start is not None and self._trunc_end is not None:
-            ts_str = self._trunc_start._to_latex(subst) if isinstance(self._trunc_start, FactorExpr) else str(self._trunc_start)
-            te_str = self._trunc_end._to_latex(subst) if isinstance(self._trunc_end, FactorExpr) else str(self._trunc_end)
-            return f'\\mathrm{{R}}_{{{w_str},\\mathrm{{trunc}}({ts_str},{te_str})}}'
-        return f'\\mathrm{{R}}_{{{w_str}}}'
 
     def _get_alias(self) -> str:
         return 'rolling'
@@ -235,7 +252,7 @@ class WindowBarsExpr(FactorExpr):
         return 'window_bars'
 
     def resolve(self, *args, **kwargs) -> 'WindowBarsExpr':
-        return WindowBarsExpr(self.window.resolve(*args, **kwargs))
+        return copy_annotation(self,WindowBarsExpr(self.window.resolve(*args, **kwargs)))
 
     def _evaluate(self, ctx: EvaluateContext) -> int:
         value = self.window.value if isinstance(self.window, ConstExpr) else self.window.evaluate(ctx=ctx)
@@ -249,9 +266,6 @@ class WindowBarsExpr(FactorExpr):
             )
         return periods
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        window_latex = self.window._to_latex(subst)
-        return f'\\mathrm{{Bars}}\\left({window_latex}\\right)'
 
     def _get_alias(self) -> str:
         return f'BARS_{self.window._get_alias()}'
@@ -286,7 +300,9 @@ class RollingOp(OperandExpr):
 
     def __init__(self, op: str, window: FactorExpr, *data_and_trunc: FactorExpr,
                  trunc_start: Optional[FactorExpr] = None,
-                 trunc_end: Optional[FactorExpr] = None):
+                 trunc_end: Optional[FactorExpr] = None,
+                 min_periods: int | None = DEFAULT_MIN_PERIODS,
+                 nan_policy: NanPolicy = DEFAULT_NAN_POLICY):
         # 拼出 operands: (window, *data, [trunc_start], [trunc_end])
         operands: List[FactorExpr] = [window]
         extra_start = 1
@@ -302,6 +318,8 @@ class RollingOp(OperandExpr):
             operands.extend(data_and_trunc)
         self._trunc_start = trunc_start
         self._trunc_end = trunc_end
+        self.min_periods = min_periods
+        self.nan_policy = nan_policy
         super().__init__(op, *operands)
 
     @property
@@ -367,10 +385,114 @@ class RollingOp(OperandExpr):
         'rolling_skew': lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).skew(),
     }
 
+    _RUST_OPS = {
+        'rolling_mean': 'mean', 'rolling_sum': 'sum',
+        'rolling_var': 'var', 'rolling_std': 'std',
+        'rolling_min': 'min', 'rolling_max': 'max',
+        'rolling_skew': 'skew',
+        'rolling_ema': 'ema',
+        'rolling_argmin': 'argmin', 'rolling_argmax': 'argmax',
+        'rolling_argmin_raw': 'argmin_raw', 'rolling_argmax_raw': 'argmax_raw',
+        'rolling_median': 'median', 'rolling_quantile': 'quantile',
+        'rolling_rank': 'rank', 'rolling_mad': 'mad',
+    }
+
+    def _min_periods_value(self, window: int) -> int:
+        value = self.min_periods
+        if value is None:
+            return default_min_periods(self.op, window)
+        if isinstance(value, ConstExpr):
+            return int(value.value)
+        if hasattr(value, "param") and hasattr(value.param, "default_value"):
+            return int(value.param.default_value)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("min_periods must resolve to an integer constant")
+        return int(value)
+
+    def _rust_rolling(self, window: int, df: pd.DataFrame,
+                      quantile: float | None = None) -> pd.DataFrame | None:
+        """Batch path uses the same Rust interval kernel as streaming."""
+        op = self._RUST_OPS.get(self.op)
+        if op is None:
+            return None
+        if op == 'ema':
+            from alpha import interval_ema
+            result = pd.DataFrame(index=df.index, columns=df.columns, dtype=float)
+            for column in df.columns:
+                values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+                result[column] = interval_ema(
+                    values, window, self._min_periods_value(window),
+                    self.nan_policy is NanPolicy.PROPAGATE,
+                )
+            return result
+        min_periods = self._min_periods_value(window)
+        propagate = self.nan_policy is NanPolicy.PROPAGATE
+        result = pd.DataFrame(index=df.index, columns=df.columns, dtype=float)
+        try:
+            from alpha import interval_rolling
+        except ImportError:
+            return None
+        fast = op in {"sum", "mean", "var", "std", "skew",
+                      "min", "max", "argmin", "argmax",
+                      "argmin_raw", "argmax_raw"}
+        empty = np.empty(0, dtype=np.uint64)
+        for column in df.columns:
+            values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+            if fast:
+                starts = empty
+                ends = empty
+            else:
+                ordinals = np.arange(len(values), dtype=np.uint64)
+                starts = np.maximum(
+                    0, ordinals.astype(np.int64) - window + 1,
+                ).astype(np.uint64)
+                ends = ordinals
+            result[column] = interval_rolling(
+                values, starts, ends, op, quantile, window,
+                min_periods, propagate,
+            )
+        return result
+
+    def _rust_rolling_pair(self, window: int, left: pd.DataFrame,
+                           right: pd.DataFrame) -> pd.DataFrame | None:
+        op = {'rolling_cov': 'cov', 'rolling_corr': 'corr'}.get(self.op)
+        if op is None:
+            return None
+        try:
+            from alpha import interval_rolling_pair
+        except ImportError:
+            return None
+        result = pd.DataFrame(index=left.index, columns=left.columns, dtype=float)
+        for column in left.columns:
+            x = pd.to_numeric(left[column], errors="coerce").to_numpy(dtype=float)
+            y = pd.to_numeric(right[column], errors="coerce").to_numpy(dtype=float)
+            ordinals = np.arange(len(x), dtype=np.uint64)
+            starts = np.maximum(
+                0, ordinals.astype(np.int64) - window + 1,
+            ).astype(np.uint64)
+            result[column] = interval_rolling_pair(
+                x, y, starts, ordinals, op == 'corr', window,
+                max(2, self._min_periods_value(window)),
+                self.nan_policy is NanPolicy.PROPAGATE,
+            )
+        return result
+
     def _apply_rolling(self, window: int, *dfs: pd.DataFrame,
                        freq: DataFreq,
                        trunc_start_arr: np.ndarray | None = None,
                        trunc_end_arr: np.ndarray | None = None) -> pd.DataFrame:
+        if trunc_start_arr is None and trunc_end_arr is None and len(dfs) == 2:
+            rust_pair = self._rust_rolling_pair(window, dfs[0], dfs[1])
+            if rust_pair is not None:
+                return rust_pair
+        if trunc_start_arr is None and trunc_end_arr is None and len(dfs) == 1:
+            quantile = None
+            if self.op == 'rolling_quantile':
+                q = self.quantile
+                quantile = float(q) if isinstance(q, (int, float)) else None
+            rust = self._rust_rolling(window, dfs[0], quantile)
+            if rust is not None:
+                return rust
         # argmax/argmin：全向量化，不依赖 rolling()
         if self.op in ('rolling_argmax', 'rolling_argmin',
                        'rolling_argmax_raw', 'rolling_argmin_raw'):
@@ -383,7 +505,11 @@ class RollingOp(OperandExpr):
         if trunc_start_arr is not None or trunc_end_arr is not None:
             if self.op == 'rolling_skew':
                 masked = _mask_outside_trunc(dfs[0], window, trunc_start_arr, trunc_end_arr)
-                return apply_rolling_statistic(self.op, masked, window)
+                return apply_rolling_statistic(
+                    self.op, masked, window,
+                    min_periods=self.min_periods,
+                    propagate_nan=self.nan_policy is NanPolicy.PROPAGATE,
+                )
             if self.op in self._OP_MAP:
                 masked = _mask_outside_trunc(dfs[0], window, trunc_start_arr, trunc_end_arr)
                 func = self._OP_MAP[self.op]
@@ -393,6 +519,8 @@ class RollingOp(OperandExpr):
         if self.op == 'rolling_skew' or self.op in ROLLING_STATISTICS:
             return apply_rolling_statistic(
                 self.op, dfs[0], window, quantile=self.quantile,
+                min_periods=self.min_periods,
+                propagate_nan=self.nan_policy is NanPolicy.PROPAGATE,
             )
         if self.op in self._OP_MAP:
             func = self._OP_MAP[self.op]
@@ -424,58 +552,6 @@ class RollingOp(OperandExpr):
         label = str(p.value) if isinstance(p, ConstExpr) else str(p)
         return f"{self.op.upper()}_{label}"
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        w_str = self.window._to_latex(subst) if isinstance(self.window, FactorExpr) else str(self.window)
-
-        # 截断后缀
-        trunc_suffix = ''
-        if self._trunc_start is not None and self._trunc_end is not None:
-            ts_str = self._trunc_start._to_latex(subst) if isinstance(self._trunc_start, FactorExpr) else str(self._trunc_start)
-            te_str = self._trunc_end._to_latex(subst) if isinstance(self._trunc_end, FactorExpr) else str(self._trunc_end)
-            trunc_suffix = f',\\mathrm{{trunc}}({ts_str},{te_str})'
-
-        if self._n_data == 1:
-            operand_latex = self.operands[self._data_start]._to_latex(subst)
-            _LATEX_MAP = {
-                'rolling_mean': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Mean}}\\left({operand_latex}\\right)',
-                'rolling_std': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Std}}\\left({operand_latex}\\right)',
-                'rolling_var': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Var}}\\left({operand_latex}\\right)',
-                'rolling_min': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Min}}\\left({operand_latex}\\right)',
-                'rolling_max': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Max}}\\left({operand_latex}\\right)',
-                'rolling_sum': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Sum}}\\left({operand_latex}\\right)',
-                'rolling_ema': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{EMA}}\\left({operand_latex}\\right)',
-                'rolling_skew': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Skew}}\\left({operand_latex}\\right)',
-                'rolling_median': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Median}}\\left({operand_latex}\\right)',
-                'rolling_mad': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{MAD}}\\left({operand_latex}\\right)',
-                'rolling_linreg_slope': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegSlope}}\\left({operand_latex}\\right)',
-                'rolling_linreg_r2': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegR2}}\\left({operand_latex}\\right)',
-                'rolling_linreg_tstat': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegT}}\\left({operand_latex}\\right)',
-                'rolling_linreg_resid_std': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegResidStd}}\\left({operand_latex}\\right)',
-                'rolling_argmax': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMax}}\\left({operand_latex}\\right)',
-                'rolling_argmin': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMin}}\\left({operand_latex}\\right)',
-                'rolling_argmax_raw': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMaxRaw}}\\left({operand_latex}\\right)',
-                'rolling_argmin_raw': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMinRaw}}\\left({operand_latex}\\right)',
-            }
-            if self.op == 'rolling_quantile':
-                q_expr = self.quantile_expr
-                q_latex = (
-                    q_expr._to_latex(subst)
-                    if isinstance(q_expr, FactorExpr)
-                    else str(q_expr)
-                )
-                return (
-                    f'\\text{{R}}_{{{w_str}{trunc_suffix}}}'
-                    f'\\text{{Quantile}}_{{{q_latex}}}'
-                    f'\\left({operand_latex}\\right)'
-                )
-            return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}{operand_latex}')
-        else:
-            left_latex = self.operands[self._data_start]._to_latex(subst)
-            right_latex = self.operands[self._data_start + 1]._to_latex(subst)
-            return f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{{self.op.replace("rolling_", "").capitalize()}}}\\left({left_latex}, {right_latex}\\right)'
 
     def _get_alias(self) -> str:
         parts = [self.op]
@@ -492,7 +568,18 @@ class RollingOp(OperandExpr):
             extra += (self._trunc_start._structural_key(),)
         if self._trunc_end is not None:
             extra += (self._trunc_end._structural_key(),)
-        return extra
+        mp = (self.min_periods._structural_key()
+              if isinstance(self.min_periods, FactorExpr) else self.min_periods)
+        return extra + (mp, self.nan_policy.value)
+
+    def resolve(self, *args, **kwargs) -> 'FactorExpr':
+        resolved = [opnd.resolve(*args, **kwargs) for opnd in self._operands]
+        mp = (self.min_periods.resolve(*args, **kwargs)
+              if isinstance(self.min_periods, FactorExpr) else self.min_periods)
+        return copy_annotation(self,type(self)(
+            self.op, *resolved,
+            min_periods=mp, nan_policy=self.nan_policy,
+        ))
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
 
@@ -714,3 +801,60 @@ def _coerce_bar_count_window(
                 raise ValueError(f"滚动窗口 bar 数必须为正整数，收到 {window!r}")
             return count
     return None
+
+
+class IntervalBarsExpr(FactorExpr):
+    """Causal per-product count of observed bars in inclusive [start, end].
+
+    Each output includes only bars formed by that output timestamp. Union
+    padding does not count; an observed bar with a NaN value still counts.
+    """
+
+    def __init__(self, start_ns: int, end_ns: int):
+        self.start_ns = int(start_ns)
+        self.end_ns = int(end_ns)
+        if self.start_ns > self.end_ns:
+            raise ValueError('interval start must not exceed end')
+
+    @property
+    def _operands(self) -> Sequence[FactorExpr]:
+        return ()
+
+    @property
+    def op_name(self) -> str:
+        return f'interval_bars:{self.start_ns}:{self.end_ns}'
+
+    def _structural_key(self):
+        return ('interval_bars', self.start_ns, self.end_ns)
+
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+        timeline = ctx.panel_timeline
+        if timeline is not None:
+            index = timeline.index
+            observed = timeline.observed_mask.reindex(index=index, columns=ctx.products, fill_value=False).to_numpy(bool).T
+        else:
+            frames = [ctx.preloaded[(product, ctx.freq.name)] for product in ctx.products]
+            index = frames[0].index
+            for frame in frames[1:]:
+                index = index.union(frame.index)
+            index = index.sort_values()
+            observed = np.asarray([index.isin(frame.index) for frame in frames])
+        from tools.data.types import finest_index
+        source_index = finest_index(index) if isinstance(index, pd.MultiIndex) else index
+        if not isinstance(source_index, pd.DatetimeIndex):
+            raise ValueError('interval_bars requires source timestamps')
+        times = source_index.as_unit('ns').asi8
+        inside = (times >= self.start_ns) & (times <= self.end_ns)
+        counts = np.cumsum(observed & inside, axis=1).astype(float)
+        counts[~observed] = np.nan
+        return pd.DataFrame(counts.T, index=index, columns=ctx.products)
+
+
+
+def interval_bars(start: Any, end: Any) -> IntervalBarsExpr:
+    """Count bars between two explicit nanosecond timestamps."""
+    def timestamp(value):
+        if isinstance(value, pd.Timestamp):
+            return value.value
+        return int(value)
+    return IntervalBarsExpr(timestamp(start), timestamp(end))

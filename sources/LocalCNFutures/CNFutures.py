@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
@@ -12,6 +13,7 @@ from sources.LocalCNFutures import SOURCE_DATA_DIR, TERM_STRUCTURE_PATH
 from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 from sources.LocalCNFutures.product_catalog import load_product_catalog
 from sources.LocalCNFutures.trading_sessions import infer_trading_day_close_time
+from sources.LocalCNFutures.nautilus_adapter import CONTRACT_DAY1, CONTRACT_MIN1
 from sources.LocalCNFutures.contract_files import (
     contract_alias_from_path,
     contract_uid_from_exchange_contract,
@@ -193,6 +195,10 @@ def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str
 
 class CNFuturesContract(FuturesContract):
     """中国期货单个合约（固定计价货币 CNY，时区 Asia/Shanghai）。"""
+    def get_instrument_fields(self) -> dict[str, Any]:
+        from .instrument_fields import instrument_fields
+        return instrument_fields(self)
+
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY', timezone='Asia/Shanghai')
         self.DAY1 = _CNFuturesContractTermStructureView(
@@ -271,6 +277,10 @@ class CNFutures(Futures):
     """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
 
     _is_cn_futures_main_product = True
+
+    def get_instrument_fields(self) -> dict[str, Any]:
+        from .instrument_fields import instrument_fields
+        return instrument_fields(self)
 
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  roller_info_path: Optional[str] = None,
@@ -452,14 +462,123 @@ def _resolve_product_reference(reference: str) -> str | None:
     return str(getattr(product, 'name', '') or '') or None
 
 
-def get_all_futures_contract() -> List[Product]:
-    """返回合约粒度的所有 CNFuturesContract 列表（基于合约分钟数据目录）。"""
+def _asset_class_for_local_future(product: Product) -> str | None:
+    """Classify only known China futures contracts/products, never by price."""
+    name = str(getattr(product, 'name', '') or '').upper()
+    if '|F|' in name:
+        parts = name.split('|')
+        if len(parts) < 4:
+            return None
+        exchange, code = parts[0], parts[2]
+    elif '.' in name:
+        code, suffix = name.split('.', 1)
+        short_exchange = suffix.split('@')[0]
+        exchange = exchange_map_reversed.get(short_exchange, short_exchange)
+    else:
+        return None
+    if exchange == 'CFFEX':
+        if code in {'T', 'TF', 'TS', 'TL'}:
+            return 'DEBT'
+        if code in {'IF', 'IH', 'IC', 'IM'}:
+            return 'EQUITY'
+        return None
+    if exchange in {'DCE', 'CZCE', 'INE', 'SHFE', 'GFEX'}:
+        return 'COMMODITY'
+    return None
 
+
+_RULE_PROVIDER_CACHE: tuple[object, tuple[object, ...], object] | None = None
+_RULE_PROVIDER_LOCK = Lock()
+
+
+def _rule_revision_for(connection, path: Path) -> tuple[object, ...]:
+    row = connection.execute(
+        "SELECT revision FROM historical_field_revision WHERE id = 1"
+    ).fetchone()
+    if row is None:
+        raise ValueError("rule store has no revision row")
+    return path.as_posix(), int(row[0])
+
+
+def _rule_store_revision() -> tuple[object, ...] | None:
+    """Return the current path/WAL/row revision without opening a caller transaction."""
+    try:
+        from tools.data.hub import DataHub
+        hub = DataHub.get_instance()
+        path = hub.get_store_path('openctp').resolve()
+        with hub.connect_store('openctp') as conn:
+            return _rule_revision_for(conn, path)
+    except Exception:
+        return None
+
+
+def _clear_rule_provider_cache() -> None:
+    global _RULE_PROVIDER_CACHE
+    with _RULE_PROVIDER_LOCK:
+        _RULE_PROVIDER_CACHE = None
+
+
+def _strict_exchange_field_history():
+    """Load strict rules once per committed store revision, in one snapshot."""
+    global _RULE_PROVIDER_CACHE
+    from tools.data.field_history import (
+        ensure_historical_field_schema, load_historical_field_frame,
+        load_market_rule_field_provider,
+    )
+    from tools.data.hub import DataHub
+
+    loader = load_market_rule_field_provider
+    try:
+        hub = DataHub.get_instance()
+        path = hub.get_store_path('openctp').resolve()
+    except Exception:
+        return loader(include_openctp_latest=False, transaction_fee_source='exchange')
+    with _RULE_PROVIDER_LOCK:
+        with hub.connect_store('openctp') as conn:
+            ensure_historical_field_schema(conn)
+            conn.execute("SAVEPOINT rule_provider_snapshot")
+            try:
+                revision = _rule_revision_for(conn, path)
+                cached = _RULE_PROVIDER_CACHE
+                if cached is not None and cached[0] is loader and cached[1] == revision:
+                    return cached[2]
+                frame = load_historical_field_frame(connection=conn, ensure_schema=False)
+                provider = loader(
+                    frame=frame, include_openctp_latest=False,
+                    transaction_fee_source='exchange',
+                )
+                _RULE_PROVIDER_CACHE = (loader, revision, provider)
+                return provider
+            finally:
+                conn.execute("ROLLBACK TO rule_provider_snapshot")
+                conn.execute("RELEASE rule_provider_snapshot")
+
+
+def _declare_source_semantics(
+    source, *, instrument_scope: str, bar_time_semantics: str,
+    raw_timestamp_unit: str,
+):
+    """Attach source-owned meanings while retaining all physical column maps."""
+    source.instrument_scope = instrument_scope
+    source.asset_class_resolver = _asset_class_for_local_future
+    source.bar_time_semantics = bar_time_semantics
+    source.raw_timestamp_unit = raw_timestamp_unit
+    source.trading_field_provider_ref = 'FieldHistory:market_rules:exchange'
+    source.trading_field_related_members = ('FieldHistory:market_rules:exchange',)
+    source.trading_field_latest_provider = 'OpenCTP:latest'
+    source.trading_field_latest_source_prefix = 'openctp/latest_snapshot'
+    source.trading_field_effective_clock = 'effective_timestamp_or_trading_day'
+    source.trading_field_provider_loader = _strict_exchange_field_history
+    return source
+
+
+def register_source_declarations() -> None:
+    """Register contract feed definitions without enumerating contract files."""
     data_dir_min = os.path.join(SOURCE_DATA_DIR, 'data_mink_product')
 
     from tools.data.types import DataFreq
     from tools.data.providers import DataProviderProductTS
-    futures_contract_ds_min1 = DataProviderProductTS(
+    _declare_source_semantics(DataProviderProductTS(
         key = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
         if_object_is_in_source=lambda object: os.path.isfile(
@@ -471,9 +590,11 @@ def get_all_futures_contract() -> List[Product]:
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
-    )
+        nautilus_adapter=CONTRACT_MIN1,
+    ), instrument_scope='physical_contract', bar_time_semantics='interval_end',
+        raw_timestamp_unit='ms')
 
-    DataProviderProductTS(
+    _declare_source_semantics(DataProviderProductTS(
         key='LocalCNFuturesContractDAY1',
         data_freq=DataFreq.DAY1,
         if_object_is_in_source=lambda obj: isinstance(obj, CNFuturesContract)
@@ -489,8 +610,19 @@ def get_all_futures_contract() -> List[Product]:
             'LOW': DataColumn.LOW, 'CLOSE': DataColumn.CLOSE,
             'VOLUME': DataColumn.VOLUME,
             'OPEN_INTEREST': DataColumn.OPEN_INTEREST,
+            'SETTLEMENT_PRICE': DataColumn.SETTLEMENT_PRICE,
+            'PRE_SETTLEMENT_PRICE': DataColumn.PRE_SETTLEMENT_PRICE,
         },
-    )
+        nautilus_adapter=CONTRACT_DAY1,
+    ), instrument_scope='physical_contract', bar_time_semantics='trading_day_label',
+        raw_timestamp_unit='date_label')
+
+
+def get_all_futures_contract() -> List[Product]:
+    """返回合约粒度的所有 CNFuturesContract 列表（基于合约分钟数据目录）。"""
+
+    register_source_declarations()
+    data_dir_min = os.path.join(SOURCE_DATA_DIR, 'data_mink_product')
 
     contract_list = []
     for file_path in os.listdir(data_dir_min):
@@ -569,7 +701,7 @@ def get_all_futures() -> List[CNFutures]:
 
     from tools.data.types import DataFreq
     from tools.data.providers import DataProviderProductTS
-    futures_ds_min1 = DataProviderProductTS(
+    _declare_source_semantics(DataProviderProductTS(
         key = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
         get_object_path=lambda object: get_object_path(object, data_dir_min),
@@ -578,8 +710,9 @@ def get_all_futures() -> List[CNFutures]:
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
-    )
-    futures_ds_day1 = DataProviderProductTS(
+    ), instrument_scope='continuous_signal', bar_time_semantics='interval_end',
+        raw_timestamp_unit='ms')
+    _declare_source_semantics(DataProviderProductTS(
         key = 'LocalCNFuturesDAY1',
         data_freq = DataFreq.DAY1,
         get_object_path=lambda object: get_object_path(object, data_dir_day),
@@ -588,7 +721,8 @@ def get_all_futures() -> List[CNFutures]:
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
-    )
+    ), instrument_scope='continuous_signal', bar_time_semantics='trading_day_label',
+        raw_timestamp_unit='date_label')
 
     return [CNFutures(name) for name in _product_names_from_catalog(_data)]
 

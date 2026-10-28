@@ -75,6 +75,7 @@ class JobRecord:
     execution_plan_hash: str = ""
     plan_notices: list[dict[str, Any]] = field(default_factory=list)
     result_summary: dict[str, Any] | None = None
+    report_ref: str = ""
     error: dict[str, Any] | None = None
     terminal_assurance: TerminalAssuranceSummary | None = None
     created_at: float = 0.0
@@ -126,7 +127,9 @@ class JobRecord:
             strategy_source_policy["scope_status"] = scope_status(
                 str(self.job_spec.get("transient_strategy_source_scope_id") or "")
             )
+        node_target = (self.job_spec.get("execution_binding") or {}).get("target") or {}
         return {
+            **({"execution_node_id": node_target["node_id"], "server_id": node_target["manager_id"]} if node_target else {}),
             "job_id": self.job_id,
             "run_id": self.run_id,
             "owner": self.owner,

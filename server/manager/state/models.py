@@ -21,7 +21,7 @@ class Worktree:
 @dataclass
 class ServiceBundle:
     api: object
-    daemon: object
+    daemon: object | None
     socket_path: Path
     deployment_id: str
 

@@ -129,7 +129,7 @@
       ["数据库主机", "填写 PostgreSQL 服务器可达的 IP 地址或主机名", host],
       ["端口", "PostgreSQL 默认使用 5432", port],
       ["数据库名称", "用户、机构、层级、配额与已认证设备的权威数据库", database],
-      ["用户名", "仅使用 FactorTester 专用数据库角色", user],
+      ["用户名", "仅使用 TradeResearch 专用数据库角色", user],
       ["密码", "密码写入服务器权限 600 的状态文件且不会回显", password],
       ["SSL 模式", "公网数据库连接至少使用 require", sslmode],
       ["连接状态", "保存前会验证网络、凭据与数据库 schema", status],

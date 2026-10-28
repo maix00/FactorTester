@@ -149,6 +149,29 @@ def record_factor_formula_version(
                      "visibility": "public" if kind == "public" else "private"},
             manager_id=provider, connection=conn,
         )
+        from server.services.versioning import build_revision_manifest, enqueue_revision
+
+        object_ref = f"factor-family:{kind}:{owner or 'public'}:{factor}"
+        manifest = build_revision_manifest(
+            object_kind="factor_family",
+            object_ref=object_ref,
+            revision_ref=f"factor-family-revision:{fingerprint}",
+            content_sha256=str(row["source_sha256"]),
+            owner_ref=owner or "__public__",
+            storage_server_id=provider,
+            created_at=float(row["created_at"]),
+            created_by=owner or "platform",
+            visibility="public" if kind == "public" else "private",
+            object_bytes=len(str(row["source_code"]).encode("utf-8")),
+            source_entity_type="factor_source_version",
+        )
+        enqueue_revision(
+            mirror,
+            principal=owner or "__public__",
+            manager_id=provider,
+            manifest=manifest,
+            connection=conn,
+        )
     assert row is not None
     return {
         "source_kind": kind,

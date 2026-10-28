@@ -2,6 +2,8 @@
 
 状态：已接受（Issue #440，2026-10-20）。
 
+2026-10-25 修订：ADR-175 将图表工作台提升为完整 React Web 外壳。本文的图表数据语义、Lightweight Charts 边界、按需加载和 Highcharts 渐进退出仍有效；其中“独立延迟挂载、独立 React 运行时”的打包方式由 ADR-175 取代，图表组件将并入同一 React 运行时。
+
 ## 决策
 
 以 FactorTester 自己的因子—策略—交易—结果链路为工作台核心。React + TypeScript 是独立延迟挂载的界面边界，Lightweight Charts 只负责可交互绘图。FactorExpr、增量因子计算、Strategy Intent Policy、订单撮合和 Job/Run 结果继续是权威来源；浏览器不得用图表插件重新计算因子或盈亏，也不得把因子值当作可交易价格。

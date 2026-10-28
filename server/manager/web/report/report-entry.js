@@ -263,6 +263,19 @@
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
     layout.append(mount); content.replaceChildren(layout, rail);
+    if (context.session && !source.isOwnerLocal
+        && (value.access?.access_basis === "owner" || value.access?.can_manage === true)) {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "report-edit-entry";
+      edit.textContent = t("编辑报告");
+      edit.onclick = () => {
+        const params = new URLSearchParams(location.search);
+        params.set("edit", "1");
+        location.href = `${location.pathname}?${params.toString()}`;
+      };
+      rail.prepend(edit);
+    }
     let refreshScrollY = null;
     const renderContent = () => FTReportRenderer.render(value, mount, {
       chapterRail: rail,
@@ -330,6 +343,9 @@
       t,
     });
     const renderer = renderContent();
+    if (new URLSearchParams(location.search).get("edit") === "1") {
+      attachChapterEditor(publicationID, content, context, api).catch(() => {});
+    }
     const stopWatching = source.watch({
       isCurrent,
       onChange: next => {
@@ -344,6 +360,156 @@
     });
     context.pageState?.register?.("research-report-updates", {dispose: stopWatching});
     session.publicationID = publicationID;
+  }
+
+
+  async function attachChapterEditor(publicationID, content, context, api) {
+    const {t} = context;
+    const documentValue = await api(`/api/research-reports/${encodeURIComponent(publicationID)}`);
+    const agent = await api(`/api/research-reports/${encodeURIComponent(publicationID)}/agent`);
+    let chapters = agent?.manifest?.chapters || [];
+    const baseRev = documentValue?.document?._rev || "";
+    if (!baseRev || !chapters.length) return;
+    const panel = document.createElement("section");
+    panel.className = "report-edit-panel";
+    const title = document.createElement("h3");
+    title.textContent = t("章节顺序编辑");
+    panel.append(title);
+    const apply = async operation => {
+      try {
+        await api(`/api/research-reports/${encodeURIComponent(publicationID)}/operations`, {
+          method: "POST", body: JSON.stringify({base_rev: baseRev, ...operation}),
+        });
+        location.reload();
+      } catch (error) {
+        context.showNotice(error?.message || t("保存失败"), true);
+      }
+    };
+    const addRow = document.createElement("div");
+    addRow.className = "report-edit-row";
+    const addTitle = document.createElement("input");
+    addTitle.placeholder = t("新章节标题");
+    const addButton = document.createElement("button");
+    addButton.textContent = t("新增章节");
+    addButton.onclick = () => apply({
+      op: "insert_chapter",
+      chapter_id: `chapter-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+      title: addTitle.value.trim() || t("新章节"),
+      after_chapter_id: chapters[chapters.length - 1]?.chapter_id || null,
+    });
+    addRow.append(addTitle, addButton);
+    panel.append(addRow);
+    chapters.forEach((chapter, index) => {
+      const row = document.createElement("div");
+      row.className = "report-edit-row";
+      const label = document.createElement("span");
+      label.textContent = chapter.title || chapter.chapter_id;
+      const up = document.createElement("button");
+      up.textContent = t("上移");
+      up.disabled = index === 0;
+      up.onclick = () => apply({
+        op: "move_chapter", chapter_id: chapter.chapter_id,
+        after_chapter_id: chapters[index - 2]?.chapter_id || null,
+      });
+      const down = document.createElement("button");
+      down.textContent = t("下移");
+      down.disabled = index === chapters.length - 1;
+      down.onclick = () => apply({
+        op: "move_chapter", chapter_id: chapter.chapter_id,
+        after_chapter_id: chapters[index + 1]?.chapter_id || null,
+      });
+      const remove = document.createElement("button");
+      remove.textContent = t("删除");
+      remove.onclick = () => {
+        if (window.confirm(`${t("删除章节")}: ${label.textContent}?`)) {
+          apply({op: "remove_chapter", chapter_id: chapter.chapter_id});
+        }
+      };
+      const componentsButton = document.createElement("button");
+      componentsButton.textContent = t("组件");
+      const componentBox = document.createElement("div");
+      componentBox.hidden = true;
+      componentsButton.onclick = async () => {
+        componentBox.hidden = !componentBox.hidden;
+        if (!componentBox.hidden && !componentBox.childElementCount) {
+          try {
+            const response = await api(`/api/research-reports/${encodeURIComponent(publicationID)}/chapters/${encodeURIComponent(chapter.chapter_id)}`);
+            const components = (response.chapter?.components || []).filter(item => item.kind !== "chapter");
+            const rootComponent = (response.chapter?.components || []).find(item => item.kind === "chapter");
+            const rootID = rootComponent?.component_id || chapter.chapter_id;
+            const addRowInner = document.createElement("div");
+            addRowInner.className = "report-edit-row";
+            const addTitleInner = document.createElement("input");
+            addTitleInner.placeholder = t("新组件标题");
+            const addBodyInner = document.createElement("textarea");
+            addBodyInner.placeholder = t("组件正文");
+            const addKindInner = document.createElement("select");
+            ["paragraph", "section"].forEach(kind => {
+              const option = document.createElement("option");
+              option.value = kind; option.textContent = kind;
+              addKindInner.append(option);
+            });
+            const addComponent = document.createElement("button");
+            addComponent.textContent = t("新增组件");
+            addComponent.onclick = () => {
+              const siblings = (response.chapter?.components || []).filter(item => item.parent_id === rootID);
+              apply({
+                op: "insert_component", chapter_id: chapter.chapter_id,
+                parent_id: rootID,
+                after_component_id: siblings[siblings.length - 1]?.component_id || rootID,
+                component: {
+                  component_id: `component-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+                  kind: addKindInner.value,
+                  title: addTitleInner.value.trim(),
+                  body: addBodyInner.value,
+                },
+              });
+            };
+            addRowInner.append(addTitleInner, addKindInner, addBodyInner, addComponent);
+            componentBox.append(addRowInner);
+            components.forEach(component => {
+              const line = document.createElement("div");
+              line.className = "report-edit-row";
+              const name = document.createElement("span");
+              name.textContent = component.title || component.component_id;
+              const siblings = components.filter(item => item.parent_id === component.parent_id);
+              const at = siblings.findIndex(item => item.component_id === component.component_id);
+              const upComponent = document.createElement("button");
+              upComponent.textContent = t("上移");
+              upComponent.disabled = at <= 0;
+              upComponent.onclick = () => apply({
+                op: "move_component", chapter_id: chapter.chapter_id,
+                component_id: component.component_id, parent_id: component.parent_id,
+                after_component_id: siblings[at - 2]?.component_id || component.parent_id,
+              });
+              const downComponent = document.createElement("button");
+              downComponent.textContent = t("下移");
+              downComponent.disabled = at < 0 || at >= siblings.length - 1;
+              downComponent.onclick = () => apply({
+                op: "move_component", chapter_id: chapter.chapter_id,
+                component_id: component.component_id, parent_id: component.parent_id,
+                after_component_id: siblings[at + 1]?.component_id || "",
+              });
+              const removeComponent = document.createElement("button");
+              removeComponent.textContent = t("删除");
+              removeComponent.onclick = () => {
+                if (window.confirm(`${t("删除组件")}: ${name.textContent}?`)) {
+                  apply({op: "remove_component", chapter_id: chapter.chapter_id,
+                         component_id: component.component_id});
+                }
+              };
+              line.append(name, upComponent, downComponent, removeComponent);
+              componentBox.append(line);
+            });
+          } catch (error) {
+            context.showNotice(error?.message || t("读取章节失败"), true);
+          }
+        }
+      };
+      row.append(label, up, down, remove, componentsButton, componentBox);
+      panel.append(row);
+    });
+    content.append(panel);
   }
 
   function openReference(target, context, labelOverride = "") {

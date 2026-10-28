@@ -108,31 +108,6 @@ class ShiftOp(OperandExpr):
         label = str(p.value) if isinstance(p, ConstExpr) else str(p)
         return f"SHIFT_{label}"
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        operand_latex = self.operand._to_latex(subst)
-        if _is_zero_shift_period(self.periods):
-            return operand_latex
-        p_label = self.periods._to_latex(subst)
-        # Only a leaf (or a named intermediate) has a replaceable time index.
-        # Stripping a suffix from a sum would shift only its final operand;
-        # appending a subscript to a nested shift would create double indices.
-        named = subst is not None and self.operand._structural_key() in subst
-        indexed_leaf = isinstance(self.operand, (ColumnRef, ParamRef)) or named
-        operand_base = _strip_latex_time_subscript(operand_latex)
-        if not indexed_leaf or operand_base == operand_latex:
-            return f"\\operatorname{{Shift}}_{{{p_label}}}\\left({operand_latex}\\right)"
-        from .composite import CompositeExpr
-        # Reuse subtraction's RHS precedence rules for the synthetic t - p.
-        subtraction = CompositeExpr('sub', self.operand, self.periods)
-        p_label = subtraction._binary_operand_latex(
-            self.periods, p_label, side='right', subst=subst,
-        )
-        if p_label.startswith('-'):
-            p_label = f"\\left({p_label}\\right)"
-        return f"{operand_base}_{{t - {p_label}}}"
 
     def _get_alias(self) -> str:
         p_expr = self.periods
@@ -152,17 +127,6 @@ def _is_zero_shift_period(periods: 'FactorExpr') -> bool:
         return False
 
 
-def _strip_latex_time_subscript(latex: str) -> str:
-    """
-    Remove a trailing time subscript from a LaTeX fragment.
 
-    Historically some leaf nodes emitted `_t` while others emitted `_{t}`.
-    For operators like SHIFT that need to *replace* the time index, we must
-    normalize both forms to avoid MathJax "Double subscripts" errors
-    (e.g. `\\tilde{O}_t_{t-N}`).
-    """
-    if latex.endswith('_{t}'):
-        return latex[:-len('_{t}')]
-    if latex.endswith('_t'):
-        return latex[:-len('_t')]
-    return latex
+# Compatibility re-export; formatting is owned by alpha.
+from alpha.factor.latex_formatters import _strip_latex_time_subscript

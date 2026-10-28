@@ -1,6 +1,8 @@
 (() => {
-  const embeddedPresentation = new URLSearchParams(location.search).get("presentation") === "embedded";
+  const presentation = new URLSearchParams(location.search).get("presentation");
+  const embeddedPresentation = presentation === "embedded" || presentation === "canvas";
   document.documentElement.classList.toggle("embedded-presentation", embeddedPresentation);
+  document.documentElement.classList.toggle("embedded-canvas", presentation === "canvas");
   const runtime = FTAppRuntime.create();
   const {
     state, content, title, eyebrow, toolbar,
@@ -221,7 +223,7 @@
       const release = await FTResearchLocal.loadClientRelease(appContext(routeToken));
       if (routeToken !== activeRouteToken) return;
       root.append(homeNetworkRow(
-        "FactorTester 客户端",
+        "TradeResearch 客户端",
         FTResearchLocal.clientDownloadButton(appContext(routeToken), release, "下载"),
       ));
     } catch (error) {
@@ -233,7 +235,7 @@
   function home() {
     activeNav("home"); setHeading(t("主页"));
     const routeToken = activeRouteToken;
-    content.innerHTML = '<div class="hero"><h2>FactorTester</h2><p></p></div><section class="home-network"><h3></h3><div class="home-network-grid"></div></section><div class="card-grid" id="home-cards"></div>';
+    content.innerHTML = '<div class="hero"><h2>TradeResearch</h2><p></p></div><section class="home-network"><h3></h3><div class="home-network-grid"></div></section><div class="card-grid" id="home-cards"></div>';
     content.querySelector(".hero p").textContent = t("选择研究模块；每个工作现场会在左侧保持");
     content.querySelector(".home-network h3").textContent = t("服务器网络信息");
     const network = content.querySelector(".home-network-grid");
@@ -473,8 +475,8 @@
       }),
       report,
       research,
-      strategyLibrary: (pageContext, scope) => FTStrategyLibraryList.render(
-        pageContext, scope || "mine",
+      strategyLibrary: (pageContext, scope, objectKind) => FTStrategyLibraryList.render(
+        pageContext, scope || "public", objectKind || "strategy_family",
       ),
       strategy: (pageContext, id, mode, route) => FTStrategyLibraryDetail.render(
         pageContext, id, mode || "view", route || {},
@@ -494,6 +496,11 @@
       jobs: (pageContext, section) => section === "types"
         ? FTTestTypes.render(pageContext)
         : FTJobs.list(pageContext, null, null, {revalidate: true}),
+      trading: async (pageContext, mode) => {
+        await window.FTStaticLoader?.loadGroups?.(["trading"]);
+        if (!pageContext.isRouteCurrent()) return;
+        return FTTradingWorkbench.render(pageContext, mode);
+      },
       job: (pageContext, port, id, serverID) => FTJobs.detail(
         pageContext, port, id, serverID,
       ),
@@ -610,4 +617,19 @@
     }
     await renderRoute();
   })();
+})();
+
+(() => {
+  function mirrorLegacyGlobals() {
+    for (const key of Object.keys(window)) {
+      if (!key.startsWith("FT") || key.length < 3) continue;
+      const alias = `TR${key.slice(2)}`;
+      if (!(alias in window)) window[alias] = window[key];
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mirrorLegacyGlobals, {once: true});
+  } else {
+    mirrorLegacyGlobals();
+  }
 })();

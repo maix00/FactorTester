@@ -40,17 +40,7 @@ class TermStructureOp(OperandExpr):
     "cross section" here is contracts under one product, not products.
     """
 
-    _LATEX = {
-        'term_spread': '\\mathrm{TermSpread}',
-        'term_ratio': '\\mathrm{TermRatio}',
-        'term_slope': '\\mathrm{TermSlope}',
-        'term_log_ratio': '\\mathrm{TermLogRatio}',
-        'term_contango': '\\mathrm{TermContango}',
-        'term_carry_annualized': '\\mathrm{TermCarryAnn}',
-        'term_curvature': '\\mathrm{TermCurvature}',
-        'term_slope_segment': '\\mathrm{TermSlopeSeg}',
-        'term_rank_value': '\\mathrm{TermRankValue}',
-    }
+    from alpha.factor.latex_formatters import _LATEX
     _PAIR_OPS = PAIR_TERM_STRUCTURE_OPS
     _DEPTH_OPS = DEPTH_TERM_STRUCTURE_OPS
     _RANK_OPS = RANK_TERM_STRUCTURE_OPS
@@ -131,18 +121,6 @@ class TermStructureOp(OperandExpr):
         }
         return adjusted_to_raw.get(column, column).name
 
-    @staticmethod
-    def _operand_latex_arg(expr: FactorExpr, *, column: bool = False) -> str:
-        if column:
-            if isinstance(expr, ColumnRef):
-                return expr.column.name
-            if isinstance(expr, ConstExpr):
-                return DataColumn(expr.value).name
-            if isinstance(expr, ParamRef):
-                return expr._parameter_latex()
-        if isinstance(expr, ConstExpr):
-            return str(expr.value)
-        return expr._to_latex()
 
     @staticmethod
     def _operand_alias_arg(expr: FactorExpr, *, column: bool = False) -> str:
@@ -267,18 +245,6 @@ class TermStructureOp(OperandExpr):
     def op_name(self) -> str:
         return self.op
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        if self.op in self._PAIR_OPS:
-            near_rank = self._operand_latex_arg(self.operands[0])
-            far_rank = self._operand_latex_arg(self.operands[1])
-            column = self._operand_latex_arg(self.operands[2], column=True)
-            return f"{self._LATEX[self.op]}_{{{near_rank},{far_rank}}}({column})"
-        depth = self._operand_latex_arg(self.operands[0])
-        column = self._operand_latex_arg(self.operands[1], column=True)
-        return f"{self._LATEX[self.op]}_{{{depth}}}({column})"
 
     def _get_alias(self) -> str:
         if self.op in self._PAIR_OPS:

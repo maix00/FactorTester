@@ -92,6 +92,9 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
             self.contract_data_layout = str(
                 kwargs.get('contract_data_layout') or 'parquet_ohlcv'
             )
+            # Optional engine-specific adapter declaration belongs to the
+            # source/provider; generic catalogs only project this metadata.
+            self.nautilus_adapter = kwargs.get('nautilus_adapter')
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 

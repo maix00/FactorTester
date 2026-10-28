@@ -91,28 +91,6 @@ class CrossSectionalOp(OperandExpr):
             return apply_group_transform(self.op, x, vals[1], self.category)
         raise ValueError(f"Unknown cross-sectional op: {self.op}")
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        if self.op == 'cs_spearman':
-            left_latex = self.left._to_latex(subst)
-            right_latex = self.right._to_latex(subst)
-            return f'\\rho_s({left_latex}, {right_latex})'
-        if self.op == 'cs_corr':
-            left_latex = self.left._to_latex(subst)
-            right_latex = self.right._to_latex(subst)
-            return f'\\rho({left_latex}, {right_latex})'
-
-        operand_latex = self.operand._to_latex(subst)
-        _LATEX_MAP = {
-            'cs_zscore': f'Z({operand_latex})',
-            'cs_rank': f'\\text{{Rank}}({operand_latex})',
-            'cs_rank_masked': f'\\text{{Rank}}_{{mask}}({operand_latex})',
-            'cs_ordinal_rank_asc': f'\\text{{OrdinalRank}}_\\uparrow({operand_latex})',
-            'cs_ordinal_rank_desc': f'\\text{{OrdinalRank}}_\\downarrow({operand_latex})',
-        }
-        return _LATEX_MAP.get(self.op, f'\\text{{{self.op}}}({operand_latex})')
 
     def _get_alias(self) -> str:
         if self.op in ('cs_spearman', 'cs_corr'):

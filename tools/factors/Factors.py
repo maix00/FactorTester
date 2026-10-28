@@ -118,6 +118,9 @@ class Factor(UniqueNameObject, FactorExpr):
         self._data = None
         self._intermediate_factor_data.clear()
         self._intermediate_alias_index.clear()
+        store=getattr(self,'_intermediate_results',None)
+        if store is not None:
+            store.clear()
 
     def _strip_outer_and_set_freq(self, expr: FactorExpr, preserve_neg: bool, set_freq: bool = False) -> FactorExpr:
         """剥离 $Rev 产生的 neg(SignalAlign(...)) 包装层（不处理因子定义的自然 neg）。
@@ -240,6 +243,7 @@ class Factor(UniqueNameObject, FactorExpr):
         freq: 可选，手动指定数据源频率。None 时自动推断。
         """
         evaluation_context = kwargs.pop('_evaluation_context', None)
+        intermediate_requests = kwargs.pop('intermediates', ())
         if isinstance(products, Product):
             products = [products]
         products = list(products)
@@ -315,7 +319,7 @@ class Factor(UniqueNameObject, FactorExpr):
 
         # ── 获取/创建 FactorRunResult；选择缓存目标 ──
         # 有 tester → 局部 dict（每次 evaluate() 调用独立，不跨 tester 污染）
-        # 无 tester → 回退到 _intermediate_factor_data（仅用于独立 Factor，如 CrossSectionIC）
+        # 无 tester → 使用本次求值缓存；仅保留显式请求的中间输出
         if _tester is not None:
             r = _tester._get_result(self)
             _intermediate_cache = (
@@ -330,17 +334,39 @@ class Factor(UniqueNameObject, FactorExpr):
             # structure, not products, source revision, or run window, so a
             # later run could silently reuse the previous run's DataFrame (for
             # example a Jan--Mar table for a Jan--Jun request).  Keep the
-            # user-facing intermediate result, but make the actual evaluation
-            # cache run-local and discard the previous snapshot before each
+            # compatibility dictionaries empty, and make the actual evaluation
+            # cache run-local before each
             # independent evaluation.
             self._intermediate_factor_data.clear()
             self._intermediate_alias_index.clear()
-            _intermediate_cache = {}
+            _intermediate_cache = evaluation_context.shared_cache if evaluation_context is not None else {}
 
         # ── 1. 表达式求值 ──
         # _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
         # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
+        from alpha.factor.results import IntermediateIndex
+        from tools.factors.expr.core import EvaluateContext
+        index=IntermediateIndex(self._expr) if intermediate_requests else None
+        selected=index.select(intermediate_requests) if index is not None else ()
+        retained={key:index.nodes[key] for key in selected}
+        output_nodes=[self._expr,self._func_expr,*retained.values()]
+        if selected and (evaluation_context is None or self._expr._structural_key() not in _intermediate_cache):
+            from tools.factors.expr.rust_plan import evaluate_rust_plan
+            context=EvaluateContext(products=products,freq=freq,preloaded=preloaded,
+                cache=_intermediate_cache,start_dt=start_dt,end_dt=end_dt,
+                warmup_window=warmup_window,panel_timeline=panel_timeline)
+            from tools.factors.expr.leaf import ConstExpr
+            computed=[node for node in output_nodes if not isinstance(node,ConstExpr)]
+            planned=evaluate_rust_plan(computed,context)
+            if planned is not None:
+                for node,frame in zip(computed,planned,strict=True):
+                    _intermediate_cache[node._structural_key()]=frame
+            for key,node in retained.items():
+                if isinstance(node,ConstExpr):
+                    _intermediate_cache[key]=node.value
+        if selected:
+            shared_cache_keys=frozenset(set(shared_cache_keys or ())|set(_intermediate_cache)|set(selected))
         result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
                                      cache=_intermediate_cache, start_dt=start_dt,
                                      end_dt=end_dt,
@@ -355,7 +381,7 @@ class Factor(UniqueNameObject, FactorExpr):
         node = self._expr
         while True:
             if isinstance(node, SignalAlign):
-                raw_data = node._raw_data  # type: ignore[assignment]
+                raw_data = _intermediate_cache.get(self._func_expr._structural_key(), node._raw_data)  # already computed output
                 break
             # CompositeExpr('neg', ...) → 穿透
             operands = getattr(node, 'operands', None) or getattr(node, '_operands', None)
@@ -382,58 +408,42 @@ class Factor(UniqueNameObject, FactorExpr):
             self._data = result
 
         # ── 5. 收集中间因子别名索引 ──
-        self._collect_intermediates_from_cache(_intermediate_cache)
+        self._collect_intermediates_from_cache(_intermediate_cache, requested=intermediate_requests)
 
         return result
     
-    def _collect_intermediates_from_cache(self, cache: Optional[dict] = None) -> None:
-        """遍历表达式树，将中间缓存中的 sk 映射到别名。
+    def formulas(self):
+        from alpha.factor.presentation import formula_bundle
+        template=getattr(self.family,'_expr',self._expr)
+        return formula_bundle(template,bound_expression=self._expr,final_name=str(self.alias))
 
-        cache: 表达式求值缓存（有 tester 时为局部 dict，无 tester 时为 _intermediate_factor_data）。
-        """
-        if cache is None:
-            return
-        self._intermediate_alias_index.clear()
+    def to_latex(self, final_name='X', **kwargs):
+        return self._expr.to_latex(final_name,**kwargs)
 
-        for node in self._expr.iter_intermediate_nodes():
-            name = node._intermediate_name
-            sk = node._structural_key()
-            if name and sk in cache:
-                existing_sk = self._intermediate_alias_index.get(name)
-                if existing_sk is not None and existing_sk != sk:
-                    raise ValueError(
-                        f"中间因子名称冲突：'{name}' 已被 structural_key={existing_sk} 注册，"
-                        f"不能再用 structural_key={sk} 注册。"
-                        f"每个 as_intermediate(name) 必须对应唯一表达式结构。"
-                    )
-                self._intermediate_alias_index[name] = sk
-                # 将局部 cache 中的数据同步到 _intermediate_factor_data，
-                # 使 get_intermediate() 在有 tester 时也能查到 intermediate 数据
-                self._intermediate_factor_data[sk] = cache[sk]
-    
-    @factor_workspace
-    def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
-        """
-        获取中间因子数据（原始未对齐 DataFrame）。
-
-        无 tester 时从 _intermediate_factor_data 获取（如 CrossSectionIC 独立 evaluate）。
-        有 tester 时：用 _func_expr 对 FactorRunResult.func_table 做 SignalAlign 对齐。
-
-        key 支持两种形式：
-          - str: 按 .as_intermediate() 注册的名称查找，如 'FE', 'RE'
-          - Tuple (structural_key): 按表达式结构 key 直接查找
-        """
-        if isinstance(key, str):
-            sk = self._intermediate_alias_index.get(key)
-            if sk is None:
-                return None
+    def _collect_intermediates_from_cache(self, cache=None, *, requested=()):
+        from alpha.factor.results import IntermediateIndex, IntermediateResults
+        index=IntermediateIndex(self._expr) if requested else None
+        results=IntermediateResults(index,requested) if index is not None else None
+        if results is not None:
+            results.replace(cache or {})
+        self._intermediate_alias_index={} if index is None else index.aliases
+        # Release the old compatibility dictionary; only explicit alpha output
+        # references remain, scoped to the active run when a tester exists.
+        self._intermediate_factor_data.clear()
+        tester=self._get_active_tester()
+        if tester is not None:
+            tester._get_result(self).intermediate_results=results
         else:
-            sk = key
-        result = self._intermediate_factor_data.get(sk)
-        if isinstance(result, dict):
-            return pd.DataFrame(result)
-        return result
-    
+            self._intermediate_results=results
+
+    @factor_workspace
+    def get_intermediate(self,key):
+        """Look up an explicitly collected output; never compute on demand."""
+        tester=self._get_active_tester()
+        result=(tester.results.get(self) if tester is not None else None)
+        values=getattr(result,'intermediate_results',None) if tester is not None else getattr(self,'_intermediate_results',None)
+        return None if values is None else values.get(key)
+
     @property
     @factor_workspace
     def freq(self) -> DataFreq:

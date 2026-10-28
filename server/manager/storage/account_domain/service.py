@@ -379,6 +379,25 @@ class AccountDomainSyncService:
             for value in groups:
                 if self._reconcile_value(owner, "product_group", value, "id"):
                     count += 1
+            from tools.data.sqlite.account_manager.product_group import (
+                current_product_group_revision_ref,
+            )
+            for value in groups:
+                if not isinstance(value, dict) or not str(value.get("id") or "").strip():
+                    continue
+                try:
+                    revision_ref = current_product_group_revision_ref(
+                        owner, value, manager_id=self.manager_id, mirror=self.local,
+                    )
+                    if revision_ref and value.get("current_revision_ref") != revision_ref:
+                        payload = {**value, "current_revision_ref": revision_ref}
+                        self.upsert(
+                            owner, "product_group", str(value["id"]), payload,
+                            flush=False,
+                        )
+                        count += 1
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    continue
             count += self.reconcile_factor_catalog(
                 owner, force=True, flush=False,
             )

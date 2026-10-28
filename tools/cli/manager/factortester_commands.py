@@ -1,4 +1,4 @@
-"""FactorTester application commands for ``factortester-manager``.
+"""TradeResearch application commands for ``factortester-manager``.
 
 These commands use the Manager control/data planes only.  They do not operate
 the host, Docker, WireGuard, SSH, or any other infrastructure transport.
@@ -34,7 +34,7 @@ def _print_job_rows(value: dict) -> None:
 
 @manager.group("jobs")
 def jobs() -> None:
-    """Inspect FactorTester Jobs."""
+    """Inspect TradeResearch Jobs."""
 
 
 @jobs.command("list")
@@ -77,7 +77,7 @@ def list_jobs(
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def list_job_ports(as_json: bool) -> None:
-    """List FactorTester service ports visible to this Manager."""
+    """List TradeResearch service ports visible to this Manager."""
     client, _ = _authenticated_client()
     value = client.job_ports()
     if as_json:
@@ -183,7 +183,7 @@ def delete_artifacts(job_id: str, yes: bool, as_json: bool) -> None:
 
 @manager.group("storage")
 def storage() -> None:
-    """Read FactorTester Job and artifact storage usage."""
+    """Read TradeResearch Job and artifact storage usage."""
 
 
 @storage.command("usage")
@@ -196,7 +196,7 @@ def storage_usage(as_json: bool) -> None:
 
 @manager.group("services")
 def services() -> None:
-    """Control FactorTester service instances owned by this Manager."""
+    """Control TradeResearch service instances owned by this Manager."""
 
 
 @services.command("list")
@@ -228,12 +228,12 @@ def _service_action(name: str, help_text: str):
             if int(item.get("port") or 0) == port
         ]
         if not matches:
-            raise click.ClickException(f"没有找到端口 {port} 对应的 FactorTester 服务")
+            raise click.ClickException(f"没有找到端口 {port} 对应的 TradeResearch 服务")
         if len(matches) != 1:
-            raise click.ClickException(f"端口 {port} 对应多个 FactorTester 服务")
+            raise click.ClickException(f"端口 {port} 对应多个 TradeResearch 服务")
         instance_id = str(matches[0].get("instance_id") or "").strip()
         if not instance_id:
-            raise click.ClickException(f"端口 {port} 缺少 FactorTester 服务身份")
+            raise click.ClickException(f"端口 {port} 缺少 TradeResearch 服务身份")
         value = client.action(instance_id, name)
         value.pop("instance_id", None)
         value["port"] = port
@@ -242,11 +242,11 @@ def _service_action(name: str, help_text: str):
     return command
 
 
-_service_action("start", "Start one stopped FactorTester service.")
-_service_action("stop", "Stop one idle FactorTester service.")
-_service_action("restart-api", "Restart one FactorTester service API.")
-_service_action("restart-bundle", "Restart one complete FactorTester service.")
-_service_action("force-stop", "Force-stop one FactorTester service.")
+_service_action("start", "Start one stopped TradeResearch service.")
+_service_action("stop", "Stop one idle TradeResearch service.")
+_service_action("restart-api", "Restart one TradeResearch service API.")
+_service_action("restart-bundle", "Restart one complete TradeResearch service.")
+_service_action("force-stop", "Force-stop one TradeResearch service.")
 
 
 def register_factor_tester_commands() -> None:

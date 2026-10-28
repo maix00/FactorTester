@@ -48,6 +48,38 @@ def publish_strategy(sync, strategy_ref: str, principal: str) -> None:
         if not manifest:
             raise ValueError('strategy revision source is unavailable')
         sync.upsert(owner, 'strategy_revision', ref, {**manifest, **policy}, flush=False)
+        if revision is not None:
+            from server.services.versioning import build_revision_manifest, publish_revision
+
+            # Source bytes are transferred by the strategy_revision object
+            # adapter.  The shared version index hashes the immutable
+            # source-free revision descriptor so a replica that has not yet
+            # hydrated source bytes produces the same identity.
+            revision_descriptor = revision_bytes(summary)
+            version_manifest = build_revision_manifest(
+                object_kind="user_strategy",
+                object_ref=strategy_ref,
+                revision_ref=ref,
+                revision_number=int(summary["revision_number"]),
+                content_sha256=hashlib.sha256(revision_descriptor).hexdigest(),
+                owner_ref=owner,
+                storage_server_id=str(manifest.get("storage_server_id") or sync.manager_id),
+                created_at=float(summary["created_at"]),
+                created_by=str(summary["created_by"]),
+                visibility=str(policy["visibility"]),
+                authorized_users=shares,
+                object_bytes=(
+                    int(manifest["object_bytes"])
+                    if manifest.get("object_bytes") is not None else None
+                ),
+                source_entity_type="strategy_revision",
+            )
+            publish_revision(
+                sync,
+                principal=owner,
+                manifest=version_manifest,
+                flush=False,
+            )
     sync.upsert(owner, 'strategy', strategy_ref,
                 {**entry, 'entry_visibility': entry['visibility'], **policy, 'shares': shares}, flush=False)
 

@@ -129,6 +129,8 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     assert task_detail["research_binding"] == {}
     assert task_detail["caller"]["channel"] == "unknown"
     assert task_detail["results"]["summary"] == {"success": True}
+    assert task_detail["progress"] is None
+    assert job.get_json()["progress"] is None
     assert task_detail["artifacts"][0]["content_type"] == "application/json"
     assert job.get_json()["has_terminal_assurance"] is True
     assert "terminal_assurance" not in job.get_json()
@@ -767,7 +769,7 @@ def test_retry_cleanup_preserves_path_still_referenced_by_active_artifact(
     assert target.is_file()
 
 
-def test_terminal_job_stream_resets_when_daemon_lost_live_event_state(tmp_path, monkeypatch) -> None:
+def test_terminal_job_stream_replays_durable_terminal_state(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
     app = Flask(__name__)
     app.secret_key = "test"
@@ -783,24 +785,11 @@ def test_terminal_job_stream_resets_when_daemon_lost_live_event_state(tmp_path, 
         status=JobStatus.SUCCEEDED,
     )
 
-    class EmptyDaemon:
-        def events(self, job_id, *, after, timeout):
-            return {
-                "known": False, "events": [], "gap": None, "closed": False,
-                "latest_progress": None, "manifest": None,
-            }
-
-    monkeypatch.setattr(
-        "server.modules.single_factor_test.backtest_job_reads._daemon_client",
-        lambda: EmptyDaemon(),
-    )
-
     response = client.get(
         "/api/jobs/job-after-restart/stream",
         headers={"Last-Event-ID": "12"},
     )
     body = response.get_data(as_text=True)
 
-    assert "event: reset" in body
-    assert '"reason":"event_state_unavailable"' in body
+    assert "event: result" in body
     assert '"status":"succeeded"' in body

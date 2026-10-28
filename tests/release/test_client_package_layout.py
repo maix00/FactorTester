@@ -64,11 +64,11 @@ def test_accepts_an_explicit_top_level_package_mapping(tmp_path: Path) -> None:
     (client / "pyproject.toml").write_text(
         """
 [tool.setuptools]
-packages = ["tools.cli", "factortester_cli_bootstrap"]
+packages = ["tools.cli", "traderesearch_cli_bootstrap"]
 
 [tool.setuptools.package-dir]
 "tools.cli" = "."
-"factortester_cli_bootstrap" = "bootstrap"
+"traderesearch_cli_bootstrap" = "bootstrap"
 """,
         encoding="utf-8",
     )

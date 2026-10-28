@@ -36,7 +36,7 @@ def _authenticated_client() -> tuple[ManagerClient, ManagerCredentialStore]:
 
 @click.group("manager")
 def manager() -> None:
-    """Manage FactorTester through its authenticated 7998/7997 APIs.
+    """Manage TradeResearch through its authenticated 7998/7997 APIs.
 
     Host administration is outside this CLI.  A server may advertise
     operator-controlled connection metadata through ``server access``; the
@@ -64,7 +64,7 @@ def configure_manager(
     port: int,
     as_json: bool,
 ) -> None:
-    """Save the FactorTester Manager control endpoint."""
+    """Save the TradeResearch Manager control endpoint."""
     config = ManagerConfig.from_url(url or f"{scheme}://{host}:{port}")
     save_manager_config(config)
     _echo({"status": "configured", "manager_url": config.base_url}, as_json)
@@ -121,6 +121,66 @@ def manager_status(as_json: bool) -> None:
     _echo(client.session(), as_json)
 
 
+@manager.group("dispatch")
+def dispatch_commands() -> None:
+    """Inspect Job outbox and per-server worker targets."""
+
+
+@dispatch_commands.command("status")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def dispatch_status(as_json: bool) -> None:
+    """Read outbox counts and all server/port targets."""
+    client, _ = _authenticated_client()
+    value = client.dispatch_overview()
+    if as_json:
+        click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+        return
+    click.echo(f"outbox: {json.dumps(value.get('outbox') or {}, ensure_ascii=False)}")
+    for server in value.get("servers") or []:
+        click.echo(f"{server.get('server_id')} online={server.get('online')}")
+        remote_outbox = server.get("remote_outbox")
+        if remote_outbox:
+            click.echo(f"  outbox {json.dumps(remote_outbox, ensure_ascii=False)}")
+        for target in server.get("ports") or []:
+            online = target.get("worker_online")
+            click.echo(f"  {target.get('port')}  {target.get('queue')}  worker={online}")
+
+
+@dispatch_commands.command("requeue")
+@click.argument("job_id")
+@click.argument("attempt", type=int)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def dispatch_requeue(job_id: str, attempt: int, as_json: bool) -> None:
+    """Requeue a failed/dead local outbox row (requires admin manage)."""
+    client, _ = _authenticated_client()
+    value = client.dispatch_requeue(job_id, attempt)
+    if as_json:
+        click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+        return
+    click.echo(f"{value.get('job_id')} attempt={value.get('attempt')} status={value.get('status')}")
+
+
+@dispatch_commands.command("targets")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def dispatch_targets(as_json: bool) -> None:
+    """List server/port queue targets only."""
+    client, _ = _authenticated_client()
+    value = client.dispatch_overview()
+    targets = [
+        {"server_id": server.get("server_id"), **target}
+        for server in value.get("servers") or []
+        for target in server.get("ports") or []
+    ]
+    if as_json:
+        click.echo(json.dumps(targets, ensure_ascii=False, indent=2))
+        return
+    for target in targets:
+        click.echo(f"{target['server_id']} {target['port']} {target['queue']} worker={target.get('worker_online')}")
+
+
 @manager.group("server")
 def server_info() -> None:
     """Read server identity and the access methods declared by that server."""
@@ -130,7 +190,7 @@ def server_info() -> None:
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def inspect_server(as_json: bool) -> None:
-    """Display FactorTester role, endpoints, features, and access metadata."""
+    """Display TradeResearch role, endpoints, features, and access metadata."""
     client, _ = _authenticated_client()
     _echo(client.identity(), as_json)
 

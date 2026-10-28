@@ -225,3 +225,24 @@ def test_lazy_groups_are_bundled_but_still_declared():
         assert bundle_bytes(name) == b"\n;\n".join(
             static_file(relative)[0] for relative in files
         )
+
+
+def test_react_shell_assets_are_served_and_manifest_gated():
+    from server.manager.web.assets import static_file
+
+    html, kind = static_file("vendor/web-app/index.html")
+    assert b"data-tr-web-app" in html
+    assert b"/research-static/vendor/web-app/loader.js" in html
+    assert b"/research-static/styles/app.css" in html
+    assert kind.startswith("text/html")
+    for name in ("loader.js", "desktop.js", "desktop.css", "mobile.js", "mobile.css"):
+        body, content_type = static_file(f"vendor/web-app/{name}")
+        assert body
+        assert content_type
+    sw, sw_type = static_file("sw.js")
+    assert b"tr-shell-v2" in sw
+    assert b"/research-static/vendor/web-app/desktop.js" in sw
+    assert "javascript" in sw_type
+    manifest, manifest_type = static_file("vendor/web-app/manifest.webmanifest")
+    assert json.loads(manifest)["start_url"] == "/app"
+    assert manifest_type == "application/manifest+json"

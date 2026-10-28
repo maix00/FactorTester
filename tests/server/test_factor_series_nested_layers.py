@@ -14,14 +14,12 @@ from server.modules.single_factor_test import evaluation
 
 class _FakeFactor:
     def __init__(self, frames):
-        self._frames = frames
-        self._intermediate_alias_index = {name: (name,) for name in frames}
-
-    def get_intermediate(self, key):
-        value = self._frames.get(key)
-        if isinstance(value, Exception):
-            raise value
-        return value
+        from alpha.factor import ColumnRef, IntermediateIndex, IntermediateResults
+        from types import SimpleNamespace
+        nodes=tuple(ColumnRef(str(i)).as_intermediate(name) for i,name in enumerate(frames))
+        index=IntermediateIndex(SimpleNamespace(operands=nodes))
+        self._intermediate_results=IntermediateResults(index,'all')
+        self._intermediate_results.replace({index.aliases[name]:value for name,value in frames.items()})
 
 
 def test_intermediate_series_exposes_each_layer():
@@ -47,4 +45,4 @@ def test_serializer_marks_nested_items():
     source = (evaluation.__file__)
     text = open(source, encoding="utf-8").read()
     assert '"nested_of"' in text
-    assert "_intermediate_series(factor)" in text
+    assert "_intermediate_series(factor, result=result)" in text

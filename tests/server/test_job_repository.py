@@ -993,3 +993,35 @@ def test_repository_records_structured_job_input_metadata(tmp_path) -> None:
     assert stored["file_name"] == "actor.py"
     assert stored["logical_path"] == "strategies/demo/actor.py"
     assert stored["title_zh"] == "临时策略源码：strategies/demo/actor.py"
+
+
+def test_job_detail_exposes_persisted_progress(tmp_path):
+    from server.jobs.models import JobRecord
+    from server.jobs.repository.sqlite import JobRepository
+    from server.jobs.states import JobStatus
+
+    repository = JobRepository(tmp_path / "jobs.db")
+    repository.create(
+        JobRecord(
+            job_id="detail-progress",
+            run_id="detail-progress-run",
+            owner="alice",
+            workspace_id="workspace",
+            kind="backtest",
+            status=JobStatus.SUBMITTED,
+            deployment_id="remote-main",
+            run_spec_hash="a" * 64,
+            job_spec={},
+        )
+    )
+    repository.transition("detail-progress", JobStatus.PLANNING)
+    repository.transition("detail-progress", JobStatus.QUEUED)
+    repository.record_progress(
+        "detail-progress", 1, sequence=1, phase="event_replay",
+        completed=5, total=10, percent=50, message="half",
+    )
+    detail = repository.load_detail("detail-progress", owner="alice")
+    assert detail["progress"] == {
+        "sequence": 1, "phase": "event_replay", "completed": 5, "total": 10,
+        "percent": 50.0, "message": "half",
+    }

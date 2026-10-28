@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
+
+from server import branding
 import sqlite3
 import threading
 import time
@@ -163,6 +166,13 @@ class JobRepository(
                     ),
                 )
                 index_job_subjects(conn, record.job_id, record.job_spec)
+                if record.status is JobStatus.QUEUED:
+                    queued_row = conn.execute(
+                        "SELECT * FROM research_jobs WHERE job_id=?",
+                        (record.job_id,),
+                    ).fetchone()
+                    if queued_row is not None:
+                        self._enqueue_dispatch(conn, queued_row)
             except sqlite3.IntegrityError as exc:
                 if record.step_mode and "research_jobs.owner" in str(exc):
                     raise ValueError("step job already active") from exc
@@ -194,6 +204,36 @@ class JobRepository(
             if existing is None:
                 raise
             return existing, False
+
+    @staticmethod
+    def _enqueue_dispatch(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
+        """Write the dispatch row in the same transaction as the Job state."""
+        from server.jobs.dispatch.contract import DispatchMessage
+        from server.jobs.dispatch.outbox import enqueue
+
+        kind = str(row["kind"] or "")
+        if kind == "dispatch_probe":
+            if branding.env("ALLOW_DISPATCH_PROBE") != "1":
+                return
+        elif kind != "backtest":
+            return
+        run_spec_hash = str(row["run_spec_hash"] or "")
+        deployment_id = str(row["deployment_id"] or "")
+        if not run_spec_hash or not deployment_id:
+            return
+        if int(row["service_port"] or 0) < 1:
+            return
+        enqueue(
+            conn,
+            DispatchMessage(
+                job_id=str(row["job_id"]),
+                attempt=max(1, int(row["attempt"] or 1)),
+                deployment_id=deployment_id,
+                run_spec_hash=run_spec_hash,
+                job_spec_hash=str(row["job_spec_hash"] or ""),
+                service_port=max(1, int(row["service_port"] or 0)),
+            ),
+        )
 
     def transition(
         self,
@@ -291,6 +331,13 @@ class JobRepository(
                 """,
                 values,
             ).fetchone()
+            if target in TERMINAL_STATUSES:
+                conn.execute(
+                    "DELETE FROM research_job_worker_leases WHERE job_id=?",
+                    (str(job_id),),
+                )
+            if target is JobStatus.QUEUED and updated is not None:
+                self._enqueue_dispatch(conn, updated)
             if target is JobStatus.RUNNING:
                 conn.execute(
                     "DELETE FROM user_job_pins WHERE owner=? AND job_id=?",
@@ -306,6 +353,294 @@ class JobRepository(
 
             cleanup_for_terminal_job(self, record)
         return record
+
+    def claim_attempt(
+        self, job_id: str, attempt: int, *, worker_pid: int | None = None,
+        worker_id: str = "",
+    ) -> JobRecord | None:
+        """Atomically claim one queued JobAttempt for a broker worker.
+
+        Duplicate Celery deliveries for the same (job_id, attempt) return None
+        after the first claim; a later attempt must be a new Job record.
+        """
+        now = time.time()
+        lease_seconds = float(os.environ.get("GTHT_JOB_LEASE_SECONDS", "120"))
+        lease_seconds = max(15.0, lease_seconds)
+        lease_owner = str(worker_id or (worker_pid if worker_pid is not None else "worker"))
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM research_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise KeyError("research job not found")
+            if int(row["attempt"] or 1) != int(attempt):
+                return None
+            if JobStatus(row["status"]) is not JobStatus.QUEUED:
+                return None
+            assignments = ["status='running'", "started_at=?", "updated_at=?"]
+            values: list[Any] = [now, now]
+            if worker_pid is not None:
+                assignments.append("worker_pid=?")
+                values.append(int(worker_pid))
+            values.append(str(job_id))
+            updated = conn.execute(
+                f"UPDATE research_jobs SET {', '.join(assignments)} "
+                "WHERE job_id=? RETURNING *",
+                values,
+            ).fetchone()
+            conn.execute(
+                """
+                INSERT INTO research_job_worker_leases (
+                    job_id, attempt, worker_id, lease_until, heartbeat_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    attempt=excluded.attempt,
+                    worker_id=excluded.worker_id,
+                    lease_until=excluded.lease_until,
+                    heartbeat_at=excluded.heartbeat_at
+                """,
+                (
+                    str(job_id), int(attempt), lease_owner,
+                    now + lease_seconds, now, now,
+                ),
+            )
+            conn.execute(
+                "DELETE FROM user_job_pins WHERE owner=? AND job_id=?",
+                (str(row["owner"]), str(job_id)),
+            )
+        return self._record(updated) if updated is not None else None
+
+    def set_report_ref(self, job_id: str, report_ref: str) -> None:
+        with self._connection() as conn:
+            conn.execute(
+                "UPDATE research_jobs SET report_ref=? WHERE job_id=?",
+                (str(report_ref), str(job_id)),
+            )
+
+    def claim_planning(
+        self, job_id: str, attempt: int,
+    ) -> JobRecord | None:
+        """Atomically claim one submitted JobAttempt for Celery planning."""
+        now = time.time()
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM research_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise KeyError("research job not found")
+            if int(row["attempt"] or 1) != int(attempt):
+                return None
+            if JobStatus(row["status"]) is not JobStatus.SUBMITTED:
+                return None
+            updated = conn.execute(
+                """
+                UPDATE research_jobs
+                SET status='planning', updated_at=?
+                WHERE job_id=? AND status='submitted'
+                RETURNING *
+                """,
+                (now, str(job_id)),
+            ).fetchone()
+        return self._record(updated) if updated is not None else None
+
+    def reset_planning(self, job_id: str) -> None:
+        """Return a planning row to submitted after a publish failure."""
+        with self._connection() as conn:
+            conn.execute(
+                "UPDATE research_jobs SET status='submitted', updated_at=? "
+                "WHERE job_id=? AND status='planning'",
+                (time.time(), str(job_id)),
+            )
+
+    def record_progress(
+        self,
+        job_id: str,
+        attempt: int,
+        *,
+        sequence: int,
+        phase: str,
+        completed: int = 0,
+        total: int = 0,
+        percent: float = 0.0,
+        message: str = "",
+    ) -> bool:
+        """Keep only the newest monotonic snapshot per JobAttempt."""
+        if sequence < 0 or completed < 0 or total < 0 or not 0 <= percent <= 100:
+            raise ValueError("invalid progress snapshot")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT sequence FROM research_job_progress WHERE job_id=? AND attempt=?",
+                (str(job_id), int(attempt)),
+            ).fetchone()
+            if row is not None and int(row["sequence"]) >= int(sequence):
+                return False
+            conn.execute(
+                """
+                INSERT INTO research_job_progress (
+                    job_id, attempt, sequence, phase, completed, total, percent,
+                    message, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id, attempt) DO UPDATE SET
+                    sequence=excluded.sequence,
+                    phase=excluded.phase,
+                    completed=excluded.completed,
+                    total=excluded.total,
+                    percent=excluded.percent,
+                    message=excluded.message,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    str(job_id), int(attempt), int(sequence), str(phase),
+                    int(completed), int(total), float(percent), str(message)[:500],
+                    time.time(),
+                ),
+            )
+            return True
+
+    def progress(self, job_id: str, attempt: int) -> dict[str, Any] | None:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM research_job_progress WHERE job_id=? AND attempt=?",
+                (str(job_id), int(attempt)),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "sequence": int(row["sequence"]),
+            "phase": row["phase"],
+            "completed": int(row["completed"]),
+            "total": int(row["total"]),
+            "percent": float(row["percent"]),
+            "message": row["message"],
+        }
+
+    def heartbeat_worker_target(
+        self, deployment_id: str, service_port: int, worker_id: str,
+        *, capabilities: dict[str, Any] | None = None,
+        ttl_seconds: float = 60.0,
+    ) -> None:
+        now = time.time()
+        ttl = max(10.0, float(ttl_seconds))
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_job_worker_targets (
+                    deployment_id, service_port, worker_id, heartbeat_at,
+                    expires_at, capabilities_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(deployment_id, service_port) DO UPDATE SET
+                    worker_id=excluded.worker_id,
+                    heartbeat_at=excluded.heartbeat_at,
+                    expires_at=excluded.expires_at,
+                    capabilities_json=excluded.capabilities_json
+                """,
+                (
+                    str(deployment_id), int(service_port), str(worker_id), now,
+                    now + ttl, _dumps(capabilities or {}),
+                ),
+            )
+
+    def list_worker_targets(self, *, now: float | None = None) -> list[dict[str, Any]]:
+        timestamp = time.time() if now is None else float(now)
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT deployment_id, service_port, worker_id, heartbeat_at,
+                       expires_at, capabilities_json
+                FROM research_job_worker_targets
+                ORDER BY deployment_id, service_port
+                """
+            ).fetchall()
+        return [
+            {
+                "deployment_id": row["deployment_id"],
+                "service_port": int(row["service_port"]),
+                "worker_id": row["worker_id"],
+                "online": float(row["expires_at"]) >= timestamp,
+                "heartbeat_at": float(row["heartbeat_at"]),
+                "expires_at": float(row["expires_at"]),
+                "capabilities": _loads(row["capabilities_json"], {}),
+            }
+            for row in rows
+        ]
+
+    def worker_target_online(
+        self, deployment_id: str, service_port: int, *, now: float | None = None,
+    ) -> bool:
+        timestamp = time.time() if now is None else float(now)
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT expires_at FROM research_job_worker_targets
+                WHERE deployment_id=? AND service_port=?
+                """,
+                (str(deployment_id), int(service_port)),
+            ).fetchone()
+        return row is not None and float(row["expires_at"]) >= timestamp
+
+    def cancel_requested(self, job_id: str, attempt: int) -> bool:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT cancel_requested_at, status FROM research_jobs "
+                "WHERE job_id=? AND attempt=?",
+                (str(job_id), int(attempt)),
+            ).fetchone()
+        if row is None:
+            return False
+        return row["cancel_requested_at"] is not None or JobStatus(row["status"]) is JobStatus.CANCELLED
+
+    def heartbeat_attempt(
+        self, job_id: str, attempt: int, worker_id: str,
+        *, lease_seconds: float | None = None,
+    ) -> bool:
+        now = time.time()
+        seconds = max(15.0, float(
+            lease_seconds if lease_seconds is not None
+            else os.environ.get("GTHT_JOB_LEASE_SECONDS", "120")
+        ))
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE research_job_worker_leases
+                SET heartbeat_at=?, lease_until=?
+                WHERE job_id=? AND attempt=? AND worker_id=?
+                """,
+                (now, now + seconds, str(job_id), int(attempt), str(worker_id)),
+            )
+            return cursor.rowcount == 1
+
+    def recover_expired_leases(self, *, now: float | None = None) -> list[str]:
+        """Fail running Jobs whose worker lease expired; never auto-replay."""
+        timestamp = time.time() if now is None else float(now)
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT job_id, attempt FROM research_job_worker_leases
+                WHERE lease_until < ?
+                ORDER BY lease_until, job_id
+                """,
+                (timestamp,),
+            ).fetchall()
+        failed: list[str] = []
+        for row in rows:
+            try:
+                self.transition(
+                    str(row["job_id"]),
+                    JobStatus.FAILED,
+                    expected=JobStatus.RUNNING,
+                    error={
+                        "code": "worker_lease_expired",
+                        "message": "worker lease expired before terminal result",
+                    },
+                )
+            except (RuntimeError, KeyError):
+                continue
+            failed.append(str(row["job_id"]))
+        return failed
 
     def set_execution_plan(
         self,
@@ -352,6 +687,13 @@ class JobRepository(
                     str(job_id),
                 ),
             )
+            if target is JobStatus.QUEUED:
+                queued_row = conn.execute(
+                    "SELECT * FROM research_jobs WHERE job_id=?",
+                    (str(job_id),),
+                ).fetchone()
+                if queued_row is not None:
+                    self._enqueue_dispatch(conn, queued_row)
         return self.require(job_id)
 
     def approve_plan(self, job_id: str, *, owner: str) -> JobRecord:
@@ -368,6 +710,12 @@ class JobRepository(
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("job is not awaiting confirmation")
+            queued_row = conn.execute(
+                "SELECT * FROM research_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if queued_row is not None:
+                self._enqueue_dispatch(conn, queued_row)
         return self.require(job_id, owner=owner)
 
     def request_cancel(self, job_id: str, *, owner: str, reason: str) -> JobRecord:
@@ -433,6 +781,11 @@ class JobRepository(
                 conn.execute(
                     "DELETE FROM user_job_pins WHERE owner=? AND job_id=?",
                     (str(owner), str(job_id)),
+                )
+                from server.jobs.dispatch.outbox import cancel_job_in_connection
+
+                cancel_job_in_connection(
+                    conn, str(job_id), max(1, int(row["attempt"] or 1)),
                 )
         record = self._record(updated)
         if record is None:

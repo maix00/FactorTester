@@ -67,6 +67,9 @@
 .backtest-group-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .backtest-group-form-actions button { border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; }
 .backtest-group-form-actions button:last-child { border-color: var(--accent); color: white; background: var(--accent); }
+.backtest-family-strategy-fields { display: grid; gap: 10px; min-width: 0; }
+.backtest-family-strategy-section { display: grid; gap: 8px; min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
+.backtest-family-strategy-section legend { padding-inline: 5px; color: var(--muted); font-size: 12px; font-weight: 650; }
 .backtest-group-form .ft-test-object-picker { min-width: 0; }
 .backtest-group-form .ft-multi-select-heading h2 { font-size: 12px; }
 .backtest-group-form .ft-multi-select-selection { display: none; }

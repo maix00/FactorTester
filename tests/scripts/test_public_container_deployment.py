@@ -677,3 +677,21 @@ def test_public_publish_refuses_without_authorization_before_transport(tmp_path:
     assert result.returncode == 2
     assert "explicit release authorization is required" in result.stderr
     assert "Pushing" not in result.stdout
+
+
+def test_public_image_can_require_a_local_nautilus_wheel() -> None:
+    dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    assert "ARG NAUTILUS_WHEEL_REQUIRED=0" in dockerfile
+    assert "nautilus_trader-*.whl" in dockerfile
+    assert 'elif [ "$NAUTILUS_WHEEL_REQUIRED" = "1" ]' in dockerfile
+
+
+def test_nautilus_builder_scripts_use_the_local_submodule_entrypoint() -> None:
+    build = (ROOT / "scripts" / "server" / "build_nautilus_linux_wheel.sh").read_text(encoding="utf-8")
+    sync = (ROOT / "scripts" / "server" / "sync_nautilus_source.sh").read_text(encoding="utf-8")
+    assert "python/pyproject.toml" in build
+    assert "python/pyproject.toml" in sync
+    assert "NAUTILUS_WHEEL_REQUIRED=1" in (ROOT / "scripts" / "server" / "prepare_nautilus_wheel_for_build.sh").read_text(encoding="utf-8")
+    assert "CARGO_PROFILE_RELEASE_CODEGEN_UNITS" in build

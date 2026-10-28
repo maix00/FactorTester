@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     pass
 
 
+from alpha.factor.annotations import copy_annotation
+
 from .core import FactorExpr, EvaluateContext, semantic_structural_key
 
 class OperandExpr(FactorExpr):
@@ -40,9 +42,7 @@ class OperandExpr(FactorExpr):
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         resolved_operands = [opnd.resolve(*args, **kwargs) for opnd in self._operands]
         resolved = type(self)(self.op, *resolved_operands)
-        if self._is_intermediate:
-            resolved = resolved.as_intermediate(self._intermediate_name, factor=kwargs.get('caller', None))
-        return resolved
+        return copy_annotation(self,resolved)
 
     # ── 通用求值 ──
 
@@ -61,12 +61,6 @@ class OperandExpr(FactorExpr):
     def op_name(self) -> str:
         return self.op.upper()
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        parts = [opnd._to_latex(subst) for opnd in self.operands]
-        return f'\\text{{{self.op}}}({", ".join(parts)})'
 
     def _get_alias(self) -> str:
         parts = [opnd._get_alias() for opnd in self.operands]

@@ -117,7 +117,7 @@ def runtime_input_digest(
 
 
 def build_python_assets(repo: Path, output: Path) -> list[Path]:
-    wheels = [_build_wheel(repo / "tools" / "cli", "factortester", output)]
+    wheels = [_build_wheel(repo / "tools" / "cli", "traderesearch", output)]
     subprocess.run(
         [
             sys.executable,

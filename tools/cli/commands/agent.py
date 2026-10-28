@@ -38,7 +38,7 @@ def doctor(as_json: bool) -> None:
     if as_json:
         click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
         return
-    click.echo("FactorTester CLI doctor")
+    click.echo("TradeResearch CLI doctor")
     for line in render_table(
         ("检查项", "状态", "说明"),
         [(item.name, item.status, item.detail) for item in checks],

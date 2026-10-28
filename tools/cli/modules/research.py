@@ -7,6 +7,7 @@ import json
 import click
 
 from tools.cli.commands.research_catalog import register_research_catalog_commands
+from tools.cli.commands.research_report_edit import register_research_report_edit_commands
 from tools.cli.commands.research_evidence import research_evidence
 from tools.cli.commands.research_report import report
 from tools.cli.core.context import client_from_config
@@ -150,3 +151,4 @@ def register_research_domain(
     research.add_command(research_evidence, name="evidence")
     research.add_command(research_profiles)
     register_research_catalog_commands(research)
+    register_research_report_edit_commands(research)

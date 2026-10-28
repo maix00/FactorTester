@@ -60,53 +60,41 @@ class CompositeExpr(OperandExpr):
     _biOps = {
         'bimax': {
             'symb': 'max',
-            'latex': '\\max',
             'nop': 2,
             'func': lambda a, b: apply_pointwise('bimax', (a, b)),
         },
         'bimin': {
             'symb': 'min',
-            'latex': '\\min',
             'nop': 2,
             'func': lambda a, b: apply_pointwise('bimin', (a, b)),
         },
     }
 
     _Ops = {
-        'add': {'symb': '+', 'latex': '+', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('add', (a, b))},
-        'sub': {'symb': '-', 'latex': '-', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('sub', (a, b))},
-        'mul': {'symb': '*', 'latex': '\\times', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('mul', (a, b))},
-        'div': {'symb': '/', 'latex': '\\frac', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('div', (a, b))},
-        'gt': {'symb': '>', 'latex': '>', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('gt', (a, b))},
-        'lt': {'symb': '<', 'latex': '<', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('lt', (a, b))},
-        'ge': {'symb': '>=', 'latex': '\\ge', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('ge', (a, b))},
-        'le': {'symb': '<=', 'latex': '\\le', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('le', (a, b))},
-        'eq': {'symb': '==', 'latex': '=', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('eq', (a, b))},
-        'ne': {'symb': '!=', 'latex': '\\neq', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('ne', (a, b))},
-        'and': {'symb': '&', 'latex': '\\wedge', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('and', (a, b))},
-        'or': {'symb': '|', 'latex': '\\vee', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('or', (a, b))},
-        'neg': {'symb': '-', 'latex': '-', 'nop': 1, 'func': lambda a, *args: apply_pointwise('neg', (a,))},
-        'abs': {'symb': 'abs', 'latex': '\\mathrm{abs}', 'nop': 1, 'func': lambda a, *args: apply_pointwise('abs', (a,))},
-        'not': {'symb': '~', 'latex': '\\neg', 'nop': 1, 'func': lambda a, *args: apply_pointwise('not', (a,))},
-        'log': {'symb': 'log', 'latex': '\\log', 'nop': 1, 'func': lambda a, *args: apply_pointwise('log', (a,))},
-        'sign': {'symb': 'sign', 'latex': '\\mathrm{sign}', 'nop': 1, 'func': lambda a, *args: apply_pointwise('sign', (a,))},
-        'sqrt': {'symb': 'sqrt', 'latex': '\\sqrt', 'nop': 1, 'func': lambda a, *args: apply_pointwise('sqrt', (a,))},
-        'tanh': {'symb': 'tanh', 'latex': '\\tanh', 'nop': 1, 'func': lambda a, *args: apply_pointwise('tanh', (a,))},
-        'pow': {'symb': '**', 'latex': '^', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('pow', (a, b))},
-        'max': {'symb': 'max', 'latex': '\\max', 'nop': -1, 'func': lambda *args: _reduce_biop('bimax', args)},
-        'min': {'symb': 'min', 'latex': '\\min', 'nop': -1, 'func': lambda *args: _reduce_biop('bimin', args)},
+        'add': {'symb': '+', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('add', (a, b))},
+        'sub': {'symb': '-', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('sub', (a, b))},
+        'mul': {'symb': '*', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('mul', (a, b))},
+        'div': {'symb': '/', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('div', (a, b))},
+        'gt': {'symb': '>', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('gt', (a, b))},
+        'lt': {'symb': '<', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('lt', (a, b))},
+        'ge': {'symb': '>=', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('ge', (a, b))},
+        'le': {'symb': '<=', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('le', (a, b))},
+        'eq': {'symb': '==', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('eq', (a, b))},
+        'ne': {'symb': '!=', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('ne', (a, b))},
+        'and': {'symb': '&', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('and', (a, b))},
+        'or': {'symb': '|', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('or', (a, b))},
+        'neg': {'symb': '-', 'nop': 1, 'func': lambda a, *args: apply_pointwise('neg', (a,))},
+        'abs': {'symb': 'abs', 'nop': 1, 'func': lambda a, *args: apply_pointwise('abs', (a,))},
+        'not': {'symb': '~', 'nop': 1, 'func': lambda a, *args: apply_pointwise('not', (a,))},
+        'log': {'symb': 'log', 'nop': 1, 'func': lambda a, *args: apply_pointwise('log', (a,))},
+        'sign': {'symb': 'sign', 'nop': 1, 'func': lambda a, *args: apply_pointwise('sign', (a,))},
+        'sqrt': {'symb': 'sqrt', 'nop': 1, 'func': lambda a, *args: apply_pointwise('sqrt', (a,))},
+        'tanh': {'symb': 'tanh', 'nop': 1, 'func': lambda a, *args: apply_pointwise('tanh', (a,))},
+        'pow': {'symb': '**', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('pow', (a, b))},
+        'max': {'symb': 'max', 'nop': -1, 'func': lambda *args: _reduce_biop('bimax', args)},
+        'min': {'symb': 'min', 'nop': -1, 'func': lambda *args: _reduce_biop('bimin', args)},
     }
 
-    _LATEX_PRECEDENCE = {
-        'or': 10,
-        'and': 20,
-        'gt': 30, 'lt': 30, 'ge': 30, 'le': 30, 'eq': 30, 'ne': 30,
-        'add': 40, 'sub': 40,
-        'mul': 50, 'div': 50,
-        'pow': 60,
-        'neg': 70, 'abs': 70, 'not': 70, 'log': 70, 'sign': 70, 'sqrt': 70, 'tanh': 70,
-        'max': 80, 'min': 80,
-    }
 
     def __new__(cls, op: str, *operands: FactorExpr, **kwargs) -> 'FactorExpr':
         """表达式规范化：常量折叠 + 等价化简，在构造前归并。
@@ -208,82 +196,9 @@ class CompositeExpr(OperandExpr):
             return self._Ops[self.op]['symb']
         return self.op
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        operands_latex = [opnd._to_latex(subst) for opnd in self.operands]
-        if self.op in self._biOps:
-            op_latex = self._biOps[self.op]['latex']
-            return f'{op_latex}\\left({operands_latex[0]}, {operands_latex[1]}\\right)'
-        if self.op in self._Ops:
-            if self._Ops[self.op]['nop'] == 1:
-                operand_latex = operands_latex[0]
-                operator = self._Ops[self.op]['latex']
-                # Factor construction represents $Rev as neg(SignalAlign).
-                # Natural negation inside the source expression stays black.
-                if self.op == 'neg' and getattr(self.operands[0], 'op', None) == 'SIGNAL_ALIGN':
-                    operator = r'\textcolor{red}{-}'
-                if self.op == 'sqrt':
-                    return f"\\sqrt{{{operand_latex}}}"
-                return f"{operator}\\left({operand_latex}\\right)"
-            elif self._Ops[self.op]['nop'] == 2:
-                left_latex = self._binary_operand_latex(self.operands[0], operands_latex[0], side='left', subst=subst)
-                right_latex = self._binary_operand_latex(self.operands[1], operands_latex[1], side='right', subst=subst)
-                if self.op == 'pow':
-                    return f'{left_latex}^{{{operands_latex[1]}}}'
-                if self.op in ('add', 'sub', 'mul', 'gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
-                    return f'{left_latex} {self._Ops[self.op]["latex"]} {right_latex}'
-                elif self.op in ('div'):
-                    return f'{self._Ops[self.op]["latex"]}{{{left_latex}}}{{{right_latex}}}'
-                else:
-                    return f'{self._Ops[self.op]["latex"]}\\left({left_latex}, {right_latex}\\right)'
-            else:
-                return f'{self._Ops[self.op]["latex"]}\\left({", ".join(operands_latex)}\\right)'
-        else:
-            return f'\\text{{{self.op.capitalize()}}}\\left({", ".join(operands_latex)}\\right)'
 
-    @classmethod
-    def _expr_precedence(cls, expr: FactorExpr) -> int:
-        if not isinstance(expr, CompositeExpr):
-            return 10_000
-        return cls._LATEX_PRECEDENCE.get(expr.op, 0)
 
-    def _needs_parenthesis(self, child: FactorExpr, side: str, subst: dict | None = None) -> bool:
-        if subst is not None and child._structural_key() in subst:
-            return False
-        # A minus sign is not part of an atomic power base.
-        if self.op == 'pow' and side == 'left':
-            if isinstance(child, ConstExpr) and child._to_latex().startswith('-'):
-                return True
-            if isinstance(child, CompositeExpr) and child.op == 'neg':
-                return True
-        if not isinstance(child, CompositeExpr):
-            return False
-        if self.op == 'div':
-            return False
 
-        parent_prec = self._LATEX_PRECEDENCE.get(self.op, 0)
-        child_prec = self._expr_precedence(child)
-
-        if child_prec < parent_prec:
-            return True
-        if child_prec > parent_prec:
-            return False
-
-        # 同优先级时按算子特性处理，保证树结构语义不丢失。
-        if self.op == 'sub' and side == 'right':
-            return True
-        if self.op == 'pow':
-            return True
-        if self.op == 'mul' and child.op == 'div':
-            return True
-        if self.op in ('gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
-            return True
-        return False
-
-    def _binary_operand_latex(self, child: FactorExpr, child_latex: str, side: str, subst: dict | None = None) -> str:
-        return f'\\left({child_latex}\\right)' if self._needs_parenthesis(child, side, subst=subst) else child_latex
 
     def _get_alias(self) -> str:
         op_aliases = {

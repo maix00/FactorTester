@@ -103,6 +103,7 @@ if FACTOR_WORKSPACE:
         scope_trading_day,
         where,
         window_bars,
+        interval_bars,
     )
 
 __all__ = [
@@ -127,6 +128,7 @@ __all__ = [
     "_mask_outside_trunc",
     "_resolve_windows",
     "window_bars",
+    "interval_bars",
     "ShiftOp",
     "_is_zero_shift_period",
     "_strip_latex_time_subscript",

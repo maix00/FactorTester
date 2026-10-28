@@ -555,7 +555,7 @@
   }
 
   async function server(context, body) {
-    body.append(pageHeader(context.t("服务器"), context.t("配置 Manager 与当前 FactorTester 服务端口"), "server.rack"));
+    body.append(pageHeader(context.t("服务器"), context.t("配置 Manager 与当前 TradeResearch 服务端口"), "server.rack"));
     const [ports, manifest] = await Promise.all([
       context.api("/api/jobs/ports"),
       context.api("/api/test-authoring/modules/group_test"),
@@ -585,7 +585,7 @@
       [context.t("端口"), context.t("Manager 管理端口"), location.port || (location.protocol === "https:" ? "443" : "80")],
       [context.t("测试连接"), context.t("当前页面已通过 Manager 读取可用服务"), FTI18n.format("已连接 · %@ 个端口", ports.ports.length)],
     ]));
-    body.append(card(context.t("FactorTester 服务端口"), [
+    body.append(card(context.t("TradeResearch 服务端口"), [
       [context.t(servicePort.label), context.t(servicePort.help_text), input],
     ]));
   }
@@ -767,9 +767,10 @@
     body.append(card(context.t("客户端更新"), [
       [context.t("可用版本"), context.t("当前 Beta 更新通道返回的版本"), release.version || release.short_version || context.t("暂不可用")],
       [context.t("更新渠道"), context.t("Swift 客户端沿用既定发布与签名流程"), "Beta"],
-      [context.t("更新来源"), context.t("由当前 FactorTester 服务返回并经 7998 转发"), release.url || context.t("FactorTester 服务")],
+      [context.t("更新来源"), context.t("由当前 TradeResearch 服务返回并经 7998 转发"), release.url || context.t("TradeResearch 服务")],
     ]));
   }
 
   window.FTSettings = {show};
+window.TRSettings = window.FTSettings;
 })();

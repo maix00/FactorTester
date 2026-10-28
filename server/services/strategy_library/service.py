@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from server.services.strategy_source_inspection import inspect_source, normalize_entrypoint
+from server.services.factor_strategy_templates import normalize_factor_bindings
 
 from .model import normalize_text, normalize_visibility
 from .permissions import access_for, subordinate_principals
@@ -70,6 +71,8 @@ class StrategyLibraryService:
         if revision is None:
             raise RuntimeError("strategy current revision is missing")
         item = dict(entry)
+        item["library_scope"] = "user_custom"
+        item["library_kind"] = "nautilus_strategy_source"
         item["current_revision"] = {
             key: value for key, value in revision.items()
             if key != "source_code"
@@ -132,6 +135,8 @@ class StrategyLibraryService:
         if revision is None:
             raise RuntimeError("strategy current revision is missing")
         item = dict(entry)
+        item["library_scope"] = "user_custom"
+        item["library_kind"] = "nautilus_strategy_source"
         item["access"] = access
         item["shares"] = self.store.shares(strategy_ref) if access["can_share"] else []
         item["current_revision"] = revision
@@ -188,6 +193,7 @@ class StrategyLibraryService:
         requirements = payload.get("requirements") or {}
         if not isinstance(requirements, dict):
             raise ValueError("strategy requirements must be an object")
+        requirements = _normalize_requirements(requirements)
         refs = self.store.create(
             owner_ref=principal, name=name, description=description,
             visibility=visibility, source_sha256=inspection["source_sha256"],
@@ -231,6 +237,7 @@ class StrategyLibraryService:
         requirements = payload.get("requirements", current.get("requirements") or {})
         if not isinstance(requirements, dict):
             raise ValueError("strategy requirements must be an object")
+        requirements = _normalize_requirements(requirements)
         revision = None
         if inspection["source_sha256"] != current["source_sha256"] \
                 or entrypoint != current["entrypoint"] \
@@ -291,3 +298,13 @@ class StrategyLibraryService:
             raise PermissionError("无权管理该策略共享")
         self.store.revoke(strategy_ref, str(target or "").strip())
         return self.shares(strategy_ref, principal=principal)
+
+
+def _normalize_requirements(value: dict[str, Any]) -> dict[str, Any]:
+    result = dict(value)
+    if "factor_bindings" in result:
+        result["factor_bindings"] = normalize_factor_bindings(
+            result["factor_bindings"],
+            field="strategy requirements factor_bindings",
+        )
+    return result

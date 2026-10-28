@@ -516,7 +516,7 @@ def workspace_snapshot_list() -> None:
 
 
 @click.group("run")
-@click.option("--port", "run_ports", multiple=True, type=click.IntRange(1, 65535), help="提交到指定 FactorTester 端口。")
+@click.option("--port", "run_ports", multiple=True, type=click.IntRange(1, 65535), help="提交到指定 TradeResearch 端口。")
 def run(run_ports: tuple[int, ...]) -> None:
     """Submit and inspect immutable research runs."""
     if len(run_ports) > 1 or len(requested_ports()) > 1:
@@ -923,7 +923,7 @@ def run_clone_workspace(run_id: str, title: str) -> None:
 
 
 @click.group("job")
-@click.option("--port", "job_ports", multiple=True, type=click.IntRange(1, 65535), help="操作指定 FactorTester 端口的任务。")
+@click.option("--port", "job_ports", multiple=True, type=click.IntRange(1, 65535), help="操作指定 TradeResearch 端口的任务。")
 def job(job_ports: tuple[int, ...]) -> None:
     """Observe and control durable job attempts."""
 
@@ -977,7 +977,7 @@ def job_list(
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
 def job_ports(as_json: bool) -> None:
-    """列出 manager 发现的 FactorTester 任务端口。"""
+    """列出 manager 发现的 TradeResearch 任务端口。"""
     ports = client_from_config().list_job_ports()
     if as_json:
         click.echo(_json({"ports": ports, "count": len(ports)}))
@@ -990,6 +990,45 @@ def job_ports(as_json: bool) -> None:
 @friendly_errors
 def job_status(job_id: str) -> None:
     click.echo(_json(client_from_config().get_job(job_id)))
+
+
+@job.command("queue")
+@click.argument("job_id")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def job_queue(job_id: str, as_json: bool) -> None:
+    """Show this Job's dispatch target queue, port and persisted progress."""
+    detail = client_from_config().get_job(job_id)
+    canonical = detail.get("task_detail") or detail
+    job_value = canonical.get("job") or detail
+    context = job_value.get("server_context") or detail.get("server_context") or {}
+    server_id = str(context.get("server_id") or "")
+    port = int(context.get("port") or job_value.get("port") or 0)
+    payload = {
+        "job_id": job_id,
+        "status": job_value.get("status") or detail.get("status"),
+        "attempt": job_value.get("attempt") or detail.get("attempt"),
+        "server_id": server_id,
+        "service_port": port,
+        "queue": (
+            f"factortester.jobs.{server_id}.{port}"
+            if server_id and port else ""
+        ),
+        "progress": detail.get("progress") or canonical.get("progress"),
+    }
+    if as_json:
+        click.echo(_json(payload))
+        return
+    click.echo(
+        f"{payload['job_id']} {payload['status']} attempt={payload['attempt']} "
+        f"queue={payload['queue'] or 'unknown'}"
+    )
+    progress = payload.get("progress") or {}
+    if progress:
+        click.echo(
+            f"progress seq={progress.get('sequence')} phase={progress.get('phase')} "
+            f"{progress.get('completed')}/{progress.get('total')} {progress.get('percent')}%"
+        )
 
 
 @job.command("config")

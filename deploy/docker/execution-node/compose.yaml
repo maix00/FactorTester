@@ -1,0 +1,55 @@
+name: traderesearch-execution-node
+
+x-node: &node
+  image: ${TR_EXECUTION_IMAGE:?set a versioned tested execution image}
+  restart: unless-stopped
+  environment: &environment
+    TR_MANAGER_ENDPOINT: ${TR_MANAGER_ENDPOINT:?set owning Manager control endpoint}
+    TR_MANAGER_ID: ${TR_MANAGER_ID:?set owning Manager identity}
+    TR_EXECUTION_NODE_ID: ${TR_EXECUTION_NODE_ID:?set stable execution node identity}
+    TR_NODE_DESCRIPTOR_FILE: /config/node.json
+    TR_NODE_STATE_DIR: /node-state
+    TR_OIDC_ISSUER: ${TR_OIDC_ISSUER:?set Keycloak issuer}
+    TR_OIDC_CLIENT_ID: ${TR_OIDC_CLIENT_ID:?set scoped node client}
+    TR_OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc
+    FACTORTESTER_FEDERATION_CA_FILE: ${TR_CA_FILE_IN_CONTAINER:-}
+    FACTORTESTER_BROKER_URL: ${TR_BROKER_URL:?set broker URL with node queue ACL}
+    FACTORTESTER_JOB_QUEUE: ${TR_JOB_QUEUE:-factortester.jobs}
+    GTHT_JOB_ARTIFACT_ROOT: /node-state/artifacts
+    TR_DATA_HOST_ROLE: server
+    TR_DATA_DEVICE_REF: ${TR_SHARED_STORAGE_ID:?set actual kernel/storage domain}
+    TR_SHARED_DATA_CACHE_ROOT: /shared-cache
+    TR_SHARED_DATA_CACHE_BYTES: ${TR_SHARED_DATA_CACHE_BYTES:-536870912}
+    TR_SHARED_DATA_ENTRY_BYTES: ${TR_SHARED_DATA_ENTRY_BYTES:-67108864}
+    TR_DATA_QUERY_CONCURRENCY: ${TR_DATA_QUERY_CONCURRENCY:-2}
+  volumes:
+    - ${TR_NODE_DESCRIPTOR:?set descriptor path}:/config/node.json:ro
+    - ${TR_NODE_STATE_ROOT:?set node-private state directory}:/node-state
+    - ${TR_DATA_ROOT:?set node-owned data directory}:/data:ro
+    - ${TR_SHARED_CACHE_ROOT:?set host shared cache directory}:/shared-cache
+    - ${TR_OIDC_SECRET_FILE:?set owner-only secret path}:/run/secrets/oidc:ro
+  cpus: ${TR_NODE_CPUS:-2}
+
+services:
+  worker:
+    <<: *node
+    mem_limit: ${TR_WORKER_MEMORY:-2g}
+    command: [python, -m, server.jobs.dispatch.node_cli, worker, --pool=solo, --concurrency=1, --prefetch-multiplier=1, --loglevel=INFO]
+  market:
+    <<: *node
+    mem_limit: ${TR_MARKET_MEMORY:-512m}
+    environment:
+      <<: *environment
+      TR_OIDC_CLIENT_ID: ${TR_MARKET_OIDC_CLIENT_ID:?set market introspection client}
+      TR_OIDC_CLIENT_SECRET_FILE: /run/secrets/market-oidc
+      TR_OIDC_AUDIENCE: ${TR_MARKET_OIDC_AUDIENCE:?set market API audience}
+      TR_NODE_MARKET_PROVIDER: server.services.product_market_data.node_adapter:read_installed_market
+    volumes:
+      - ${TR_NODE_DESCRIPTOR:?set descriptor path}:/config/node.json:ro
+      - ${TR_NODE_STATE_ROOT:?set node-private state directory}:/node-state
+      - ${TR_DATA_ROOT:?set node-owned data directory}:/data:ro
+      - ${TR_SHARED_CACHE_ROOT:?set host shared cache directory}:/shared-cache
+      - ${TR_MARKET_OIDC_SECRET_FILE:?set market introspection secret}:/run/secrets/market-oidc:ro
+    ports:
+      - ${TR_NODE_BIND:-127.0.0.1}:${TR_NODE_MARKET_PORT:-18000}:18000
+    command: [python, -m, server.jobs.dispatch.node_cli, serve-data, --bind, 0.0.0.0, --port, '18000']

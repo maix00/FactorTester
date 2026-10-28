@@ -204,7 +204,7 @@ def test_manager_action_rejects_unknown_or_ambiguous_port(monkeypatch) -> None:
     ])
 
     assert duplicate.exit_code != 0
-    assert "多个 FactorTester 服务" in duplicate.output
+    assert "多个 TradeResearch 服务" in duplicate.output
     assert missing.exit_code != 0
     assert "没有找到" in missing.output
 

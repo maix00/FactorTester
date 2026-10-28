@@ -1307,25 +1307,28 @@
       return out;
     };
     let previewFrame = 0;
+    let previewRevision = 0;
     let refreshParameterComposition = () => {};
     const refreshFormulaPreview = () => {
-      if (previewFrame) return;
-      const schedule = window.requestAnimationFrame || (callback => setTimeout(callback, 0));
-      previewFrame = schedule(() => {
+      ++previewRevision;
+      if (previewFrame) clearTimeout(previewFrame);
+      previewFrame = setTimeout(async () => {
         previewFrame = 0;
+        const revision = previewRevision;
         const target = topMount.querySelector?.(".factor-family-formula");
         if (!target) return;
-        const formula = window.FTFactorDetailShared.previewExpression(
-          state.family || state.inspection || state.loaded,
-          attachNestedTemplates(state.parameterValues),
-        );
-        // 编辑/新建模式：用「因子家族 math_expr(LATEX模板) + 参数列表」在现场（浏览器）做
-        // 参数替换 + 嵌套因子叠加，得到预览公式。这与查看模式（渲染后端 resolved_math_expr）
-        // 是两条路径：编辑可改嵌套因子，故须前端即时重算。math_expr=模板输入、resolved=输出。
+        let formula;
+        try {
+          formula = await window.FTFactorDetailShared.previewExpression(
+            state.family || state.inspection || state.loaded,
+            attachNestedTemplates(state.parameterValues), {api: context.api});
+        } catch (_) { return; }
+        if (revision !== previewRevision || target !== topMount.querySelector?.(".factor-family-formula")) return;
+        // alpha is the sole composer; the browser only renders the current response.
         if (!formula) return;
         if (window.katex) window.FTUI?.renderMath?.(target, formula, {display: true});
         else target.textContent = formula;
-      });
+      }, 100);
     };
     const redraw = () => {
       refreshParameterComposition = () => {};
@@ -1339,17 +1342,14 @@
       // does not move the formula into the source tab or make it disappear
       // when the tab content is rebuilt.
       const formulaSource = state.inspection || state.family || state.loaded;
-      const liveExpression = !state.familyMode
-        ? window.FTFactorDetailShared.previewExpression(
-          formulaSource, attachNestedTemplates(state.parameterValues),
-        ) : "";
       topMount.append(window.FTFactorDetailShared.summary(context, {
         ...(formulaSource || {}),
-        math_expr: liveExpression || formulaSource?.math_expr
+        math_expr: formulaSource?.math_expr
           || formulaSource?.expression
           || formulaSource?.resolved_math_expr || "",
         description: formulaSource?.description || formulaSource?.desc || "",
       }));
+      if (!state.familyMode) refreshFormulaPreview();
       sourceMount.replaceChildren();
       if (state.familyMode) {
         sourceMount.append(sourceControls(context, state, redraw, {

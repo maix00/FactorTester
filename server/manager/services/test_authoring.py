@@ -68,6 +68,8 @@ class TestAuthoringService:
                     "/api/product-library/data-source-categories",
                     "/api/jobs/artifact-capabilities",
                     "/api/test-authoring/modules",
+                    "/api/test-authoring/configuration-schema",
+                    "/api/test-authoring/execution-targets",
                 }
                 or cls._SETTINGS_RE.fullmatch(path)
                 or cls._SETTINGS_SUMMARY_RE.fullmatch(path)
@@ -79,7 +81,7 @@ class TestAuthoringService:
             )
         if method == "POST":
             return bool(
-                path == "/api/test-authoring/workspaces"
+                path in {"/api/test-authoring/workspaces", "/api/runs", "/api/runs/preview", "/api/test-authoring/execution-plan/resolve"}
                 or cls._SAVE_TEMPLATE_RE.fullmatch(path)
                 or cls._LOAD_TEMPLATE_RE.fullmatch(path)
                 or cls._STRATEGIES_RE.fullmatch(path)
@@ -138,6 +140,14 @@ class TestAuthoringService:
         owner: str,
         query: dict[str, list[str]] | None = None,
     ) -> TestAuthoringResponse:
+        if path == "/api/test-authoring/execution-targets":
+            from server.modules.single_factor_test.execution_nodes import visible_targets
+            return TestAuthoringResponse({"success": True, "targets": visible_targets(owner)})
+        if path == "/api/test-authoring/configuration-schema":
+            from tools.testers.settings.json_schema import configuration_editor_contract
+
+            locale = str((query or {}).get("locale", ["zh"])[0])
+            return TestAuthoringResponse({"success": True, **configuration_editor_contract(locale=locale)})
         if path == "/api/test-authoring/modules":
             from server.modules.single_factor_test.backtest_settings import (
                 _navigation_children,
@@ -244,10 +254,53 @@ class TestAuthoringService:
         value = str(values.get("include_source", ["0"])[0] or "0")
         return value.strip().lower() in {"1", "true", "yes", "on"}
 
+    def node_job_operation(self, *, job_id: str, suffix: str, owner: str) -> TestAuthoringResponse:
+        """Reuse established owner-scoped handlers without a business listener."""
+        from server.jobs.repository.sqlite import JobRepository
+        record = JobRepository().load(job_id, owner=owner)
+        if record is None or not record.job_spec.get("execution_binding"):
+            return TestAuthoringResponse({"success": False, "error": "node Job not found"}, 404)
+        from flask import Flask, session
+        from server.modules.single_factor_test.backtest_job_reads import (
+            get_test_job, get_test_job_result, list_test_job_artifacts,
+        )
+        from server.modules.single_factor_test.backtest_jobs import cancel_test_job
+        actions = {"": get_test_job, "/result": get_test_job_result,
+                   "/artifacts": list_test_job_artifacts, "/cancel": cancel_test_job}
+        if suffix not in actions:
+            raise ValueError("unsupported node Job operation")
+        app = Flask("traderesearch-job-control")
+        import secrets
+        app.secret_key = secrets.token_bytes(32)
+        with app.test_request_context("/api/jobs/" + job_id + suffix, method="POST" if suffix == "/cancel" else "GET"):
+            session["username"] = owner
+            response = app.make_response(actions[suffix](job_id))
+            return TestAuthoringResponse(response.get_json(), response.status_code)
+
     def write(
         self, method: str, path: str, *, owner: str, payload: dict[str, Any],
+        trusted_context: bool = False,
     ) -> TestAuthoringResponse:
         from server.services import research_configurations, research_workspaces
+
+        if method == "POST" and path in {"/api/runs", "/api/runs/preview"}:
+            # Adapt the existing control API functions; never start a Flask
+            # listener or import/run an execution engine in the Manager.
+            from flask import Flask, session
+            from server.modules.single_factor_test.research_jobs import (
+                submit_research_run, preview_research_run,
+            )
+            if not trusted_context:
+                from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
+                payload = {key: value for key, value in payload.items() if key != MANAGER_RUN_CONTEXT_KEY}
+            app = Flask("traderesearch-run-control")
+            import secrets
+            app.secret_key = secrets.token_bytes(32)
+            with app.test_request_context(path, method="POST", json=payload):
+                session["username"] = owner
+                value = submit_research_run() if path == "/api/runs" else preview_research_run()
+                response = app.make_response(value)
+                return TestAuthoringResponse(response.get_json(), response.status_code)
 
         if match := self._STRATEGIES_RE.fullmatch(path):
             from server.manager.services.test_authoring_strategies import write
@@ -319,7 +372,8 @@ class TestAuthoringService:
                 try:
                     from server.services import configuration_strategies
 
-                    candidate = payload.get("payload")
+                    from server.services.execution_plans import encode
+                    candidate = encode(payload["execution_plan"]) if "execution_plan" in payload else payload.get("payload")
                     if isinstance(candidate, dict):
                         configuration_strategies.validate(
                             candidate,
@@ -333,7 +387,7 @@ class TestAuthoringService:
                 try:
                     value = research_configurations.update_workspace_configuration(
                         workspace_id=unquote(match.group(1)), owner=owner,
-                        expected_revision=revision, payload=payload.get("payload"),
+                        expected_revision=revision, payload=candidate,
                     )
                 except research_configurations.ConfigurationRevisionConflict as exc:
                     raise TestAuthoringError(

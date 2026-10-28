@@ -3,40 +3,14 @@
     backtest_groups: Object.freeze({
       render: groupList,
       selected: state => FTBacktestGroupModel.selected(state),
-      removeSelected: state => FTBacktestGroupModel.removeSelected(state),
+      removeSelected: state => removeSelected(state),
       actions: Object.freeze({
-        create: (_state, _selected) => ({mode: "base"}),
-        derive: (_state, selected) => ({mode: "derived", parentID: selected[0]?.id}),
+        create: (_state, _selected) => ({mode: "family"}),
         edit: (_state, selected) => ({mode: "edit", groupID: selected[0]?.id}),
         rename: (_state, selected) => ({
           mode: "rename", strategyKind: "group", strategyID: selected[0]?.id,
         }),
-        compose: (_state, selected) => ({
-          mode: "ls", groupIDs: selected.map(group => group.id),
-        }),
       }),
-    }),
-    backtest_long_short: Object.freeze({
-      render: longShortList,
-      selected: state => FTBacktestGroupModel.selectedLongShort(state),
-      removeSelected: state => FTBacktestGroupModel.removeSelectedLongShort(state),
-      actions: Object.freeze({
-        create: (_state, _selected) => ({mode: "ls"}),
-        edit: (_state, selected) => ({mode: "ls", strategyID: selected[0]?.id}),
-        rename: (_state, selected) => ({
-          mode: "rename", strategyKind: "long_short", strategyID: selected[0]?.id,
-        }),
-        swap: (state, selected) => {
-          const id = selected[0]?.id;
-          if (id) FTBacktestGroupModel.swapLongShort(state, id);
-        },
-      }),
-    }),
-    backtest_custom_strategies: Object.freeze({
-      render: customStrategyList,
-      selected: () => [],
-      removeSelected: () => [],
-      actions: Object.freeze({}),
     }),
   });
 
@@ -46,7 +20,8 @@
 
   function render(context, state, refresh) {
     const restoredEditor = state.backtestGroupEditor;
-    const restoredFlow = restoredEditor?.mode === "edit" ? "edit"
+    const restoredFlow = restoredEditor?.mode === "family" ? "family"
+      : restoredEditor?.mode === "edit" ? "edit"
       : restoredEditor?.mode === "derived" ? "derive"
         : restoredEditor?.mode === "base" ? "create" : "";
     if (restoredFlow && editorCatalogsNeedLoad(state)) {
@@ -54,9 +29,9 @@
     }
     return FTConfigurationGroupSurface.render({
       context, state, refresh, adapters, initialize,
-      title: "策略组设置",
-      description: "下方策略与组合会冻结在同一次回测任务中",
-      count: `${strategyCount(state)} ${context.t("项策略")}`,
+      title: "策略组",
+      description: "在策略组中添加策略家族实例；配置项由家族声明的参数结构生成",
+      count: `${strategyCount(state)} ${context.t("个策略")}`,
       activeKey: "backtestGroupSurfaceKey",
       openKey: "backtestGroupsOpen",
       editorKey: "backtestGroupEditor",
@@ -68,8 +43,8 @@
       barClass: "backend-settings-tab-bar backtest-group-tab-bar",
       hostClass: "backend-settings-host backtest-group-host",
       panelClass: "backtest-group-panel",
-      emptyTitle: "暂无策略组设置",
-      emptyDescription: "后端没有为该测试注册策略组 surface",
+      emptyTitle: "暂无策略",
+      emptyDescription: "从策略库选择策略家族并添加策略实例",
       renderEditor: (ctx, current, editor, onFinish) => (
         FTBacktestGroupForm.render(ctx, current, editor, onFinish)
       ),
@@ -80,19 +55,87 @@
   function loadEditorCatalogs(context, state, flow, refresh) {
     // The editor is intentionally lightweight on first paint, but its fallback
     // scope is the same visible catalog used by the factor/product tabs.
-    if (!["create", "derive", "edit"].includes(flow.kind)) return;
+    const kind = flow.kind || flow.mode || "";
+    if (!["create", "family", "derive", "edit"].includes(kind)) return;
     const loaders = [
       window.FTTests?.ensureProductsForExecution?.(context, state, refresh),
       window.FTTests?.ensureFactorsForExecution?.(context, state, refresh),
     ];
+    if (!state.strategyFamilyCatalog && !state.strategyFamilyCatalogPromise
+      && !state.strategyFamilyCatalogError) {
+      state.strategyFamilyCatalogPromise = Promise.all([
+        FTStrategyLibraryRuntime.factorStrategies(context),
+        FTStrategyLibraryRuntime.list(context, {scope: "all", page: 1, limit: 100})
+          .catch(error => ({items: [], error: error.message || String(error)})),
+      ])
+        .then(([catalog, library]) => {
+          state.strategyFamilyCatalog = mergeStrategyCatalogs(catalog, library);
+          state.strategyLibraryCatalogError = library.error || "";
+        })
+        .catch(error => { state.strategyFamilyCatalogError = error.message || String(error); })
+        .finally(() => { state.strategyFamilyCatalogPromise = null; refresh(); });
+      loaders.push(state.strategyFamilyCatalogPromise);
+    }
     if (loaders.some(Boolean)) void Promise.all(loaders).then(refresh).catch(error => {
       state.backtestGroupCatalogError = error.message || String(error);
       refresh();
     });
   }
 
+  function mergeStrategyCatalogs(catalog, library) {
+    const families = Array.isArray(catalog?.families) ? [...catalog.families] : [];
+    const items = Array.isArray(catalog?.items) ? [...catalog.items] : [];
+    const userStrategies = Array.isArray(library?.items) ? library.items : [];
+    if (!userStrategies.length) return {...catalog, families, items};
+    const familyRef = "nautilus-strategy-family:user-authored";
+    const familyRevisionRef = "nautilus-strategy-family-revision:user-authored:1";
+    const userItems = userStrategies.map(item => {
+      const revisionRef = String(item.current_revision_ref || item.current_revision?.revision_ref || "");
+      const strategyRef = String(item.strategy_ref || "");
+      return {
+        ...item,
+        object_kind: "strategy",
+        library_scope: item.library_scope || "user_custom",
+        library_kind: item.library_kind || "nautilus_strategy_source",
+        family_ref: familyRef,
+        family_revision_ref: familyRevisionRef,
+        strategy_revision_ref: revisionRef,
+        revision_ref: revisionRef,
+        configuration_schema: {
+          schema_ref: `${revisionRef}:configuration-schema:1`,
+          version: 1,
+          fields: [{
+            key: "product_group_ref", label: "产品组", type: "product_group_ref",
+            required: true, section: "产品范围",
+          }],
+        },
+        strategy_ref: strategyRef,
+      };
+    }).filter(item => item.strategy_ref && item.revision_ref);
+    if (!userItems.length) return {...catalog, families, items};
+    families.push({
+      family_ref: familyRef,
+      family_revision_ref: familyRevisionRef,
+      object_kind: "strategy_family",
+      library_scope: "user_custom",
+      read_only: true,
+      name: "用户策略",
+      description: "从用户策略库选择已冻结版本的 Nautilus Strategy 实现。",
+      strategy_refs: userItems.map(item => item.strategy_ref),
+      configuration_schema: {
+        schema_ref: `${familyRevisionRef}:configuration-schema:1`,
+        version: 1,
+        fields: userItems[0].configuration_schema.fields,
+      },
+    });
+    items.push(...userItems);
+    return {...catalog, families, items};
+  }
+
   function editorCatalogsNeedLoad(state) {
-    return ["factors", "products"].some(key => (
+    return !state.strategyFamilyCatalog && !state.strategyFamilyCatalogPromise
+      && !state.strategyFamilyCatalogError
+      || ["factors", "products"].some(key => (
       state.lazy?.[key]?.status === "idle"
     ));
   }
@@ -123,8 +166,8 @@
       })),
     }));
     return FTStrategyList.render({
-      context, title: context.t("分组组合"),
-      count: `${state.analysis.groups.length} ${context.t("个组")} / ${batches.length} ${context.t("个添加批次")}`,
+      context, title: context.t("策略组"),
+      count: `${state.analysis.groups.length} ${context.t("个策略")} / ${batches.length} ${context.t("个添加批次")}`,
       batches, selection: selectionType(surface) === "radio" ? "single" : "multi",
       showConfigOpen: state.backtestGroupConfigOpen === true,
       onToggleConfig: open => { state.backtestGroupConfigOpen = open; refresh(); },
@@ -213,6 +256,22 @@
     const adapter = adapters[name];
     if (!adapter) throw new Error(`未实现的策略组内容适配器: ${name}`);
     return adapter;
+  }
+
+  function removeSelected(state) {
+    const ids = new Set(FTBacktestGroupModel.selected(state).map(item => String(item.id)));
+    const removed = FTBacktestGroupModel.removeSelected(state);
+    state.analysis.factor_strategy_bindings = (
+      state.analysis.factor_strategy_bindings || []
+    ).filter(item => !ids.has(String(item.strategy_id || item.target_strategy_id || "")));
+    state.analysis.strategy_venue_bindings = (
+      state.analysis.strategy_venue_bindings || []
+    ).filter(item => !ids.has(String(item.strategy_id || "")));
+    state.strategyBindings = (state.strategyBindings || []).filter(item => (
+      !ids.has(String(item.target_strategy_id || ""))
+    ));
+    state.nautilusReview = null;
+    return removed;
   }
 
   function strategyCount(state) {

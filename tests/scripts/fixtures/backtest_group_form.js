@@ -36,6 +36,7 @@ class Element {
 
 global.window = {};
 global.document = {createElement: tag => new Element(tag)};
+global.FTUI = {empty: () => new Element("empty")};
 global.FTTestFieldRow = {
   create: (_label, control) => {
     const row = new Element("field-row");
@@ -135,7 +136,8 @@ const groups = [
   {id: "g2", name: "第二组"},
 ];
 global.FTBacktestGroupModel = {
-  find: (_state, id) => groups.find(item => item.id === id),
+  find: (current, id) => current.analysis.groups.find(item => item.id === id)
+    || groups.find(item => item.id === id),
   groupLabel: value => value?.name || value?.id || "",
   rootsAndChildren: () => groups.map(group => ({group})),
   registeredOverrides: () => ({}),
@@ -169,7 +171,7 @@ const context = {
   },
 };
 const state = {
-  analysis: {groups: [], ls_configs: []},
+  analysis: {groups: [], ls_configs: [], factor_strategy_bindings: []},
   groups,
   factors: [{ref: "factor:v2:roc", alias: "ROC"}],
   values: {split_count: 5, group_index: 1},
@@ -207,4 +209,97 @@ assert.deepEqual(scopedSourceInitial.factor_candidate_refs, [],
 assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
   context, state, {mode: "ls", groupIDs: ["g1", "g2"]}, () => {},
 ), "opening the Long-Short form must mount picker elements");
+
+state.strategyFamilyCatalog = {
+  families: [{
+    family_ref: "family:group", family_revision_ref: "family-rev:1",
+    name: "因子横截面分组", strategy_refs: ["strategy:group"],
+  }],
+  items: [{
+    object_kind: "strategy", family_ref: "family:group",
+    template_ref: "strategy:group", revision_ref: "strategy-rev:1",
+    strategy_ref: "strategy:group", strategy_revision_ref: "strategy-rev:1",
+    name: "因子横截面分组第 N 组",
+    configuration_schema: {schema_ref: "schema:1", fields: [
+      {key: "signal", label: "分组因子", type: "factor_ref", required: true},
+      {key: "product_group_ref", label: "产品组", type: "product_group_ref", required: true},
+      {key: "split_count", label: "分组数", type: "integer", required: true, default: 5, minimum: 2},
+      {key: "group_index", label: "分组序数", type: "integer", required: true, default: 1, minimum: 1, maximum_from: "split_count"},
+    ]},
+  }],
+};
+const familyForm = window.FTBacktestGroupForm.render(
+  context, state, {mode: "family"}, () => {},
+);
+function findByLabel(root, label) {
+  if (root["aria-label"] === label) return root;
+  for (const child of root.children || []) {
+    const found = findByLabel(child, label);
+    if (found) return found;
+  }
+  return null;
+}
+function findButton(root, label) {
+  if (root.tagName === "button" && root.textContent === label) return root;
+  for (const child of root.children || []) {
+    const found = findButton(child, label);
+    if (found) return found;
+  }
+  return null;
+}
+assert.ok(findByLabel(familyForm, "策略家族"));
+assert.ok(findByLabel(familyForm, "策略实现"));
+assert.ok(findByLabel(familyForm, "分组因子"));
+assert.ok(findByLabel(familyForm, "产品组"));
+assert.ok(findByLabel(familyForm, "分组数"));
+assert.ok(findByLabel(familyForm, "分组序数"));
+findByLabel(familyForm, "分组因子").value = "factor:v2:roc";
+findByLabel(familyForm, "产品组").value = "g1";
+findButton(familyForm, "保存").listeners.click();
+assert.equal(state.analysis.groups.length, 1);
+assert.deepEqual(state.analysis.groups[0].parameters, {split_count: 5, group_index: 1});
+assert.equal(state.analysis.groups[0].product_group_ref, "g1");
+assert.deepEqual(state.analysis.factor_strategy_bindings[0].factor_bindings, {
+  signal: "factor:v2:roc",
+});
+assert.equal(state.analysis.factor_strategy_bindings[0].family_revision_ref, "family-rev:1");
+
+state.strategyFamilyCatalog.families.push({
+  family_ref: "nautilus-strategy-family:user-authored",
+  family_revision_ref: "nautilus-strategy-family-revision:user-authored:1",
+  name: "用户策略", strategy_refs: ["strategy:user"],
+});
+state.strategyFamilyCatalog.items.push({
+  object_kind: "strategy", library_kind: "nautilus_strategy_source",
+  family_ref: "nautilus-strategy-family:user-authored",
+  strategy_ref: "strategy:user", current_revision_ref: "strategy-revision:r2",
+  revision_ref: "strategy-revision:r2", name: "My Nautilus Strategy",
+  source_sha256: "abc123",
+  current_revision: {source_sha256: "abc123"},
+  configuration_schema: {schema_ref: "strategy-revision:r2:configuration-schema:1", fields: [
+    {key: "product_group_ref", label: "产品组", type: "product_group_ref", required: true},
+  ]},
+});
+const libraryForm = window.FTBacktestGroupForm.render(
+  context, state, {mode: "family"}, () => {},
+);
+findByLabel(libraryForm, "策略家族").value = "nautilus-strategy-family:user-authored";
+findByLabel(libraryForm, "策略家族").listeners.change();
+findByLabel(libraryForm, "产品组").value = "g2";
+findButton(libraryForm, "保存").listeners.click();
+assert.equal(state.analysis.groups.length, 2);
+assert.equal(state.analysis.groups[1].strategy_kind, "library");
+assert.equal(state.analysis.groups[1].strategy_revision_ref, "strategy-revision:r2");
+assert.equal(state.strategyBindings[0].target_strategy_id, state.analysis.groups[1].id);
+assert.equal(state.strategyBindings[0].source.strategy_ref, "strategy:user");
+assert.equal(state.strategyBindings[0].source.revision_ref, "strategy-revision:r2");
+assert.equal(state.strategyBindings[0].source.source_sha256, "abc123");
+assert.equal(state.analysis.factor_strategy_bindings.length, 1,
+  "adding a user strategy must not leave a stale factor-template binding");
+const editLibraryForm = window.FTBacktestGroupForm.render(
+  context, state, {mode: "edit", groupID: state.analysis.groups[1].id}, () => {},
+);
+assert.ok(findByLabel(editLibraryForm, "策略家族"),
+  "editing a library strategy must keep the family-driven configuration form");
+assert.equal(findByLabel(editLibraryForm, "产品组").value, "g2");
 console.log("ok");

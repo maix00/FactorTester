@@ -41,36 +41,32 @@ def _factor_runtime_scope(payload: dict[str, Any]):
 
 def run_group(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     from server.modules.single_factor_test.planning import verify_execution_plan
-    from tools.factors.tester_calc.single_factor_test.group.research_run import (
-        execute_group_run_spec,
-    )
 
     scope = _factor_runtime_scope(payload)
     with scope:
         verify_execution_plan("backtest", payload)
-        execute_group_run_spec(
-            payload, sink=_factor_series_sink(payload, sink),
-            cancel_event=cancel_event,
+        if cancel_event.is_set():
+            sink.emit_error("backtest job cancelled before start", cancelled=True)
+            return
+        run_spec = payload.get("run_spec") or {}
+        configuration = run_spec.get("configuration") or {}
+        analyses = (
+            (configuration.get("payload") or configuration).get("analyses") or {}
         )
-
-
-def _factor_series_sink(payload: dict[str, Any], sink: Any) -> Any:
-    if "factor_series" not in set(payload.get("output_requests") or ()):
-        return sink
-
-    class Sink:
-        def __getattr__(self, name: str) -> Any:
-            return getattr(sink, name)
-
-        def emit_result(self, data: dict[str, Any], **kwargs: Any) -> None:
-            from server.modules.single_factor_test.evaluation import (
-                factor_series_for_run_spec,
+        backtest = analyses.get("backtest") or {}
+        execution = backtest.get("execution") or {}
+        if (execution.get("backend") != "nautilus_trader"
+                or execution.get("contract_version") != 4):
+            sink.emit_error(
+                "legacy backtest execution has been retired; this Job requires "
+                "a NautilusTrader RunSpec",
+                error_code="legacy_backtest_retired",
             )
-            sink.emit_result({
-                **data, "factor_series": factor_series_for_run_spec(payload),
-            }, **kwargs)
-
-    return Sink()
+            return
+        sink.emit_error(
+            "NautilusTrader Job runner is not enabled on this worker",
+            error_code="nautilus_execution_unavailable",
+        )
 
 
 def _run_analysis(payload: dict[str, Any], sink: Any, cancel_event: Any, *, kind: str) -> None:
@@ -213,3 +209,16 @@ def run_ic(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
             sink=sink,
             cancel_event=cancel_event,
         )
+
+def nautilus_backtest_runner_status() -> dict[str, Any]:
+    """Advertise the registered Nautilus Job executor for submission capability."""
+    try:
+        from server.services.nautilus_bridge.job_executor import execute_nautilus_job
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": f"Nautilus Job executor is unavailable: {type(exc).__name__}: {exc}",
+        }
+    if not hasattr(execute_nautilus_job, "execute"):
+        return {"available": False, "reason": "Nautilus Job executor has no execute method"}
+    return {"available": True, "reason": ""}

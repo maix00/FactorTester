@@ -33,6 +33,28 @@ final class APIClient: NSObject {
 
     private let decoder = JSONDecoder()
 
+    func researchReport(publicationID: String) async throws -> [String: Any] {
+        let data = try await request(
+            path: "/api/research-reports/\(publicationID)",
+        )
+        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
+    func applyResearchReportOperation(
+        publicationID: String,
+        baseRev: String,
+        operation: [String: Any],
+    ) async throws -> [String: Any] {
+        var payload = operation
+        payload["base_rev"] = baseRev
+        let data = try await request(
+            path: "/api/research-reports/\(publicationID)/operations",
+            method: "POST",
+            json: payload,
+        )
+        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
     // ── 通用请求 ──────────────────────────────────────────────────────────
 
     private func request(path: String, method: String = "GET", json: [String: Any]? = nil) async throws -> Data {

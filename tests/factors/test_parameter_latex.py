@@ -18,4 +18,13 @@ def test_frequency_parameter_in_shift_is_escaped_everywhere():
 
 def test_term_structure_column_parameter_uses_same_literal_label():
     expr = ParamRef(FactorFreqParam)
-    assert TermStructureOp._operand_latex_arg(expr, column=True) == r'\textcolor{red}{\$F}'
+    from tools.factors.expr import term_spread
+    assert r'\textcolor{red}{\$F}' in term_spread(column=FactorFreqParam).to_latex()
+
+
+def test_bound_column_parameter_remains_an_indexed_series():
+    from tools.parameters import DataColumnParam
+    parameter=DataColumnParam('LatexColumn',DataColumn.CLOSE)
+    result=ParamRef(parameter).to_latex(values={'LatexColumn':DataColumn.OPEN})
+    assert result == 'O_t'
+    assert 'DataColumn.' not in result

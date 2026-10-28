@@ -235,3 +235,14 @@ pyrightconfig.json
 web/chart-workbench/node_modules/
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,visualstudiocode
+
+!deploy/docker/factortester-public/wheels/
+!deploy/docker/factortester-public/wheels/README.md
+
+# local build outputs
+.artifacts/
+
+deploy/docker/factortester-public/wheels/nautilus_trader-*.whl
+
+# generated legacy TA wrapper (must not be distributed)
+vendor/py-alpha-lib/py-binding/python/alpha/algo/algo_gen.py

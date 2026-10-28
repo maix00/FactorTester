@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import re
 import secrets
 import threading
@@ -594,12 +595,42 @@ def can_manage_level(current_username: str | None, level_id: str | None) -> bool
 
 def load_product_groups(username: str) -> list:
     ensure_account_manager_sqlite_store()
+    from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+    if libraries_read_enabled():
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+            import settings as Settings
+
+            url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+            if url:
+                reader = CouchDBLibraryReader(CouchDBObjectStore(
+                    url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+                ))
+                return reader.product_groups(username)
+        except Exception:
+            pass
     return _load_product_groups(username)
 
 
 def save_product_groups(username: str, groups: list) -> None:
     ensure_account_manager_sqlite_store()
     _save_product_groups(username, groups)
+    from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+    if libraries_write_enabled():
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+            if url:
+                CouchDBLibraryWriter(CouchDBObjectStore(
+                    url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+                )).replace_product_groups(username, groups)
+        except Exception:
+            pass
     _replace_domain_entities(
         username, "product_group", groups, id_key="id",
     )

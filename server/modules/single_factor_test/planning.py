@@ -28,120 +28,270 @@ def _hash(value: Any) -> str:
 
 
 def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    from tools.factors.tester_calc.single_factor_test.group.research_run import (
-        prepare_group_run_spec,
-    )
-    from tools.testers.backtest.modules.engine import engine_mode_for
-    from tools.testers.backtest.modules.market_data import (
-        _MISSING_DATA_SOURCE,
-        _data_source_instance_label,
-        _factor_required_columns,
-        _product_available_freqs,
-        _required_data_source_for_strategy,
-        _required_frequency_for_strategy,
-        _select_required_product_frequency,
-        _select_required_product_source,
-    )
-    from tools.testers.backtest.modules.term_structure import _expand_product_contracts
+    """Plan a backtest exclusively from its immutable Nautilus RunSpec.
 
-    prepared = prepare_group_run_spec(data)
-    start_text = _timestamp_text(prepared["start_dt"])
-    end_text = _timestamp_text(prepared["end_dt"])
-    start_date = start_text[:10] or None
-    end_date = end_text[:10] or None
-    requirements: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-    strategies: dict[str, dict[str, Any]] = {}
-    notices: list[dict[str, Any]] = []
-    expansion_cache: dict[
-        tuple[Any, str | None, str | None, str],
-        tuple[list[Any], list[dict[str, Any]]],
-    ] = {}
-    missing_lifecycle_notices: set[str] = set()
-    for strategy_id, config in prepared["resolved_settings_by_alias"].items():
-        selection = config.get("product_path_selection")
-        products = list(getattr(selection, "products", ()) or ())
-        required_frequency = _required_frequency_for_strategy(config, products)
-        required_sources = _required_data_source_for_strategy(config)
-        factor_columns = list(_factor_required_columns(config.get("factor")))
-        engine_mode = engine_mode_for(config)
-        strategy_products: list[str] = []
-        strategy_contracts: list[str] = []
-        for product in products:
-            expansion_key = (product, start_date, end_date, engine_mode)
-            if expansion_key not in expansion_cache:
-                expansion_cache[expansion_key] = _expand_product_contracts(
-                    product,
-                    start_date=start_date,
-                    end_date=end_date,
-                    engine_mode=engine_mode,
-                )
-            contracts, metadata = expansion_cache[expansion_key]
-            universe = [product, *[item for item in contracts if item != product]]
-            strategy_products.append(_name(product))
-            strategy_contracts.extend(_name(item) for item in contracts)
-            for row in metadata:
-                if not row.get("is_identity") and not any(
-                    row.get(key) for key in (
-                        "last_trade_date", "expire_date", "delivery_date", "maturity_date",
-                        "last_trade_ts", "expire_ts", "delivery_ts", "maturity_ts",
-                    )
-                ):
-                    contract = str(
-                        row.get("contract_product") or row.get("uid") or ""
-                    )
-                    if contract not in missing_lifecycle_notices:
-                        missing_lifecycle_notices.add(contract)
-                        notices.append({
-                            "severity": "warning",
-                            "code": "term_structure_lifecycle_authority_missing",
-                            "message": "contract lifecycle has no authoritative terminal field",
-                            "details": {"contract": contract},
-                        })
-            for item in universe:
-                frequency = _select_required_product_frequency(
-                    item, _product_available_freqs(item), required_frequency
-                )
-                if frequency is None:
-                    raise ValueError(f"{_name(item)} does not provide required bar frequency")
-                source = _select_required_product_source(item, frequency, required_sources)
-                if source is _MISSING_DATA_SOURCE:
-                    raise ValueError(f"{_name(item)} does not provide the requested data source")
-                source_label = _data_source_instance_label(source)
-                product_name = _name(item)
-                key = (
-                    product_name, source_label, frequency.name, start_text, end_text,
-                )
-                resolved = {
-                    "product": product_name,
-                    "frequency": frequency.name,
-                    "data_source": source_label,
-                    "factor_columns": sorted(set(factor_columns)),
-                    "start": start_text,
-                    "end": end_text,
-                }
-                existing = requirements.get(key)
-                if existing is not None:
-                    resolved["factor_columns"] = sorted(set(
-                        existing["factor_columns"]
-                    ).union(factor_columns))
-                requirements[key] = resolved
-        strategies[str(strategy_id)] = {
-            "selection_id": str(getattr(selection, "selection_id", "")),
-            "products": sorted(set(strategy_products)),
-            "contracts": sorted(set(strategy_contracts)),
-            "frequency": required_frequency.name,
-            "requested_sources": list(required_sources),
-            "factor_columns": factor_columns,
-            "engine_mode": engine_mode,
-        }
-    resolved = {
-        "kind": "backtest",
-        "external_factor_artifacts": _artifact_plan_rows(data),
-        "run_window": {"start": start_text, "end": end_text},
-        "strategies": strategies,
-        "data_requirements": [requirements[key] for key in sorted(requirements)],
+    Planning must not reopen the authoring editor, expand mutable product
+    catalogs, choose another frequency, or import the retired Python engine.
+    The RunSpec hash covers the complete product/factor/strategy definitions;
+    this compact projection is only the execution cache key and review view.
+    """
+    from server.services.nautilus_bridge.catalog_plan import catalog_staging_requests
+    from server.services.nautilus_bridge.config import (
+        UnsupportedExecutionConfig,
+        compile_frozen_execution_plan,
+    )
+    from server.services.nautilus_bridge.source_registry import (
+        UnsupportedNautilusSource,
+        from_server_sources,
+    )
+    from server.services.research_run_identity import (
+        NAUTILUS_RUN_SPEC_VERSION,
+        hash_run_spec,
+    )
+
+    run_spec = data.get("run_spec")
+    if not isinstance(run_spec, dict):
+        raise ValueError("backtest planning requires a frozen NautilusTrader RunSpec")
+    if run_spec.get("run_spec_version") != NAUTILUS_RUN_SPEC_VERSION:
+        raise ValueError("legacy backtest RunSpecs are read-only and cannot be planned")
+    configuration = run_spec.get("configuration")
+    if not isinstance(configuration, dict):
+        raise ValueError("NautilusTrader RunSpec has no frozen configuration")
+    analyses = configuration.get("analyses")
+    backtest = analyses.get("backtest") if isinstance(analyses, dict) else None
+    execution = backtest.get("execution") if isinstance(backtest, dict) else None
+    if not isinstance(execution, dict) or (
+        execution.get("backend") != "nautilus_trader"
+        or execution.get("contract_version") != 4
+    ):
+        raise ValueError("backtest planning accepts only NautilusTrader contract v4")
+    contract = execution.get("nautilus_contract")
+    if not isinstance(contract, dict) or contract.get("contract_version") != 2:
+        raise ValueError("NautilusTrader RunSpec has no frozen execution contract v2")
+    blockers = contract.get("blockers")
+    if not isinstance(blockers, list) or blockers:
+        first = blockers[0] if isinstance(blockers, list) and blockers else {}
+        reason = first.get("reason") if isinstance(first, dict) else None
+        raise ValueError("NautilusTrader execution contract is blocked" + (
+            f": {reason}" if reason else ""
+        ))
+    settings = contract.get("settings")
+    source = contract.get("source_adapter")
+    if not isinstance(settings, dict) or not isinstance(source, dict):
+        raise ValueError("NautilusTrader RunSpec is missing its frozen source/settings")
+
+    portable = bool(run_spec.get("data_requirements"))
+    if portable:
+        from types import SimpleNamespace
+        binding = data.get("execution_binding") or {}
+        inputs = binding.get("inputs") or []
+        if not inputs:
+            raise ValueError("portable RunSpec requires an explicit execution binding")
+        runtime = inputs[0]["runtime_adapter"]
+        adapter = SimpleNamespace(**runtime)
+        source_key = runtime["member_key"]
+        frequency = runtime["frequency"]
+    else:
+        source_key = str(settings.get("data_source_ref") or "").strip()
+        frequency = str(source.get("frequency") or "").strip().upper()
+        if not source_key or not frequency:
+            raise ValueError("NautilusTrader RunSpec has no frozen source member/frequency")
+        try:
+            adapter = from_server_sources().adapter_for(
+                source_key=source_key,
+                frequency=frequency,
+                instrument_scope="physical_contract",
+            )
+        except UnsupportedNautilusSource as exc:
+            raise ValueError(str(exc)) from exc
+        if (adapter.adapter_id != source.get("adapter_id")
+                or adapter.frequency != frequency
+                or source.get("feed_kind") != "bar"):
+            raise ValueError("frozen Nautilus source adapter differs from the registered adapter")
+
+    # Capability names here are earned by real engine tests and are identical
+    # to the capabilities accepted when a ResearchRun is created. Optional
+    # volume consumption, daily settlement and historical fees stay blocked
+    # until their Job adapters pass their own end-to-end contracts.
+    try:
+        compiled = compile_frozen_execution_plan(
+            settings,
+            feed_kind="bar",
+            adapter_capabilities=frozenset({"native_bar_open_market_orders"}),
+        )
+    except UnsupportedExecutionConfig as exc:
+        raise ValueError(f"invalid NautilusTrader execution contract: {exc}") from exc
+
+    shared = configuration.get("shared")
+    selections = shared.get("product_selections") if isinstance(shared, dict) else None
+    if not isinstance(selections, dict):
+        raise ValueError("NautilusTrader RunSpec has no frozen product selections")
+    scope_refs = tuple(settings.get("product_scope_refs") or ())
+    requirements: list[dict[str, Any]] = []
+    for scope_ref in scope_refs:
+        selection = selections.get(scope_ref)
+        if not isinstance(selection, dict):
+            raise ValueError(f"NautilusTrader product scope is not frozen: {scope_ref}")
+        paths = selection.get("paths") or selection.get("selected_paths")
+        if not isinstance(paths, list) or not paths:
+            raise ValueError(f"NautilusTrader product scope has no frozen paths: {scope_ref}")
+        # This adapter only declares physical contracts. Product-level paths
+        # (including continuous main contracts) require a distinct signal
+        # stream and roll-aware route; do not reinterpret them as contracts.
+        if any(not isinstance(path, str) or not path.strip() for path in paths):
+            raise ValueError(f"NautilusTrader product scope contains an invalid path: {scope_ref}")
+        requirements.append({
+            "product_scope_ref": str(scope_ref),
+            "resolution_sha256": str(selection.get("resolution_sha256") or ""),
+            "path_count": len(paths),
+            "source_member": source_key,
+            "adapter_id": adapter.adapter_id,
+            "frequency": frequency,
+            "start_utc": str(settings["start_utc"]),
+            "end_utc": str(settings["end_utc"]),
+        })
+
+    from server.services.configuration_strategies import execution_groups
+    backtest_groups = execution_groups(backtest)
+    if not isinstance(backtest_groups, list) or not backtest_groups:
+        raise ValueError("NautilusTrader RunSpec has no strategy instances")
+    strategies: list[dict[str, Any]] = []
+    routes = {
+        str(item.get("strategy_id") or ""): item
+        for item in settings.get("strategy_venue_bindings") or []
+        if isinstance(item, dict)
     }
-    return resolved, notices
+    for group in backtest_groups:
+        if not isinstance(group, dict):
+            raise ValueError("NautilusTrader strategy group must be an object")
+        strategy_id = str(group.get("id") or "").strip()
+        scope_ref = str(
+            group.get("product_path_selection_id")
+            or group.get("product_scope_ref")
+            or ""
+        ).strip()
+        route = routes.get(strategy_id)
+        if not strategy_id or not scope_ref or scope_ref not in scope_refs or route is None:
+            raise ValueError("NautilusTrader strategy has no frozen scope/Venue binding")
+        strategies.append({
+            "strategy_id": strategy_id,
+            "product_scope_ref": scope_ref,
+            "venue_ids": sorted(str(item).upper() for item in route.get("venue_ids") or []),
+        })
+    factors = shared.get("factors") or []
+    factor_refs = sorted({
+        str(item.get("ref") or "")
+        for item in factors if isinstance(item, dict) and item.get("ref")
+    })
+    from server.services.factor_strategy_templates import compile_factor_strategy_bindings
+    frozen_families=compile_factor_strategy_bindings(configuration)
+    families=_strategy_execution_blocks({"strategy_specs":frozen_families} if frozen_families else data,shared)
+    strategy=families[0] if len(families)==1 else None
+    resolved = {
+        "kind": "nautilus_strategy_family" if families else "backtest",
+        **({"execution_binding": data["execution_binding"]} if portable else {}),
+        "run_spec_version": NAUTILUS_RUN_SPEC_VERSION,
+        "run_spec_sha256": hash_run_spec(run_spec),
+        "execution": compiled.manifest(),
+        "source_adapter": {
+            "member_key": source_key,
+            "adapter_id": adapter.adapter_id,
+            "frequency": frequency,
+            "instrument_scope": adapter.instrument_scope,
+            "clock_policy": adapter.clock_policy,
+        },
+        "run_window": {
+            "start": compiled.start_utc,
+            "end": compiled.end_utc,
+        },
+        "strategies": sorted(strategies, key=lambda item: item["strategy_id"]),
+        "factor_refs": factor_refs,
+        "data_requirements": sorted(requirements, key=lambda item: item["product_scope_ref"]),
+        "catalog_staging": catalog_staging_requests(run_spec),
+        "external_factor_artifacts": _artifact_plan_rows(data),
+    }
+    if portable:
+        import os
+        budget = int(os.environ.get("TR_MAX_INPUT_BARS", "1000000"))
+        if not 1 <= budget <= 10000000:
+            raise ValueError("invalid node Bar input budget")
+        resolved["max_input_bars"] = budget
+        requirements = run_spec["data_requirements"]
+        if any(item["start_ns"] > pd.Timestamp(compiled.start_utc).value
+               or item["end_ns"] < pd.Timestamp(compiled.end_utc).value for item in requirements):
+            raise ValueError("input requirements do not cover the formal run interval")
+        resolved["run_window"] = {
+            "start": pd.Timestamp(min(item["start_ns"] for item in requirements), tz="UTC").isoformat(),
+            "end": pd.Timestamp(max(item["end_ns"] for item in requirements), tz="UTC").isoformat(),
+        }
+    if families:
+        resolved["strategy_families"] = families
+    if strategy:
+        resolved["strategy"] = strategy
+    return resolved, []
+
+
+
+def _strategy_execution_blocks(data,shared):
+    specs=data.get('strategy_specs') or data.get('strategy_plan') or []
+    families=[];seen=set()
+    for i,spec in enumerate(specs):
+        block=_strategy_execution_block({'strategy_specs':[spec]},shared)
+        if block is None:
+            raise ValueError('strategy has no supported native factor family execution')
+        identity=str(spec.get('strategy_id') or spec.get('id') or f'FactorFamily-{i:03}')
+        if identity in seen:raise ValueError('duplicate strategy family id')
+        seen.add(identity);families.append({**block,'strategy_id':identity})
+    return families
+
+
+def _strategy_execution_block(data: dict[str, Any], shared: Any) -> dict[str, Any] | None:
+    """Freeze the TradeResearch strategy family choice into the execution plan."""
+    specs = data.get("strategy_specs") or data.get("strategy_plan")
+    if not isinstance(specs, list) or not specs or not isinstance(specs[0], dict):
+        return None
+    spec = specs[0]
+    kind = str(spec.get("template_kind") or spec.get("strategy_kind") or spec.get("source_name") or "").strip()
+    parameters = spec.get("parameters") if isinstance(spec.get("parameters"), dict) else {}
+    if kind == "threshold":
+        family = {
+            "entry_threshold": parameters.get("entry_threshold", parameters.get("entry", 0)),
+            "exit_threshold": parameters.get("exit_threshold", parameters.get("exit", 0)),
+            "side_mode": parameters.get("side_mode", "long_short"),
+        }
+    elif kind in {"cross_sectional_group", "group_quantile"}:
+        family = {
+            "split_count": parameters.get("split_count", 0),
+            "group_index": parameters.get("group_index", 0),
+        }
+        kind = "cross_sectional_group"
+    else:
+        return None
+    roles = spec.get("factor_roles")
+    if not roles and spec.get("factor_bindings"):
+        records={str(x.get("ref")):x for x in (shared or {}).get("factors",[]) if isinstance(x,dict)}
+        roles={role:{"ref":ref,"alias":records.get(ref,{}).get("alias","")} for role,ref in spec["factor_bindings"].items()}
+    if not isinstance(roles, dict) or not roles:
+        role = str(spec.get("factor_role") or "factor")
+        alias = str((spec.get("data") or {}).get("factor") or "").strip()
+        factors = (shared or {}).get("factors") if isinstance(shared, dict) else None
+        binding = None
+        if isinstance(factors, list):
+            for item in factors:
+                if isinstance(item, dict) and (not alias or item.get("alias") == alias):
+                    binding = {"ref": item.get("ref"), "alias": item.get("alias")}
+                    break
+        if binding and binding.get("ref"):
+            roles = {role: binding}
+        else:
+            return None
+    return {
+        "kind": kind,
+        "family_id": kind,
+        "parameters": family,
+        "factor_roles": roles,
+        "products": list((spec.get("data") or {}).get("products") or ()),
+    }
 
 
 def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -319,7 +469,14 @@ def build_execution_plan(kind: str, data: dict[str, Any]) -> dict[str, Any]:
         ]
     return {
         "plan_version": 1,
-        "kind": kind,
+        "kind": resolved.get("kind") or kind,
+        **({"max_input_bars": resolved["max_input_bars"]} if "max_input_bars" in resolved else {}),
+        "strategy": resolved.get("strategy"),
+        **({"strategy_families": resolved["strategy_families"]} if "strategy_families" in resolved else {}),
+        **({"execution_binding": resolved["execution_binding"]} if "execution_binding" in resolved else {}),
+        "catalog_staging": resolved.get("catalog_staging"),
+        "source_adapter": resolved.get("source_adapter"),
+        "run_window": resolved.get("run_window"),
         "resolved": resolved,
         "resolved_hash": resolved_hash,
         "cache_keys": sorted(set(cache_keys)),

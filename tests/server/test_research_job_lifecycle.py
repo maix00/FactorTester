@@ -8,8 +8,9 @@ from flask import Flask
 
 import server.modules.shared.submission_helpers  # noqa: F401 - injects product resolver
 import settings as Settings
-from server.jobs.models import SchedulingEntitlement
+from server.jobs.models import JobRecord, SchedulingEntitlement
 from server.jobs.repository import JobRepository
+from server.jobs.states import JobStatus
 from server.modules.single_factor_test import research_jobs, sft_bp
 from server.services import (
     factor_registry,
@@ -594,7 +595,7 @@ def test_run_preview_matches_submission_without_persisting(client, monkeypatch) 
     request_payload = {
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
-        "analyses": ["ic", "backtest"],
+        "analyses": ["ic"],
         "retention_mode": "summary",
         "step_mode": False,
         "start_date": "2024-01-01",
@@ -642,7 +643,7 @@ def test_run_preview_matches_submission_without_persisting(client, monkeypatch) 
         preview_payload["run_spec_hash"], preview_payload["run_spec_hash"],
     ]
     jobs = JobRepository().list(owner="alice", run_id=run["run_id"])
-    assert {job.kind for job in jobs} == {"ic", "backtest"}
+    assert {job.kind for job in jobs} == {"ic"}
     for job in jobs:
         assert job.run_spec_hash == run["run_spec_hash"]
         assert job.job_spec["run_spec"] == run["run_spec"]
@@ -660,7 +661,7 @@ def test_run_capability_preview_is_read_only(client, monkeypatch) -> None:
         research_jobs,
         "_capability_plans",
         lambda _prepared, owner: [{
-            "kind": "backtest",
+            "kind": "ic",
             "resolved": {
                 "data_requirements": [{
                     "product": "AG.SHF",
@@ -675,7 +676,7 @@ def test_run_capability_preview_is_read_only(client, monkeypatch) -> None:
     response = client.post("/api/runs/capability-preview", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
-        "analyses": ["backtest"],
+        "analyses": ["ic"],
     })
 
     assert response.status_code == 200, response.get_data(as_text=True)
@@ -683,7 +684,7 @@ def test_run_capability_preview_is_read_only(client, monkeypatch) -> None:
     assert value["success"] is True
     assert value["capability"] is True
     assert value["data_requirements"]
-    assert value["plans"][0]["kind"] == "backtest"
+    assert value["plans"][0]["kind"] == "ic"
     assert JobRepository().list(owner="alice") == []
 
 
@@ -932,7 +933,7 @@ def test_explicit_empty_outputs_do_not_restore_ic_defaults(client) -> None:
     assert explicit.get_json()["output_requests"] == []
 
 
-def test_performance_profile_is_job_telemetry_not_run_spec_identity(client) -> None:
+def test_performance_profile_cannot_bypass_legacy_backtest_gate(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
     request_payload = {
@@ -940,36 +941,26 @@ def test_performance_profile_is_job_telemetry_not_run_spec_identity(client) -> N
         "configuration_revision": workspace["configuration"]["revision"],
         "analyses": ["ic", "backtest"],
     }
-    base = client.post("/api/runs/preview", json=request_payload).get_json()
     profiled = client.post("/api/runs/preview", json={
         **request_payload,
         "performance_profile": {
             "kind": "cumulative_flow",
             "min_total_ms": 25,
         },
-    }).get_json()
-
-    assert profiled["run_spec_hash"] == base["run_spec_hash"]
-    assert profiled["performance_profile"] == {
-        "kind": "cumulative_flow",
-        "min_total_ms": 25.0,
-    }
+    })
+    assert profiled.status_code == 400
+    assert profiled.get_json()["code"] == "legacy_backtest_unavailable"
 
     response = client.post("/api/runs", json={
         **request_payload,
-        "performance_profile": profiled["performance_profile"],
+        "performance_profile": {"kind": "cumulative_flow", "min_total_ms": 25},
     })
-    assert response.status_code == 202, response.get_data(as_text=True)
-    jobs = JobRepository().list(owner="alice")
-    backtest = next(job for job in jobs if job.kind == "backtest")
-    ic = next(job for job in jobs if job.kind == "ic")
-    assert backtest.job_spec["performance_profile"] == profiled[
-        "performance_profile"
-    ]
-    assert "performance_profile" not in ic.job_spec
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
 
 
-def test_margin_execution_profile_is_opt_in_backtest_telemetry(client) -> None:
+def test_margin_execution_profile_cannot_bypass_legacy_backtest_gate(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
     request_payload = {
@@ -977,30 +968,20 @@ def test_margin_execution_profile_is_opt_in_backtest_telemetry(client) -> None:
         "configuration_revision": workspace["configuration"]["revision"],
         "analyses": ["ic", "backtest"],
     }
-    base = client.post("/api/runs/preview", json=request_payload).get_json()
     profiled = client.post("/api/runs/preview", json={
         **request_payload,
         "margin_execution_profile": {"kind": "cumulative"},
-    }).get_json()
-
-    assert profiled["run_spec_hash"] == base["run_spec_hash"]
-    assert profiled["margin_execution_profile"] == {
-        "kind": "cumulative",
-        "min_total_ms": 0.0,
-    }
+    })
+    assert profiled.status_code == 400
+    assert profiled.get_json()["code"] == "legacy_backtest_unavailable"
 
     response = client.post("/api/runs", json={
         **request_payload,
-        "margin_execution_profile": profiled["margin_execution_profile"],
+        "margin_execution_profile": {"kind": "cumulative"},
     })
-    assert response.status_code == 202, response.get_data(as_text=True)
-    jobs = JobRepository().list(owner="alice")
-    backtest = next(job for job in jobs if job.kind == "backtest")
-    ic = next(job for job in jobs if job.kind == "ic")
-    assert backtest.job_spec["margin_execution_profile"] == profiled[
-        "margin_execution_profile"
-    ]
-    assert "margin_execution_profile" not in ic.job_spec
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
 
 
 def test_run_submission_accepts_sample_use_without_a_trial_plan(
@@ -1065,7 +1046,7 @@ def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:
     response = client.post("/api/runs/preview", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
-        "analyses": ["ic", "backtest"],
+        "analyses": ["ic"],
         "factor_subject_descriptors": [descriptor],
     })
 
@@ -1081,7 +1062,7 @@ def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:
     }]
 
 
-def test_preview_freezes_transient_profile_screen_without_shared_registration(
+def test_legacy_backtest_preview_rejects_transient_profile_screen_without_job(
     client, monkeypatch, tmp_path,
 ) -> None:
     workspace = _create_workspace(client)
@@ -1122,7 +1103,7 @@ class ProfileScreen(FactorFamily):
             for kind in prepared["analyses"]
         ],
     )
-    response = client.post("/api/runs/preview", json={
+    request_payload = {
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
         "analyses": ["backtest"],
@@ -1132,16 +1113,19 @@ class ProfileScreen(FactorFamily):
             "path": "custom_factors/ProfileScreen.py",
             "source_code": source,
         }],
-    })
-
-    assert response.status_code == 200, response.get_data(as_text=True)
-    preview = response.get_json()
-    policy = preview["factor_source_policy"]
+    }
+    prepared = research_jobs._prepare_local_research_run_request(
+        request_payload, owner="alice",
+    )
+    policy = prepared["run_spec"]["factor_source_policy"]
     assert policy["mode"] == "transient_run_source"
     assert policy["files"][0]["factor_id"] == "ProfileScreen"
-    assert len(policy["files"][0]["source_sha256"]) == 64
     assert "source_code" not in policy["files"][0]
-    assert source not in json.dumps(preview)
+    response = client.post("/api/runs/preview", json=request_payload)
+
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
     configuration = client.get(
         f"/api/test-authoring/workspaces/{workspace['workspace_id']}/configuration"
     ).get_json()["configuration"]["payload"]
@@ -1151,7 +1135,7 @@ class ProfileScreen(FactorFamily):
     )
 
 
-def test_submitted_transient_factor_source_is_retained_as_job_input_artifact(
+def test_legacy_backtest_rejects_transient_factor_source_without_retention(
     client,
     monkeypatch,
     tmp_path,
@@ -1199,58 +1183,13 @@ class ProfileScreen(FactorFamily):
         }],
     })
 
-    assert response.status_code == 202, response.get_data(as_text=True)
-    job = JobRepository().list(
-        owner="alice", run_id=response.get_json()["run_id"],
-    )[0]
-    source_artifact = JobRepository().load_artifact(
-        job_id=job.job_id,
-        name="factor_source__ProfileScreen",
-        owner="alice",
-    )
-    assert source_artifact is not None
-    assert source_artifact["content_type"] == "text/x-python"
-    assert source_artifact["state"] == "active"
-    assert (
-        tmp_path / "artifacts" / source_artifact["relative_path"]
-    ).read_text(encoding="utf-8") == source
-
-    repository = JobRepository()
-    assert job.summary()["factor_source_policy"]["scope_status"] == "available"
-    repository.transition(job.job_id, "planning")
-    repository.transition(
-        job.job_id,
-        "failed",
-        expected="planning",
-        error={"code": "test_failure", "message": "terminal cleanup"},
-    )
-    terminal = repository.require(job.job_id, owner="alice")
-    assert terminal.summary()["factor_source_policy"]["scope_status"] == "cleaned"
-
-    detail = client.get(f"/api/jobs/{job.job_id}")
-    assert detail.status_code == 200
-    task_detail = detail.get_json()["task_detail"]
-    assert {item["artifact_kind"] for item in task_detail["input_artifacts"]} == {"factor_source", "product_scope"}
-    retained_input = next(item for item in task_detail["input_artifacts"] if item["artifact_kind"] == "factor_source")
-    assert retained_input["name"] == "factor_source__ProfileScreen"
-    assert retained_input["role"] == "input"
-    assert retained_input["artifact_kind"] == "factor_source"
-    assert retained_input["file_name"] == "ProfileScreen.py"
-    assert retained_input["title_zh"] == "临时因子源码：ProfileScreen"
-    old_byte_route = client.get(
-        f"/api/jobs/{job.job_id}/artifacts/factor_source__ProfileScreen"
-    )
-    assert old_byte_route.status_code == 404
-
-    cleared = client.delete(f"/api/jobs/{job.job_id}/artifacts")
-    assert cleared.status_code == 200
-    assert cleared.get_json()["deleted_files"] == 2
-    assert not (
-        tmp_path / "artifacts" / source_artifact["relative_path"]
-    ).exists()
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
+    assert list((tmp_path / "artifacts").rglob("ProfileScreen.py")) == []
 
 
-def test_retry_rebuilds_transient_factor_scope_from_retained_job_input(
+def test_legacy_backtest_rejects_factor_source_before_retry_scope_creation(
     client,
     monkeypatch,
     tmp_path,
@@ -1293,43 +1232,13 @@ class ProfileScreen(FactorFamily):
             "source_code": source,
         }],
     })
-    original = JobRepository().list(
-        owner="alice", run_id=submitted.get_json()["run_id"],
-    )[0]
-    repository = JobRepository()
-    original_scope = str(
-        original.job_spec["transient_factor_source_scope_id"]
-    )
-    repository.transition(original.job_id, "planning")
-    repository.transition(
-        original.job_id,
-        "failed",
-        expected="planning",
-        error={"code": "retry_test", "message": "retry retained input"},
-    )
-    assert original.summary()["factor_source_policy"]["scope_status"] == "cleaned"
-
-    response = client.post(f"/api/jobs/{original.job_id}/retry")
-
-    assert response.status_code == 202, response.get_data(as_text=True)
-    retried = repository.require(response.get_json()["job_id"], owner="alice")
-    retry_scope = str(retried.job_spec["transient_factor_source_scope_id"])
-    assert retry_scope and retry_scope != original_scope
-    assert retried.summary()["factor_source_policy"]["scope_status"] == "available"
-    artifact = repository.load_artifact(
-        job_id=retried.job_id,
-        name="factor_source__ProfileScreen",
-        owner="alice",
-    )
-    assert artifact is not None
-    assert artifact["artifact_role"] == "input"
-    assert artifact["artifact_kind"] == "factor_source"
-    assert artifact["content_hash"] == hashlib.sha256(
-        source.encode("utf-8")
-    ).hexdigest()
+    assert submitted.status_code == 400
+    assert submitted.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
+    assert list((tmp_path / "artifacts").rglob("ProfileScreen.py")) == []
 
 
-def test_retry_input_copy_failure_terminalizes_new_attempt(
+def test_legacy_backtest_rejects_before_input_copy_or_attempt_creation(
     client,
     monkeypatch,
     tmp_path,
@@ -1369,44 +1278,13 @@ class ProfileScreen(FactorFamily):
             "source_code": source,
         }],
     })
-    repository = JobRepository()
-    original = repository.list(
-        owner="alice", run_id=submitted.get_json()["run_id"],
-    )[0]
-    repository.transition(original.job_id, "planning")
-    repository.transition(
-        original.job_id,
-        "failed",
-        expected="planning",
-        error={"code": "retry_test", "message": "force a retry"},
-    )
-
-    def fail_copy(*_args, **_kwargs):
-        raise OSError("simulated retained input write failure")
-
-    monkeypatch.setattr(
-        "server.modules.single_factor_test.backtest_jobs.retain_factor_sources",
-        fail_copy,
-    )
-    client.application.config["PROPAGATE_EXCEPTIONS"] = False
-    response = client.post(f"/api/jobs/{original.job_id}/retry")
-
-    assert response.status_code == 500
-    attempts = [
-        item for item in repository.list(owner="alice", run_id=original.run_id)
-        if item.retry_of == original.job_id
-    ]
-    assert len(attempts) == 1
-    failed = attempts[0]
-    assert failed.status.value == "failed"
-    assert failed.error == {
-        "code": "job_input_retention_failed",
-        "message": "simulated retained input write failure",
-    }
-    assert failed.summary()["factor_source_policy"]["scope_status"] == "cleaned"
+    assert submitted.status_code == 400
+    assert submitted.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
+    assert list((tmp_path / "artifacts").rglob("ProfileScreen.py")) == []
 
 
-def test_submitted_strategy_hook_is_retained_and_exposed_as_job_input(
+def test_legacy_backtest_rejects_strategy_hook_without_retention(
     client,
     monkeypatch,
     tmp_path,
@@ -1465,39 +1343,13 @@ class IntradayGate:
         }],
     })
 
-    assert response.status_code == 202, response.get_data(as_text=True)
-    job = JobRepository().list(
-        owner="alice", run_id=response.get_json()["run_id"],
-    )[0]
-    detail = client.get(f"/api/jobs/{job.job_id}")
-    assert detail.status_code == 200
-    inputs = detail.get_json()["task_detail"]["input_artifacts"]
-    retained = next(
-        item for item in inputs if item["artifact_kind"] == "strategy_source"
-    )
-    assert retained["role"] == "input"
-    assert retained["artifact_kind"] == "strategy_source"
-    assert retained["file_name"] == "intraday_gate.py"
-    assert retained["logical_path"] == "strategies/hooks/intraday_gate.py"
-    assert retained["title_zh"] == (
-        "临时策略源码：strategies/hooks/intraday_gate.py"
-    )
-    old_byte_route = client.get(
-        f"/api/jobs/{job.job_id}/artifacts/{retained['name']}"
-    )
-    assert old_byte_route.status_code == 404
-    spec = next(
-        item for item in inputs if item["artifact_kind"] == "strategy_spec"
-    )
-    assert spec["role"] == "input"
-    assert spec["file_name"] == "intraday_gate.strategy.json"
-    assert spec["title_zh"] == "运行策略配置：intraday_gate"
-    assert client.get(
-        f"/api/jobs/{job.job_id}/artifacts/{spec['name']}"
-    ).status_code == 404
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
+    assert list((tmp_path / "artifacts").rglob("intraday_gate.py")) == []
 
 
-def test_run_dependency_is_frozen_retained_and_copied_on_retry(
+def test_legacy_backtest_rejects_run_dependency_without_retention(
     client,
     monkeypatch,
     tmp_path,
@@ -1521,67 +1373,10 @@ def test_run_dependency_is_frozen_retained_and_copied_on_retry(
         "run_input_dependencies": [dependency],
     })
 
-    assert submitted.status_code == 202, submitted.get_data(as_text=True)
-    repository = JobRepository()
-    original = repository.list(
-        owner="alice", run_id=submitted.get_json()["run_id"],
-    )[0]
-    assert original.job_spec["retention_mode"] == "summary"
-    # #298 changed this viewer to the compact strategy_analysis_source
-    # artifact, so it no longer forces full replay retention.
-    assert original.job_spec["result_retention_mode"] == "summary"
-    assert original.retention_mode == "summary"
-    policy = original.job_spec["run_spec"]["run_input_dependency_policy"]
-    assert policy["mode"] == "retained_job_input"
-    assert policy["files"][0]["path"] == dependency["path"]
-    assert "content" not in policy["files"][0]
-
-    detail = client.get(f"/api/jobs/{original.job_id}")
-    task_detail = detail.get_json()["task_detail"]
-    inputs = task_detail["input_artifacts"]
-    assert task_detail["run_input_dependency_policy"] == policy
-    retained = next(
-        item for item in inputs if item["artifact_kind"] == "run_dependency"
-    )
-    assert retained["file_name"] == "dynamic-hold.yaml"
-    assert retained["logical_path"] == dependency["path"]
-    assert retained["title_zh"] == dependency["title_zh"]
-    old_byte_route = client.get(
-        f"/api/jobs/{original.job_id}/artifacts/{retained['name']}"
-    )
-    assert old_byte_route.status_code == 404
-
-    repository.transition(original.job_id, "planning")
-    repository.transition(
-        original.job_id,
-        "failed",
-        expected="planning",
-        error={"code": "retry_test", "message": "copy dependencies"},
-    )
-    retry = client.post(f"/api/jobs/{original.job_id}/retry")
-    assert retry.status_code == 202, retry.get_data(as_text=True)
-    copied = repository.list_artifacts(
-        job_id=retry.get_json()["job_id"], owner="alice",
-    )
-    copied_dependency = next(
-        item for item in copied if item["artifact_kind"] == "run_dependency"
-    )
-    assert copied_dependency["content_hash"] == retained["content_hash"]
-    assert copied_dependency["file_name"] == retained["file_name"]
-
-    cleared = client.delete(f"/api/jobs/{original.job_id}/artifacts")
-    assert cleared.status_code == 200
-    assert cleared.get_json()["deleted_files"] == 2
-    assert repository.load_artifact(
-        job_id=original.job_id,
-        name=retained["name"],
-        owner="alice",
-    )["state"] == "deleted"
-    assert repository.load_artifact(
-        job_id=retry.get_json()["job_id"],
-        name=copied_dependency["name"],
-        owner="alice",
-    )["state"] == "active"
+    assert submitted.status_code == 400
+    assert submitted.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
+    assert list((tmp_path / "artifacts").rglob("dynamic-hold.yaml")) == []
 
 
 def test_configuration_snapshot_preview_and_submit_freeze_same_runspec(
@@ -1945,19 +1740,19 @@ def test_configuration_schema_migration_replaces_legacy_settings_atomically(clie
     assert "local_settings" not in backtest
 
 
-def test_all_analyses_dispatch_importable_process_runners(client) -> None:
+def test_non_backtest_analyses_dispatch_importable_process_runners(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
     response = client.post("/api/runs", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
-        "analyses": ["ic", "factor_evaluation", "factor_type_analysis", "backtest"],
+        "analyses": ["ic", "factor_evaluation", "factor_type_analysis"],
     })
 
     assert response.status_code == 202, response.get_data(as_text=True)
     jobs = JobRepository().list(owner="alice", run_id=response.get_json()["run_id"], limit=20)
     assert {job.kind for job in jobs} == {
-        "ic", "factor_evaluation", "factor_type_analysis", "backtest",
+        "ic", "factor_evaluation", "factor_type_analysis",
     }
     assert all(":run_" in job.runner_path for job in jobs)
     assert all(job.summary()["execution_mode"] == "process" for job in jobs)
@@ -2017,7 +1812,7 @@ def test_submission_payload_cannot_write_terminal_assurance(client) -> None:
     assert "terminal_assurance" not in job.summary()
 
 
-def test_retry_attests_current_backend_revision_without_changing_frozen_run(
+def test_legacy_backtest_rejected_before_source_revision_snapshot(
     client,
     monkeypatch,
 ) -> None:
@@ -2033,50 +1828,12 @@ def test_retry_attests_current_backend_revision_without_changing_frozen_run(
         },
         base_url="http://localhost:8141",
     )
-    assert response.status_code == 202, response.get_data(as_text=True)
-    original = JobRepository().list(
-        owner="alice",
-        run_id=response.get_json()["run_id"],
-    )[0]
-    repository = JobRepository()
-    repository.transition(original.job_id, "planning")
-    repository.transition(
-        original.job_id,
-        "failed",
-        expected="planning",
-        error={"code": "backend_regression", "message": "retry after deployment"},
-    )
-
-    monkeypatch.setenv("GTHT_SOURCE_REVISION", "new-backend-revision")
-    retried_response = client.post(
-        f"/api/jobs/{original.job_id}/retry",
-        json={
-            "performance_profile": {
-                "kind": "cumulative_flow",
-                "min_total_ms": 25,
-            },
-        },
-        base_url="http://localhost:8176",
-    )
-
-    assert retried_response.status_code == 202, retried_response.get_data(as_text=True)
-    retried = repository.require(retried_response.get_json()["job_id"])
-    assert retried.source_revision == "new-backend-revision"
-    assert original.service_port == 8141
-    assert retried.service_port == 8176
-    assert retried.run_spec_hash == original.run_spec_hash
-    assert {
-        key: value for key, value in retried.job_spec.items()
-        if key != "performance_profile"
-    } == original.job_spec
-    assert retried.job_spec["performance_profile"] == {
-        "kind": "cumulative_flow",
-        "min_total_ms": 25.0,
-    }
-    assert retried.retry_of == original.job_id
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
 
 
-def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monkeypatch) -> None:
+def test_retired_backtest_freezes_owner_product_group_before_rejecting_submit(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)
     backtest = payload["analyses"]["backtest"]
@@ -2089,21 +1846,25 @@ def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monk
         "server.modules.products.product_group_store.load_product_groups",
         lambda owner: [{"id": "owner-group", "name": "Owner group", "paths": ["core8_path"]}],
     )
-    response = client.post("/api/runs", json={
+    request_payload = {
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
         "analyses": ["backtest"],
-    })
-
-    assert response.status_code == 202, response.get_data(as_text=True)
-    jobs = JobRepository().list(owner="alice", run_id=response.get_json()["run_id"])
-    frozen = jobs[0].job_spec["product_selections"]["owner-group"]
+    }
+    prepared = research_jobs._prepare_local_research_run_request(
+        request_payload, owner="alice",
+    )
+    frozen = prepared["run_spec"]["configuration"]["shared"][
+        "product_selections"
+    ]["owner-group"]
     assert frozen["paths"] == ["core8_path"]
     assert "selected_paths" not in frozen
     assert frozen["product_group_template_id"] == "owner-group"
-    run = response.get_json()["run"]
-    assert run["run_spec"]["configuration"]["shared"]["product_selections"]["owner-group"] == frozen
-    assert "product_selections" not in run["run_spec"]["configuration"]["analyses"]["backtest"]
+    response = client.post("/api/runs", json=request_payload)
+
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "legacy_backtest_unavailable"
+    assert JobRepository().list(owner="alice") == []
 
 
 def test_run_rejects_unresolvable_product_selection_before_creating_job(client, monkeypatch) -> None:
@@ -2130,9 +1891,91 @@ def test_run_rejects_unresolvable_product_selection_before_creating_job(client, 
     assert JobRepository().list(owner="alice", workspace_id=workspace["workspace_id"]) == []
 
 
+def test_historical_v4_backtest_job_is_readable_but_cannot_retry_or_continue(
+    client,
+) -> None:
+    repository = JobRepository()
+    historic_spec = {"run_spec": {
+        "run_spec_version": 4,
+        "analyses": ["backtest"],
+        "configuration": {"analyses": {"backtest": {"execution": {
+            "settings": {},
+        }}}},
+    }}
+    failed = repository.create(JobRecord(
+        job_id="historic-v4-failed", run_id="historic-run",
+        owner="alice", workspace_id="historic-workspace", kind="backtest",
+        status=JobStatus.SUBMITTED, job_spec=historic_spec,
+        runner_path="historical.runner:run",
+    ))
+    repository.transition(failed.job_id, "failed", expected="submitted")
+    detail = client.get(f"/api/jobs/{failed.job_id}")
+    assert detail.status_code == 200
+    assert detail.get_json()["job_spec"]["run_spec"][
+        "run_spec_version"
+    ] == 4
+    retry = client.post(f"/api/jobs/{failed.job_id}/retry")
+    assert retry.status_code == 409
+    assert retry.get_json()["code"] == "legacy_backtest_retry_unavailable"
+    assert len(repository.list(owner="alice")) == 1
+
+    paused = repository.create(JobRecord(
+        job_id="historic-v4-paused", run_id="historic-run",
+        owner="alice", workspace_id="historic-workspace", kind="backtest",
+        status=JobStatus.SUBMITTED, job_spec=historic_spec,
+        runner_path="historical.runner:run", step_mode=True,
+    ))
+    repository.transition(paused.job_id, "queued", expected="submitted")
+    repository.transition(paused.job_id, "running", expected="queued")
+    repository.transition(paused.job_id, "paused", expected="running")
+    continued = client.post(
+        f"/api/jobs/{paused.job_id}/continue", json={"action": "continue"},
+    )
+    assert continued.status_code == 409
+    assert continued.get_json()["code"] == "legacy_backtest_continue_unavailable"
+    assert repository.require(paused.job_id, owner="alice").status is JobStatus.PAUSED
+
+    awaiting = repository.create(JobRecord(
+        job_id="historic-v4-awaiting", run_id="historic-run",
+        owner="alice", workspace_id="historic-workspace", kind="backtest",
+        status=JobStatus.SUBMITTED, job_spec=historic_spec,
+        runner_path="historical.runner:run",
+    ))
+    repository.transition(awaiting.job_id, "planning", expected="submitted")
+    repository.set_execution_plan(
+        awaiting.job_id, plan={}, notices=[], requires_confirmation=True,
+    )
+    approval = client.post(f"/api/jobs/{awaiting.job_id}/approve")
+    assert approval.status_code == 409
+    assert approval.get_json()["code"] == "legacy_backtest_approve_unavailable"
+    assert repository.require(awaiting.job_id, owner="alice").status is JobStatus.AWAITING_CONFIRMATION
+
+
 def test_view_lifecycle_is_not_a_research_job_api(client) -> None:
     workspace = _create_workspace(client)
     response = client.post("/api/view-leases", json={
         "view_uuid": "view-a", "workspace_id": workspace["workspace_id"],
     })
     assert response.status_code == 404
+
+
+def test_nautilus_backtest_retry_copies_frozen_execution_plan(client):
+    repository = JobRepository()
+    job = repository.create(JobRecord(
+        job_id="nautilus-retry-source", run_id="run-nautilus",
+        owner="alice", workspace_id="workspace-nautilus", kind="backtest",
+        status=JobStatus.SUBMITTED, job_spec={"run_spec": {"run_spec_version": 10}},
+        runner_path="server.jobs.dispatch.executors:ProcessRunnerExecutor",
+    ))
+    repository.transition(job.job_id, "planning", expected="submitted")
+    repository.set_execution_plan(
+        job.job_id, plan={"kind": "nautilus_strategy_family", "jobs": []},
+        notices=[], requires_confirmation=False,
+    )
+    repository.transition(job.job_id, "running", expected="queued")
+    repository.transition(job.job_id, "failed", expected="running")
+    response = client.post(f"/api/jobs/{job.job_id}/retry")
+    assert response.status_code == 202, response.get_data(as_text=True)
+    retried = repository.require(response.get_json()["job_id"], owner="alice")
+    assert retried.retry_of == job.job_id
+    assert retried.execution_plan["kind"] == "nautilus_strategy_family"

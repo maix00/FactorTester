@@ -1,4 +1,13 @@
 (() => {
+  let dispatchRefreshTimer = null;
+
+  function clearDispatchRefresh() {
+    if (dispatchRefreshTimer !== null) {
+      clearInterval(dispatchRefreshTimer);
+      dispatchRefreshTimer = null;
+    }
+  }
+
   function statusPill(context, status) {
     const pill = document.createElement("span");
     pill.className = `pill manager-status ${status}`;
@@ -13,7 +22,10 @@
   function actionButton(context, actions, label, path, instanceID, disabled = false, danger = false) {
     const button = document.createElement("button");
     button.textContent = context.t(label);
-    button.disabled = disabled;
+    const canManage = Array.isArray(context.session?.admin_capabilities)
+      && context.session.admin_capabilities.includes("admin_console:manage");
+    button.disabled = disabled || !canManage;
+    if (!canManage) button.title = context.t("需要管理权限");
     if (danger) button.classList.add("danger-action");
     button.onclick = async () => {
       if (danger && !window.confirm(context.t("确认执行“%@”？").replace("%@", context.t(label)))) return;
@@ -44,6 +56,33 @@
     intro.querySelector("b").textContent = context.t("并行服务与工作树");
     intro.querySelector("small").textContent = `${context.t("本机")} 127.0.0.1 · ${context.t("局域网")} ${manager.lan_ip || context.t("不可用")} · ${context.t("VS Code 调试前请先停止同端口服务")}`;
     wrapper.append(intro);
+    const canManage = Array.isArray(context.session?.admin_capabilities)
+      && context.session.admin_capabilities.includes("admin_console:manage");
+    const requeue = document.createElement("div");
+    requeue.className = "row-actions manager-actions";
+    const jobInput = document.createElement("input");
+    jobInput.placeholder = context.t("job_id");
+    const attemptInput = document.createElement("input");
+    attemptInput.placeholder = context.t("attempt");
+    attemptInput.type = "number";
+    attemptInput.min = "1";
+    const requeueButton = document.createElement("button");
+    requeueButton.textContent = context.t("重新投递");
+    requeueButton.disabled = !canManage;
+    requeueButton.onclick = async () => {
+      await context.api("/api/dispatch/requeue", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          job_id: jobInput.value.trim(),
+          attempt: Number(attemptInput.value),
+        }),
+      });
+      context.showNotice(context.t("已重新投递"));
+      await dispatchView(context, body);
+    };
+    requeue.append(jobInput, attemptInput, requeueButton);
+    wrapper.append(requeue);
     const view = FTUI.table([
       context.t("工作树 / 服务"), context.t("实例"), context.t("端口"),
       context.t("状态"), context.t("操作"),
@@ -94,6 +133,95 @@
     body.replaceChildren(wrapper);
   }
 
+  async function dispatchView(context, body) {
+    clearDispatchRefresh();
+    body.replaceChildren(FTUI.loading(context.t("正在读取任务队列…")));
+    const payload = await context.api("/api/dispatch/overview");
+    const wrapper = document.createElement("div");
+    wrapper.className = "detail-stack manager-page";
+    const intro = document.createElement("div");
+    intro.className = "manager-intro";
+    intro.innerHTML = `<b></b><small></small>`;
+    intro.querySelector("b").textContent = context.t("任务队列与 worker");
+    const outbox = payload.outbox || {};
+    const nautilus = payload.nautilus || {};
+    const engine = nautilus.available
+      ? context.t("Nautilus 已就绪")
+      : `${context.t("Nautilus 未就绪")}: ${nautilus.reason || ""}`;
+    intro.querySelector("small").textContent = `${context.t("本机 outbox")}: pending ${outbox.pending ?? 0} · sent ${outbox.sent ?? 0} · failed ${outbox.failed ?? 0} · dead ${outbox.dead ?? 0} · ${engine}`;
+    wrapper.append(intro);
+    const view = FTUI.table([
+      context.t("服务器"), context.t("端口"), context.t("队列"),
+      context.t("worker"), context.t("outbox"), context.t("状态"),
+    ], []);
+    (payload.servers || []).forEach(server => {
+      (server.ports || []).forEach(target => {
+        const worker = target.worker_online;
+        const workerText = worker === true ? context.t("在线") : worker === false ? context.t("离线") : context.t("未知");
+        const status = server.online ? (worker === false ? "degraded" : "running") : "stopped";
+        const remoteOutbox = server.remote_outbox;
+        const outboxText = remoteOutbox
+          ? `pending ${remoteOutbox.pending ?? 0} · sent ${remoteOutbox.sent ?? 0} · failed ${remoteOutbox.failed ?? 0} · dead ${remoteOutbox.dead ?? 0}`
+          : server.is_local
+            ? `pending ${outbox.pending ?? 0} · sent ${outbox.sent ?? 0} · failed ${outbox.failed ?? 0} · dead ${outbox.dead ?? 0}`
+            : "—";
+        FTUI.appendRow(view.body, [
+          `${server.server_id}${server.is_local ? " (本机)" : ""}`,
+          target.port,
+          target.queue,
+          workerText,
+          outboxText,
+          statusPill(context, status),
+        ]);
+      });
+    });
+    wrapper.append(view.shell);
+    if (payload.nautilus_runtime) {
+      const runtime = document.createElement("div");
+      runtime.className = "manager-intro";
+      const label = document.createElement("b");
+      label.textContent = context.t("Nautilus 运行时");
+      const value = document.createElement("small");
+      const item = payload.nautilus_runtime;
+      value.textContent = item.compatible
+        ? context.t("已安装")
+        : `${context.t("未就绪")} (${item.version || item.expected})`;
+      runtime.append(label, value);
+      wrapper.append(runtime);
+    }
+    if (payload.couchdb_authority !== undefined) {
+      const authority = document.createElement("div");
+      authority.className = "manager-intro";
+      const label = document.createElement("b");
+      label.textContent = context.t("CouchDB 权威模式");
+      const value = document.createElement("small");
+      value.textContent = payload.couchdb_authority ? context.t("已启用") : context.t("未启用");
+      authority.append(label, value);
+      wrapper.append(authority);
+    }
+    if (Array.isArray(payload.audit) && payload.audit.length) {
+      const audit = document.createElement("div");
+      audit.className = "manager-intro";
+      const title = document.createElement("b");
+      title.textContent = context.t("最近调度审计");
+      const list = document.createElement("small");
+      list.textContent = payload.audit
+        .slice(0, 10)
+        .map(row => `${row.action} ${row.job_id}#${row.attempt} ${row.actor}`)
+        .join(" · ");
+      audit.append(title, list);
+      wrapper.append(audit);
+    }
+    body.replaceChildren(wrapper);
+    dispatchRefreshTimer = setInterval(() => {
+      if (!body.isConnected) {
+        clearDispatchRefresh();
+        return;
+      }
+      void dispatchView(context, body).catch(() => {});
+    }, 5000);
+  }
+
   function selectTab(context, value) {
     const path = `/manager?section=${encodeURIComponent(value)}`;
     if (context.openTab && context.tabID) {
@@ -108,6 +236,7 @@
   }
 
   async function show(context, selected = "services") {
+    clearDispatchRefresh();
     context.activeNav("manager");
     context.setHeading(context.t("服务器管理"), "Manager 7998");
     const wrapper = document.createElement("div");
@@ -116,6 +245,7 @@
     const body = document.createElement("div"); body.className = "manager-tab-content";
     const options = [
       ["services", "服务"],
+      ["dispatch", "任务队列"],
       ["allowlist", "公网访客白名单"],
       ["devices", "已认证设备"],
       ["accounts", "用户与机构"],
@@ -133,7 +263,9 @@
       context, () => show(context, selected),
     ));
     context.content.replaceChildren(wrapper);
-    if (selected === "allowlist" || selected === "devices") {
+    if (selected === "dispatch") {
+      await dispatchView(context, body);
+    } else if (selected === "allowlist" || selected === "devices") {
       await window.FTStaticLoader?.loadGroups?.(["manager-access"]);
       await FTManagerAccessControl.show(context, body, selected);
     } else if (selected === "accounts") {
@@ -156,4 +288,5 @@
   }
 
   window.FTManager = {show};
+  window.TRManager = window.FTManager;
 })();

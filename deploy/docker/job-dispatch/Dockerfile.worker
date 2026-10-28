@@ -1,0 +1,8 @@
+ARG BASE_IMAGE=factortester-public:local
+FROM ${BASE_IMAGE}
+USER root
+COPY deploy/requirements-dispatch.txt /tmp/requirements-dispatch.txt
+RUN python -m pip install --no-cache-dir -r /tmp/requirements-dispatch.txt \
+    && rm -f /tmp/requirements-dispatch.txt
+USER factortester
+WORKDIR /opt/factortester/app

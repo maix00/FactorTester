@@ -1,4 +1,4 @@
-"""Click entrypoint for the separately installed FactorTester CLI."""
+"""Click entrypoint for the separately installed TradeResearch CLI."""
 
 from __future__ import annotations
 
@@ -34,21 +34,21 @@ research = click.Group("research", help="Research reports, evidence, and profile
     help="Run/Job 的业务服务选择器；由 Manager 校验并路由，不改变服务器入口地址。",
 )
 def cli(ports: tuple[int, ...]) -> None:
-    """FactorTester CLI.
+    """TradeResearch CLI.
 
     \b
     常用路径:
-      factortester configure --base-url https://manager.example:7998
-      factortester login --username <username>
-      factortester doctor
-      factortester factor-plan --factor-family SgCCS --configuration-file research-config.json
+      traderesearch configure --base-url https://manager.example:7998
+      traderesearch login --username <username>
+      traderesearch doctor
+      traderesearch factor-plan --factor-family SgCCS --configuration-file research-config.json
       # agent 因子研究：安装/使用 longbridge-quant、quantitative-research，并阅读 tools/cli/docs/factor-research-cli.md
-      factortester list
-      factortester workspace create --factor-family SgCCS --factor 'SgCCS=SgCCS|N:2m|$F:1d'
-      factortester workspace update --file research-config.json
-      factortester run submit --analysis ic --analysis backtest
-      factortester job list
-      factortester job watch <job_id>
+      traderesearch list
+      traderesearch workspace create --factor-family SgCCS --factor 'SgCCS=SgCCS|N:2m|$F:1d'
+      traderesearch workspace update --file research-config.json
+      traderesearch run submit --analysis ic --analysis backtest
+      traderesearch job list
+      traderesearch job watch <job_id>
     用户配置统一保存为 ResearchConfiguration；模板使用同一 schema，提交后由 immutable RunSpec 与 job 承接。
     """
 

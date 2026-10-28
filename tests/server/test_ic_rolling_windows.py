@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from server.jobs.report_outputs.builders import build_report_artifacts
-from server.jobs.scheduling.result_projection import persisted_result_summary
+from server.jobs.result_projection import persisted_result_summary
 from server.modules.single_factor_test.ic_rolling import (
     build_factor_rolling_ic,
     normalize_rolling_window_specs,

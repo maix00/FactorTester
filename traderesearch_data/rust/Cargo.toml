@@ -1,0 +1,15 @@
+[package]
+name = "traderesearch-data-io"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+arrow-array = "=59.3.1"
+arrow-buffer = "=59.3.1"
+arrow-ipc = "=59.3.1"
+arrow-schema = "=59.3.1"
+memmap2 = "0.9"
+
+[dev-dependencies]
+tempfile = "3"

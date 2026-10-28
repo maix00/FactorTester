@@ -28,6 +28,14 @@ def test_strategy_create_edit_delete_converges_without_source_in_metadata(tmp_pa
     received = reader.get(ref, principal='alice')['strategy']
     assert received['current_revision']['revision_ref'] == entry['current_revision_ref']
     assert 'source_code' not in json.dumps(list(control.rows.values()))
+    generic = right.local.list_entities(
+        principal='alice', entity_type='versioned_object_revision',
+    )
+    assert len(generic) == 1
+    assert generic[0]['payload']['revision_manifest']['object_kind'] == 'user_strategy'
+    assert generic[0]['payload']['revision_manifest']['object_ref'] == ref
+    assert generic[0]['payload']['revision_manifest']['revision_ref'] == entry['current_revision_ref']
+    assert 'source_code' not in json.dumps(generic[0]['payload'])
     assert reader.store.get_revision(entry['current_revision_ref'])['source_code'] == ''
     metadata = right.local.get_entity('alice', 'strategy_revision', entry['current_revision_ref'])['payload']
     origin = StrategyRevisionOriginAdapter(database=left.local.path, cache_root=tmp_path/'bytes')

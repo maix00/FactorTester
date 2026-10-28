@@ -1,3 +1,4 @@
+import {chartInteraction} from "./chart-interaction";
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {mergeBars} from "./range-data";
@@ -85,8 +86,7 @@ function FactorChart({bars, indicators, product, loadRange, controller,
             : {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false})},
       localization: {timeFormatter: (time: number) =>
         new Date(Number(time) * 1000).toLocaleString()},
-      handleScale: {mouseWheel: true, pinch: true, axisPressedMouseMove: true},
-      handleScroll: {mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true},
+      ...chartInteraction,
     });
     chart.current = instance;
     controller.current = instance;

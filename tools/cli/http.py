@@ -19,9 +19,19 @@ from .agent_auth import AgentCapability
 
 
 DEFAULT_HOME = Path.home() / ".factortester"
-CONFIG_ENV = "FACTORTESTER_CONFIG"
-HOME_ENV = "FACTORTESTER_HOME"
-STREAM_TIMEOUT_ENV = "FACTORTESTER_STREAM_TIMEOUT"
+CONFIG_ENV = "TRADERESEARCH_CONFIG"
+HOME_ENV = "TRADERESEARCH_HOME"
+STREAM_TIMEOUT_ENV = "TRADERESEARCH_STREAM_TIMEOUT"
+CANONICAL_ENV_PREFIX = "TRADERESEARCH_"
+
+
+def config_env(name: str) -> str | None:
+    """One config/session authority, with the canonical environment first."""
+    suffix = name.removeprefix(CANONICAL_ENV_PREFIX).removeprefix("FACTORTESTER_")
+    value = os.environ.get(CANONICAL_ENV_PREFIX + suffix)
+    return value if value is not None else os.environ.get("FACTORTESTER_" + suffix)
+
+
 DEFAULT_STREAM_TIMEOUT = 600.0
 DEFAULT_BINARY_LIMIT = 8 * 1024 * 1024
 
@@ -54,7 +64,7 @@ class BinaryResponse:
 
 
 def config_path() -> Path:
-    configured = os.environ.get(CONFIG_ENV)
+    configured = config_env(CONFIG_ENV)
     if configured:
         return Path(configured).expanduser()
     return _home_dir() / "config.json"
@@ -81,7 +91,7 @@ def state_path() -> Path:
 
 
 def _home_dir() -> Path:
-    configured = os.environ.get(HOME_ENV)
+    configured = config_env(HOME_ENV)
     return Path(configured).expanduser() if configured else DEFAULT_HOME
 
 
@@ -106,7 +116,7 @@ def load_config(path: Path | None = None) -> ClientConfig:
     if path is None and not target.exists():
         target = native_selection_path()
     if not target.exists():
-        raise FileNotFoundError(f"FactorTester CLI 尚未配置，请先运行 factortester configure")
+        raise FileNotFoundError(f"TradeResearch CLI 尚未配置，请先运行 traderesearch configure")
     raw = json.loads(target.read_text(encoding="utf-8"))
     base_url = str(raw.get("base_url") or "").strip()
     if not base_url:
@@ -339,7 +349,7 @@ class HttpSession:
             if _looks_like_html(raw):
                 raise ValueError(
                     "服务器返回了 HTML 页面而不是 JSON，可能尚未登录、登录已过期，"
-                    "或服务地址配置到了网页入口；请先运行 factortester login。"
+                    "或服务地址配置到了网页入口；请先运行 traderesearch login。"
                 ) from exc
             raise HttpClientError(exc.code, url, raw) from exc
         finally:
@@ -378,7 +388,7 @@ class HttpSession:
             if _looks_like_html(raw):
                 raise ValueError(
                     "服务器返回了 HTML 页面而不是 JSON，可能尚未登录、登录已过期，"
-                    "或服务地址配置到了网页入口；请先运行 factortester login。"
+                    "或服务地址配置到了网页入口；请先运行 traderesearch login。"
                 ) from exc
             raise HttpClientError(exc.code, url, raw) from exc
         finally:
@@ -389,7 +399,7 @@ class HttpSession:
             if _looks_like_html(raw):
                 raise ValueError(
                     "服务器返回了 HTML 页面而不是 JSON，可能尚未登录、登录已过期，"
-                    "或服务地址配置到了网页入口；请先运行 factortester login。"
+                    "或服务地址配置到了网页入口；请先运行 traderesearch login。"
                 ) from exc
             raise ValueError("服务器没有返回合法 JSON。") from exc
         if not isinstance(parsed, dict):
@@ -475,7 +485,7 @@ class HttpSession:
         self._save_cookies()
 
     def _stream_timeout(self) -> float:
-        raw = os.environ.get(STREAM_TIMEOUT_ENV)
+        raw = config_env(STREAM_TIMEOUT_ENV)
         if raw:
             try:
                 return max(float(raw), self.timeout)

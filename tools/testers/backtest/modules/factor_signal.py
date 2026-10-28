@@ -20,7 +20,7 @@ import pandas as pd
 from tools.data.types import DataIndex, DataTime
 from tools.data.types.time_freq import DataFreq
 from tools.factors.expr.signal_align import signal_align
-from tools.testers.backtest.engines.factors.incremental import NormalizedBarFields
+from tools.factors.expr.streaming.incremental import NormalizedBarFields
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import (
     ExecutableModule,

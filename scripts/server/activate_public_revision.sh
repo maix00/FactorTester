@@ -144,6 +144,7 @@ else
   echo "FACTORTESTER_PUBLIC_CACHE_FROM=factortester-public:$old_revision" \
     | sudo tee -a "$next_env" >/dev/null
 fi
+bash "$release_path/scripts/server/check_public_build_capacity.sh"
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
   bash "$public_script" build factortester-public
 postgres_before="$(

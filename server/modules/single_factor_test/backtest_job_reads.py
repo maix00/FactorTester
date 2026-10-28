@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import base64
 import binascii
 import time
@@ -9,12 +11,11 @@ from copy import deepcopy
 from pathlib import Path
 
 import orjson
-from flask import Response, jsonify, request, session, stream_with_context
+from flask import Response, jsonify, make_response, request, session, stream_with_context
 
 from server.jobs.artifacts import default_user_quota_bytes
 from server.jobs.product_scope_inputs import product_scope_snapshot
 from server.jobs.input_artifacts import FACTOR_SOURCE_PREFIX, artifact_role
-from server.jobs.ipc import DaemonUnavailable
 from server.jobs.ports import detect_port
 from server.jobs.report_outputs import (
     artifact_description,
@@ -33,7 +34,6 @@ from server.modules.single_factor_test.backtest_job_support import (
     require_job,
     require_job_detail,
 )
-from server.modules.single_factor_test.research_jobs import _daemon_client
 from server.services.session_runtime import require_user
 
 
@@ -398,6 +398,7 @@ def _task_detail(
             "error": job.error,
             "evidence": evidence,
         },
+        "progress": detail.get("progress"),
         "output_declarations": declarations,
         "input_artifacts": visible_inputs,
         "artifacts": artifacts,
@@ -686,6 +687,7 @@ def get_test_job(job_id: str):
         "submission_context": _submission_context(job),
         "caller": task_detail["caller"],
         "task_detail": task_detail,
+        "progress": detail.get("progress"),
         "evidence": evidence,
         **job_urls(job.job_id),
     }
@@ -695,77 +697,785 @@ def get_test_job(job_id: str):
     return jsonify(payload)
 
 
+def _can_read_report(actor: str, document: dict, report_ref: str) -> bool:
+    if document.get("owner") == actor:
+        return True
+    from tools.data.account_manage import get_account, is_super_admin_account
+
+    if is_super_admin_account(get_account(actor)):
+        return True
+    import os
+    from server.permissions.entries import PermissionStore
+
+    db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get(
+        "FACTORTESTER_PERMISSIONS_DB", ""
+    )
+    if not db:
+        return False
+    from server.permissions.subjects import subjects_for_user
+
+    subjects = subjects_for_user(actor)
+    store = PermissionStore(db)
+    return any(store.allows(
+        subject=subject, resource_type="report",
+        resource_ref=report_ref, action="read",
+    ) for subject in subjects)
+
+
+@sft_bp.get("/api/auth/oidc/start")
+def oidc_start():
+    """Begin the Keycloak authorization-code flow for browser clients."""
+    import secrets
+    from flask import session, url_for
+    from server import branding
+    from server.identity.auth_mode import keycloak_enabled
+    from server.identity.keycloak import oidc_authorization_url
+
+    if not keycloak_enabled():
+        return jsonify({"success": False, "error": "Keycloak login is disabled"}), 503
+    base_url = branding.env("KEYCLOAK_URL")
+    realm = branding.env("KEYCLOAK_REALM")
+    client_id = branding.env("KEYCLOAK_CLIENT_ID")
+    if not (base_url and realm and client_id):
+        return jsonify({"success": False, "error": "OIDC is not configured"}), 503
+    state = secrets.token_urlsafe(24)
+    session["oidc_state"] = state
+    redirect_uri = url_for("sft.oidc_callback", _external=True)
+    return jsonify({"success": True, "authorization_url": oidc_authorization_url(
+        base_url=base_url, realm=realm, client_id=client_id,
+        redirect_uri=redirect_uri, state=state,
+    )})
+
+
+@sft_bp.get("/api/auth/oidc/logout")
+def oidc_logout():
+    from flask import redirect, session, url_for
+    from server import branding
+    from server.identity.auth_mode import keycloak_enabled
+    from server.identity.keycloak import oidc_logout_url
+
+    session.clear()
+    if not keycloak_enabled():
+        return redirect("/")
+    url = oidc_logout_url(
+        base_url=branding.env("KEYCLOAK_URL"), realm=branding.env("KEYCLOAK_REALM"),
+        client_id=branding.env("KEYCLOAK_CLIENT_ID"),
+        post_logout_redirect_uri=url_for("sft.oidc_logout", _external=True),
+    )
+    return redirect(url)
+
+
+@sft_bp.get("/api/auth/oidc/callback")
+def oidc_callback():
+    """Complete the authorization-code flow and establish the session."""
+    from flask import redirect, request, session
+    from server import branding
+    from server.identity.auth_mode import keycloak_enabled
+    from server.identity.keycloak import OIDCClient, oidc_userinfo
+
+    if not keycloak_enabled():
+        return jsonify({"success": False, "error": "Keycloak login is disabled"}), 503
+    code = str(request.args.get("code") or "")
+    state = str(request.args.get("state") or "")
+    expected = str(session.pop("oidc_state", "") or "")
+    if not code or not state or state != expected:
+        return jsonify({"success": False, "error": "invalid OIDC state"}), 400
+    redirect_uri = request.url_root.rstrip("/") + "/api/auth/oidc/callback"
+    client = OIDCClient(
+        branding.env("KEYCLOAK_URL"), branding.env("KEYCLOAK_REALM"),
+        branding.env("KEYCLOAK_CLIENT_ID"),
+        client_secret=branding.env("KEYCLOAK_CLIENT_SECRET"),
+    )
+    tokens = client.exchange_code(code, redirect_uri)
+    try:
+        profile = oidc_userinfo(
+            base_url=branding.env("KEYCLOAK_URL"), realm=branding.env("KEYCLOAK_REALM"),
+            access_token=str(tokens.get("access_token") or ""),
+        )
+    except Exception:
+        from server.identity.keycloak import jwt_claims
+
+        profile = jwt_claims(
+            str(tokens.get("id_token") or tokens.get("access_token") or "")
+        )
+    username = str(profile.get("preferred_username") or profile.get("sub") or "")
+    if not username:
+        return jsonify({"success": False, "error": "OIDC profile has no username"}), 401
+    # Keycloak lowercases usernames; retain the legacy spelling when available.
+    try:
+        from server.identity.keycloak import KeycloakAdminAdapter
+        identity = KeycloakAdminAdapter(
+            branding.env("KEYCLOAK_URL"), branding.env("KEYCLOAK_REALM"),
+            client_id=branding.env("KEYCLOAK_ADMIN_CLIENT_ID", "admin-cli"),
+            client_secret=branding.env("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
+        ).user(username)
+        legacy = (getattr(identity, "attributes", {}) or {}).get("legacy_username") if identity else None
+        if legacy:
+            username = legacy[0] if isinstance(legacy, (tuple, list)) else str(legacy)
+    except Exception:
+        pass
+    role = "user"
+    try:
+        from tools.data.account_manage import get_account
+        account = get_account(username)
+        if account is not None:
+            role = str(account.role or "user")
+    except Exception:
+        pass
+    session["username"] = username
+    session["role"] = role
+    return redirect("/")
+
+
+@sft_bp.post("/api/objects")
+def put_versioned_object():
+    actor = require_user()
+    import os
+    from flask import request
+    from server.jobs.storage.couchdb_objects import VersionedObject, put_object
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    body = request.get_json(silent=True) or {}
+    kind = str(body.get("kind") or "")
+    ref = str(body.get("ref") or "")
+    payload = body.get("payload")
+    if kind not in {"factor_version", "strategy_version"}:
+        return jsonify({"success": False, "error": "unsupported object kind"}), 400
+    if not ref or not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "ref and payload are required"}), 400
+    expected = "factor:v2:" if kind == "factor_version" else "strategy:"
+    if not ref.startswith(expected):
+        return jsonify({"success": False, "error": "object ref does not match kind"}), 400
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "object store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        put_object(store, VersionedObject(
+            ref=ref, kind=kind, owner=actor, payload=payload,
+            links=dict(body.get("links") or {}),
+        ))
+    except Exception:
+        return jsonify({"success": False, "error": "object already exists or write failed"}), 409
+    try:
+        from server.jobs.dispatch.audit import append_audit
+        import settings as Settings
+
+        append_audit(Settings.CACHE_DB_PATH, action="object_write", actor=actor,
+                     job_id=ref, detail=kind)
+    except Exception:
+        pass
+    return jsonify({"success": True, "ref": ref, "owner": actor})
+
+
+@sft_bp.get("/api/objects/<path:object_ref>")
+def get_versioned_object(object_ref: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_objects import get_object
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "object store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_object(store, object_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "object not found"}), 404
+    if document.get("owner") != actor:
+        from server.permissions.subjects import subjects_for_user
+        from server.permissions.entries import PermissionStore
+
+        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+        if not (db and any(PermissionStore(db).allows(
+            subject=subject, resource_type=str(document.get("kind") or ""),
+            resource_ref=object_ref, action="read",
+        ) for subject in subjects_for_user(actor))):
+            return jsonify({"success": False, "error": "object access denied"}), 403
+    return jsonify({"success": True, "document": document})
+
+
+@sft_bp.get("/api/reports/<report_ref>/conflicts")
+def get_report_conflicts(report_ref: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if not _can_read_report(actor, document, report_ref):
+        return jsonify({"success": False, "error": "report access denied"}), 403
+    return jsonify({"success": True, "conflicts": store.conflicts(report_ref)})
+
+
+@sft_bp.post("/api/reports/<report_ref>/conflicts/resolve")
+def resolve_report_conflicts(report_ref: str):
+    actor = require_user()
+    import os
+    from flask import request
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if document.get("owner") != actor:
+        from tools.data.account_manage import get_account, is_super_admin_account
+        if not is_super_admin_account(get_account(actor)):
+            import os as _os
+            from server.permissions.entries import PermissionStore
+            db = _os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or _os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+            from server.permissions.subjects import subjects_for_user
+
+            if not (db and any(PermissionStore(db).allows(
+                subject=subject, resource_type="admin_console",
+                resource_ref="dispatch", action="manage",
+            ) for subject in subjects_for_user(actor))):
+                return jsonify({"success": False, "error": "report owner or admin manage permission required"}), 403
+    keep_rev = str((request.get_json(silent=True) or {}).get("keep_rev") or "")
+    if not keep_rev:
+        return jsonify({"success": False, "error": "keep_rev is required"}), 400
+    remaining = store.resolve_conflicts(report_ref, keep_rev=keep_rev)
+    try:
+        from server.jobs.dispatch.audit import append_audit
+        import settings as Settings
+
+        append_audit(
+            Settings.CACHE_DB_PATH, action="report_conflict_resolve",
+            actor=actor, job_id=report_ref, detail=keep_rev,
+        )
+    except Exception:
+        pass
+    return jsonify({"success": True, "conflicts": remaining})
+
+
+@sft_bp.get("/api/job-test-reports/<report_ref>/attachments")
+@sft_bp.get("/api/reports/<report_ref>/attachments")
+def list_report_attachments(report_ref: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if not _can_read_report(actor, document, report_ref):
+        return jsonify({"success": False, "error": "report access denied"}), 403
+    attachments = document.get("_attachments") if isinstance(document.get("_attachments"), dict) else {}
+    return jsonify({"success": True, "attachments": [
+        {"name": name, "content_type": str(meta.get("content_type") or ""),
+         "length": int(meta.get("length") or 0)}
+        for name, meta in sorted(attachments.items())
+    ]})
+
+
+@sft_bp.get("/api/job-test-reports/<report_ref>/attachments/<path:name>")
+@sft_bp.get("/api/reports/<report_ref>/attachments/<path:name>")
+def get_report_attachment(report_ref: str, name: str):
+    """Stream one content-addressed CouchDB report attachment."""
+    actor = require_user()
+    import os
+    from flask import Response
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(
+        url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip(),
+        username=os.environ.get("FACTORTESTER_COUCHDB_USER", ""),
+        password=os.environ.get("FACTORTESTER_COUCHDB_PASSWORD", ""),
+    )
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if not _can_read_report(actor, document, report_ref):
+        return jsonify({"success": False, "error": "report access denied"}), 403
+    attachment = (document.get("attachments") or {}).get(name)
+    if not attachment:
+        return jsonify({"success": False, "error": "attachment not found"}), 404
+    data = store.get_attachment(report_ref, attachment)
+    mime = "text/html" if name.endswith(".html") else "text/csv" if name.endswith(".csv") else "application/octet-stream"
+    return Response(data, mimetype=mime, headers={"Content-Disposition": f'inline; filename="{name}"'})
+
+
+@sft_bp.post("/api/research-reports/<publication_id>/operations")
+def apply_research_report_operation(publication_id: str):
+    actor = require_user()
+    import os
+    from flask import request
+    from server.jobs.storage.couchdb_research_reports import get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+    from server.jobs.storage.research_report_operations import (
+        apply_component_batch, apply_component_insert, apply_component_move,
+        apply_component_remove, apply_index_operation,
+    )
+    from server.jobs.storage.research_report_projection_ops import apply_projection_operation
+
+    payload = request.get_json(silent=True) or {}
+    base_rev = str(payload.get("base_rev") or "")
+    operation = payload.get("operation") if isinstance(payload.get("operation"), dict) else payload
+    if not base_rev:
+        return jsonify({"success": False, "error": "base_rev is required"}), 400
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor:
+        return jsonify({"success": False, "error": "only the research report owner may edit"}), 403
+    if document.get("projection_hash"):
+        try:
+            result = apply_projection_operation(
+                store, document, base_rev=base_rev, operation=operation,
+            )
+        except ValueError as exc:
+            code = 409 if "conflict" in str(exc) else 400
+            return jsonify({"success": False, "error": str(exc)}), code
+        try:
+            from server.jobs.dispatch.audit import append_audit
+            import settings as Settings
+
+            append_audit(Settings.CACHE_DB_PATH, action="research_report_operation",
+                         actor=actor, job_id=publication_id,
+                         detail=str(operation.get("op") or ""))
+        except Exception:
+            pass
+        return jsonify({"success": True, "rev": result["rev"],
+                        "projection_hash": result["projection_hash"],
+                        "generation": result["generation"],
+                        "components": (result.get("chapter") or {}).get("components") or []})
+    try:
+        op = str(operation.get("op") or "")
+        if op == "move_component":
+            result = apply_component_move(
+                store, document, base_rev=base_rev,
+                chapter_id=str(operation.get("chapter_id") or ""),
+                component_id=str(operation.get("component_id") or ""),
+                parent_id=str(operation.get("parent_id") or ""),
+                after_component_id=str(operation.get("after_component_id") or ""),
+            )
+        elif op == "insert_component":
+            result = apply_component_insert(
+                store, document, base_rev=base_rev,
+                chapter_id=str(operation.get("chapter_id") or ""),
+                component=dict(operation.get("component") or {}),
+                parent_id=str(operation.get("parent_id") or ""),
+                after_component_id=str(operation.get("after_component_id") or ""),
+            )
+        elif op == "remove_component":
+            result = apply_component_remove(
+                store, document, base_rev=base_rev,
+                chapter_id=str(operation.get("chapter_id") or ""),
+                component_id=str(operation.get("component_id") or ""),
+                include_children=bool(operation.get("include_children")),
+            )
+        elif op == "batch":
+            operations = operation.get("operations")
+            if not isinstance(operations, list):
+                return jsonify({"success": False, "error": "operations must be a list"}), 400
+            result = apply_component_batch(store, document, base_rev=base_rev,
+                                           operations=operations)
+        else:
+            result = apply_index_operation(store, document, base_rev=base_rev, operation=operation)
+    except ValueError as exc:
+        code = 409 if "conflict" in str(exc) else 400
+        return jsonify({"success": False, "error": str(exc)}), code
+    try:
+        from server.jobs.dispatch.audit import append_audit
+        import settings as Settings
+
+        append_audit(Settings.CACHE_DB_PATH, action="research_report_operation",
+                     actor=actor, job_id=publication_id,
+                     detail=str(operation.get("op") or ""))
+    except Exception:
+        pass
+    if "index" in result:
+        return jsonify({"success": True, "rev": result["rev"],
+                        "attachment": result["attachment"],
+                        "chapters": result["index"].get("chapters") or []})
+    return jsonify({"success": True, "rev": result["rev"],
+                    "attachment": result["attachment"],
+                    "components": result["chapter"].get("components") or []})
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/conflicts")
+def get_research_report_conflicts(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import document_id, get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor:
+        return jsonify({"success": False, "error": "only the research report owner may inspect conflicts"}), 403
+    return jsonify({"success": True, "conflicts": store.conflicts(document_id(publication_id))})
+
+
+@sft_bp.post("/api/research-reports/<publication_id>/conflicts/resolve")
+def resolve_research_report_conflicts(publication_id: str):
+    actor = require_user()
+    import os
+    from flask import request
+    from server.jobs.storage.couchdb_research_reports import document_id, get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor:
+        return jsonify({"success": False, "error": "only the research report owner may resolve conflicts"}), 403
+    keep_rev = str((request.get_json(silent=True) or {}).get("keep_rev") or "")
+    if not keep_rev:
+        return jsonify({"success": False, "error": "keep_rev is required"}), 400
+    remaining = store.resolve_conflicts(document_id(publication_id), keep_rev=keep_rev)
+    try:
+        from server.jobs.dispatch.audit import append_audit
+        import settings as Settings
+
+        append_audit(Settings.CACHE_DB_PATH, action="research_report_conflict_resolve",
+                     actor=actor, job_id=publication_id, detail=keep_rev)
+    except Exception:
+        pass
+    return jsonify({"success": True, "conflicts": remaining})
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/chapters/<chapter_id>")
+def get_research_report_chapter(publication_id: str, chapter_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+    from server.jobs.storage.research_report_agent import chapter_attachment_path
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    meta = (document.get("attachments") or {}).get(chapter_attachment_path(chapter_id)) or {}
+    name = str(meta.get("name") or "")
+    if not name:
+        return jsonify({"success": False, "error": "chapter not found"}), 404
+    import json as _json
+
+    return jsonify({"success": True, "chapter": _json.loads(store.get_attachment(document["_id"], name))})
+
+
+@sft_bp.get("/api/strategy-families")
+def get_public_strategy_families():
+    require_user()
+    from server.services.strategy_family_catalog import (
+        list_public_strategy_families,
+    )
+
+    return jsonify({"success": True,
+                    "families": list_public_strategy_families()})
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/agent")
+def get_research_report_agent(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report, projection
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+    from server.jobs.storage.research_report_agent import agent_manifest, agent_markdown, load_index
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+        value = projection(store, document)
+        index_value = load_index(store, document)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    return jsonify({"success": True, "manifest": agent_manifest(document, index_value), "markdown": agent_markdown(store, document, index_value)})
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/agent.md")
+def get_research_report_agent_markdown(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report, projection
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+    from server.jobs.storage.research_report_agent import agent_manifest, agent_markdown, load_index
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+        value = projection(store, document)
+        index_value = load_index(store, document)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    return Response(agent_markdown(store, document, index_value), mimetype="text/markdown")
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/projection")
+def get_research_report_projection(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report, projection
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+        value = projection(store, document)
+    except Exception:
+        return jsonify({"success": False, "error": "research report projection not found"}), 404
+    visibility = str(document.get("visibility") or "private")
+    if document.get("owner_ref") != actor and visibility != "public":
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    return jsonify({"success": True, "projection": value})
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/attachments")
+def list_research_report_attachments(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    visibility = str(document.get("visibility") or "private")
+    allowed = document.get("owner_ref") == actor or visibility == "public"
+    if not allowed:
+        from server.permissions.entries import PermissionStore
+        from server.permissions.subjects import subjects_for_user
+        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+        allowed = bool(db and any(PermissionStore(db).allows(
+            subject=subject, resource_type="research_report",
+            resource_ref=publication_id, action="read",
+        ) for subject in subjects_for_user(actor)))
+    if not allowed:
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    attachments = document.get("attachments") if isinstance(document.get("attachments"), dict) else {}
+    return jsonify({"success": True, "attachments": [
+        {"path": path, **meta} for path, meta in sorted(attachments.items())
+    ]})
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/attachments/<path:name>")
+def get_research_report_attachment(publication_id: str, name: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import document_id, get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    visibility = str(document.get("visibility") or "private")
+    allowed = document.get("owner_ref") == actor or visibility == "public"
+    if not allowed:
+        from server.permissions.entries import PermissionStore
+        from server.permissions.subjects import subjects_for_user
+        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+        allowed = bool(db and any(PermissionStore(db).allows(
+            subject=subject, resource_type="research_report",
+            resource_ref=publication_id, action="read",
+        ) for subject in subjects_for_user(actor)))
+    if not allowed:
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    attachments = document.get("attachments") if isinstance(document.get("attachments"), dict) else {}
+    meta = next((item for item in attachments.values()
+                 if isinstance(item, dict) and item.get("name") == name), None)
+    if meta is None:
+        return jsonify({"success": False, "error": "attachment not found"}), 404
+    data = store.get_attachment(document_id(publication_id), name)
+    response = make_response(data)
+    response.headers["Content-Type"] = str(meta.get("content_type") or "application/octet-stream")
+    response.headers["Content-Disposition"] = f'inline; filename="{name}"'
+    return response
+
+
+@sft_bp.get("/api/research-reports/<publication_id>")
+def get_research_report_document(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    visibility = str(document.get("visibility") or "private")
+    allowed = document.get("owner_ref") == actor or visibility == "public"
+    if not allowed:
+        from server.permissions.entries import PermissionStore
+        from server.permissions.subjects import subjects_for_user
+        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+        allowed = bool(db and any(PermissionStore(db).allows(
+            subject=subject, resource_type="research_report",
+            resource_ref=publication_id, action="read",
+        ) for subject in subjects_for_user(actor)))
+    if not allowed:
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    return jsonify({"success": True, "document": document})
+
+
+@sft_bp.get("/api/job-test-reports/<path:report_ref>")
+@sft_bp.get("/api/reports/<path:report_ref>")
+def get_report_document(report_ref: str):
+    """Read one CouchDB report document, scoped to its owner."""
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(
+        url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip(),
+        username=os.environ.get("FACTORTESTER_COUCHDB_USER", ""),
+        password=os.environ.get("FACTORTESTER_COUCHDB_PASSWORD", ""),
+    )
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if not _can_read_report(actor, document, report_ref):
+        return jsonify({"success": False, "error": "report access denied"}), 403
+    return jsonify({"success": True, "document": document})
+
+
+@sft_bp.get("/api/dispatch/status")
+def dispatch_status():
+    """Read-only dispatch/worker projection for the operations panel."""
+    require_user()
+    from server.jobs.dispatch.outbox import DispatchOutbox
+
+    job_repository = repository()
+    db_path = getattr(job_repository, "db_path", None)
+    if db_path is None:
+        return jsonify({"success": False, "error": "job repository unavailable"}), 503
+    outbox = DispatchOutbox(db_path)
+    deployment = os.environ.get("FACTORTESTER_DEPLOYMENT_ID", "").strip()
+    raw_port = os.environ.get("FACTORTESTER_SERVICE_PORT", "").strip()
+    port = int(raw_port) if raw_port.isdigit() else 0
+    return jsonify({
+        "success": True,
+        "deployment_id": deployment,
+        "service_port": port,
+        "queue": (
+            f"factortester.jobs.{deployment}.{port}"
+            if deployment and port else ""
+        ),
+        "outbox": outbox.counts(),
+        "workers": job_repository.list_worker_targets(),
+    })
+
+
 @sft_bp.get("/api/jobs/<job_id>/stream")
 def stream_test_job(job_id: str):
-    job, error = require_job(job_id)
+    """Stream the durable Job progress projection.
+
+    Celery workers run in a different process (and possibly a different
+    server), so the old daemon EventBroker is no longer the live source.
+    Progress snapshots are persisted in the Job database and replayed here.
+    """
+    _job, error = require_job(job_id)
     if error:
         return error
     owner = require_user()
-    after = _after_seq()
 
     @stream_with_context
     def generate():
-        nonlocal after
+        last_sequence = -1
         while True:
             current = repository().load(job_id, owner=owner)
             if current is None:
-                yield _sse(
-                    "error",
-                    {"error": "research job not found"},
-                )
+                yield _sse("error", {"error": "research job not found"})
                 return
-            try:
-                snapshot = _daemon_client().events(
-                    job_id,
-                    after=after,
-                    timeout=2.0,
-                )
-            except DaemonUnavailable:
-                yield _sse("reset", {
-                    "reason": "daemon_unavailable",
+            progress = repository().progress(job_id, current.attempt)
+            if progress is not None and int(progress["sequence"]) > last_sequence:
+                last_sequence = int(progress["sequence"])
+                yield _sse("progress", {
+                    **progress,
+                    "status": current.status.value,
+                    "percent_scope": "global",
+                })
+            if current.status in TERMINAL_STATUSES:
+                yield _sse("result", {
                     "status": current.status.value,
                     "result_summary": current.result_summary,
                     "error": current.error,
                 })
                 return
-            if not snapshot.get("known", True):
-                yield _sse("reset", {
-                    "reason": "event_state_unavailable",
-                    "status": current.status.value,
-                    "latest_progress": None,
-                    "manifest": None,
-                    "result_summary": current.result_summary,
-                    "error": current.error,
-                })
-                if current.status in TERMINAL_STATUSES or after > 0:
-                    return
-            gap = snapshot.get("gap")
-            if gap:
-                yield _sse("reset", {
-                    "reason": "event_gap",
-                    "gap": gap,
-                    "status": current.status.value,
-                    "latest_progress": snapshot.get("latest_progress"),
-                    "manifest": snapshot.get("manifest"),
-                })
-            for event in snapshot.get("events") or []:
-                after = max(after, int(event["seq"]))
-                yield _sse(
-                    event["event"],
-                    event["data"],
-                    event_id=after,
-                )
-            if (
-                current.status in TERMINAL_STATUSES
-                or snapshot.get("closed")
-            ):
-                return
-            if not snapshot.get("events"):
-                yield _sse("heartbeat", {
-                    "status": current.status.value,
-                    "latest_progress": snapshot.get("latest_progress"),
-                    "server_time": time.time(),
-                })
+            yield _sse("heartbeat", {
+                "status": current.status.value,
+                "latest_progress": (
+                    progress if progress is not None and last_sequence >= 0 else None
+                ),
+                "server_time": time.time(),
+            })
+            time.sleep(1.0)
 
     return Response(
         generate(),
@@ -797,6 +1507,10 @@ def get_test_job_result(job_id: str):
         "status": job.status.value,
         "evidence": evidence,
         "compatibility": _compatibility(job),
+        "report_ref": job.report_ref or (
+            str(job.result_summary.get("report_ref") or "")
+            if isinstance(job.result_summary, dict) else ""
+        ),
     }
     if evidence_warning:
         base["detail_warning"] = evidence_warning

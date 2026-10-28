@@ -31,25 +31,27 @@ if (!shared || typeof shared.previewExpression !== "function") {
   process.exit(3);
 }
 
-const results = input.map(entry => {
-  const factor = entry.factor;
-  const values = entry.values || {};
-  const expression = shared.previewExpression(factor, values);
-  katex.renderToString(expression, {throwOnError: true, strict: "ignore", displayMode: true});
-  // Exercise the nested parameter table's actual "values" toggle too.
-  global.document = {createElement: () => ({
-    children: [], handlers: {}, append(...nodes) { this.children.push(...nodes); },
-    addEventListener(type, handler) { this.handlers[type] = handler; },
-    replaceChildren() {},
-  })};
-  let localExpression;
-  window.katex = {};
-  window.FTUI = {
-    renderMath(_target, source) { localExpression = source; },
-  };
-  const local = shared.localFormula({t: x => x}, factor, values);
-  local.root.children[0].children[1].handlers.click();
-  return {expression, localExpression};
-});
-
-process.stdout.write(JSON.stringify(results));
+async function main() {
+  const results = [];
+  for (const entry of input) {
+    const factor = entry.factor;
+    const values = entry.values || {};
+    const api = async (_path, options) => ({success: true,
+      latex: JSON.parse(options.body).include_nested_definitions === false ? entry.flat : entry.rendered});
+    const expression = await shared.previewExpression(factor, values, {api});
+    katex.renderToString(expression, {throwOnError: true, strict: "ignore", displayMode: true});
+    global.document = {createElement: () => ({
+      children: [], handlers: {}, append(...nodes) { this.children.push(...nodes); },
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+      replaceChildren() {},
+    })};
+    let localExpression;
+    window.katex = {};
+    window.FTUI = {renderMath(_target, source) { localExpression = source; }};
+    const local = shared.localFormula({t: x => x, api}, factor, values);
+    await local.root.children[0].children[1].handlers.click();
+    results.push({expression, localExpression});
+  }
+  process.stdout.write(JSON.stringify(results));
+}
+main().catch(error => { process.stderr.write(String(error.stack)); process.exit(1); });
