@@ -10,6 +10,7 @@ import { FunctionPage } from "../components/function-page.tsx";
 import { TRDataTable } from "../components/data-table.tsx";
 import { DetailsPanel } from "../components/details-panel.tsx";
 import { LibraryCreate } from "../components/library-create.tsx";
+import { ProductGroupEditor } from "../components/product-group-editor.tsx";
 import { ResultView } from "../components/result-view.tsx";
 import { request } from "../configuration/api.ts";
 import { formatDate } from "../format.ts";
@@ -33,6 +34,7 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<Row | null>(null), [detailError, setDetailError] = useState("");
   const [creating, setCreating] = useState(false), [detailOpen, setDetailOpen] = useState(false);
+  const [groupCreating, setGroupCreating] = useState(false), [groupEditing, setGroupEditing] = useState(false);
   const serverPaged = domain === "strategies" && !["public", "strategyFamilies"].includes(tab);
   useEffect(() => {
     if (tab === "reference") { setRows([]); return; }
@@ -50,7 +52,7 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
     return () => { clearTimeout(timer); controller.abort(); };
   }, [domain, tab, serverPaged, serverPaged ? page : 0, serverPaged ? size : 0, serverPaged ? query : "", revision]);
   useEffect(() => {
-    setDetail(null); setDetailError(""); if (!selected) return;
+    setDetail(null); setDetailError(""); setGroupEditing(false); if (!selected) return;
     const controller = new AbortController(), ref = encodeURIComponent(identity(selected));
     const url = tab === "factors" ? `/api/factor-library/factors/detail?factor_ref=${ref}${selected.owner_username ? `&owner_username=${encodeURIComponent(selected.owner_username)}` : ""}`
       : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? `/api/strategy-library/strategies/${ref}?include_source=0`
@@ -64,9 +66,11 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
   const visible = serverPaged ? filtered : filtered.slice((page - 1) * size, page * size);
   const label = (key: string): string => t(domain === "strategies" ? `library.scopes.${key}` : `catalog.${key}`);
   const select = (row: Row): void => { if (tab === "sources") { instance.open("source-detail", {sourceFamilyId: sourceIdentity(row)}); return; } if (tab === "products") { instance.open("product-detail", { productName: row.name || row.code || row.id, productTitle: row.desc || row.name || row.code }); return; } setSelected(row); if (mobile) setDetailOpen(true); };
-  const contents = detailError ? <div role="alert">{detailError}</div> : tab === "factors" || tab === "families" ? <FactorDetail key={identity(selected || {})} detail={detail} /> : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? <StrategyDetail onRemoved={() => { setSelected(null); setDetailOpen(false); setRevision((value) => value + 1); }} key={identity(selected || {})} detail={detail} onUpdated={(value) => { setSelected(value); setRevision((revision) => revision + 1); }} /> : <ResultView value={detail} />;
+  const groupDetail = (detail as Row | null)?.group ?? detail ?? selected;
+  const contents = detailError ? <div role="alert">{detailError}</div> : tab === "groups" && groupEditing ? <ProductGroupEditor group={groupDetail as Row} onCancel={() => setGroupEditing(false)} onSaved={(value) => { setGroupEditing(false); setSelected(value); setDetail({ group: value } as Row); setRevision((revision) => revision + 1); }} /> : tab === "factors" || tab === "families" ? <FactorDetail key={identity(selected || {})} detail={detail} /> : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? <StrategyDetail onRemoved={() => { setSelected(null); setDetailOpen(false); setRevision((value) => value + 1); }} key={identity(selected || {})} detail={detail} onUpdated={(value) => { setSelected(value); setRevision((revision) => revision + 1); }} /> : tab === "groups" ? <div className="tr-group-detail"><ResultView value={detail} /><Button onClick={() => setGroupEditing(true)}>{t("productGroup.edit")}</Button></div> : <ResultView value={detail} />;
   if (creating) return <FunctionPage title={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}><LibraryCreate kind={domain === "factors" ? "factor" : "strategy"} onCancel={() => setCreating(false)} onCreated={() => { setCreating(false); setRevision((value) => value + 1); }} /></FunctionPage>;
-  return <FunctionPage title={t(`nav.${domain}`)} actions={<><Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} />{domain !== "products" ? <Button type="primary" aria-label={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")} icon={<PlusOutlined />} onClick={() => setCreating(true)}>{t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}</Button> : null}</>}>
+  if (groupCreating) return <FunctionPage title={t("productGroup.create")}><ProductGroupEditor onCancel={() => setGroupCreating(false)} onSaved={(value) => { setGroupCreating(false); setRevision((revision) => revision + 1); setSelected(value); }} /></FunctionPage>;
+  return <FunctionPage title={t(`nav.${domain}`)} actions={<><Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} />{domain === "products" && tab === "groups" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setGroupCreating(true)}>{t("productGroup.create")}</Button> : null}{domain !== "products" ? <Button type="primary" aria-label={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")} icon={<PlusOutlined />} onClick={() => setCreating(true)}>{t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}</Button> : null}</>}>
     <Tabs activeKey={tab} onChange={(value) => { setTab(value); setPage(1); setRows([]); setSelected(null); setQuery(""); setOwnerFilter(undefined); setFamilyFilter(undefined); }} items={tabsByDomain[domain].map((key) => ({ key, label: label(key) }))} />
     {tab === "reference" ? <ReferenceLookup /> : <><div className="tr-library-filters"><Input.Search allowClear aria-label={t(domain === "products" && tab === "products" ? "market.productSearch" : "library.search")} placeholder={t(domain === "products" && tab === "products" ? "market.productSearch" : "library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
       {domain === "factors" ? <Select allowClear aria-label={t("library.allFamilies")} placeholder={t("library.allFamilies")} value={familyFilter} options={[...new Set(rows.map(family))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setFamilyFilter(value); setPage(1); }} /> : null}
