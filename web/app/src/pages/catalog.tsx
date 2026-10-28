@@ -1,4 +1,4 @@
-import { catalogSearchMatches } from "../catalog-search.ts";
+import { catalogRows, catalogSearchMatches } from "../catalog-search.ts";
 import { sourceIdentity } from "../source-model.ts";
 import React, { useEffect, useMemo, useState } from "react";
 import { Button, Input, Select, Tabs, Tag } from "antd";
@@ -43,7 +43,7 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
     const timer = setTimeout(() => {
       void request(url, { signal: controller.signal }).then((data) => {
         if (controller.signal.aborted) return;
-        const items = (tab === "strategyFamilies" ? data.families : undefined) || data.items || data.products || data.groups || data.sources || data.categories || data.factors || data.families || [];
+        const items = catalogRows(data, domain, tab);
         setRows(items); setTotal(data.total ?? items.length);
       }).catch((reason) => { if (!controller.signal.aborted) setError(reason.message); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     }, serverPaged ? 200 : 0);
