@@ -14,6 +14,9 @@ import { PageSurface } from "./surface.tsx";
 import { AppTheme } from "./components/app-theme.tsx";
 import { Brand } from "./components/brand.tsx";
 import { useTranslation } from "react-i18next";
+import { workspaceLayoutKey } from "./layout.ts";
+import { useAuth } from "./auth.tsx";
+import { AccountMenu } from "./components/account-actions.tsx";
 import { SettingsOverlay } from "./components/settings-overlay.tsx";
 import { PageErrorBoundary } from "./error-boundary.tsx";
 import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
@@ -58,11 +61,12 @@ function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number
 
 const components = { page: Panel };
 const tabComponents = { page: Tab };
-const LAYOUT_KEY = "tr.workspace.layout.v2";
 type DockviewApi = DockviewReadyEvent["api"];
 
 export function DesktopShell(): React.ReactElement {
   const { t } = useTranslation();
+  const {session}=useAuth();
+  const layoutKey=workspaceLayoutKey(session?.username||"anonymous");
   const pages = pagesForScope("desktop").filter((page) => page.sidebarVisible !== false);
   const label = (page: { id: string; title: string }): string => t(`nav.${page.id}`, { defaultValue: page.title });
   const [api, setApi] = useState<DockviewApi | null>(null);
@@ -104,7 +108,7 @@ export function DesktopShell(): React.ReactElement {
 
   const resetLayout = (): void => {
     if (!api) return;
-    localStorage.removeItem(LAYOUT_KEY);
+    localStorage.removeItem(layoutKey);
     api.clear();
     for (const page of pages.filter((item) => ["research", "configuration"].includes(item.id))) {
       api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: label(page), params: { pageId: page.id }, renderer: "always" });
@@ -115,7 +119,7 @@ export function DesktopShell(): React.ReactElement {
     setApi(event.api);
     let restored = false;
     try {
-      const raw = localStorage.getItem(LAYOUT_KEY);
+      const raw = localStorage.getItem(layoutKey);
       if (raw) {
         event.api.fromJSON(JSON.parse(raw));
         for (const panel of [...event.api.panels]) {
@@ -137,7 +141,7 @@ export function DesktopShell(): React.ReactElement {
       if (pageId) setActive(pageId);
     });
     event.api.onDidLayoutChange(() => {
-      try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(event.api.toJSON())); } catch { /* storage disabled */ }
+      try { localStorage.setItem(layoutKey, JSON.stringify(event.api.toJSON())); } catch { /* storage disabled */ }
     });
   };
 
@@ -178,6 +182,7 @@ export function DesktopShell(): React.ReactElement {
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
+        <AccountMenu collapsed={collapsed}/>
         <button type="button" className="tr-account-button" onClick={() => setSettingsOpen(true)}>
           <PageIcon name="settings" />
           <span className="tr-nav-label">{t("settings")}</span>

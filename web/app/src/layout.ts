@@ -50,3 +50,6 @@ export function createMemoryLayoutStore(initial: string | null = null): LayoutSt
     load() { return restoreLayout(current); },
   };
 }
+
+/** Persist workspace references only within the authenticated principal. */
+export function workspaceLayoutKey(principal:string):string { return `tr.workspace.layout.v3:${encodeURIComponent(principal)}`; }

@@ -81,7 +81,7 @@ fi
 docker run --rm --platform "$PLATFORM" \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
   -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
-  -v "$BUILD_SRC:/repo:ro" -v "$BUILD_OUT:/wheels" -v "$ALPHA_OUT:/alpha-wheels" \
+  -v "$BUILD_SRC:/repo" -v "$BUILD_OUT:/wheels" -v "$ALPHA_OUT:/alpha-wheels" \
   -v "$CACHE/cargo/registry:/root/.cargo/registry" \
   -v "$CACHE/cargo/git:/root/.cargo/git" \
   -v "$TARGET_CACHE:/target" \
