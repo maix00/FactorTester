@@ -400,3 +400,23 @@ def test_public_entry_exposes_compliance_without_a_session(tmp_path) -> None:
     assert value["public_registration_enabled"] is False
     assert "白名单" in value["compliance_notice"]
     assert "暂不开放自助注册" in value["registration_notice"]
+
+
+def test_public_shell_is_served_without_a_session_for_the_login_overlay(tmp_path) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.require_login_for_ui = True
+    state.require_device_auth = True
+    state.public_server = True
+
+    with _running_manager(state) as base_url:
+        with urlopen(Request(f"{base_url}/app", headers=_headers())) as response:
+            shell = response.read().decode("utf-8")
+        with urlopen(Request(
+            f"{base_url}/research-static/vendor/web-app/loader.js",
+            headers=_headers(),
+        )) as response:
+            script = response.read()
+
+    assert "data-tr-web-app" in shell
+    assert response.status == 200
+    assert script

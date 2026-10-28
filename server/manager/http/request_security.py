@@ -674,6 +674,15 @@ class RequestSecurityMixin:
         if path == "/compliance":
             return True
 
+        if method == "GET" and (
+            path == "/app"
+            or path.startswith("/app/")
+            or path.startswith("/research-static/")
+        ):
+            # The React shell is public but inert. Its unauthenticated overlay
+            # reads the compliance notice and returns 401 from every data API.
+            return True
+
         if method == "GET" and path == "/api/device/summary":
             # The compliance page may show an aggregate count before the
             # browser has a session.  It contains no usernames or device IDs.
