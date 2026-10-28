@@ -631,3 +631,14 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
   .tr-job-page-detail > .ant-tabs > .ant-tabs-nav .ant-tabs-ink-bar { display: none; }
   .tr-job-page-detail > .ant-tabs > .ant-tabs-nav .ant-tabs-tab-active { box-shadow: inset 0 -2px var(--ant-color-primary, #1677ff); }
 }
+
+/* The same compact settings browser is used by desktop Modal and mobile settings. */
+.tr-settings-browser { display:flex; flex-direction:column; gap:16px; min-width:0; }
+.tr-settings-browser > .ant-select { width:100%; }
+.tr-settings-browser > .ant-btn { align-self:flex-start; }
+.tr-technical-document { min-width:0; font-size:14px; line-height:1.8; overflow-wrap:anywhere; }
+.tr-technical-document h3 { font-size:20px; margin:4px 0 20px; }
+.tr-technical-document h2,.tr-technical-document h4 { margin:24px 0 12px; scroll-margin-top:16px; }
+.tr-technical-document pre { overflow:auto; max-width:100%; padding:12px; border-radius:8px; background:var(--workspace); font-size:12px; }
+.tr-technical-document table { display:block; max-width:100%; overflow:auto; border-collapse:collapse; }
+.tr-technical-document th,.tr-technical-document td { padding:8px 12px; border:1px solid var(--line); text-align:left; }
