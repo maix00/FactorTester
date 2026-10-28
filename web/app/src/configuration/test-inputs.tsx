@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import Form from "@rjsf/antd";
-import validator from "@rjsf/validator-ajv8";
+import validator from "./validator.ts";
 import type { RJSFSchema } from "@rjsf/utils";
 import { NO_DEFAULTS } from "./form-options.ts";
 import { Alert, Select } from "antd";
