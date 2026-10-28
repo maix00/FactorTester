@@ -1,0 +1,4 @@
+# Shared host artifacts for root-invoked alpha, Nautilus and runtime builds.
+# Linux release containers override this with their own CARGO_TARGET_DIR.
+[build]
+target-dir = ".artifacts/nautilus-build/host-target"

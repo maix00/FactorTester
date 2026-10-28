@@ -42,7 +42,7 @@ NautilusTrader 由 `vendor/nautilus_trader` 固定版本提供；因子核心和
 
 构建使用 vendor 仓库锁定的 Rust toolchain、`maturin==1.15.0` 和开发 profile
 （默认 `opt-level=1`，降低 macOS Python 扩展链接体积），复用
-`vendor/nautilus_trader/target`。测试会拒绝静默跳过扩展缺失、加载其他
+`.artifacts/nautilus-build/host-target`。测试会拒绝静默跳过扩展缺失、加载其他
 wheel 或版本不匹配的情况。
 
 alpha adapter 及两个公共因子策略的原生测试使用同一固定 Nautilus 源码：
@@ -127,3 +127,5 @@ runtime，但命令树和服务端权限不同。Swift 客户端使用 App 内�
 本机实际运行测试的依赖不安装到 CLI 环境。它们由执行端负责：优先使用
 FactorTester Docker runner；必须原生运行时，才根据 Job/Worktree 的依赖清单
 创建独立的 runner Conda/venv。这样升级 CLI 不会改变既有测试环境。
+
+本机 Cargo 操作从仓库根运行，复用根 `.cargo/config.toml` 的单一 host target，避免在 alpha、Nautilus、runtime 各自产生一套依赖编译产物。Linux 发布容器使用单独的有界 target，不能与 macOS 架构混用。运行时构建回执放在 `.artifacts/runtime-receipts`，不放进可删除的 Cargo target。清理前确认无 Cargo/rustc/maturin 进程且已安装扩展不是 target 内符号链接；使用 `cargo clean --target-dir <明确的生成目录>`，不得清理源码、数据、数据库或用户备份。缓存被淘汰后重编译是正常代价，不虚报为增量命中。
