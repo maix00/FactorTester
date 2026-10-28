@@ -39,7 +39,6 @@ BUILD_ID="$(nautilus_build_identity "$ROOT" "$SRC" "$PLATFORM")"
 BUILD_OUT="$OUT/$BUILD_ID"
 ALPHA_OUT="$OUT/alpha-$ALPHA_REVISION"
 mkdir -p "$BUILD_OUT" "$ALPHA_OUT"
-CACHED="$OUT/nautilus_trader-$BUILD_ID.whl"
 if [[ -f "$BUILD_OUT/checksums.sha256" ]] && shasum -a 256 -c "$BUILD_OUT/checksums.sha256" >/dev/null 2>&1; then
   echo "native wheel cache=hit build_id=$BUILD_ID platform=$PLATFORM"
   exit 0
@@ -112,7 +111,6 @@ docker run --rm --platform "$PLATFORM" \
     CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /wheels -i python3.14
   '
 WHEEL="$(ls "$BUILD_OUT"/nautilus_trader-*.whl | head -n 1)"
-cp -f "$WHEEL" "$CACHED"
 ALPHA_WHEEL="$(ls "$ALPHA_OUT"/py_alpha_lib-*.whl | head -n 1)"
 shasum -a 256 "$WHEEL" "$ALPHA_WHEEL" > "$BUILD_OUT/checksums.sha256"
 cache_kb="$(du -sk "$TARGET_CACHE" | awk '{print $1}')"
@@ -124,4 +122,4 @@ if (( cache_kb > limit_gb * 1024 * 1024 )); then
   echo "native target cache=evicted reason=over-${limit_gb}GiB-budget"
 fi
 echo "native wheel cache=stored build_id=$BUILD_ID target_cache_kb=$cache_kb"
-ls -lh "$WHEEL" "$CACHED"
+ls -lh "$WHEEL"
