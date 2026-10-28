@@ -1,9 +1,6 @@
-# Local Nautilus wheels
+# 原生 wheel 发布
 
-Place the wheel built from `vendor/nautilus_trader` here before a public
-build that sets `NAUTILUS_WHEEL_REQUIRED=1`. The build fails when the flag is
-set and no `nautilus_trader-*.whl` is present; it never silently skips a
-required local build.
+此目录中的历史包不再作为公网构建的输入。使用 `build_nautilus_linux_wheel.sh` 构建，再由 `prepare_nautilus_wheel_for_build.sh` 生成独立的 BuildKit `native-wheels` 上下文；公网发布在切换前验证两份包及其校验和。新编译包不再加入 Git。
 
 ## 构建与磁盘预算
 
