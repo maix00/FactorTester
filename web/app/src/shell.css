@@ -608,3 +608,4 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-settings-action { border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); padding: 6px 10px; font-size: 12px; cursor: pointer; }
 .tr-settings-action:hover { border-color: var(--accent); color: var(--accent); }
 .tr-auth-compliance-link { justify-self: start; margin-top: -8px; }
+.tr-auth-guidance { margin: -6px 0 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); color: var(--muted); font-size: 12px; line-height: 1.6; }

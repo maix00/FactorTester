@@ -144,6 +144,7 @@ function AuthOverlay({ entry, unavailable, onAuthenticated }: {
           {entry?.registration_notice ? <p>{entry.registration_notice}</p> : null}
         </div>
         <a className="tr-auth-compliance-link" href={fullCompliance}>{t("auth.openCompliance")}</a>
+        {publicGate ? <p className="tr-auth-guidance">{t("auth.publicVisitorHint")}</p> : null}
         <form className="tr-auth-form" onSubmit={submit}>
           <label>
             <span>{t("auth.username")}</span>
