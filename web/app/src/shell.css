@@ -642,3 +642,8 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-technical-document pre { overflow:auto; max-width:100%; padding:12px; border-radius:8px; background:var(--workspace); font-size:12px; }
 .tr-technical-document table { display:block; max-width:100%; overflow:auto; border-collapse:collapse; }
 .tr-technical-document th,.tr-technical-document td { padding:8px 12px; border:1px solid var(--line); text-align:left; }
+.tr-settings-section-picker { width:100%; }
+.tr-technical-document th { white-space:nowrap; }
+.tr-technical-document th,.tr-technical-document td { min-width:100px; }
+.tr-technical-document td:not(:first-child) { min-width:180px; }
+.tr-technical-document table,.tr-technical-document pre,.tr-settings-content { scrollbar-width:thin; scrollbar-color:#c6cbd4 transparent; }

@@ -29,7 +29,7 @@ export function ProfileSettings():React.ReactElement {
   {detailError?<Alert type="error" message={detailError} action={<Button onClick={()=>setReload(n=>n+1)}>{t("retry")}</Button>}/>:!detail?<Spin/>:<PropertyGroups groups={[{key:"profile",title:detail.display_name||detail.profile_id,items:[
     {key:"name",label:t("editor.name"),value:detail.display_name||detail.profile_id},
     {key:"owner",label:t("library.owner"),value:detail.owner_alias||detail.owner_ref},
-    {key:"id",label:t("library.identity"),value:detail.profile_key,wide:true},
+    {key:"id",label:t("settingsPanel.profileIdentity"),value:detail.profile_key,wide:true},
     {key:"server",label:t("settingsPanel.sections.server"),value:detail.source_server_id},
     {key:"visibility",label:t("library.visibility"),value:detail.visibility,render:value=>t(`research.visibility.${value}`,{defaultValue:String(value)})},
   ]}]}/>}
