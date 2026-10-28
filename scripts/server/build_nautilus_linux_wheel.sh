@@ -23,7 +23,15 @@ trap cleanup_target EXIT
 [ -f "$SRC/python/pyproject.toml" ] || { echo "missing $SRC/python/pyproject.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
 REVISION="$(git -C "$SRC" rev-parse HEAD)"
-CACHED="$OUT/nautilus_trader-$REVISION.whl"
+ALPHA_REVISION="$(git -C "$ROOT/vendor/py-alpha-lib" rev-parse HEAD)"
+git -C "$ROOT" diff --quiet HEAD -- native/traderesearch_nautilus_runtime traderesearch_data/rust || {
+  echo "runtime composition has uncommitted changes" >&2; exit 1;
+}
+RUNTIME_TREE="$(git -C "$ROOT" ls-tree -r HEAD -- native/traderesearch_nautilus_runtime traderesearch_data/rust)"
+BUILD_ID="$(printf '%s\n' "$REVISION" "$ALPHA_REVISION" "$RUNTIME_TREE" | shasum -a 256 | cut -d' ' -f1)"
+BUILD_OUT="$OUT/$BUILD_ID"
+mkdir -p "$BUILD_OUT"
+CACHED="$OUT/nautilus_trader-$BUILD_ID.whl"
 if [ -f "$CACHED" ]; then
   echo "cached wheel for $REVISION: $CACHED"
   exit 0
@@ -57,7 +65,7 @@ fi
 docker run --rm \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
   -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
-  -v "$SRC:/src" -v "$OUT:/wheels" \
+  -v "$ROOT:/repo:ro" -v "$BUILD_OUT:/wheels" \
   -v "$CACHE/cargo/registry:/root/.cargo/registry" \
   -v "$CACHE/cargo/git:/root/.cargo/git" \
   -v "$TARGET_CACHE:/target" \
@@ -68,9 +76,9 @@ docker run --rm \
   "$BUILDER" bash -lc '
     set -euo pipefail
     . /root/.cargo/env
-    cd /src/python
+    cd /repo/native/traderesearch_nautilus_runtime
     CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /wheels -i python3.14
   '
-WHEEL="$(ls "$OUT"/nautilus_trader-*.whl | head -n 1)"
+WHEEL="$(ls "$BUILD_OUT"/nautilus_trader-*.whl | head -n 1)"
 cp -f "$WHEEL" "$CACHED"
 ls -lh "$WHEEL" "$CACHED"
