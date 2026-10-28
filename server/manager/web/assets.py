@@ -375,3 +375,51 @@ def sse_payload(revision: int, publication_ids: set[str]) -> bytes:
 
 def heartbeat() -> bytes:
     return f": keepalive {int(time.time())}\n\n".encode("ascii")
+
+
+def web_app_asset_versions() -> dict[str, str]:
+    """Content identities for declared React assets; cache hashes, not payload copies."""
+    names = sorted(value.removeprefix("vendor/web-app/")
+                   for value in _module_manifest().get("vendor_assets", ())
+                   if value.startswith("vendor/web-app/"))
+    signature = []
+    root = (VENDOR_ROOT / "web-app").resolve()
+    for name in names:
+        path = (root / name).resolve()
+        if root not in path.parents or not path.is_file():
+            raise ValueError("declared Web app asset was not found")
+        stat = path.stat()
+        signature.append((name, str(path), stat.st_mtime_ns, stat.st_size))
+    return dict(_web_app_versions(tuple(signature)))
+
+
+def _web_app_versions(signature: tuple) -> tuple:
+    result = []
+    for name, path, mtime, size in signature:
+        result.append((name, _web_app_digest(path, mtime, size)))
+    return tuple(result)
+
+
+@lru_cache(maxsize=64)
+def _web_app_digest(path: str, mtime: int, size: int) -> str:
+    del mtime, size  # Cache invalidation keys; never retain asset payloads.
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def web_app_shell_bytes() -> bytes:
+    versions = web_app_asset_versions()
+    legacy = asset_revision()
+    body = static_file("vendor/web-app/index.html")[0].decode("utf-8")
+    attrs = (f'data-tr-web-app data-tr-asset-versions="{html.escape(json.dumps(versions), quote=True)}" '
+             f'data-tr-legacy-revision="{legacy}"')
+    body = body.replace("data-tr-web-app", attrs, 1)
+    for name in ("loader.js", "manifest.webmanifest"):
+        body = body.replace(f'vendor/web-app/{name}"', f'vendor/web-app/{name}?v={versions[name]}"')
+    return body.replace('styles/app.css"', f'styles/app.css?v={legacy}"').encode("utf-8")
+
+
+def web_app_frame_bytes() -> bytes:
+    version = web_app_asset_versions()["artifact-frame.js"]
+    return static_file("vendor/web-app/artifact-frame.html")[0].replace(
+        b"artifact-frame.js\"", f'artifact-frame.js?v={version}"'.encode("ascii"))

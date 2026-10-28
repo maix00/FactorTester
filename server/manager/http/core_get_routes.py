@@ -32,6 +32,8 @@ from server.manager.web.assets import (
     bundle_bytes_for_groups,
     shell_bytes,
     static_file,
+    web_app_shell_bytes,
+    web_app_frame_bytes,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -348,6 +350,8 @@ class CoreGetRoutesMixin:
             relative = parsed.path.removeprefix("/research-static/")
             if relative in {"", "research.html", "module-manifest.json"}:
                 self.send_header("Cache-Control", "no-store")
+            elif relative.startswith("vendor/web-app/") and not parse_qs(parsed.query).get("v"):
+                self.send_header("Cache-Control", "no-cache")
             else:
                 self.send_header(
                     "Cache-Control", "public, max-age=31536000, immutable",
@@ -516,7 +520,7 @@ class CoreGetRoutesMixin:
             self.wfile.write(body)
             return True
         if parsed.path == "/app/artifact-frame":
-            body, content_type = static_file("vendor/web-app/artifact-frame.html")
+            body, content_type = web_app_frame_bytes(), "text/html"
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Security-Policy", (
@@ -534,7 +538,7 @@ class CoreGetRoutesMixin:
             self.wfile.write(body)
             return True
         if parsed.path in {"/app", "/app/"}:
-            body, content_type = static_file("vendor/web-app/index.html")
+            body, content_type = web_app_shell_bytes(), "text/html"
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header(
