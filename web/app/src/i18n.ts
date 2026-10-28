@@ -45,6 +45,7 @@ export const resources = {
       workspace: { title: "工作区", desc: "已打开和最近访问的页面" },
       notifications: { title: "通知", close: "关闭", empty: "暂无通知", new: "新", bell: "通知中心" },
       more: "加载更多",
+      devices: {identity:"设备编号",fingerprint:"公钥指纹",source:"登记服务器",hint:"公网白名单用户登录后会自动登记浏览器设备；此处仅管理你自己的设备。",search:"搜索我的设备",empty:"尚未登记设备",name:"设备",client:"客户端",enrollmentIP:"登记 IP",lastIP:"最近访问 IP",active:"启用",revoked:"已撤销",action:"操作",revoke:"撤销",revokeConfirm:"撤销此设备的访问授权？",revokedNotice:"设备已撤销",revokeFailed:"无法撤销设备",clients:{browser:"浏览器",swift:"桌面客户端"}},
       settingsPanel: {
         permissionRequired:"此设置需要相应的管理权限。", title: "设置", language: "语言", languageHint: "界面语言与数字/日期格式，时区独立。",
         layout: "工作区布局", layoutHint: "重置 Dockview 标签、分组和分栏。",
@@ -99,6 +100,7 @@ export const resources = {
       workspace: { title: "Workspace", desc: "Open and recently visited pages" },
       notifications: { title: "Notifications", close: "Close", empty: "No notifications", new: "new", bell: "Notification center" },
       more: "Load more",
+      devices: {identity:"Device ID",fingerprint:"Public key fingerprint",source:"Registration server",hint:"Allowlisted public sign-ins register browser devices automatically. Only your own devices appear here.",search:"Search my devices",empty:"No registered devices",name:"Device",client:"Client",enrollmentIP:"Enrollment IP",lastIP:"Last IP",active:"Active",revoked:"Revoked",action:"Action",revoke:"Revoke",revokeConfirm:"Revoke this device’s access?",revokedNotice:"Device revoked",revokeFailed:"Could not revoke device",clients:{browser:"Browser",swift:"Desktop client"}},
       settingsPanel: {
         permissionRequired:"This setting requires administrative permission.", title: "Settings", language: "Language", languageHint: "Interface language and number/date formats; time zone is separate.",
         layout: "Workspace layout", layoutHint: "Reset Dockview tabs, groups and splits.",

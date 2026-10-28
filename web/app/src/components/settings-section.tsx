@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import { useTranslation } from "react-i18next";
+import { DeviceSettings } from "./device-settings.tsx";
 import { AccountActions } from "./account-actions.tsx";
 import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
@@ -33,7 +34,6 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
       profiles: "/api/client/profiles",
       mihomo: "/api/admin/mihomo",
       federation: "/api/federation/config",
-      devices: "/api/devices",
       quota: "/api/jobs/storage",
       updates: "/api/client/releases/beta.json",
     };
@@ -118,7 +118,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
               ) : <Spin tip={t("loading")}/>}
               {docPage ? <pre className="tr-job-detail">{docContent || t("loading")}</pre> : null}
             </div>
-          ) : ["controlDatabase", "federation", "devices", "quota", "updates", "manager", "profiles", "mihomo"].includes(section) ? (
+          ) : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "profiles", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
               {sectionData ? <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>

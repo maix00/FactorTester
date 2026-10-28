@@ -11,6 +11,7 @@ import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.
 import { PageIcon } from "./icon.tsx";
 import { PageInstanceProvider, newPageInstanceId, type PageArguments } from "./page-instance.ts";
 import { PageSurface } from "./surface.tsx";
+import { useCompactLayout } from "./configuration/layout.ts";
 import { AppTheme } from "./components/app-theme.tsx";
 import { Brand } from "./components/brand.tsx";
 import { useTranslation } from "react-i18next";
@@ -66,12 +67,14 @@ type DockviewApi = DockviewReadyEvent["api"];
 export function DesktopShell(): React.ReactElement {
   const { t } = useTranslation();
   const {session}=useAuth();
+  const compact=useCompactLayout();
   const layoutKey=workspaceLayoutKey(session?.username||"anonymous");
   const pages = pagesForScope("desktop").filter((page) => page.sidebarVisible !== false);
   const label = (page: { id: string; title: string }): string => t(`nav.${page.id}`, { defaultValue: page.title });
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [active, setActive] = useState(pages[0]?.id ?? "research");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
+  const effectiveCollapsed=collapsed || compact;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
@@ -149,13 +152,13 @@ export function DesktopShell(): React.ReactElement {
     <AppTheme>
     <DesktopNotificationHost />
     <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
-    <div className={`tr-app-shell${collapsed ? " is-collapsed" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
+    <div className={`tr-app-shell${effectiveCollapsed ? " is-collapsed" : ""}${compact ? " is-compact" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label={t("mainNavigation")}>
         <div className="tr-sidebar-header">
           <button type="button" className="tr-sidebar-brand" onClick={() => open(pages[0]?.id ?? "research")}>
             <span className="tr-sidebar-title"><Brand /></span>
           </button>
-          <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? t("expand") : t("collapse")} title={collapsed ? t("expand") : t("collapse")} onClick={() => {
+          {!compact ? <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? t("expand") : t("collapse")} title={collapsed ? t("expand") : t("collapse")} onClick={() => {
               setCollapsed((value) => {
                 const next = !value;
                 localStorage.setItem("tr.sidebar.collapsed", next ? "1" : "0");
@@ -163,12 +166,12 @@ export function DesktopShell(): React.ReactElement {
               });
             }}>
             <PageIcon name="sidebar" />
-          </button>
+          </button> : null}
         </div>
         <div className="tr-sidebar-resize" role="separator" aria-orientation="vertical" aria-label={t("resizeSidebar")} onPointerDown={startResize} />
         <nav className="tr-module-nav">
           {pages.map((page) => (
-            <Tooltip key={page.id} title={collapsed ? label(page) : undefined} placement="right">
+            <Tooltip key={page.id} title={effectiveCollapsed ? label(page) : undefined} placement="right">
             <button
               key={page.id}
               type="button"
@@ -182,7 +185,7 @@ export function DesktopShell(): React.ReactElement {
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
-        <AccountMenu collapsed={collapsed}/>
+        <AccountMenu collapsed={effectiveCollapsed}/>
         <button type="button" className="tr-account-button" onClick={() => setSettingsOpen(true)}>
           <PageIcon name="settings" />
           <span className="tr-nav-label">{t("settings")}</span>
