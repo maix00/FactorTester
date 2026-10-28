@@ -115,3 +115,22 @@ def test_execution_api_rejects_invalid_oidc_bearer(transport):
     with pytest.raises(urllib.error.HTTPError) as error:
         urlopen(request)
     assert error.value.code==403
+
+
+def test_saved_automatic_binding_is_revalidated_even_without_client_hash(transport, monkeypatch):
+    from server.modules.single_factor_test import research_jobs, execution_nodes
+    from server.services.research_run_context import RunRequestError
+    _, _, service, binding, _ = transport
+    product = _requirement().product_ref
+    prepared = {'owner':'alice','analyses':['backtest'],
+        'execution_selection':{'mode':'auto','manager_id':'manager-a','resolved_ref':'obsolete'},
+        'run_spec':{'data_requirements':[asdict(_requirement())],
+            'configuration':{'shared':{'product_selections':{'scope':{'paths':[product]}}}}}}
+    monkeypatch.setattr(execution_nodes,'node_service',lambda:service)
+    monkeypatch.setattr(research_jobs,'_prepare_local_research_run_request',lambda *a,**k:prepared)
+    with pytest.raises(RunRequestError) as error:
+        research_jobs._prepare_research_run_request({},owner='alice')
+    assert error.value.status_code == 409
+    assert error.value.details['code'] == 'execution_binding_changed'
+    prepared['execution_selection']['resolved_ref']=canonical_hash(binding)
+    assert research_jobs._prepare_research_run_request({},owner='alice')['execution_binding']==binding
