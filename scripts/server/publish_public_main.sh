@@ -40,7 +40,7 @@ remote_exec() {
   "${ssh_command[@]}" "$remote" "$@"
 }
 
-for command in git ssh; do
+for command in git ssh tar; do
   command -v "$command" >/dev/null || {
     echo "missing local command: $command" >&2
     exit 2
@@ -73,6 +73,31 @@ done
 nautilus_revision="$(bash "$repo_root/scripts/server/nautilus_vendor_revision.sh")"
 export FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision"
 
+# Finished native artifacts are versioned separately from Git source releases.
+source "$repo_root/scripts/server/nautilus_build_identity.sh"
+native_build_id="$(nautilus_build_identity "$repo_root" "$repo_root/vendor/nautilus_trader" linux/amd64)"
+native_artifact_root="$remote_container_root/native-wheels"
+native_context="$native_artifact_root/$native_build_id"
+if remote_exec "test -f '$native_context/checksums.sha256' && test \"\$(cat '$native_context/build-id.txt')\" = '$native_build_id' && cd '$native_context' && sha256sum -c checksums.sha256 >/dev/null 2>&1"; then
+  echo "public native artifacts cache=hit build_id=$native_build_id"
+else
+  local_native_context="$(bash "$repo_root/scripts/server/prepare_nautilus_wheel_for_build.sh")"
+  remote_exec "sudo install -d -m 0755 -o \"\$(id -u)\" -g \"\$(id -g)\" '$native_artifact_root'"
+  artifact_budget_mb="${TR_NATIVE_ARTIFACT_MAX_MB:-512}"
+  [[ "$artifact_budget_mb" =~ ^[1-9][0-9]*$ ]] || { echo "invalid native artifact budget" >&2; exit 2; }
+  incoming_kb="$(du -sk "$local_native_context" | awk '{print $1}')"
+  remote_exec "used=\$(du -sk '$native_artifact_root' | awk '{print \$1}'); test \$((used + $incoming_kb)) -le $((artifact_budget_mb * 1024))" || {
+    echo "native artifacts exceed ${artifact_budget_mb}MiB budget; retain current/rollback and clean unused artifacts before retry" >&2; exit 3;
+  }
+  upload_context="$(remote_exec "mktemp -d '$native_artifact_root/.upload.XXXXXX'")"
+  trap 'remote_exec "rm -rf -- \"$upload_context\"" >/dev/null 2>&1 || true' EXIT
+  # Only the two wheels and their receipt are sent, never a source/data tree.
+  tar -C "$local_native_context" -cf - . | "${ssh_command[@]}" "$remote" "tar -xf - -C '$upload_context'"
+  remote_exec "cd '$upload_context' && sha256sum -c checksums.sha256 && test \"\$(cat build-id.txt)\" = '$native_build_id' && test ! -e '$native_context' && mv '$upload_context' '$native_context'"
+  trap - EXIT
+  echo "public native artifacts cache=stored build_id=$native_build_id"
+fi
+
 revision="$(git -C "$repo_root" rev-parse main)"
 
 if [[ "$skip_github" == "1" ]]; then
@@ -101,7 +126,7 @@ remote_revision="$(
 
 remote_exec bash -s -- \
   "$revision" "$remote_git_root" "$remote_container_root" "$remote_env" \
-  "$release_retention" <<'REMOTE'
+  "$release_retention" "$native_build_id" <<'REMOTE'
 set -Eeuo pipefail
 
 revision="$1"
@@ -109,6 +134,7 @@ git_root="$2"
 container_root="$3"
 production_env="$4"
 release_retention="$5"
+native_build_id="$6"
 activation_script="$(mktemp "${TMPDIR:-/tmp}/factortester-activate.XXXXXX")"
 cleanup() {
   rm -f "$activation_script"
@@ -120,5 +146,5 @@ git --git-dir="$git_root/repo.git" show \
 chmod 0700 "$activation_script"
 bash "$activation_script" \
   "$revision" "$git_root" "$container_root" "$production_env" \
-  "$release_retention"
+  "$release_retention" "$native_build_id"
 REMOTE

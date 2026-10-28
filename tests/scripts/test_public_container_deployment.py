@@ -683,15 +683,34 @@ def test_public_image_can_require_a_local_nautilus_wheel() -> None:
     dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text(
         encoding="utf-8",
     )
-    assert "ARG NAUTILUS_WHEEL_REQUIRED=0" in dockerfile
+    assert "COPY --from=native-wheels" in dockerfile
     assert "nautilus_trader-*.whl" in dockerfile
-    assert 'elif [ "$NAUTILUS_WHEEL_REQUIRED" = "1" ]' in dockerfile
+    assert "attach_factor_family, replay_shared_inputs" in dockerfile
 
 
 def test_nautilus_builder_scripts_use_the_local_submodule_entrypoint() -> None:
-    build = (ROOT / "scripts" / "server" / "build_nautilus_linux_wheel.sh").read_text(encoding="utf-8")
+    build = (ROOT / "scripts" / "server" / "native_wheel_build.sh").read_text(encoding="utf-8")
     sync = (ROOT / "scripts" / "server" / "sync_nautilus_source.sh").read_text(encoding="utf-8")
     assert "python/pyproject.toml" in build
     assert "python/pyproject.toml" in sync
-    assert "NAUTILUS_WHEEL_REQUIRED=1" in (ROOT / "scripts" / "server" / "prepare_nautilus_wheel_for_build.sh").read_text(encoding="utf-8")
+    assert "build-id.txt" in (ROOT / "scripts" / "server" / "prepare_nautilus_wheel_for_build.sh").read_text(encoding="utf-8")
     assert "CARGO_PROFILE_RELEASE_CODEGEN_UNITS" in build
+
+
+def test_native_updates_preserve_unrelated_tool_dependency_layers() -> None:
+    dockerfile=(DEPLOYMENT / "FactorTester.Dockerfile").read_text()
+    deps=dockerfile.split("FROM factortester-public-deps AS factortester-cli-builder")[0]
+    assert "NAUTILUS_VENDOR_REVISION" not in deps
+    native=dockerfile.index("COPY --from=native-wheels")
+    assert dockerfile.index("COPY deploy/docker/factortester-public/mihomo-linux") < native
+    assert dockerfile.index("ARG CODEX_VERSION",dockerfile.index("FROM factortester-public-deps AS factortester-public")) < native
+    assert native < dockerfile.index("COPY server server")
+
+
+def test_public_native_artifact_preflight_precedes_push_and_app_stop() -> None:
+    publisher=(ROOT/'scripts/server/publish_public_main.sh').read_text()
+    activation=(ROOT/'scripts/server/activate_public_revision.sh').read_text()
+    assert publisher.index('public native artifacts cache=hit') < publisher.index('push origin main')
+    assert activation.index('sha256sum -c checksums.sha256') < activation.index('stop-app')
+    assert 'TR_NATIVE_WHEEL_CONTEXT=$native_context' in activation
+    assert _compose()['services']['factortester-public']['build']['additional_contexts']['native-wheels']

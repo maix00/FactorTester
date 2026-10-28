@@ -6,6 +6,7 @@ git_root="${2:-${FACTORTESTER_REMOTE_GIT_ROOT:-/opt/factortester}}"
 container_root="${3:-${FACTORTESTER_REMOTE_CONTAINER_ROOT:-/opt/factortester-container}}"
 production_env="${4:-${FACTORTESTER_REMOTE_PUBLIC_ENV:-/etc/factortester-container/public.env}}"
 release_retention="${5:-${FACTORTESTER_PUBLIC_RELEASE_RETENTION:-3}}"
+native_build_id="${6:-}"
 release_root="$container_root/releases"
 release_path="$release_root/$revision"
 next_env="$production_env.next-$revision"
@@ -21,6 +22,10 @@ publish_lock="$git_root/.publish.lock"
   echo "FACTORTESTER_PUBLIC_RELEASE_RETENTION must be a positive integer" >&2
   exit 2
 }
+[[ "$native_build_id" =~ ^[0-9a-f]{64}$ ]] || { echo "verified native build identity required" >&2; exit 2; }
+native_context="$container_root/native-wheels/$native_build_id"
+[[ -f "$native_context/checksums.sha256" && "$(cat "$native_context/build-id.txt")" == "$native_build_id" ]] || { echo "missing native artifact context" >&2; exit 2; }
+(cd "$native_context" && sha256sum -c checksums.sha256)
 for command in awk chmod date docker find flock git install python3 sed sudo touch; do
   command -v "$command" >/dev/null || {
     echo "missing deployment command: $command" >&2
@@ -127,6 +132,12 @@ sudo sed -i \
   "s/^FACTORTESTER_REVISION=.*/FACTORTESTER_REVISION=$revision/" \
   "$next_env"
 sudo chmod 0600 "$next_env"
+if sudo grep -q '^TR_NATIVE_WHEEL_CONTEXT=' "$next_env"; then
+  sudo sed -i "s|^TR_NATIVE_WHEEL_CONTEXT=.*|TR_NATIVE_WHEEL_CONTEXT=$native_context|" "$next_env"
+else
+  printf 'TR_NATIVE_WHEEL_CONTEXT=%s\n' "$native_context" | sudo tee -a "$next_env" >/dev/null
+fi
+
 
 public_script="$release_path/scripts/server/factortester_public_container.sh"
 old_revision="$(
