@@ -23,6 +23,7 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const artifactRequest = useRef<AbortController | null>(null);
+  const [activeTab, setActiveTab] = useState("overview");
   const [artifactPage, setArtifactPage] = useState(1);
   const [artifactPageSize, setArtifactPageSize] = useState(20);
   const [outputError, setOutputError] = useState("");
@@ -95,7 +96,7 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
     {!terminalStatus(detail.status) ? <Button danger onClick={() => { void request(jobURL(job, "/cancel"), { method: "POST" }).then(() => setRefresh((value) => value + 1)).catch((reason) => setError(reason.message)); }}>{t("jobs.cancel")}</Button> : null}</div>
     {detail.error ? <Alert type="error" showIcon message={typeof detail.error === "string" ? detail.error : JSON.stringify(detail.error)} /> : null}
     {outputError ? <Alert type="error" showIcon message={outputError} action={<Button onClick={() => setRefresh(value => value + 1)}>{t("retry")}</Button>} /> : null}
-    <Tabs destroyOnHidden onChange={() => setArtifactPage(1)} items={[
+    <Tabs activeKey={activeTab} destroyOnHidden onChange={(key) => { setActiveTab(key); setArtifactPage(1); }} items={[
       { key: "overview", label: t("jobs.overview"), children: <><PropertyGroups groups={[{key:"job",title:t("jobs.overview"),items:[
         {key:"job",label:t("jobs.jobId"),value:detail.job_id || job.job_id},
         {key:"kind",label:t("configuration.testKind"),value:detail.kind,render:value => t(`configuration.analysisNames.${value}`,{defaultValue:String(value)})},
@@ -109,7 +110,7 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
       ]} /> : result ? <ResultView value={result} /> : <Empty description={t(terminalStatus(detail.status) ? "empty" : "jobs.waitingResults")} /> },
       { key: "configuration", label: t("jobs.configuration"), children: <FrozenRunSpec hash={detail.run_spec_hash} serverID={job.server_id} /> },
       { key: "inputs", label: t("jobs.inputs"), children: artifactTable(retained.inputs) },
-      { key: "outputs", label: t("jobs.output"), children: <>{artifactTable(retained.outputs)}<Select aria-label={t("jobs.output")} style={{ width: "100%" }} value={artifactName || undefined} options={retained.outputs.filter((item) => /\.html?$/i.test(item.name || "")).map((item) => ({ label: item.name, value: item.name }))} onChange={setArtifactName} />
+      { key: "outputs", label: t("jobs.output"), children: <>{artifactTable(retained.outputs)}<Select aria-label={t("jobs.preview")} placeholder={t("jobs.preview")} style={{ width: "100%", marginTop: 16 }} value={artifactName || undefined} options={retained.outputs.filter((item) => /\.html?$/i.test(item.name || "")).map((item) => ({ label: item.name, value: item.name }))} onChange={setArtifactName} />
         {artifactName ? <JobHtmlReport job={job} name={artifactName} /> : null}</> },
     ]} /></div>;
 }
