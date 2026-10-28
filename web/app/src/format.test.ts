@@ -19,3 +19,15 @@ test("Intl formatting follows the selected language and explicit time zone", asy
   await i18n.changeLanguage("zh");
   assert.match(formatDate("2026-10-25T12:00:00Z", { timeZone: "UTC", dateStyle: "short" }), /2026\/10\/25/);
 });
+
+
+test("Manager Unix seconds and explicit milliseconds show the same instant", async () => {
+  const { formatDate } = await import("./format.ts");
+  const options = { timeZone: "UTC", dateStyle: "short", timeStyle: "medium" } as const;
+  const millis = Date.parse("2026-10-28T16:16:09Z");
+  const expected = formatDate(new Date(millis), options);
+  assert.equal(formatDate(millis / 1000, options), expected);
+  assert.equal(formatDate(millis, options, "milliseconds"), expected);
+  assert.equal(formatDate("2026-10-28T16:16:09Z", options), expected);
+  assert.equal(formatDate("bad timestamp", options), "—");
+});

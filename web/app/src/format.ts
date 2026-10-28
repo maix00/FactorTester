@@ -15,7 +15,10 @@ export function formatMoney(value: number, currency: string, options: Intl.Numbe
 export function formatDate(
   value: string | number | Date,
   options: Intl.DateTimeFormatOptions & { timeZone?: string } = {},
+  numericUnit: "seconds" | "milliseconds" = "seconds",
 ): string {
-  const date = value instanceof Date ? value : new Date(value);
+  // Manager metadata uses Unix seconds; callers with epoch milliseconds opt in explicitly.
+  const date = value instanceof Date ? value : new Date(typeof value === "number" && numericUnit === "seconds" ? value * 1000 : value);
+  if (!Number.isFinite(date.getTime())) return "—";
   return new Intl.DateTimeFormat(currentLocale(), options).format(date);
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Input, Tabs, Tag } from "antd";
+import { Alert, Button, Input, Spin, Tabs, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
@@ -8,6 +8,7 @@ import { FunctionPage } from "../components/function-page.tsx";
 import { DetailsPanel } from "../components/details-panel.tsx";
 import { TRDataTable } from "../components/data-table.tsx";
 import { ResultView } from "../components/result-view.tsx";
+import { PropertyGroups } from "../components/property-groups.tsx";
 import { ResearchCreate } from "../components/research-create.tsx";
 import { useAuth } from "../auth.tsx";
 import { ReportEditor } from "../components/report-editor.tsx";
@@ -30,7 +31,7 @@ export function ResearchPage(): React.ReactElement {
     const controller = new AbortController(); setDetail(null); setMarkdown(""); if (!selected) return;
     if (tab === "reports") {
       void fetch(`/api/research-reports/${encodeURIComponent(id(selected))}/agent.md`, { credentials: "same-origin", signal: controller.signal }).then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.text(); }).then((value) => { if (!controller.signal.aborted) setMarkdown(value); }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
-    } else void request(`/api/research/${encodeURIComponent(id(selected))}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data); }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
+    } else void request(`/api/research/${encodeURIComponent(id(selected))}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data.research || data); }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
     return () => controller.abort();
   }, [selected, tab]);
   const filtered = useMemo(() => rows.filter((row) => !query || `${row.title || ""} ${row.owner_ref || row.owner || ""}`.toLowerCase().includes(query.toLowerCase())), [rows, query]);
@@ -46,7 +47,22 @@ export function ResearchPage(): React.ReactElement {
     {creating ? <ResearchCreate onClose={() => setCreating(false)} onCreated={(value) => { setCreating(false); setSelected(value); setEditor(false); setRevision(revision => revision + 1); }} /> : null}
     {selected ? <DetailsPanel title={selected.title || id(selected)} onClose={() => { setSelected(null); setEditor(false); }}>
       {tab === "reports" ? <><ReportEditor publicationID={id(selected)} />{markdown ? <details className="tr-report-markdown"><summary>{t("report.markdown")}</summary><pre className="tr-job-detail">{markdown}</pre></details> : null}</>
-        : editor ? <iframe className="tr-artifact-frame" title={selected.title || id(selected)} src={`/researches/${encodeURIComponent(id(selected))}?presentation=embedded`} /> : <><ResultView value={detail} /><Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></>}
+        : editor ? <iframe className="tr-artifact-frame" title={selected.title || id(selected)} src={`/researches/${encodeURIComponent(id(selected))}?presentation=embedded`} /> : <><ResearchSummary value={detail as Row | null} /><Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></>}
     </DetailsPanel> : null}
   </FunctionPage>;
+}
+
+
+function ResearchSummary({value}:{value:Row|null}):React.ReactElement {
+  const {t}=useTranslation();
+  if(!value)return <Spin tip={t("loading")} />;
+  if(value.error)return <Alert type="error" showIcon message={String(value.error)} />;
+  return <><PropertyGroups groups={[{key:"research",title:t("research.tabResearches"),items:[
+    {key:"title",label:t("editor.name"),value:value.title},
+    {key:"description",label:t("library.description"),value:value.description,wide:true},
+    {key:"owner",label:t("library.owner"),value:value.owner_alias||value.owner_ref},
+    {key:"visibility",label:t("library.visibility"),value:value.visibility,render:value=>t(`research.visibility.${value}`,{defaultValue:String(value)})},
+    {key:"updated",label:t("jobs.updated"),value:value.updated_at,render:value=>formatDate(value as number|string,{dateStyle:"medium",timeStyle:"short"})},
+    {key:"profile",label:t("research.profile"),value:value.profile_ref},
+  ]}]} /><details><summary>{t("details")}</summary><ResultView value={value}/></details></>;
 }
