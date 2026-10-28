@@ -298,3 +298,10 @@
 - Job 配置直接按冻结 hash 读取 RunSpec，回测只呈现 nautilus_contract；删除该视图的旧 configuration/job_spec/execution_plan 回退。
 - 数据源补充当前能力契约 mode_available；产品/数据源的进一步字段迁移缺口见 [Nautilus 迁移核对](NAUTILUS-MIGRATION.md)。旧注册表仍有后端依赖，未宣称全清理。
 - 37 项前端检查与类型检查通过；本地当前 Manager 包装/RunSpec 夹具核对了 Venue/account_type/oms_type/native_config 与旧字段不显示。真实任务与全页面移动验收仍待完成。
+
+## 2026-10-28 本轮验收增量
+
+- 账户入口：1440×844、390×844 的真实组件浏览器检查（API 回放），注册/注销请求、注册关闭、密码不一致、注销 503、Escape、Tab 焦点循环；无横向溢出或页面异常。浏览器插件不可用，使用 GTHT Playwright + 已安装 Chrome。
+- 设置：桌面 overlay 与移动端详情共用 SettingsSection；移动端不再显示服务/设备/更新占位页，新增联邦/配额/文档/Profile 的可达入口。请求取消防止旧响应覆盖；503 明确错误并可重试。它们仍不是完整的管理编辑功能。
+- 视觉核对：账户设计稿与当前截图核对品牌、标题/标签字号、蓝白配色、40px 输入/按钮、间距、移动端边界及访问说明折叠。保留仓库 Brand 的双色品牌形式。
+- 旧页面删除门槛尚未满足：研究编辑仍 iframe，交易图、Agent、若干库编辑/权限分支缺失。不得把本轮账户/报告改进描述为全量迁移。
