@@ -6,26 +6,16 @@ import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
 import { useAuth } from "../auth.tsx";
 
-export const SETTINGS_SECTIONS = [
-  { id: "account", icon: "account" },
-  { id: "server", icon: "catalog" },
-  { id: "federation", icon: "workspace" },
-  { id: "controlDatabase", icon: "runs" },
-  { id: "devices", icon: "trading" },
-  { id: "quota", icon: "research" },
-  { id: "workspace", icon: "workspace" },
-  { id: "language", icon: "research" },
-  { id: "updates", icon: "runs" },
-  { id: "manager", icon: "runs" },
-  { id: "docs", icon: "research" },
-  { id: "profiles", icon: "account" },
-  { id: "mihomo", icon: "runs" },
-] as const;
+import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
 
-export type SettingsSectionID=typeof SETTINGS_SECTIONS[number]["id"];
-export function visibleSettingsSections(manager:boolean){return SETTINGS_SECTIONS.filter(item=>!["manager","mihomo"].includes(item.id)||manager);}
-
-export function SettingsSection({section,onResetLayout}:{section:SettingsSectionID;onResetLayout?:()=>void}):React.ReactElement{
+type SettingsSectionProps={section:SettingsSectionID;onResetLayout?:()=>void};
+export function SettingsSection(props:SettingsSectionProps):React.ReactElement {
+ const {session}=useAuth(),{t}=useTranslation();
+ const allowed=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"});
+ if(!allowed.some(item=>item.id===props.section))return <Alert type="info" message={t("settingsPanel.permissionRequired")} />;
+ return <SettingsSectionContent {...props}/>;
+}
+function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):React.ReactElement{
  const {t}=useTranslation();const {session}=useAuth();
  const [error,setError]=useState("");const [reload,setReload]=useState(0);
   const [serverInfo, setServerInfo] = useState<Record<string, unknown> | null>(null);

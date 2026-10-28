@@ -186,8 +186,9 @@ function AuthOverlay({ entry, unavailable, onAuthenticated, mode:initialMode, on
           <label>
             <span>{t("auth.username")}</span>
             <input value={username} onChange={(event) => setUsername(event.target.value)}
-              autoComplete="username" autoFocus required disabled={submitting} />
+              autoComplete="username" autoFocus required maxLength={mode === "register" ? 32 : undefined} disabled={submitting} />
           </label>
+          {mode === "register" ? <small className="tr-auth-alias-hint">{t("auth.aliasHint")}</small> : null}
           <label>
             <span>{t("auth.password")}</span>
             <input type="password" value={password} onChange={(event) => setPassword(event.target.value)}
