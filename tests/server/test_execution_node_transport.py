@@ -1,4 +1,7 @@
-"""Real HTTP/signature/repository integration; no fake node authenticator."""
+"""Real HTTP/Job repository; deterministic introspection fixture.
+
+Actual Keycloak + native execution is covered by verify_remote_node_job.
+"""
 from dataclasses import asdict
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
@@ -15,9 +18,7 @@ from server.jobs.repository.sqlite import JobRepository
 from server.jobs.states import JobStatus
 from server.manager.http.peer_handler import PeerControlHandler
 from server.manager.storage.transfers.node_identities import NodeIdentityRegistry
-from server.manager.transfers.node_client import NodeControlClient
-from server.manager.transfers.node_keys import NodeKey
-from server.manager.transfers.security import NodeAuthenticator
+from server.identity.service_access import ServiceHTTPClient, ServiceTokenVerifier
 from tests.server.test_execution_data_binding import _offer, _requirement, _target
 
 
@@ -25,17 +26,23 @@ from tests.server.test_execution_data_binding import _offer, _requirement, _targ
 def transport(tmp_path, monkeypatch):
     monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     repo = JobRepository(tmp_path / "manager.sqlite")
-    identities = NodeIdentityRegistry(tmp_path / "identities.sqlite", server_id="manager-a")
-    key = NodeKey.load_or_create(tmp_path / "node.key", node_id="node-b")
-    identities.enroll(key.public_record())
-    state = SimpleNamespace(server_id="manager-a", node_identities=identities,
-        node_authenticator=NodeAuthenticator(identities), job_repository=repo)
+    import time
+    class IdentityFixture:
+        def client_credentials(self, **kwargs):
+            return {"access_token":"fixture-node-token", "expires_in":60}
+        def introspect(self, token):
+            return {"active":token=="fixture-node-token", "iss":"https://identity.invalid/realms/test",
+                    "aud":["manager-a"],"exp":time.time()+60,"sub":"node-service",
+                    "tr_node_id":"node-b","scope":"tr:execution:node"}
+    identity=IdentityFixture()
+    state=SimpleNamespace(session=lambda _token:None,server_id="manager-a",job_repository=repo,
+        execution_token_verifier=ServiceTokenVerifier(identity,issuer="https://identity.invalid/realms/test",audience="manager-a"))
     class Handler(PeerControlHandler):
         pass
     Handler.state = state
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
-    client = NodeControlClient(f"http://127.0.0.1:{server.server_port}", key=key)
+    client = ServiceHTTPClient(f"http://127.0.0.1:{server.server_port}", oidc=identity)
     descriptor = {"target": asdict(_target()), "service_port": 8000,
                   "offers": [asdict(_offer())], "runtime_adapters": {_offer().source_ref: {
         "member_key": "minute", "adapter_id": "native-v1", "frequency": "MIN1",
@@ -81,7 +88,7 @@ def test_wrong_node_and_other_manager_are_rejected_before_job_access(transport, 
     from dataclasses import replace
     descriptor = {**remote.descriptor, "target": {**remote.descriptor["target"], "manager_id":"manager-other"}}
     with pytest.raises(urllib.error.HTTPError) as error:
-        remote.client.signed_json("/api/federation/execution/register", descriptor)
+        remote.client.post_json("/api/federation/execution/register", descriptor)
     assert error.value.code == 403
     with pytest.raises(PermissionError):
         service.operation("node-b", {"job_id":"node-test","attempt":2,"action":"load"})
@@ -98,3 +105,13 @@ def test_node_result_bytes_are_verified_and_registered(transport, tmp_path):
     assert artifacts[0]["size_bytes"] == path.stat().st_size
     with pytest.raises(urllib.error.HTTPError):
         remote._upload("node-test",path,"../outside.csv")
+
+
+def test_execution_api_rejects_invalid_oidc_bearer(transport):
+    from urllib.request import Request, urlopen
+    _, remote, _, _, _=transport
+    request=Request(remote.client.endpoint+"/api/federation/execution/register",data=b"{}",method="POST",
+        headers={"Authorization":"Bearer invalid-token","Content-Type":"application/json"})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urlopen(request)
+    assert error.value.code==403
