@@ -186,10 +186,10 @@ export function DesktopShell(): React.ReactElement {
         </nav>
         <div className="tr-sidebar-spacer" />
         <AccountMenu collapsed={effectiveCollapsed}/>
-        <button type="button" className="tr-account-button" onClick={() => setSettingsOpen(true)}>
+        <Tooltip title={effectiveCollapsed ? t("settings") : undefined} placement="right"><button type="button" aria-label={t("settings")} className="tr-account-button" onClick={() => setSettingsOpen(true)}>
           <PageIcon name="settings" />
           <span className="tr-nav-label">{t("settings")}</span>
-        </button>
+        </button></Tooltip>
       </aside>
       <main className="tr-main">
         <section className="tr-workspace dockview-theme-light">
