@@ -329,7 +329,9 @@ def _prepare_local_research_run_request(
         and isinstance(configuration_payload.get("analyses"), dict)
         else None
     )
-    if isinstance(backtest_configuration, dict) and "strategy_bindings" in backtest_configuration:
+    if isinstance(backtest_configuration, dict) and any(
+        key in backtest_configuration for key in ("strategy_bindings", "factor_strategy_bindings")
+    ):
         from server.services.strategy_bindings import compile_configuration_strategies
 
         try:

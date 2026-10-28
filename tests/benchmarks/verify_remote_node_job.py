@@ -26,6 +26,7 @@ import uuid
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--automatic',action='store_true')
+    parser.add_argument('--saved-plan',action='store_true',help='Save/reopen/resolve the editable document before real dispatch')
     parser.add_argument('--federated',action='store_true')
     parser.add_argument('--fixture-db',type=Path,required=True)
     parser.add_argument('--fixture-job',required=True)
@@ -122,11 +123,33 @@ def main():
     contract=execution['nautilus_contract'];execution.update(backend='nautilus_trader',contract_version=4)
     contract.update(contract_version=2,blockers=[],source_adapter={'feed_kind':'bar','bar_spec':requirements[0].bar_spec})
     settings=contract['settings'];settings.pop('data_source_ref',None);settings['data_requirement_ref']='data-requirements:'+canonical_hash([x.requirement_ref for x in requirements])
-    scope=settings['product_scope_refs'][0]
+    scope='inline:treasuries' if args.saved_plan else settings['product_scope_refs'][0]
+    old_scope=settings['product_scope_refs'][0]
+    if args.saved_plan:
+        def scope_refs(value):
+            if isinstance(value,dict):return {key:scope_refs(item) for key,item in value.items()}
+            if isinstance(value,list):return [scope_refs(item) for item in value]
+            return scope if value==old_scope else value
+        contract.update(scope_refs(contract))
+        settings=contract['settings']
+    settings['product_scope_refs']=[scope]
     run_spec['configuration']['shared']['product_selections']={scope:{'paths':list(catalogs)}}
     families=copy.deepcopy(old_plan['strategy_families'])
     backtest['groups']=[{'id':family['strategy_id'],'product_path_selection_id':scope} for family in families]
     specs=[{**family,'template_kind':family['kind']} for family in families]
+    if args.saved_plan:
+        backtest['venues']=copy.deepcopy(settings['venues'])
+        for venue in backtest['venues']:
+            venue.setdefault('native_config',{})['fee_model']={'type':'zero'}
+        backtest['strategy_venue_bindings']=copy.deepcopy(settings['strategy_venue_bindings'])
+        from server.services.factor_strategy_templates import factor_strategy_catalog
+        catalog=factor_strategy_catalog()
+        templates={item['kind']:item for item in catalog['items']}
+        backtest['factor_strategy_bindings']=[dict(binding_id='binding-'+family['strategy_id'],
+            strategy_id=family['strategy_id'],template_ref=templates[family['kind']]['template_ref'],
+            revision_ref=templates[family['kind']]['revision_ref'],product_group_ref=scope,
+            factor_bindings={role:value['ref'] for role,value in family['factor_roles'].items()},
+            parameters={**{item['key']:item['default'] for item in templates[family['kind']]['parameters'] if 'default' in item},**family['parameters']}) for family in families]
     spec={'_owner':'alice','run_spec':run_spec,'execution_binding':binding,'strategy_specs':specs}
     job_id='remote-'+uuid.uuid4().hex[:12]
     if args.federated:
@@ -139,6 +162,15 @@ def main():
         # An origin Manager freezes this research input; the remote Manager
         # runs the exact production preview/submission adapters, not a mock.
         execution['settings']=copy.deepcopy(settings)
+        if args.saved_plan:
+            import pandas as pd
+            execution['settings'].pop('data_requirement_ref',None)
+            for side in ('start','end'):
+                stamp=pd.Timestamp(settings[side+'_utc']).tz_convert('UTC')
+                execution['settings'][side+'_date']=stamp.strftime('%Y-%m-%d')
+                execution['settings'][side+'_time']=stamp.strftime('%H:%M:%S')
+            execution['settings'].update(timezone='UTC',time_precision='exact',freq_mode='fixed',freq_fixed='MIN1',
+                fee_mode='zero',slippage_mode='none',order_type='market',matching_model='auto',liquidity_mode='infinite')
         configuration=validate_payload({**run_spec['configuration'],'schema_version':3,'ui':{}})
         fingerprint=hashlib.sha256(orjson.dumps(configuration,option=orjson.OPT_SORT_KEYS)).hexdigest()
         run_spec.update(workspace_id='remote-fixture',configuration_id='remote-fixture-config',
@@ -160,7 +192,36 @@ def main():
                 source_access_policy='owner',factor_id=alias,path=portable_source_path(canonical),
                 source_code=source,source_sha256=hashlib.sha256(source.encode()).hexdigest(),source_bytes=len(source.encode()))
         prepared['portable_factor_sources'] = list(portable.values())
+        if args.saved_plan:
+            from server.services import research_configurations
+            from server.services.execution_plans import document
+            from server.manager.services.execution_plan_resolution import resolve
+            from server.modules.single_factor_test.execution_nodes import visible_targets
+            stored=research_configurations.create_workspace_configuration(owner='alice',workspace_id='remote-fixture',payload=configuration)
+            editable=document(configuration)
+            editable['execution']={'mode':'auto','manager_id':manager,'bundles':[{'bundle_id':'Local','owner':'platform'}]}
+            resolved=resolve(state,owner='alice',request={'workspace_id':'remote-fixture','execution_plan':editable})
+            editable['execution'].update(resolved=resolved['binding'],resolved_ref=resolved['binding_ref'])
+            path='/api/test-authoring/workspaces/remote-fixture/configuration'
+            saved=state.test_authoring.write('PUT',path,owner='alice',payload={'expected_revision':stored['revision'],'execution_plan':editable})
+            assert saved.status==200, saved
+            reopened=state.test_authoring.get(path,owner='alice').payload['configuration']
+            assert canonical_hash(reopened['execution_plan'])==canonical_hash(editable)
+            prepared['configuration']=reopened
+            prepared['execution_selection']=editable['execution']
+            run_spec['data_requirements']=[item['requirement'] for item in resolved['binding']['inputs']]
+            run_spec.update(configuration_id=reopened['configuration_id'],configuration_revision=reopened['revision'],configuration_fingerprint=reopened['fingerprint'])
+            (args.root/'saved-execution-plan.json').write_text(json.dumps(editable,indent=2))
         context=create_manager_run_context(prepared,owner='alice')
+        if args.saved_plan:
+            context=state.test_authoring.prepare_run_context({
+                'workspace_id':'remote-fixture','configuration_revision':reopened['revision'],
+                'analyses':['backtest'],
+                '_execution_capability_directory': visible_targets('alice'),
+                'transient_factor_sources':[{'path':'custom_factors/'+factor['identity']['family_alias']+'.py','source_code':factor['source_code']} for factor in shared['factors']],
+            },owner='alice')
+            blocked=context['prepared']['run_spec']['configuration']['analyses']['backtest']['execution']['nautilus_contract']['blockers']
+            if blocked:raise AssertionError(blocked)
         federation=FederatedGateway()
         origin_client='manager-api' if origin=='manager-a' else 'manager-b-api'
         federation._execution_clients={endpoint:ServiceHTTPClient(endpoint,oidc=oidc(origin_client),response_limit=16*1024**2)}
@@ -175,6 +236,9 @@ def main():
         preview=federation.public_data(peer,kind='execution',operation='preview',principal='alice',payload={'request':request})
         if preview['status']!=200:raise AssertionError(preview)
         request['expected_execution_binding_ref']=preview['response']['execution_binding_ref']
+        if args.saved_plan:
+            (args.root/'preview-binding.json').write_text(json.dumps(preview['response']['execution_binding'],indent=2))
+            assert request['expected_execution_binding_ref']==editable['execution']['resolved_ref']
         submitted=federation.public_data(peer,kind='execution',operation='submit',principal='alice',payload={'request':request})
         if submitted['status']!=202:raise AssertionError(submitted)
         job_id=submitted['response']['jobs'][0]['job_id']
@@ -238,7 +302,7 @@ def main():
             receipt={'run_spec_hash':record.run_spec_hash,'fills_sha256':fill_digest,'fill_columns':list(fills[0]),'job_id' :job_id,'manager_id':manager,'node_id':node,'status':current.status.value,
                 'seconds':time.perf_counter()-started,'sampled_worker_peak_rss_bytes':max(rss),
                 'manager_job_db':str(repo.db_path),'node_has_manager_job_db':False,
-                'automatic_matching':args.automatic,'cross_manager_job_reads':args.federated,'cross_manager_discovery_preview_submit':args.federated,'origin_manager':origin if args.federated else manager,'real_broker':True,'real_native_strategy':True,'authenticated_http':True,'authentication':'real Keycloak service account and introspection',
+                'saved_plan_roundtrip':args.saved_plan,'saved_configuration_runspec_compiler':args.saved_plan,'automatic_matching':args.automatic,'cross_manager_job_reads':args.federated,'cross_manager_discovery_preview_submit':args.federated,'origin_manager':origin if args.federated else manager,'real_broker':True,'real_native_strategy':True,'authenticated_http':True,'authentication':'real Keycloak service account and introspection',
                 'orders':result['orders'],'factor_actors':result['factor_actors'],'strategies':len(families),
                 'attachments':list(report['attachments']),'data_start_ns':min(x.start_ns for x in requirements),
                 'data_end_ns':max(x.end_ns for x in requirements),

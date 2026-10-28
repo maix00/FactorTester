@@ -119,3 +119,19 @@ Shovel（只在独立 broker 确有跨域投递需求时配置）。不新增消
 新节点 Job 的读取/取消也走 Manager 控制面，复用现有 owner-scoped handlers；尚未接入
 通用远程 SSE，前端明确使用既有轮询 fallback。真实 Keycloak HTTP 验证了结果/附件清单
 读取与另一用户的 403，自动/手动任务的 RunSpec 与成交摘要对账一致。
+
+## 2026-10-28：单一配置文档到真实远程策略执行
+
+ExecutionPlan v2 是唯一可编辑文档，内含 RunSpec 意图和执行选择；工作区 payload_json
+只是存储编码。自动位置解析使用同一产品组、时间与 Bundle 选择生成绑定，前端原子更新
+文档和灰态位置，保存后重读仍保持同一绑定。提交重新匹配并校验绑定 hash；变化则拒绝，
+不静默换节点。实际执行的冻结 RunSpec 会补全版本、策略来源和编译后的执行参数，
+不应把编辑意图与冻结对象的字节相等作为验收条件。
+
+`verify_remote_node_job --saved-plan --federated --automatic` 已包含真实保存/重读 API、
+`prepare_run_context` 冻结、Keycloak、跨 Manager HTTP、RabbitMQ/Celery、Nautilus 与
+CouchDB 报告回读。两产品各 10,000 根分钟 Bar，2024-01-02 至 2024-03-05，3 策略、
+1 FactorActor，903 订单；worker 启动至结果回读 2.5174 秒，采样峰值 458244096 bytes。
+成交校验与旧验收一致。回执 `/tmp/tr-saved-plan-20261028-p/receipt.json`。
+这是隔离进程的真实策略链路测试，非部署后浏览器端到端验收，也非原研报完整预热验收。
+发现并修复仅有公共模板绑定时漏编译，以及去重后的 Venue/路由读取缺口。
