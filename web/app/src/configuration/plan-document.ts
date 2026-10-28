@@ -60,3 +60,9 @@ function canonicalJSON(value:unknown):string {
   if(value && typeof value==='object')return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonicalJSON((value as Record<string,unknown>)[key])).join(',')+'}';
   return JSON.stringify(value);
 }
+
+/** Initialize a new automatic choice once; never rewrite an imported/edited JSON draft. */
+export function initializeManagerChoice(value: ExecutionChoice, managers: string[], initialize: boolean): ExecutionChoice | undefined {
+  if (!initialize || value.mode !== "auto" || value.manager_id || value.target || value.resolved || !managers[0]) return undefined;
+  return { ...value, manager_id: managers[0] };
+}
