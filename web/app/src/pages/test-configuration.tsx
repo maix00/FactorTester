@@ -1,7 +1,7 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Modal, Pagination, Select, Switch, Tabs } from "antd";
 import Form from "@rjsf/antd";
-import validator from "@rjsf/validator-ajv8";
+import validator from "../configuration/validator.ts";
 import type { RJSFSchema } from "@rjsf/utils";
 import { useTranslation } from "react-i18next";
 import { notify } from "../notifications/core.ts";

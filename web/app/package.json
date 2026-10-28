@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "6.3.4",
+    "@cfworker/json-schema": "4.1.1",
     "@ionic/react": "9.0.9",
     "@ionic/react-router": "9.0.9",
     "@rjsf/antd": "6.11.0",
