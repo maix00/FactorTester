@@ -35,10 +35,17 @@ def test_composed_identity_and_canonical_stage(tmp_path):
     name='nautilus_trader-2.0.0rc8-cp314-cp314-linux_x86_64.whl'
     with zipfile.ZipFile(wheel_dir/name,'w') as wheel:
         wheel.writestr('nautilus_trader-2.0.0rc8.dist-info/METADATA','Name: nautilus-trader\nVersion: 2.0.0rc8\n')
+    alpha_revision=run(['git','rev-parse','HEAD'],root/'vendor/py-alpha-lib',check=True).stdout.strip()
+    alpha_dir=cache/('alpha-'+alpha_revision);alpha_dir.mkdir()
+    with zipfile.ZipFile(alpha_dir/'py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl','w') as wheel:
+        wheel.writestr('py_alpha_lib-0.3.1.dist-info/METADATA','Name: py-alpha-lib\nVersion: 0.3.1\n')
     result=run(command,root,env=env)
     assert result.returncode==0,result.stderr
-    assert [p.name for p in dest.glob('*.whl')]==[name]
-    assert (dest/name).read_bytes()==(wheel_dir/name).read_bytes()
+    staged=Path(result.stdout.strip())
+    assert (staged/name).read_bytes()==(wheel_dir/name).read_bytes()
+    assert old.read_bytes()==b'old'  # tracked source never changed
+    assert (staged/'build-id.txt').read_text().strip()==identity
+    assert run(command,root,env=env).stdout==result.stdout
 
 
 def test_finished_wheel_hit_skips_capacity_checks_and_compilation(tmp_path):
