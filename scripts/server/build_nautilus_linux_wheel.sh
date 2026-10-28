@@ -37,7 +37,8 @@ git -C "$ROOT" diff --quiet HEAD -- native/traderesearch_nautilus_runtime trader
 RUNTIME_TREE="$(git -C "$ROOT" ls-tree -r HEAD -- native/traderesearch_nautilus_runtime traderesearch_data/rust)"
 BUILD_ID="$(printf '%s\n' "$REVISION" "$ALPHA_REVISION" "$RUNTIME_TREE" "$PLATFORM" | shasum -a 256 | cut -d' ' -f1)"
 BUILD_OUT="$OUT/$BUILD_ID"
-mkdir -p "$BUILD_OUT"
+ALPHA_OUT="$OUT/alpha-$ALPHA_REVISION"
+mkdir -p "$BUILD_OUT" "$ALPHA_OUT"
 CACHED="$OUT/nautilus_trader-$BUILD_ID.whl"
 if [ -f "$CACHED" ]; then
   echo "cached wheel for $REVISION: $CACHED"
@@ -72,7 +73,7 @@ fi
 docker run --rm --platform "$PLATFORM" \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
   -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
-  -v "$ROOT:/repo:ro" -v "$BUILD_OUT:/wheels" \
+  -v "$ROOT:/repo:ro" -v "$BUILD_OUT:/wheels" -v "$ALPHA_OUT:/alpha-wheels" \
   -v "$CACHE/cargo/registry:/root/.cargo/registry" \
   -v "$CACHE/cargo/git:/root/.cargo/git" \
   -v "$TARGET_CACHE:/target" \
@@ -83,6 +84,8 @@ docker run --rm --platform "$PLATFORM" \
   "$BUILDER" bash -lc '
     set -euo pipefail
     . /root/.cargo/env
+    cd /repo/vendor/py-alpha-lib/py-binding
+    CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /alpha-wheels -i python3.14
     cd /repo/native/traderesearch_nautilus_runtime
     CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /wheels -i python3.14
   '

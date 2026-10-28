@@ -19,3 +19,16 @@ export function planSchema(configurationSchema:JSONObject):JSONObject {
     plan_version:{const:2},run_spec:{type:"object",required:["configuration","analyses"],properties:{configuration:configurationSchema,analyses:{type:"array",minItems:1,maxItems:1,items:{type:"string"}},retention_mode:{enum:["summary","full"]}}},
     execution:{type:"object",required:["mode","manager_id","bundles"],properties:{mode:{enum:["auto","manual"]},manager_id:{type:"string"},bundles:{type:"array",items:{type:"object",required:["bundle_id","owner"],properties:{bundle_id:{type:"string"},owner:{type:"string"}}}},target:{type:"object"},resolved:{type:"object",readOnly:true},resolved_ref:{type:"string",readOnly:true}}}}};
 }
+
+/** A temporarily incomplete JSON edit must not crash the form projection. */
+export function executionChoiceFromDocument(value: JSONObject | undefined): ExecutionChoice {
+  const raw=value?.execution;
+  const execution=raw && typeof raw==='object' && !Array.isArray(raw) ? raw as JSONObject : {};
+  const bundles=Array.isArray(execution.bundles) ? execution.bundles.filter((item:any)=>
+    item && typeof item.bundle_id==='string' && typeof item.owner==='string') as BundleScope[] : [];
+  const resolved=execution.resolved as Record<string,any>|undefined;
+  return {mode:execution.mode==='manual'?'manual':'auto', manager_id:typeof execution.manager_id==='string'?execution.manager_id:'', bundles,
+    target:execution.target as Record<string,any>|undefined,
+    resolved:resolved && Array.isArray(resolved.inputs) && resolved.target ? resolved:undefined,
+    resolved_ref:typeof execution.resolved_ref==='string'?execution.resolved_ref:undefined};
+}

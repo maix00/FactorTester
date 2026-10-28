@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createDraft} from "./draft.ts";
-import {configurationDraft,replaceConfiguration,planFromConfiguration} from "./plan-document.ts";
+import {configurationDraft,replaceConfiguration,planFromConfiguration,executionChoiceFromDocument} from "./plan-document.ts";
 test("form edits are a lens over the one ExecutionPlan JSON draft",()=>{
  const root=planFromConfiguration({schema_version:3,shared:{factors:[]},analyses:{backtest:{}},ui:{}});
  const draft=createDraft(root,2),view=configurationDraft(draft)!;
@@ -15,4 +15,11 @@ test("editing configuration invalidates the old automatic target",()=>{
  const draft=createDraft(root,1),view=configurationDraft(draft)!;
  const next=replaceConfiguration(draft,{...view,text:JSON.stringify({shared:{},analyses:{backtest:{n:2}},ui:{}})});
  assert.equal(JSON.parse(next.text).execution.resolved,undefined);assert.equal(JSON.parse(next.text).execution.resolved_ref,undefined);
+});
+
+test("partial ExecutionPlan JSON edits keep the execution form renderable",()=>{
+ for(const value of [{},{execution:{}},{execution:{bundles:null}},{execution:{bundles:'invalid'}},{execution:[]}]){
+  const choice=executionChoiceFromDocument(value);
+  assert.deepEqual(choice.bundles,[]); assert.equal(choice.resolved,undefined);
+ }
 });

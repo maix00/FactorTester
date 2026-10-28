@@ -10,7 +10,7 @@ import { JobDetail } from "../components/job-detail.tsx";
 import type { JobReference } from "../job-model.ts";
 import { TestInputs } from "../configuration/test-inputs.tsx";
 import { ExecutionTargetPicker } from "../configuration/execution-target.tsx";
-import { configurationDraft, replaceConfiguration, planFromConfiguration, planSchema, type ExecutionChoice } from "../configuration/plan-document.ts";
+import { configurationDraft, replaceConfiguration, planFromConfiguration, planSchema, executionChoiceFromDocument, type ExecutionChoice } from "../configuration/plan-document.ts";
 import { runRequest } from "../configuration/run.ts";
 import { request } from "../configuration/api.ts";
 import { PlusOutlined, ReloadOutlined, ArrowLeftOutlined, CodeOutlined, CalendarOutlined, BarChartOutlined, DatabaseOutlined } from "@ant-design/icons";
@@ -37,7 +37,7 @@ export function TestConfigurationPage(): React.ReactElement {
   const [planDraft,setPlanDraft]=useState<Draft|null>(null);
   const draft=useMemo(()=>configurationDraft(planDraft),[planDraft]);
   const planValue=useMemo(()=>parseDraft(planDraft?.text||"{}"),[planDraft?.text]);
-  const executionChoice=(planValue.value?.execution||{mode:"auto",manager_id:"",bundles:[]}) as ExecutionChoice;
+  const executionChoice=executionChoiceFromDocument(planValue.value);
   const executionSelection=executionChoice.bundles.length>0;
   const [resolving,setResolving]=useState(false),[resolutionError,setResolutionError]=useState("");
   const setDraft=useCallback((update:React.SetStateAction<Draft|null>)=>setPlanDraft(current=>{
