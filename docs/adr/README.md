@@ -1,5 +1,7 @@
 # 架构决策记录
 
+- [187 — 同主机共享数据与按测试类型选择执行服务](187-host-shared-inputs-and-test-services.md)
+
 - [184 — 数据源自行维护适配器的类型化 Bundle](184-source-owned-typed-bundles.md)
 
 - [182 — TradeResearch CLI 分阶段命名迁移](182-traderesearch-cli-naming.md)

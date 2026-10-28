@@ -19,7 +19,7 @@ import time
 from typing import Iterator, Sequence
 
 
-CACHE_FORMAT_VERSION = 3  # v3 retains source schema metadata after projected reads
+CACHE_FORMAT_VERSION = 4  # v3 retains metadata; v4 shares source inode aliases
 
 
 class CacheBusy(RuntimeError):
@@ -267,7 +267,10 @@ class SharedColumnarCache:
                     skip = True; break
             if skip:
                 continue
-            group_key = sha256(json.dumps([before, revision, group, columns, CACHE_FORMAT_VERSION]).encode()).hexdigest()
+            # Container bind mounts may expose one inode at different paths.
+            # Scope + device/inode/revision identify that backing file; retain
+            # the full path-based revision only for this reader's change checks.
+            group_key = sha256(json.dumps([before[1:], revision, group, columns, CACHE_FORMAT_VERSION]).encode()).hexdigest()
             producer = None
             scanner, scanned = None, -1
             try:

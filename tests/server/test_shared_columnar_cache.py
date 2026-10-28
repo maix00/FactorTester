@@ -93,6 +93,19 @@ def test_source_replacement_does_not_reuse_old_data(tmp_path):
     assert len(list(cache.root.glob('*.arrow'))) == 2
 
 
+def test_source_inode_aliases_share_publication_but_distinct_files_do_not(tmp_path):
+    source = tmp_path/'source.parquet'; _file(source,10)
+    alias = tmp_path/'other-container-path.parquet'; os.link(source,alias)
+    cache = SharedColumnarCache(tmp_path/'cache',_scope())
+    first = list(cache.iter_parquet_batches(source,columns=['value']))
+    second = list(cache.iter_parquet_batches(alias,columns=['value']))
+    assert first[0].equals(second[0])
+    assert len(list(cache.root.glob('*.arrow'))) == 1
+    copy = tmp_path/'independent-copy.parquet'; copy.write_bytes(source.read_bytes())
+    list(cache.iter_parquet_batches(copy,columns=['value']))
+    assert len(list(cache.root.glob('*.arrow'))) == 2
+
+
 def test_borrowed_chunk_uses_open_inode_and_validates_identity(tmp_path):
     source = tmp_path/'source.parquet'; _file(source, 10)
     cache = SharedColumnarCache(tmp_path/'cache', _scope())

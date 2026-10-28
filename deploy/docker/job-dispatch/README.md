@@ -82,3 +82,17 @@ production database.
 
 The target queue names are not a substitute for a shared Job database. A worker
 on another server must never be given this server's Job DB path.
+
+Shared input prerequisites: use the same host `FACTORTESTER_STATE_ROOT` and
+Manager `FACTORTESTER_SERVER_ID` in the Manager/business and dispatch Compose
+projects. They resolve the cache to the same `shared-columnar` directory, with
+one resource policy and a stable device scope. Container users must have
+compatible numeric UID/file permissions; do not make the cache world-writable.
+Workers must not mint a separate Manager identity. Client-owned sources remain
+isolated and are not uploaded by this configuration.
+
+This prepares cross-container cache reuse; it does not implement normalized
+result caching, queue-aware lifetime management, or aggregate host RAM admission.
+The cache byte limit bounds cached files, not process RSS. Docker Desktop
+containers and native macOS processes do not share one kernel page cache.
+See ADR-187 for pending work and acceptance; no containers are started by this change.
