@@ -288,3 +288,22 @@ def update_inline(
             raise ValueError("strategy requirements must be an object")
         strategy["requirements"] = deepcopy(requirements)
     return {"strategy": deepcopy(strategy), "binding": deepcopy(binding)}
+
+
+def execution_groups(backtest: dict[str, Any]) -> list[dict[str, Any]]:
+    """One metadata projection of strategy IDs and product-group scopes."""
+    result = [dict(item) for item in backtest.get('groups') or [] if isinstance(item,dict)]
+    by_id = {str(item.get('id') or ''): item for item in result}
+    for item in backtest.get('factor_strategy_bindings') or []:
+        if not isinstance(item,dict):raise ValueError('factor strategy binding must be an object')
+        identity=str(item.get('strategy_id') or '').strip()
+        scope=str(item.get('product_group_ref') or '').strip()
+        if not identity or not scope:raise ValueError('strategy requires identity and product group')
+        previous=by_id.get(identity)
+        if previous is not None:
+            prior=previous.get('product_path_selection_id') or previous.get('product_group_ref')
+            if prior!=scope:raise ValueError('strategy has conflicting product groups')
+            continue
+        group={'id':identity,'product_path_selection_id':scope}
+        result.append(group);by_id[identity]=group
+    return result

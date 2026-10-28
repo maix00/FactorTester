@@ -116,7 +116,8 @@ def freeze_native_venues(
             "venue starting_balances must sum to initial_capital_major; each venue account is isolated",
         )
 
-    groups = [item for item in backtest.get("groups", ()) if isinstance(item, Mapping)]
+    from server.services.configuration_strategies import execution_groups
+    groups = execution_groups(dict(backtest))
     if not groups:
         raise UnsupportedVenuePlan("at least one strategy instance is required")
     groups_by_id: dict[str, Mapping[str, Any]] = {}

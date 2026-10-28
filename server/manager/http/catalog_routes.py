@@ -1120,6 +1120,11 @@ class CatalogRoutesMixin:
             else str(session["username"])
         )
         try:
+            if method == "POST" and parsed.path == "/api/test-authoring/execution-plan/resolve":
+                from server.manager.services.execution_plan_resolution import resolve
+                value = resolve(self.state, owner=principal, request=self._json_body(1024*1024))
+                json_response(self, value)
+                return True
             selected_manager = parse_qs(parsed.query).get("server_id", [self.state.server_id])[0]
             if (selected_manager not in {"", "local", self.state.server_id}
                     and parsed.path in {"/api/test-authoring/execution-targets", "/api/runs", "/api/runs/preview"}):
@@ -1131,6 +1136,8 @@ class CatalogRoutesMixin:
                     from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
                     payload = self._json_body(1024*1024)
                     payload.pop(MANAGER_RUN_CONTEXT_KEY, None)
+                    directory = self.state.federation_gateway.public_data(route, kind="execution", operation="targets", principal=principal)
+                    payload["_execution_capability_directory"] = directory["targets"]
                     payload[MANAGER_RUN_CONTEXT_KEY] = self.state.test_authoring.prepare_run_context(
                         payload, owner=principal, strategy_library=self.state.test_authoring.strategy_library)
                     value = self.state.federation_gateway.public_data(route, kind="execution",

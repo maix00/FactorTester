@@ -20,7 +20,7 @@ _UI_CATALOG_KEYS = {
 
 
 def freeze_product_scope(
-    configuration: dict[str, Any], *, owner: str, analyses: list[str]
+    configuration: dict[str, Any], *, owner: str, analyses: list[str], known_product_refs: frozenset[str] = frozenset()
 ) -> dict[str, Any]:
     """Return a self-contained configuration without mutable catalog snapshots.
 
@@ -90,7 +90,7 @@ def freeze_product_scope(
             continue
         canonical_selections[selection_id] = _canonical_selection(
             selection_id, raw, group, owner=owner,
-            category_definitions=temporary_categories if not group else {},
+            category_definitions=temporary_categories if not group else {}, known_product_refs=known_product_refs,
         )
     if unresolved:
         raise ValueError(
@@ -236,7 +236,8 @@ def _analysis_selection_ids(analysis: dict[str, Any]) -> set[str]:
         for key in ("product_path_selection_id", "selection_id")
         if str(analysis.get(key) or "").strip()
     }
-    for group in analysis.get("groups") or []:
+    from server.services.configuration_strategies import execution_groups
+    for group in execution_groups(analysis):
         if isinstance(group, dict) and _selection_id(group):
             result.add(_selection_id(group))
     # IC schema 2 keeps product scope ownership on each typed configuration
@@ -349,7 +350,7 @@ def _canonical_selection(
     selection_id: str,
     raw: dict[str, Any],
     stored_group: dict[str, Any] | None,
-    *, owner: str, category_definitions=None,
+    *, owner: str, category_definitions=None, known_product_refs: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     # Once a catalog group is resolved, every execution-semantic field comes
     # from that owner-controlled row. Client projections remain input/display
@@ -368,7 +369,7 @@ def _canonical_selection(
     from server.modules.products.product_category_paths import resolve_product_scope_paths
 
     definition_paths = list(dict.fromkeys(str(path).strip() for path in paths if str(path).strip()))
-    resolved_paths = resolve_product_scope_paths(
+    resolved_paths = sorted(set(definition_paths)) if set(definition_paths).issubset(known_product_refs) else resolve_product_scope_paths(
         definition_paths, username=owner, category_ids=source.get("category_ids"),
         category_definitions=category_definitions,
     )

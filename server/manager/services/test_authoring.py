@@ -81,7 +81,7 @@ class TestAuthoringService:
             )
         if method == "POST":
             return bool(
-                path in {"/api/test-authoring/workspaces", "/api/runs", "/api/runs/preview"}
+                path in {"/api/test-authoring/workspaces", "/api/runs", "/api/runs/preview", "/api/test-authoring/execution-plan/resolve"}
                 or cls._SAVE_TEMPLATE_RE.fullmatch(path)
                 or cls._LOAD_TEMPLATE_RE.fullmatch(path)
                 or cls._STRATEGIES_RE.fullmatch(path)
@@ -372,7 +372,8 @@ class TestAuthoringService:
                 try:
                     from server.services import configuration_strategies
 
-                    candidate = payload.get("payload")
+                    from server.services.execution_plans import encode
+                    candidate = encode(payload["execution_plan"]) if "execution_plan" in payload else payload.get("payload")
                     if isinstance(candidate, dict):
                         configuration_strategies.validate(
                             candidate,
@@ -386,7 +387,7 @@ class TestAuthoringService:
                 try:
                     value = research_configurations.update_workspace_configuration(
                         workspace_id=unquote(match.group(1)), owner=owner,
-                        expected_revision=revision, payload=payload.get("payload"),
+                        expected_revision=revision, payload=candidate,
                     )
                 except research_configurations.ConfigurationRevisionConflict as exc:
                     raise TestAuthoringError(

@@ -205,6 +205,7 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
             "identity migration"
         )
     raw = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
+    from server.services.execution_plans import document
     return {
         "configuration_id": str(row["configuration_id"]),
         "owner": str(row["owner"]),
@@ -214,6 +215,7 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "schema_version": int(row["schema_version"]),
         "revision": int(row["revision"]),
         "payload": payload,
+        "execution_plan": document(payload),
         "fingerprint": hashlib.sha256(raw).hexdigest(),
         "source_configuration_id": str(row["source_configuration_id"] or ""),
         "legacy_template_id": str(row["legacy_template_id"] or ""),

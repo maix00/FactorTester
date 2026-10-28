@@ -26,7 +26,7 @@ def visible_targets(owner):
                   if offer["installation"]["owner"] in {"platform", owner}]
         values.append({"route_id": row["deployment_id"], "service_port": row["service_port"],
                        "online": row["online"], "expires_at": row["expires_at"],
-                       "target": capabilities["execution_target"], "market_read_available": bool(capabilities.get("market_endpoint")), "offers": [{**item, "source_ref": offer_from_dict(item).source_ref} for item in offers]})
+                       "target": capabilities["execution_target"], "runtime_adapters": {key:value for key,value in capabilities.get("runtime_adapters",{}).items() if key in {offer_from_dict(item).source_ref for item in offers}}, "market_read_available": bool(capabilities.get("market_endpoint")), "offers": [{**item, "source_ref": offer_from_dict(item).source_ref} for item in offers]})
     return values
 
 
@@ -36,6 +36,11 @@ def bind_prepared_execution(prepared, selection):
     requirements = prepared["run_spec"].get("data_requirements") or []
     owner = prepared.get("owner") or require_user()
     rows = visible_targets(owner)
+    bundles = selection.get("bundles")
+    if bundles is not None:
+        keys = {(item["bundle_id"],item["owner"]) for item in bundles}
+        if not keys:raise ValueError("select at least one Bundle")
+        rows = [{**row,"offers":[offer for offer in row["offers"] if (offer["installation"]["bundle_id"],offer["installation"]["owner"]) in keys]} for row in rows]
     from traderesearch_data.execution import offer_from_dict, requirement_from_dict, deployment_from_dict, compatible_bar_offers
     if selection.get("mode") == "auto":
         if selection.get("manager_id") != node_service().manager_id:
@@ -65,6 +70,15 @@ def bind_prepared_execution(prepared, selection):
         selection = {"target": selected["target"],
                      "sources": {item["requirement"]["product_ref"]: item["source_ref"] for item in selected["inputs"]}}
     target = selection["target"]
+    if "sources" not in selection:
+        offers = tuple(offer_from_dict(item) for row in rows if canonical_hash(row["target"]) == canonical_hash(target) for item in row["offers"])
+        sources = {}
+        for raw in requirements:
+            requirement = requirement_from_dict(raw)
+            compatible = compatible_bar_offers(requirement,deployment_from_dict(target),offers)
+            if not compatible:raise ValueError("selected Bundles do not cover the complete configured product group")
+            sources[requirement.product_ref] = min(compatible,key=lambda offer:offer.source_ref).source_ref
+        selection = {**selection,"sources":sources}
     visible = {offer_from_dict(item).source_ref for row in rows if canonical_hash(row["target"]) == canonical_hash(target)
                for item in row["offers"]}
     if not set(selection["sources"].values()).issubset(visible):
@@ -102,3 +116,45 @@ def peer_execution_route(state, manager_id):
     return ServiceRoute(server_id=manager_id, role=peer.get("role", ""),
         branch=peer.get("branch", ""), revision=peer.get("revision", ""), port=0,
         peer_control_endpoint=endpoint, remote=True, online=True)
+
+
+def requirements_for_configuration(configuration, selection, directory):
+    """Derive all product/Bar/time inputs from configuration, never picker rows."""
+    from dataclasses import asdict
+    from datetime import datetime
+    from traderesearch_data.execution import BarRequirement
+    from server.services.nautilus_bridge.run_spec import _utc_window
+    payload=configuration["payload"]
+    backtest=payload["analyses"].get("backtest") or {}
+    settings=(backtest.get("execution") or {}).get("settings") or {}
+    if settings.get("start_utc") and settings.get("end_utc"):
+        window={key:settings[key] for key in ("start_utc","end_utc")}
+    else:
+        window,reason=_utc_window(settings)
+        if window is None:raise ValueError(reason)
+    def ns(value):
+        import pandas as pd
+        stamp=pd.Timestamp(value)
+        if stamp.tz is None:raise ValueError("configuration time bounds require a timezone")
+        return stamp.value
+    start,end=ns(window["start_utc"]),ns(window["end_utc"])
+    warmup=settings.get("factor_warmup") or {}
+    if warmup.get("mode")=="custom":start=ns(warmup["data_start_utc"])
+    bundles={(item["bundle_id"],item["owner"]) for item in selection.get("bundles") or []}
+    if not bundles:raise ValueError("select at least one Bundle")
+    rows=[row for row in directory if row["online"] and (selection.get("mode")=="auto" or canonical_hash(row["target"])==canonical_hash(selection.get("target")))]
+    products=sorted({path for group in payload["shared"].get("product_selections",{}).values() for path in (group.get("paths") or group.get("selected_paths") or [])})
+    if not products:raise ValueError("strategy must define a frozen product group")
+    frequency=str(settings.get("freq_fixed") or "").upper()
+    requirements=[]
+    for product in products:
+        offers=[offer for row in rows for offer in row["offers"] if offer["available"] and offer["product_ref"]==product
+                and (offer["installation"]["bundle_id"],offer["installation"]["owner"]) in bundles
+                and (not frequency or row.get("runtime_adapters",{}).get(offer["source_ref"],{}).get("frequency")==frequency)]
+        contracts={(offer["bar_spec"],offer["price_basis"],offer["time_semantics"]) for offer in offers}
+        if len(contracts)!=1:raise ValueError(f"{product}: configure one supported Bar frequency and price/time contract")
+        bar,price,timing=next(iter(contracts))
+        fields=tuple(sorted(set.intersection(*(set(offer["fields"]) for offer in offers))))
+        if not {"open","high","low","close","volume"}.issubset(fields):raise ValueError("selected Bundle has no complete OHLCV contract")
+        requirements.append(asdict(BarRequirement(product,bar,price,timing,fields,start,end)))
+    return requirements

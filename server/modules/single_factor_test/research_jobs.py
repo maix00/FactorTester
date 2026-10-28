@@ -316,6 +316,13 @@ def _prepare_local_research_run_request(
     # legacy worker input bundle.  This keeps library revisions and inline
     # configuration sources out of the worker-specific request format.
     configuration_payload = configuration.get("payload")
+    from server.services.execution_plans import selection as saved_execution_selection
+    document_metadata = saved_execution_selection(configuration_payload or {})
+    if document_metadata:
+        if document_metadata["analyses"] != analyses:
+            raise _RunRequestError("test type differs from the saved ExecutionPlan", status_code=409)
+        retention_mode = document_metadata["retention_mode"]
+        data = {**data, "execution_selection": document_metadata["execution"]}
     backtest_configuration = (
         configuration_payload.get("analyses", {}).get("backtest")
         if isinstance(configuration_payload, dict)
@@ -359,6 +366,16 @@ def _prepare_local_research_run_request(
         raise _RunRequestError(
             f"configuration missing analyses: {missing}"
         )
+    directory = data.get("_execution_capability_directory")
+    known_product_refs = frozenset()
+    if data.get("execution_selection", {}).get("bundles"):
+        from server.modules.single_factor_test.execution_nodes import visible_targets
+        if directory is None:
+            directory = visible_targets(owner)
+            data = {**data,"_execution_capability_directory":directory}
+        bundle_keys = {(item["bundle_id"],item["owner"]) for item in data["execution_selection"]["bundles"]}
+        known_product_refs = frozenset(offer["product_ref"] for row in directory for offer in row["offers"]
+            if (offer["installation"]["bundle_id"],offer["installation"]["owner"]) in bundle_keys)
     try:
         with transient_factor_source_scope(
             owner=owner,
@@ -369,7 +386,7 @@ def _prepare_local_research_run_request(
             )
 
             frozen_configuration = freeze_run_spec_inputs(
-                configuration, owner=owner, analyses=analyses,
+                configuration, owner=owner, analyses=analyses, known_product_refs=known_product_refs,
             )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
@@ -398,6 +415,12 @@ def _prepare_local_research_run_request(
                 freeze_nautilus_execution_policy,
             )
 
+            if data.get("execution_selection", {}).get("bundles") and not data.get("data_requirements"):
+                from server.modules.single_factor_test.execution_nodes import requirements_for_configuration, visible_targets
+                directory = data.get("_execution_capability_directory")
+                if directory is None:
+                    directory = visible_targets(owner)
+                data = {**data, "data_requirements": requirements_for_configuration(frozen_configuration, data["execution_selection"], directory)}
             frozen_configuration = freeze_nautilus_execution_policy(
                 frozen_configuration, data_requirements=data.get("data_requirements"),
             )
@@ -579,6 +602,7 @@ def _prepare_local_research_run_request(
         }
     return {
         "workspace_id": workspace_id,
+        "execution_selection": deepcopy(data.get("execution_selection")),
         "task_name": task_name,
         "acting_profile_ref": acting_profile_ref,
         "acting_profile_name": acting_profile_name,
@@ -694,10 +718,11 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         prepared = load_manager_run_context(context, owner=owner)
     else:
         prepared = _prepare_local_research_run_request(data, owner=owner)
-    if data.get("execution_selection"):
+    selected_execution = prepared.get("execution_selection") or data.get("execution_selection")
+    if selected_execution:
         from server.modules.single_factor_test.execution_nodes import bind_prepared_execution
         try:
-            prepared["execution_binding"] = bind_prepared_execution(prepared, data["execution_selection"])
+            prepared["execution_binding"] = bind_prepared_execution(prepared, selected_execution)
             from server.jobs.assurance import canonical_hash
             expected = data.get("expected_execution_binding_ref")
             if expected and expected != canonical_hash(prepared["execution_binding"]):
@@ -1333,6 +1358,7 @@ def submit_research_run():
                 "output_requests": output_requests,
                 "run_spec": run_spec,
                 **({"execution_binding": prepared["execution_binding"]} if prepared.get("execution_binding") else {}),
+                "execution_selection": deepcopy(prepared.get("execution_selection")),
                 "execution_plan": deepcopy(next(
                     (plan for plan in (_plans or ()) if plan.get("kind") == kind),
                     {},

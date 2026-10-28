@@ -83,6 +83,12 @@ class FederationPublicDataRoutesMixin:
         if kind == "execution":
             if viewer is None:
                 raise PermissionError("execution nodes require an account identity")
+            if operation == "resolve-selection":
+                from server.modules.single_factor_test.execution_nodes import bind_prepared_execution
+                prepared = payload["prepared"]
+                if not isinstance(prepared,dict):raise ValueError("input requirements are required")
+                prepared = {**prepared,"owner":viewer}
+                return {"binding":bind_prepared_execution(prepared,payload["selection"])}
             if operation == "job":
                 suffix = str(payload.get("suffix") or "")
                 if suffix == "/cancel" and "tr:federation:submit" not in self._execution_identity.scopes:

@@ -151,7 +151,8 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
             "end_utc": str(settings["end_utc"]),
         })
 
-    backtest_groups = backtest.get("groups") or []
+    from server.services.configuration_strategies import execution_groups
+    backtest_groups = execution_groups(backtest)
     if not isinstance(backtest_groups, list) or not backtest_groups:
         raise ValueError("NautilusTrader RunSpec has no strategy instances")
     strategies: list[dict[str, Any]] = []

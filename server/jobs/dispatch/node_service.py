@@ -173,6 +173,8 @@ class ExecutionNodeService:
             if not isinstance(plan, dict):
                 raise ValueError("plan must be an object")
             plan["execution_binding"] = record.job_spec["execution_binding"]
+            plan["run_spec"] = record.job_spec["run_spec"]
+            plan["execution"] = record.job_spec.get("execution_selection") or {"mode":"manual","target":record.job_spec["execution_binding"]["target"]}
             updated = self.repository.set_execution_plan(record.job_id, plan=plan,
                 notices=args.get("notices", []), requires_confirmation=bool(args.get("requires_confirmation")))
             return {"record": record_to_wire(updated)}
