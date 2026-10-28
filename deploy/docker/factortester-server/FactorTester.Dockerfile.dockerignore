@@ -5,3 +5,9 @@
 !deploy/docker/factortester-server/
 !deploy/docker/factortester-server/manager-entrypoint.sh
 !deploy/docker/factortester-server/start-fixed-service.py
+
+!vendor/
+!vendor/py-alpha-lib/
+!vendor/py-alpha-lib/**
+vendor/py-alpha-lib/.git
+vendor/py-alpha-lib/target

@@ -1,3 +1,14 @@
+# Build the pinned alpha submodule for the deployment architecture once.
+FROM rust:1.99-slim AS alpha-builder
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv python3-dev \
+    && python3 -m venv /build-env && /build-env/bin/pip install --no-cache-dir maturin==1.15.0
+COPY vendor/py-alpha-lib /src/alpha
+ENV CARGO_BUILD_JOBS=2
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/alpha/target \
+    /build-env/bin/maturin build --release --manifest-path /src/alpha/py-binding/Cargo.toml \
+    --interpreter /build-env/bin/python --out /wheels
+
 FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
 
 ARG FACTORTESTER_UID=1000
@@ -31,6 +42,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY deploy/requirements-linux.txt /tmp/requirements-linux.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -r /tmp/requirements-linux.txt
+
+COPY --from=alpha-builder /wheels /tmp/alpha-wheels
+RUN python -m pip install --no-cache-dir --no-deps /tmp/alpha-wheels/*.whl \
+    && rm -rf /tmp/alpha-wheels \
+    && python -c "from alpha.factor.annotations import ExpressionAnnotations"
 
 RUN set -eu; \
     if ! getent group "${FACTORTESTER_GID}" >/dev/null; then \
