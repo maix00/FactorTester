@@ -20,7 +20,7 @@ import { useCompactLayout } from "../configuration/layout.ts";
 type Row = Record<string, any>;
 type Domain = "products" | "factors" | "strategies";
 const tabsByDomain = { products: ["products", "groups", "sources", "categories", "reference"], factors: ["factors", "families", "sets"], strategies: ["public", "mine", "subordinates", "shared", "strategyFamilies"] };
-const identity = (row: Row): string => String(row.ref || row.factor_ref || row.strategy_ref || row.template_ref || row.family_ref || row.set_ref || row.id || row.family_id || row.bundle_id || row.source_name || row.factor_family_alias || row.alias || row.name || "");
+const identity = (row: Row): string => String(row.group_ref || row.ref || row.factor_ref || row.strategy_ref || row.template_ref || row.family_ref || row.set_ref || row.id || row.family_id || row.bundle_id || row.source_name || row.factor_family_alias || row.alias || row.name || "");
 const title = (row: Row): string => String(row.family_name || row.bundle_name || row.source_name || row.name || row.title || row.factor_family_name || row.factor_alias || row.alias || identity(row));
 const owner = (row: Row): string => String(row.owner_username || row.owner || row.owner_ref || "—");
 const family = (row: Row): string => String(row.factor_family_alias || row.family_alias || row.identity?.family_alias || row.family_ref || "—");
