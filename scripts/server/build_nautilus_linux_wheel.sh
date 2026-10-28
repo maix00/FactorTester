@@ -23,6 +23,12 @@ cleanup_target() {
 trap cleanup_target EXIT
 [ -f "$SRC/python/pyproject.toml" ] || { echo "missing $SRC/python/pyproject.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
+[[ "$(cd "$SRC" && pwd -P)" == "$(cd "$ROOT/vendor/nautilus_trader" && pwd -P)" ]] || {
+  echo "composed runtime requires this checkout's pinned Nautilus submodule" >&2; exit 1;
+}
+git -C "$ROOT/vendor/py-alpha-lib" diff --quiet HEAD || {
+  echo "alpha submodule has uncommitted changes" >&2; exit 1;
+}
 REVISION="$(git -C "$SRC" rev-parse HEAD)"
 ALPHA_REVISION="$(git -C "$ROOT/vendor/py-alpha-lib" rev-parse HEAD)"
 git -C "$ROOT" diff --quiet HEAD -- native/traderesearch_nautilus_runtime traderesearch_data/rust || {
