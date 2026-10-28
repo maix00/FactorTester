@@ -40,6 +40,10 @@ BUILD_OUT="$OUT/$BUILD_ID"
 ALPHA_OUT="$OUT/alpha-$ALPHA_REVISION"
 mkdir -p "$BUILD_OUT" "$ALPHA_OUT"
 if [[ -f "$BUILD_OUT/checksums.sha256" ]] && shasum -a 256 -c "$BUILD_OUT/checksums.sha256" >/dev/null 2>&1; then
+  WHEEL="$(ls "$BUILD_OUT"/nautilus_trader-*.whl | head -n 1)"
+  bash "$ROOT/scripts/server/complete_nautilus_wheel.sh" "$WHEEL"
+  ALPHA_WHEEL="$(ls "$ALPHA_OUT"/py_alpha_lib-*.whl | head -n 1)"
+  shasum -a 256 "$WHEEL" "$ALPHA_WHEEL" > "$BUILD_OUT/checksums.sha256"
   echo "native wheel cache=hit build_id=$BUILD_ID platform=$PLATFORM"
   exit 0
 fi
@@ -112,6 +116,7 @@ docker run --rm --platform "$PLATFORM" \
   '
 WHEEL="$(ls "$BUILD_OUT"/nautilus_trader-*.whl | head -n 1)"
 ALPHA_WHEEL="$(ls "$ALPHA_OUT"/py_alpha_lib-*.whl | head -n 1)"
+bash "$ROOT/scripts/server/complete_nautilus_wheel.sh" "$WHEEL"
 shasum -a 256 "$WHEEL" "$ALPHA_WHEEL" > "$BUILD_OUT/checksums.sha256"
 cache_kb="$(du -sk "$TARGET_CACHE" | awk '{print $1}')"
 if (( cache_kb > limit_gb * 1024 * 1024 )); then

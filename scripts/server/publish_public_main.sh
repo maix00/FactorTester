@@ -24,6 +24,8 @@ ssh_command=(
   -o BatchMode=yes
   -o ConnectTimeout="${FACTORTESTER_SSH_CONNECT_TIMEOUT:-20}"
   -o ConnectionAttempts=1
+  -o ServerAliveInterval=15
+  -o ServerAliveCountMax=4
   -o StrictHostKeyChecking=yes
 )
 if [[ -n "${FACTORTESTER_SSH_PORT:-}" ]]; then
@@ -72,6 +74,11 @@ for baseline in origin/main origin/feat; do
 done
 nautilus_revision="$(bash "$repo_root/scripts/server/nautilus_vendor_revision.sh")"
 export FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision"
+
+# Fail before sending artifacts or Git when the host lacks named contexts.
+remote_exec "docker compose version >/dev/null && docker buildx version >/dev/null" || {
+  echo "public deployment requires Docker Compose and Buildx; install the build plugin before retry" >&2; exit 2;
+}
 
 # Finished native artifacts are versioned separately from Git source releases.
 source "$repo_root/scripts/server/nautilus_build_identity.sh"

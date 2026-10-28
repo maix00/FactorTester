@@ -31,7 +31,8 @@ def test_environment_pins_the_vendor_maturin_build_backend():
 def test_builder_uses_vendor_toolchain_and_reused_dev_target():
     builder = (ROOT / "scripts/build_nautilus_extension.sh").read_text()
     assert "rust-toolchain.toml" in builder
-    assert 'CARGO_TARGET_DIR="${NAUTILUS_ROOT}/target"' in builder
+    assert 'CARGO_TARGET_DIR="${HOST_TARGET}"' in builder
+    assert ".artifacts/runtime-receipts/" in builder
     assert 'CARGO_PROFILE_DEV_OPT_LEVEL="${DEV_OPT_LEVEL}"' in builder
     assert "maturin develop --profile dev --locked" in builder
     assert 'getattr(native, "__file__", None)' in builder

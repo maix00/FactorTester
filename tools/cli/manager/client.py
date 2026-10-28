@@ -29,6 +29,13 @@ class ManagerClient:
         self.token = str(token or "").strip()
         self.timeout = timeout
 
+    def _open(self, request: Request, *, timeout: float | None = None):
+        from tools.cli.native_session import transfer_tls_context
+        context=transfer_tls_context(request.full_url, self.config.base_url)
+        options={"timeout":self.timeout if timeout is None else timeout}
+        if context is not None:options["context"]=context
+        return urlopen(request, **options)
+
     def login(self, username: str, password: str) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -154,7 +161,7 @@ class ManagerClient:
         hasher = hashlib.sha256()
         size = 0
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self._open(request) as response:
                 descriptor, temporary_name = tempfile.mkstemp(
                     prefix=f".{target.name}.",
                     suffix=".download",
@@ -243,7 +250,7 @@ class ManagerClient:
             method="PUT",
         )
         try:
-            with urlopen(request, timeout=timeout) as response:
+            with self._open(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8", errors="replace")
                 status = int(response.status)
         except HTTPError as exc:
@@ -432,7 +439,7 @@ class ManagerClient:
             headers["Authorization"] = f"Bearer {self.token}"
         request = Request(url, data=body, headers=headers, method=method)
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self._open(request) as response:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
