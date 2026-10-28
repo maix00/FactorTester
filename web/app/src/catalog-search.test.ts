@@ -11,3 +11,13 @@ test("product directory searches both identifier and displayed description", () 
   assert.equal(catalogSearchMatches("黄金", displayed, product), false);
   assert.equal(catalogSearchMatches("  ", displayed, product), true);
 });
+
+test("factor tabs select their resource even if category metadata is present", async () => {
+  const {catalogRows} = await import("./catalog-search.ts");
+  const categories = ["public"];
+  const families = [{family_ref:"family:v2:example"}];
+  assert.deepEqual(catalogRows({factors:[], categories}, "factors", "factors"), []);
+  assert.deepEqual(catalogRows({families, categories}, "factors", "families"), families);
+  assert.deepEqual(catalogRows({items:[]}, "factors", "sets"), []);
+  assert.throws(() => catalogRows({categories}, "factors", "factors"), /factors/);
+});
