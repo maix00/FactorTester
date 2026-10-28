@@ -689,7 +689,7 @@ def test_public_image_can_require_a_local_nautilus_wheel() -> None:
 
 
 def test_nautilus_builder_scripts_use_the_local_submodule_entrypoint() -> None:
-    build = (ROOT / "scripts" / "server" / "build_nautilus_linux_wheel.sh").read_text(encoding="utf-8")
+    build = (ROOT / "scripts" / "server" / "native_wheel_build.sh").read_text(encoding="utf-8")
     sync = (ROOT / "scripts" / "server" / "sync_nautilus_source.sh").read_text(encoding="utf-8")
     assert "python/pyproject.toml" in build
     assert "python/pyproject.toml" in sync
