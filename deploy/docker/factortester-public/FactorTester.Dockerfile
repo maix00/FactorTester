@@ -3,7 +3,6 @@ FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9
 # Persist layer metadata so cache_from can reuse the apt/pip dependency layers.
 ARG BUILDKIT_INLINE_CACHE=1
 ARG FACTORTESTER_UID=1000
-ARG NAUTILUS_VENDOR_REVISION=unknown
 ARG FACTORTESTER_GID=1000
 ARG DEBIAN_MIRROR=https://deb.debian.org/debian
 ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
@@ -61,30 +60,6 @@ RUN python -m compileall -q -b /runtime \
     && grep -F 'TradeResearch CLI' /tmp/factortester-help >/dev/null
 
 FROM factortester-public-deps AS factortester-public
-ARG NAUTILUS_VENDOR_REVISION
-ARG MIHOMO_ARCHIVE_SHA256=db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9
-LABEL org.traderesearch.nautilus.revision="${NAUTILUS_VENDOR_REVISION}"
-COPY deploy/docker/factortester-public/wheels/py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl /tmp/py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl
-COPY deploy/docker/factortester-public/wheels/alpha_factor-0.3.1-py3-none-any.whl /tmp/alpha_factor-0.3.1-py3-none-any.whl
-RUN python -m pip install --no-cache-dir --no-deps /tmp/py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl /tmp/alpha_factor-0.3.1-py3-none-any.whl \
-    && rm -f /tmp/py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl /tmp/alpha_factor-0.3.1-py3-none-any.whl \
-    && python -c "from alpha.factor import FactorExpr; from alpha.factor.annotations import ExpressionAnnotations; print(FactorExpr.__name__)"
-
-# Nautilus is built from the local vendor submodule by
-# scripts/server/build_nautilus_linux_wheel.sh. A public release that requires
-# it passes NAUTILUS_WHEEL_REQUIRED=1 and fails rather than shipping without it.
-ARG NAUTILUS_WHEEL_REQUIRED=0
-COPY deploy/docker/factortester-public/wheels/ /tmp/factortester-wheels/
-RUN set -eu; \
-    wheel="$(ls /tmp/factortester-wheels/nautilus_trader-*.whl 2>/dev/null | head -n 1 || true)"; \
-    if [ -n "$wheel" ]; then \
-      python -m pip install --no-cache-dir --no-deps "$wheel"; \
-      python -c "from nautilus_trader._libnautilus import attach_factor_family, replay_shared_inputs"; \
-      rm -rf /tmp/factortester-wheels; \
-    elif [ "$NAUTILUS_WHEEL_REQUIRED" = "1" ]; then \
-      echo "NAUTILUS_WHEEL_REQUIRED=1 but no local nautilus_trader wheel was supplied" >&2; exit 1; \
-    fi
-
 # The npm package is a small launcher around the platform package. Install
 # only the official native Linux binary, so the image needs neither npm nor a
 # second Node runtime and the existing Python dependency layer stays cached.
@@ -154,6 +129,19 @@ RUN set -eu; \
     gzip -dc /tmp/mihomo.gz > /usr/local/bin/mihomo; \
     chmod 0555 /usr/local/bin/mihomo; \
     rm -f /tmp/mihomo.gz
+
+# Native package updates do not invalidate system/CLI tool dependency layers.
+ARG NAUTILUS_VENDOR_REVISION
+ARG MIHOMO_ARCHIVE_SHA256=db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9
+LABEL org.traderesearch.nautilus.revision="${NAUTILUS_VENDOR_REVISION}"
+COPY --from=native-wheels / /tmp/native-wheels/
+RUN set -eu; \
+    cd /tmp/native-wheels; \
+    sha256sum -c checksums.sha256; \
+    python -m pip install --no-cache-dir --no-deps ./py_alpha_lib-*.whl ./nautilus_trader-*.whl; \
+    python -c "from alpha.factor import FactorExpr; from alpha.factor.annotations import ExpressionAnnotations; from nautilus_trader._libnautilus import attach_factor_family, replay_shared_inputs"; \
+    rm -rf /tmp/native-wheels
+
 
 ARG FACTORTESTER_REVISION
 ARG FACTORTESTER_UID=1000
