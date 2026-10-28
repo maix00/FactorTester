@@ -76,6 +76,7 @@ RUN set -eu; \
     wheel="$(ls /tmp/factortester-wheels/nautilus_trader-*.whl 2>/dev/null | head -n 1 || true)"; \
     if [ -n "$wheel" ]; then \
       python -m pip install --no-cache-dir --no-deps "$wheel"; \
+      python -c "from nautilus_trader._libnautilus import attach_factor_family, replay_shared_inputs"; \
       rm -rf /tmp/factortester-wheels; \
     elif [ "$NAUTILUS_WHEEL_REQUIRED" = "1" ]; then \
       echo "NAUTILUS_WHEEL_REQUIRED=1 but no local nautilus_trader wheel was supplied" >&2; exit 1; \

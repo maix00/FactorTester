@@ -8,7 +8,7 @@ ENV RUSTUP_DIST_SERVER=$RUSTUP_DIST_SERVER \
     RUSTUP_UPDATE_ROOT=$RUSTUP_UPDATE_ROOT \
     CARGO_HOME=/root/.cargo \
     RUSTUP_HOME=/root/.rustup
-RUN sed -i s/deb.debian.org/mirrors.aliyun.com/g /etc/apt/sources.list.d/debian.sources \
+RUN sed -i -e s/deb.debian.org/mirrors.aliyun.com/g -e 's|http://|https://|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential curl pkg-config libssl-dev patchelf cmake clang \
