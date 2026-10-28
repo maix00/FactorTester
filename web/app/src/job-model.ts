@@ -1,7 +1,8 @@
-export type JobReference = { job_id: string; server_id?: string; service_port?: number; task_name?: string; status?: string };
+export type JobReference = { job_id: string; server_id?: string; service_port?: number; task_name?: string; status?: string; execution_node_id?: string };
 export function jobURL(job: JobReference, suffix = ""): string {
   const params = new URLSearchParams();
   if (job.server_id) params.set("server_id", job.server_id);
+  if (job.execution_node_id) params.set("node_execution", "1");
   if (job.service_port) params.set("port", String(job.service_port));
   return `/api/jobs/${encodeURIComponent(job.job_id)}${suffix}${params.size ? `?${params}` : ""}`;
 }

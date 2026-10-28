@@ -1,10 +1,10 @@
 import type { RangeBand } from "./runtime.ts";
-export type MarketSettings = { source: string; interval: string; range: string; adjusted: boolean; zone: "product" | "system" | "utc"; start?: string; end?: string };
+export type MarketSettings = { source: string; interval: string; range: string; adjusted: boolean; zone: "product" | "system" | "utc"; nodeSource?: {route_id:string; source_ref:string; product_ref:string}; start?: string; end?: string };
 export const DEFAULT_MARKET_SETTINGS: MarketSettings = { source: "", interval: "DAY1", range: "all", adjusted: false, zone: "product" };
 export function priceRequest(product: string, contract: string | undefined, settings: MarketSettings): Record<string, unknown> {
   if (settings.range === "custom" && (!settings.start || !settings.end || settings.start > settings.end)) throw new Error("Invalid date range");
   return { ...(contract ? { contract_uid: contract } : { product_name: product }), adjusted: contract ? false : settings.adjusted, chart_mode: "fixed", chart_interval: settings.interval, max_points: 5000,
-    ...(settings.source ? { data_source: settings.source } : {}), ...(["day", "month", "year", "ytd"].includes(settings.range) ? { chart_range: settings.range } : {}),
+    ...(settings.nodeSource ? settings.nodeSource : settings.source ? { data_source: settings.source } : {}), ...(["day", "month", "year", "ytd"].includes(settings.range) ? { chart_range: settings.range } : {}),
     ...(settings.range === "custom" ? { start_date: settings.start, end_date: settings.end } : {}) };
 }
 export function termBands(rows: Record<string, any>[]): RangeBand[] {

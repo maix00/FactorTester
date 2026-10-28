@@ -80,3 +80,39 @@ Evidence: `/Users/maxdeux/.codex/visualizations/2026/10/27/tr-parity/desktop-job
 and `mobile-jobs.png`. These are fixture UI checks, not actual production Jobs,
 source inspection, authorization or broker execution acceptance. UI scope is
 passed; the whole migration remains incomplete per MIGRATION.md.
+
+## Execution topology / #448 (2026-10-28)
+
+User correction: preserve the existing app design system and introduce three
+ordered top-level tabs: Execution → Configuration → Results. Execution inputs
+must not remain as a global panel above both Configuration and Results. A
+manually selected node supplies test types; automatic matching uses compatible
+online candidates in the selected Manager and freezes the actual selection at
+preview/submission. Switching tabs preserves inputs; switching Manager makes old
+preview invalid. Results carry Manager/node identity and read through control
+APIs, without requiring an execution business-port listener.
+
+Applied frontend-app-builder's existing-design-system exception: no new visual
+concept or generated marketing assets. Existing AntD tabs/selects, app typography,
+white surfaces, 14px controls, blue accent and responsive setting rows remain the
+reference. Compared copy, tab order/container hierarchy, text scale, spacing,
+control/border treatment and 390px stacking against the existing app surface.
+No new card grid or alternative design tokens. The JSON editor is configuration
+JSON, not the frozen RunSpec or the resolved ExecutionPlan.
+
+Browser plugin not available. GTHT Playwright with installed Chrome checked the
+actual React components using isolated HTTP catalog/config fixtures derived from
+the real native Job; both 1440×1000 Chinese and 390×844 English render, Manager
+switch, automatic product/Bar input selection, tab switching/preserved dates,
+and node-limited test types passed, no page errors or picker horizontal overflow.
+`view_image` inspected both final captures. Fixtures exercise UI, not browser→
+production submission. Real Keycloak/peer HTTP→native Celery execution and report
+acceptance are separately recorded in ADR188 and verify_remote_node_job receipts.
+The compiled native RunSpec fixture has no authoring strategy bindings and its
+Decimal initial balance differs from editor input schema: it is deliberately not
+claimed as a valid editable strategy draft or browser submission acceptance.
+
+Captures: `/Users/maxdeux/.codex/visualizations/2026/10/28/execution-topology/zh-CN-1440.png`
+and `en-US-390.png`. No temporary QA entrypoint is shipped. Local/public deployment,
+complete Keycloak administration UI and removal of embedded legacy routes remain
+separate work; this pass does not declare the whole frontend migration complete.

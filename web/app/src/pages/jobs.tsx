@@ -37,7 +37,7 @@ export function JobsPage(): React.ReactElement {
     {scope === "subordinates" ? <div className="tr-page-filters"><Select aria-label={t("jobs.subordinate")} placeholder={t("jobs.subordinate")} value={username || undefined} options={users.map((user) => ({ value: user.username, label: user.username }))} onChange={(value) => { setUsername(value); setPage(1); }} /></div> : null}
     {loginRequired ? <Alert type="info" message={t("jobs.loginRequired")} /> : null}
     <TRDataTable rows={rows} rowKey={(row) => `${row.server_id || ""}:${row.port || row.service_port || ""}:${row.job_id}`} loading={loading} error={error} pagination={{ page: scope === "server" ? actualPage : page, mode: scope === "server" ? "cursor" : undefined, hasMore, pageSize: size, total, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
-      { title: t("jobs.task"), key: "task", render: (_, row) => <button className="tr-table-link" onClick={() => instance.open("job-detail", { jobId: row.job_id, serverId: row.server_id, servicePort: row.port || row.service_port })}>{row.task_name || row.kind || row.job_id}{mobile ? <small className="tr-job-mobile-meta" title={row.job_id}>{[row.server_name || row.server_id, row.port || row.service_port, row.job_id].filter(Boolean).join(" · ")}</small> : null}</button> },
+      { title: t("jobs.task"), key: "task", render: (_, row) => <button className="tr-table-link" onClick={() => instance.open("job-detail", { jobId: row.job_id, serverId: row.server_id, servicePort: row.port || row.service_port, executionNodeId:row.execution_node_id })}>{row.task_name || row.kind || row.job_id}{mobile ? <small className="tr-job-mobile-meta" title={row.job_id}>{[row.server_name || row.server_id, row.port || row.service_port, row.job_id].filter(Boolean).join(" · ")}</small> : null}</button> },
       { title: t("jobs.status"), dataIndex: "status", render: (value) => <Tag>{t(`jobs.states.${value}`, { defaultValue: value })}</Tag> },
       { title: t("jobs.updated"), dataIndex: "updated_at", responsive: ["md"], render: (value) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—" },
       { title: t("jobs.server"), key: "server", responsive: ["md"], render: (_, row) => row.server_name || row.server_id || "—" },
@@ -49,5 +49,5 @@ export function JobsPage(): React.ReactElement {
 }
 export function JobDetailPage(): React.ReactElement {
   const { t } = useTranslation(); const instance = usePageInstance();
-  return <FunctionPage title={t("jobs.detail")}><JobDetail job={{ job_id: instance.args.jobId || "", server_id: instance.args.serverId, service_port: instance.args.servicePort } as JobReference} /></FunctionPage>;
+  return <FunctionPage title={t("jobs.detail")}><JobDetail job={{ job_id: instance.args.jobId || "", server_id: instance.args.serverId, service_port: instance.args.servicePort, execution_node_id:instance.args.executionNodeId } as JobReference} /></FunctionPage>;
 }

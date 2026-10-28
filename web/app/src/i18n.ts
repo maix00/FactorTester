@@ -7,6 +7,7 @@ export const resources = {
       panelLayout: { menu: "排列页面", right: "移到右侧区域", below: "移到下方区域", maximize: "最大化区域", restore: "恢复区域" },
       brand: { name: "TradeResearch", first: "Trade", second: "Research" }, mainNavigation: "主导航", resizeSidebar: "调整侧栏宽度", resetLayout: "重置布局", settings: "设置", close: "关闭", pages: "{{count}} 个页面",
       details: "详情", loading: "正在加载…", loadFailed: "读取失败", empty: "暂无数据", language: "语言",
+      executionTopology: { mode:"匹配方式",auto:"按配置自动匹配",manual:"手动指定",autoHint:"按配置匹配当前 Manager 中获授权的在线节点；预览时确认实际执行位置。",requirements:"产品与 Bar 类型",tab:"执行位置",title:"执行节点与数据",service:"节点与服务",refresh:"刷新执行节点",chooseService:"选择测试服务",offline:"离线",inputs:"产品与数据安装",start:"输入开始（UTC）",end:"输入结束（UTC）",hint:"数据需求随 RunSpec 冻结；具体节点安装在执行计划中绑定。输入区间应覆盖预热与正式回测。",none:"尚无已注册的执行节点，可继续使用当前服务。",unavailable:"执行服务或来源已不可用",chooseInputs:"请选择来源和有效的输入区间",duplicateProduct:"每个产品请选择一份数据输入" },
       configuration: {
         testKind:"测试类型", analysisNames: { backtest: "回测", ic: "IC", factor_evaluation: "因子序列", factor_type_analysis: "因子类型" }, scope: { public: "公共", user_custom: "用户" }, edit: "编辑", preview: "预览", run: "运行", submitted: "已提交运行", strategies: "策略", addStrategy: "添加策略", editStrategy: "编辑策略", add: "添加", cancel: "取消", strategyId: "策略名称",
         sections: { data: "数据与时间", execution: "场所与撮合", funds: "费用与保证金", other: "其他设置" }, runSettings: "运行设置", strategy: "策略", removeStrategy: "移除策略", searchStrategies: "搜索策略", search: "搜索设置项",
@@ -14,7 +15,7 @@ export const resources = {
         strategyFields: { signal: "信号因子", product_group_ref: "产品组", entry_threshold: "入场阈值", exit_threshold: "退出阈值", side_mode: "方向", split_count: "分组数", group_index: "第 N 组" },
         values: { long_short: "多空", long_only: "仅做多", short_only: "仅做空" },
         title: "测试", setup: "配置",
-        workspace: "选择工作区", create: "新建配置", newTitle: "新的测试配置", fields: "配置项", json: "JSON",
+        workspace: "选择工作区", create: "新建配置", newTitle: "新的测试配置", fields: "配置项", json: "配置 JSON",
         reload: "重新读取", save: "保存", saved: "配置已保存", savedState: "已保存", unsaved: "未保存",
         loading: "正在读取配置…", loadingEditor: "正在加载 JSON 编辑器…", chooseWorkspace: "选择工作区或新建配置，开始编辑。",
         addFields: "添加配置项", inputs: "测试输入", analysis: "测试类型", allAnalyses: "全部分析",
@@ -58,6 +59,7 @@ export const resources = {
       panelLayout: { menu: "Arrange page", right: "Move to right region", below: "Move to lower region", maximize: "Maximize region", restore: "Restore regions" },
       brand: { name: "TradeResearch", first: "Trade", second: "Research" }, mainNavigation: "Main navigation", resizeSidebar: "Resize sidebar", resetLayout: "Reset layout", settings: "Settings", close: "Close", pages: "{{count}} pages",
       details: "Details", loading: "Loading…", loadFailed: "Load failed", empty: "No data", language: "Language",
+      executionTopology: { mode:"Matching",auto:"Match configuration automatically",manual:"Choose manually",autoHint:"Match authorized online nodes in this Manager. Preview confirms the actual execution target.",requirements:"Products and Bar types",tab:"Execution",title:"Execution node and data",service:"Node and service",refresh:"Refresh execution nodes",chooseService:"Select a test service",offline:"Offline",inputs:"Products and installations",start:"Input start (UTC, with warmup)",end:"Input end (UTC)",hint:"RunSpec freezes data requirements; the execution plan binds a node installation. Include warmup and the formal backtest interval.",none:"No authorized execution nodes available.",unavailable:"Execution service or input is unavailable",chooseInputs:"Select inputs and a valid input interval",duplicateProduct:"Select one input per product" },
       configuration: {
         testKind:"Test type", analysisNames: { backtest: "Backtest", ic: "IC", factor_evaluation: "Factor series", factor_type_analysis: "Factor type" }, scope: { public: "Public", user_custom: "User" }, edit: "Edit", preview: "Preview", run: "Run", submitted: "Run submitted", strategies: "Strategies", addStrategy: "Add strategy", editStrategy: "Edit strategy", add: "Add", cancel: "Cancel", strategyId: "Strategy name",
         groups: {"group_strategy": "Grouping", "position_policy": "Position policy", "rebalance_trigger": "Rebalancing", "target_allocation": "Target allocation", "term_carry_strategy": "Term carry", "engine": "Engine", "time": "Time range", "capital": "Capital", "order": "Order execution", "accounting": "Accounting", "delivery_force_close": "Delivery closeout", "rollover": "Rollover", "data_source": "Data source", "frequency": "Data frequency", "factor": "Factor execution", "calendar": "Backtest clock", "cost": "Fees", "volume_capacity": "Volume participation", "margin": "Margin", "strategy_book": "Strategy book", "return_frequency": "Forward returns", "delay": "Delay", "ic_method": "IC method", "summary": "Summary", "quantile_portfolio_statistics": "Group portfolio", "price_type": "Price type", "method": "Analysis method"} ,
@@ -66,7 +68,7 @@ export const resources = {
         strategyFields: { signal: "Signal factor", product_group_ref: "Product group", entry_threshold: "Entry threshold", exit_threshold: "Exit threshold", side_mode: "Direction", split_count: "Groups", group_index: "Group index" },
         values: { long_short: "Long and short", long_only: "Long only", short_only: "Short only" },
         title: "Test", setup: "Configuration",
-        workspace: "Select workspace", create: "New configuration", newTitle: "New test configuration", fields: "Fields", json: "JSON",
+        workspace: "Select workspace", create: "New configuration", newTitle: "New test configuration", fields: "Fields", json: "Configuration JSON",
         reload: "Reload", save: "Save", saved: "Configuration saved", savedState: "Saved", unsaved: "Unsaved",
         loading: "Loading configuration…", loadingEditor: "Loading JSON editor…", chooseWorkspace: "Select a workspace or create a configuration to begin.",
         addFields: "Add configuration", inputs: "Test inputs", analysis: "Test type", allAnalyses: "All analyses",

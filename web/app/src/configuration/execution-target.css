@@ -1,0 +1,8 @@
+.tr-execution-target { display:grid; gap:12px; padding:24px; margin:0; border:0; border-radius:0; background:var(--tr-surface,#fff); }
+.tr-execution-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.tr-execution-row { display:grid; grid-template-columns:168px minmax(0,1fr); align-items:center; gap:12px; min-width:0; }
+.tr-execution-row .ant-select { min-width:0; width:100%; }
+.tr-execution-dates { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+@media(max-width:700px) { .tr-execution-target { padding:12px; } .tr-execution-row { grid-template-columns:minmax(0,1fr); gap:6px; } .tr-execution-dates { grid-template-columns:minmax(0,1fr); gap:12px; } }
+
+.tr-execution-heading h2 { margin:0; font-size:18px; font-weight:600; line-height:28px; }
