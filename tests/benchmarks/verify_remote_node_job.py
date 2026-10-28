@@ -39,6 +39,8 @@ def main():
     parser.add_argument('--manager-id',choices=['manager-a','manager-b'],default='manager-a')
     parser.add_argument('--node-client',choices=['node-a','node-b'],default='node-a')
     args=parser.parse_args()
+    acceptance_started=time.perf_counter()
+    authoring_seconds=None
     for url in (args.broker,args.couch_url):
         if urllib.parse.urlparse(url).hostname not in {'127.0.0.1','localhost'}:
             raise ValueError('isolated localhost services required')
@@ -193,6 +195,7 @@ def main():
                 source_code=source,source_sha256=hashlib.sha256(source.encode()).hexdigest(),source_bytes=len(source.encode()))
         prepared['portable_factor_sources'] = list(portable.values())
         if args.saved_plan:
+            authoring_started=time.perf_counter()
             from server.services import research_configurations
             from server.services.execution_plans import document
             from server.manager.services.execution_plan_resolution import resolve
@@ -222,6 +225,7 @@ def main():
             },owner='alice')
             blocked=context['prepared']['run_spec']['configuration']['analyses']['backtest']['execution']['nautilus_contract']['blockers']
             if blocked:raise AssertionError(blocked)
+            authoring_seconds=time.perf_counter()-authoring_started
         federation=FederatedGateway()
         origin_client='manager-api' if origin=='manager-a' else 'manager-b-api'
         federation._execution_clients={endpoint:ServiceHTTPClient(endpoint,oidc=oidc(origin_client),response_limit=16*1024**2)}
@@ -239,6 +243,10 @@ def main():
         if args.saved_plan:
             (args.root/'preview-binding.json').write_text(json.dumps(preview['response']['execution_binding'],indent=2))
             assert request['expected_execution_binding_ref']==editable['execution']['resolved_ref']
+        if args.saved_plan:
+            stale={**request,'expected_execution_binding_ref':'obsolete-binding'}
+            denied=federation.public_data(peer,kind='execution',operation='submit',principal='alice',payload={'request':stale})
+            assert denied['status']==409 and denied['response']['code']=='execution_binding_changed',denied
         submitted=federation.public_data(peer,kind='execution',operation='submit',principal='alice',payload={'request':request})
         if submitted['status']!=202:raise AssertionError(submitted)
         job_id=submitted['response']['jobs'][0]['job_id']
@@ -300,9 +308,9 @@ def main():
                 raise AssertionError('fill comparison has no real execution fields')
             fill_digest=canonical_hash(normalized)
             receipt={'run_spec_hash':record.run_spec_hash,'fills_sha256':fill_digest,'fill_columns':list(fills[0]),'job_id' :job_id,'manager_id':manager,'node_id':node,'status':current.status.value,
-                'seconds':time.perf_counter()-started,'sampled_worker_peak_rss_bytes':max(rss),
+                'seconds':time.perf_counter()-started,'authoring_freeze_seconds':authoring_seconds,'acceptance_total_seconds':time.perf_counter()-acceptance_started,'sampled_worker_peak_rss_bytes':max(rss),
                 'manager_job_db':str(repo.db_path),'node_has_manager_job_db':False,
-                'saved_plan_roundtrip':args.saved_plan,'saved_configuration_runspec_compiler':args.saved_plan,'automatic_matching':args.automatic,'cross_manager_job_reads':args.federated,'cross_manager_discovery_preview_submit':args.federated,'origin_manager':origin if args.federated else manager,'real_broker':True,'real_native_strategy':True,'authenticated_http':True,'authentication':'real Keycloak service account and introspection',
+                'saved_plan_roundtrip':args.saved_plan,'stale_binding_rejected':args.saved_plan,'saved_configuration_runspec_compiler':args.saved_plan,'automatic_matching':args.automatic,'cross_manager_job_reads':args.federated,'cross_manager_discovery_preview_submit':args.federated,'origin_manager':origin if args.federated else manager,'real_broker':True,'real_native_strategy':True,'authenticated_http':True,'authentication':'real Keycloak service account and introspection',
                 'orders':result['orders'],'factor_actors':result['factor_actors'],'strategies':len(families),
                 'attachments':list(report['attachments']),'data_start_ns':min(x.start_ns for x in requirements),
                 'data_end_ns':max(x.end_ns for x in requirements),

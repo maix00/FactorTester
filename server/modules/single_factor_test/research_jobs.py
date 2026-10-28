@@ -725,12 +725,13 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         from server.modules.single_factor_test.execution_nodes import bind_prepared_execution
         try:
             prepared["execution_binding"] = bind_prepared_execution(prepared, selected_execution)
-            from server.jobs.assurance import canonical_hash
-            expected = data.get("expected_execution_binding_ref")
-            if expected and expected != canonical_hash(prepared["execution_binding"]):
-                raise ValueError("execution installation changed since preview; preview again")
         except (KeyError, TypeError, ValueError, PermissionError) as exc:
             raise _RunRequestError(str(exc), status_code=422) from exc
+        from server.jobs.assurance import canonical_hash
+        expected = data.get("expected_execution_binding_ref") or selected_execution.get("resolved_ref")
+        if expected and expected != canonical_hash(prepared["execution_binding"]):
+            raise _RunRequestError("execution installation changed; refresh matching and save the updated plan",
+                status_code=409, details={"code":"execution_binding_changed"})
     if not prepared.get("execution_binding"):
         _reject_unavailable_nautilus_run(prepared)
         _validate_mounted_run_windows(prepared)

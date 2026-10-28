@@ -10,7 +10,7 @@ import { JobDetail } from "../components/job-detail.tsx";
 import type { JobReference } from "../job-model.ts";
 import { TestInputs } from "../configuration/test-inputs.tsx";
 import { ExecutionTargetPicker } from "../configuration/execution-target.tsx";
-import { configurationDraft, replaceConfiguration, planFromConfiguration, planSchema, type ExecutionChoice } from "../configuration/plan-document.ts";
+import { configurationDraft, replaceConfiguration, planFromConfiguration, planSchema, executionChoiceFromDocument, resolutionInputKey, applyResolution, type ExecutionChoice } from "../configuration/plan-document.ts";
 import { runRequest } from "../configuration/run.ts";
 import { request } from "../configuration/api.ts";
 import { PlusOutlined, ReloadOutlined, ArrowLeftOutlined, CodeOutlined, CalendarOutlined, BarChartOutlined, DatabaseOutlined } from "@ant-design/icons";
@@ -37,8 +37,9 @@ export function TestConfigurationPage(): React.ReactElement {
   const [planDraft,setPlanDraft]=useState<Draft|null>(null);
   const draft=useMemo(()=>configurationDraft(planDraft),[planDraft]);
   const planValue=useMemo(()=>parseDraft(planDraft?.text||"{}"),[planDraft?.text]);
-  const executionChoice=(planValue.value?.execution||{mode:"auto",manager_id:"",bundles:[]}) as ExecutionChoice;
+  const executionChoice=executionChoiceFromDocument(planValue.value);
   const executionSelection=executionChoice.bundles.length>0;
+  const [resolutionEpoch,setResolutionEpoch]=useState(0);
   const [resolving,setResolving]=useState(false),[resolutionError,setResolutionError]=useState("");
   const setDraft=useCallback((update:React.SetStateAction<Draft|null>)=>setPlanDraft(current=>{
     const view=configurationDraft(current);const next=typeof update==="function"?update(view):update;
@@ -84,30 +85,19 @@ export function TestConfigurationPage(): React.ReactElement {
     const supported = availableTypes.filter(type => type in registered);
     if (supported.length && !supported.includes(analysis)) { setAnalysis(supported[0]); }
   }, [availableTypes, contract, analysis]);
-  const resolutionKey=useMemo(()=>{
-    if(!planValue.value)return "";
-    const value=structuredClone(planValue.value);const execution=value.execution as JSONObject|undefined;
-    if(execution){delete execution.resolved;delete execution.resolved_ref;}
-    return JSON.stringify(value);
-  },[planValue]);
+  const resolutionKey=useMemo(()=>resolutionInputKey(planValue.value),[planValue]);
   useEffect(()=>{
     if(!workspace||!executionChoice.manager_id||!executionChoice.bundles.length||!resolutionKey){setResolutionError("");setResolving(false);return;}
     const controller=new AbortController();setResolutionError("");setResolving(true);
+    setPlanDraft(current=>applyResolution(current,resolutionKey));
     const timer=setTimeout(()=>{
       request("/api/test-authoring/execution-plan/resolve",{method:"POST",signal:controller.signal,body:JSON.stringify({workspace_id:workspace,execution_plan:JSON.parse(resolutionKey)})}).then(result=>{
         if(controller.signal.aborted)return;
-        setResolutionError("");setPlanDraft(current=>{
-          if(!current)return current;
-          const value=parseDraft(current.text).value;if(!value)return current;
-          const clean=structuredClone(value);const execution=clean.execution as JSONObject;delete execution.resolved;delete execution.resolved_ref;
-          if(JSON.stringify(clean)!==resolutionKey)return current;
-          const updated={...value,execution:{...(value.execution as JSONObject),resolved:result.binding,resolved_ref:result.binding_ref}};
-          return {...current,text:JSON.stringify(updated,null,2),source:"form"};
-        });
+        setResolutionError("");setPlanDraft(current=>applyResolution(current,resolutionKey,result));
       }).catch(reason=>{if(!controller.signal.aborted)setResolutionError(reason.message);}).finally(()=>{if(!controller.signal.aborted)setResolving(false);});
     },400);
     return()=>{clearTimeout(timer);controller.abort();};
-  },[workspace,resolutionKey]);
+  },[workspace,resolutionKey,resolutionEpoch]);
   const parsed = useMemo(() => parseDraft(draft?.text ?? "{}"), [draft?.text]);
   const deferredText = useDeferredValue(draft?.text ?? "{}");
   const validationErrors = useMemo(() => {
@@ -205,7 +195,10 @@ export function TestConfigurationPage(): React.ReactElement {
       if(activeWorkspace.current!==currentWorkspace)return;
       setJobs(value.jobs||[]);setSelectedJob(0);setTab("results");
       notify({code:"configuration.submitted",type:"success",message:t("configuration.submitted"),description:String(value.run_id||"")});
-    }catch(reason){if(activeWorkspace.current===currentWorkspace)setError(reason instanceof Error?reason.message:String(reason));}
+    }catch(reason){if(activeWorkspace.current===currentWorkspace){
+      setError(reason instanceof Error?reason.message:String(reason));
+      if((reason as {code?:string}).code==='execution_binding_changed')setResolutionEpoch(value=>value+1);
+    }}
     finally{setRunning(false);}
   };
 
@@ -275,7 +268,7 @@ export function TestConfigurationPage(): React.ReactElement {
       {key:"configuration",label:t("configuration.setup"),disabled:!availableTypes.length},
       {key:"results",label:t("jobs.results"),disabled:!jobs.length},
     ]} />
-    <div hidden={tab !== "execution"}><ExecutionTargetPicker value={executionChoice} onChange={changeExecution} onCapabilities={changeCapabilities} resolving={resolving} error={resolutionError} /></div>
+    <div hidden={tab !== "execution"}><ExecutionTargetPicker value={executionChoice} onChange={changeExecution} onCapabilities={changeCapabilities} onRefresh={()=>setResolutionEpoch(value=>value+1)} resolving={resolving} error={resolutionError} /></div>
     {tab === "execution" ? null : tab === "results" ? <div className="tr-config-results">{jobs.length > 1 ? <Select value={selectedJob} options={jobs.map((job, index) => ({ value: index, label: job.task_name || job.job_id }))} onChange={setSelectedJob} /> : null}{jobs[selectedJob] ? <JobDetail job={jobs[selectedJob]} /> : null}</div> :
      !draft ? !loading ? <Empty description={false} /> : null : !contract ? <p role="status">{t("configuration.loading")}</p> : <div className="tr-config-layout">
       <aside className="tr-config-sidebar" hidden={mobile && detail}>

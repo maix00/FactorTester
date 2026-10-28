@@ -7,8 +7,8 @@ import type { ExecutionChoice } from "./plan-document.ts";
 import type { ExecutionTarget } from "./execution-target-model.ts";
 import "./execution-target.css";
 
-export function ExecutionTargetPicker({ value, onChange, onCapabilities, resolving, error }: {
-  value:ExecutionChoice;onChange:(value:ExecutionChoice)=>void;onCapabilities:(types:string[])=>void;resolving:boolean;error:string;
+export function ExecutionTargetPicker({ value, onChange, onCapabilities, onRefresh, resolving, error }: {
+  value:ExecutionChoice;onChange:(value:ExecutionChoice)=>void;onCapabilities:(types:string[])=>void;onRefresh:()=>void;resolving:boolean;error:string;
 }):React.ReactElement {
   const {t}=useTranslation();
   const [managers,setManagers]=useState<string[]>([]),[targets,setTargets]=useState<ExecutionTarget[]>([]);
@@ -34,7 +34,7 @@ export function ExecutionTargetPicker({ value, onChange, onCapabilities, resolvi
     const install=input.offer.installation;return `${install.bundle_id} · ${install.bundle_version} · ${install.node_id}`;
   }))] as string[];
   return <section className="tr-execution-target" aria-label={t("executionTopology.title")}>
-    <div className="tr-execution-heading"><h2>{t("executionTopology.title")}</h2><Button type="text" icon={<ReloadOutlined/>} loading={loading} aria-label={t("executionTopology.refresh")} onClick={()=>setReload(n=>n+1)}/></div>
+    <div className="tr-execution-heading"><h2>{t("executionTopology.title")}</h2><Button type="text" icon={<ReloadOutlined/>} loading={loading} aria-label={t("executionTopology.refresh")} onClick={()=>{setReload(n=>n+1);onRefresh();}}/></div>
     <label className="tr-execution-row"><span>{t("executionTopology.mode")}</span><Select value={value.mode} options={[{value:"auto",label:t("executionTopology.auto")},{value:"manual",label:t("executionTopology.manual")}]} onChange={mode=>update({mode,target:undefined})}/></label>
     <label className="tr-execution-row"><span>Manager</span><Select value={manager||undefined} options={managers.map(id=>({value:id,label:id}))} onChange={manager_id=>update({manager_id,target:undefined,bundles:[]})}/></label>
     {value.mode==="manual"?<label className="tr-execution-row"><span>{t("executionTopology.service")}</span><Select value={target?.route_id} loading={loading} options={targets.map(row=>({value:row.route_id,label:`${row.target.node_id} · ${row.target.service_id}`,disabled:!row.online}))} onChange={id=>update({target:targets.find(row=>row.route_id===id)?.target,bundles:[]})}/></label>:null}
