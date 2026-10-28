@@ -379,3 +379,24 @@ def test_public_device_challenge_is_canonical_ip_only(tmp_path, monkeypatch) -> 
         with urlopen(canonical) as response:
             payload = json.loads(response.read())
         assert payload["success"] is True
+
+
+def test_public_entry_exposes_compliance_without_a_session(tmp_path) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.require_login_for_ui = True
+    state.require_device_auth = True
+    state.public_server = True
+    state.public_registration_enabled = False
+
+    with _running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/public/entry", headers=_headers(),
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["success"] is True
+    assert value["public_server"] is True
+    assert value["require_device_auth"] is True
+    assert value["public_registration_enabled"] is False
+    assert "白名单" in value["compliance_notice"]
+    assert "暂不开放自助注册" in value["registration_notice"]

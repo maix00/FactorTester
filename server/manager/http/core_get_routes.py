@@ -16,6 +16,10 @@ from server.manager.http.content_encoding import (
     request_accept_encoding,
 )
 from server.manager.http.localization import web_localization
+from server.manager.http.pages import (
+    PUBLIC_DEVICE_COMPLIANCE_NOTICE,
+    PUBLIC_REGISTRATION_NOTICE,
+)
 from server.manager.http.responses import json_response
 from server.manager.services.profile_storage_inventory import (
     ProfileStorageInventoryIncomplete,
@@ -61,7 +65,25 @@ def _admin_capabilities(username: str, role: str) -> list[str]:
 class CoreGetRoutesMixin:
     """Order focused GET route families without owning their implementations."""
 
+    def _serve_public_entry(self) -> None:
+        """Expose the same legal text and policy flags to the React login gate."""
+        json_response(self, {
+            "success": True,
+            "compliance_notice": PUBLIC_DEVICE_COMPLIANCE_NOTICE,
+            "registration_notice": PUBLIC_REGISTRATION_NOTICE,
+            "public_registration_enabled": bool(
+                getattr(self.state, "public_registration_enabled", False)
+            ),
+            "require_device_auth": bool(
+                getattr(self.state, "require_device_auth", False)
+            ),
+            "public_server": bool(getattr(self.state, "public_server", False)),
+        })
+
     def _get_entry_routes(self, parsed) -> bool:
+        if parsed.path == "/api/public/entry":
+            self._serve_public_entry()
+            return True
         if parsed.path in {"/favicon.svg", "/favicon.ico"}:
             return self._serve_site_icon()
         if parsed.path == "/compliance":

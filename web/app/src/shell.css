@@ -584,3 +584,27 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-scalar-values { margin:0; padding:0; list-style:none; font-size:13px; line-height:21px; }
 .tr-scalar-values li { padding:6px 0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
 .tr-value-empty { color:var(--muted); font-size:13px; }
+
+/* Unauthenticated compliant-access overlay. */
+.tr-auth-loading { min-height: 100vh; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+.tr-auth-overlay { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; overflow: auto; background: color-mix(in srgb, var(--bg) 82%, #0b1220); backdrop-filter: blur(6px); }
+.tr-auth-card { width: min(760px, 100%); border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 24px 80px rgb(15 23 42 / 24%); padding: 28px; display: grid; gap: 18px; }
+.tr-auth-card header { display: grid; gap: 6px; }
+.tr-auth-card header > span { color: var(--accent); font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.tr-auth-card h1 { margin: 0; font-size: 24px; line-height: 1.25; }
+.tr-auth-card header p { margin: 0; color: var(--muted); font-size: 13px; }
+.tr-auth-compliance { max-height: 210px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--accent) 4%, var(--panel)); padding: 14px 16px; font-size: 12px; line-height: 1.75; color: var(--muted); }
+.tr-auth-compliance p { margin: 0 0 8px; }
+.tr-auth-compliance a, .tr-auth-register, .tr-auth-redirect { color: var(--accent); font-size: 12px; font-weight: 600; }
+.tr-auth-form { display: grid; gap: 12px; }
+.tr-auth-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.tr-auth-form input { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); padding: 10px 12px; font-size: 13px; }
+.tr-auth-form input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tr-auth-submit { border: 0; border-radius: 8px; background: var(--accent); color: #fff; padding: 11px 16px; font-size: 13px; font-weight: 650; cursor: pointer; }
+.tr-auth-submit:disabled { opacity: .55; cursor: not-allowed; }
+.tr-auth-error { margin: 0; color: #b42318; font-size: 12px; }
+.tr-auth-card footer { border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); font-size: 11px; }
+@media (max-width: 640px) { .tr-auth-overlay { padding: 12px; align-items: start; } .tr-auth-card { padding: 20px; margin-top: 8vh; } }
+.tr-settings-action { border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); padding: 6px 10px; font-size: 12px; cursor: pointer; }
+.tr-settings-action:hover { border-color: var(--accent); color: var(--accent); }
+.tr-auth-compliance-link { justify-self: start; margin-top: -8px; }

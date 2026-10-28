@@ -4,6 +4,7 @@ import { Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitch } from "./language-switch.tsx";
 import { PageIcon } from "../icon.tsx";
+import { useAuth } from "../auth.tsx";
 
 const SECTIONS = [
   { id: "account", icon: "account" },
@@ -29,23 +30,14 @@ export function SettingsOverlay({
   onResetLayout: () => void;
 }): React.ReactElement {
   const { t } = useTranslation();
+  const { session, logout } = useAuth();
   const [section, setSection] = useState<string>("account");
-  const [session, setSession] = useState<{ username?: string; role?: string; capabilities?: { manager?: boolean } } | null>(null);
   const [serverInfo, setServerInfo] = useState<Record<string, unknown> | null>(null);
   const [sectionData, setSectionData] = useState<Record<string, unknown> | null>(null);
   const [docPage, setDocPage] = useState<string>("");
   const [docContent, setDocContent] = useState<string>("");
   const [profileID, setProfileID] = useState<string>("");
   const [profileData, setProfileData] = useState<Record<string, unknown> | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    fetch("/api/session", { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((value) => { if (!cancelled) setSession(value?.session ?? value ?? null); })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [open]);
   useEffect(() => {
     const endpoints: Record<string, string> = {
       controlDatabase: "/api/control-database/config",
@@ -182,6 +174,12 @@ export function SettingsOverlay({
               <div className="tr-settings-row">
                 <div><b>{t("settingsPanel.role")}</b></div>
                 <span className="tr-settings-value">{session?.role || "—"}</span>
+              </div>
+              <div className="tr-settings-row">
+                <div><b>{t("settingsPanel.accountAction")}</b></div>
+                <button type="button" className="tr-settings-action" onClick={() => { void logout(); onClose(); }}>
+                  {t("settingsPanel.signOut")}
+                </button>
               </div>
             </div>
           ) : (
