@@ -5008,3 +5008,19 @@ def test_product_group_detail_renders_before_delayed_category_directory() -> Non
             assert not errors
         finally:
             browser.close()
+
+
+def test_native_report_frame_has_confined_policy_without_weakening_app(tmp_path) -> None:
+    state=authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/app") as response:
+            policy=response.headers['Content-Security-Policy']
+            assert "script-src 'self';" in policy
+            assert "frame-src 'self';" in policy
+        with urlopen(f"{base_url}/app/artifact-frame") as response:
+            policy=response.headers['Content-Security-Policy']
+            assert "sandbox allow-scripts allow-downloads" in policy
+            assert "allow-same-origin" not in policy
+            assert "connect-src 'none'" in policy
+            assert "frame-ancestors 'self'" in policy
+            assert 'artifact-frame.js' in response.read().decode()

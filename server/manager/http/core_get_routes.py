@@ -515,6 +515,24 @@ class CoreGetRoutesMixin:
             self.end_headers()
             self.wfile.write(body)
             return True
+        if parsed.path == "/app/artifact-frame":
+            body, content_type = static_file("vendor/web-app/artifact-frame.html")
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Security-Policy", (
+                "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
+                "connect-src 'none'; frame-src 'none'; object-src 'none'; "
+                "base-uri 'none'; form-action 'none'; frame-ancestors 'self'; "
+                "sandbox allow-scripts allow-downloads"
+            ))
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
         if parsed.path in {"/app", "/app/"}:
             body, content_type = static_file("vendor/web-app/index.html")
             self.send_response(200)
