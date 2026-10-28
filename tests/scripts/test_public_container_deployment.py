@@ -695,3 +695,13 @@ def test_nautilus_builder_scripts_use_the_local_submodule_entrypoint() -> None:
     assert "python/pyproject.toml" in sync
     assert "NAUTILUS_WHEEL_REQUIRED=1" in (ROOT / "scripts" / "server" / "prepare_nautilus_wheel_for_build.sh").read_text(encoding="utf-8")
     assert "CARGO_PROFILE_RELEASE_CODEGEN_UNITS" in build
+
+
+def test_native_updates_preserve_unrelated_tool_dependency_layers() -> None:
+    dockerfile=(DEPLOYMENT / "FactorTester.Dockerfile").read_text()
+    deps=dockerfile.split("FROM factortester-public-deps AS factortester-cli-builder")[0]
+    assert "NAUTILUS_VENDOR_REVISION" not in deps
+    native=dockerfile.index("COPY deploy/docker/factortester-public/wheels/py_alpha_lib")
+    assert dockerfile.index("COPY deploy/docker/factortester-public/mihomo-linux") < native
+    assert dockerfile.index("ARG CODEX_VERSION",dockerfile.index("FROM factortester-public-deps AS factortester-public")) < native
+    assert native < dockerfile.index("COPY server server")
