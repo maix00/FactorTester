@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ReloadOutlined } from "@ant-design/icons";
 import { request } from "./api.ts";
 import type { ExecutionChoice } from "./plan-document.ts";
-import type { ExecutionTarget } from "./execution-target-model.ts";
+import { executionManagerIDs, type ExecutionTarget } from "./execution-target-model.ts";
 import "./execution-target.css";
 
 export function ExecutionTargetPicker({ value, onChange, onCapabilities, onRefresh, resolving, error }: {
@@ -13,9 +13,10 @@ export function ExecutionTargetPicker({ value, onChange, onCapabilities, onRefre
   const {t}=useTranslation();
   const [managers,setManagers]=useState<string[]>([]),[targets,setTargets]=useState<ExecutionTarget[]>([]);
   const [reload,setReload]=useState(0),[loading,setLoading]=useState(false),[loadError,setLoadError]=useState("");
-  useEffect(()=>{const controller=new AbortController();request("/api/federation/servers",{signal:controller.signal}).then(result=>{
-    if(!controller.signal.aborted)setManagers([...new Set([result.server_id,...(result.servers||[]).map((item:any)=>item.server_id)])] as string[]);
-  }).catch(reason=>{if(!controller.signal.aborted)setLoadError(reason.message);});return()=>controller.abort();},[]);
+  const [managerError,setManagerError]=useState("");
+  useEffect(()=>{const controller=new AbortController();setManagerError("");request("/api/server/network-info",{signal:controller.signal}).then(result=>{
+    if(!controller.signal.aborted)setManagers(executionManagerIDs(result));
+  }).catch(reason=>{if(!controller.signal.aborted)setManagerError(reason.message);});return()=>controller.abort();},[reload]);
   const manager=value.manager_id||managers[0]||"";
   useEffect(()=>{if(!manager)return;const controller=new AbortController();setLoading(true);setTargets([]);
     request(`/api/test-authoring/execution-targets?server_id=${encodeURIComponent(manager)}`,{signal:controller.signal}).then(result=>{if(!controller.signal.aborted){setTargets(result.targets||[]);setLoadError("");}})
@@ -44,6 +45,6 @@ export function ExecutionTargetPicker({ value, onChange, onCapabilities, onRefre
       <label className="tr-execution-row"><span>{t("executionTopology.installations")}</span><Select mode="multiple" disabled value={resolvedBundles}/></label>
       {resolving?<div className="tr-execution-resolving" role="status"><Spin size="small"/>{t("executionTopology.resolving")}</div>:null}
     </div>:null}
-    {error||loadError?<Alert type="error" showIcon message={error||loadError}/>:null}
+    {error||managerError||loadError?<Alert type="error" showIcon message={error||managerError||loadError}/>:null}
   </section>;
 }

@@ -33,14 +33,14 @@ export function ResearchPage(): React.ReactElement {
     } else void request(`/api/research/${encodeURIComponent(id(selected))}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data); }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
     return () => controller.abort();
   }, [selected, tab]);
-  const filtered = useMemo(() => rows.filter((row) => !query || `${row.title || ""} ${row.owner || ""}`.toLowerCase().includes(query.toLowerCase())), [rows, query]);
+  const filtered = useMemo(() => rows.filter((row) => !query || `${row.title || ""} ${row.owner_ref || row.owner || ""}`.toLowerCase().includes(query.toLowerCase())), [rows, query]);
   return <FunctionPage title={t("nav.research")} actions={<>{tab === "researches" ? <Button type="primary" onClick={() => session ? setCreating(true) : openAuth("login")}>{t("research.create")}</Button> : null}<Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} /></>}>
     <Tabs activeKey={tab} onChange={(value) => { setTab(value); setRows([]); setPage(1); setSelected(null); setEditor(false); }} items={[{ key: "researches", label: t("research.tabResearches") }, { key: "reports", label: t("research.tabReports") }]} />
     <div className="tr-library-filters"><Input.Search allowClear aria-label={t("library.search")} placeholder={t("library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} /></div>
     <TRDataTable rows={filtered.slice((page - 1) * size, page * size)} rowKey={id} loading={loading} error={error} pagination={{ page, pageSize: size, total: filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
       { title: t("editor.name"), key: "title", render: (_, row) => <button className="tr-table-link" onClick={() => { setSelected(row); setEditor(false); }}>{row.title || id(row)}</button> },
-      { title: t("library.owner"), dataIndex: "owner", responsive: ["md"], render: (value) => value || "—" },
-      { title: t("library.visibility"), dataIndex: "visibility", responsive: ["md"], render: (value) => value ? <Tag>{t(`library.scopes.${value}`, { defaultValue: value })}</Tag> : "—" },
+      { title: t("library.owner"), key: "owner", responsive: ["md"], render: (_, row) => row.owner_alias || row.owner_ref || row.owner || "—" },
+      { title: t("library.visibility"), dataIndex: "visibility", responsive: ["md"], render: (value) => value ? <Tag>{t(`research.visibility.${value}`, { defaultValue: value })}</Tag> : "—" },
       { title: t("jobs.updated"), dataIndex: "updated_at", render: (value) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—" },
     ]} />
     {creating ? <ResearchCreate onClose={() => setCreating(false)} onCreated={(value) => { setCreating(false); setSelected(value); setEditor(false); setRevision(revision => revision + 1); }} /> : null}

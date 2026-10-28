@@ -72,7 +72,7 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
       <Form layout="vertical" className="tr-report-add">
         <Form.Item label={t("report.paragraphTitle")}><Input aria-label={t("report.paragraphTitle")} disabled={busy} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("report.paragraphTitle")} /></Form.Item>
         <Form.Item label={t("report.paragraphBody")}><Input.TextArea aria-label={t("report.paragraphBody")} disabled={busy} autoSize={{ minRows: 4, maxRows: 12 }} value={body} onChange={(event) => setBody(event.target.value)} placeholder={t("report.paragraphBody")} /></Form.Item>
-        <Button type="primary" loading={busy} disabled={busy || !firstChapter || !body.trim()} onClick={() => {
+        <Button aria-label={t("report.addParagraph")} type="primary" loading={busy} disabled={busy || !firstChapter || !body.trim()} onClick={() => {
           void apply({ op: "insert_component", chapter_id: firstChapter, component: { kind: "paragraph", title, body } }).then(saved => { if (saved) { setTitle(""); setBody(""); } });
         }}>{t("report.addParagraph")}</Button>
       </Form>

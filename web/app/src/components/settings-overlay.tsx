@@ -3,10 +3,11 @@ import { Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { PageIcon } from "../icon.tsx";
 import { useAuth } from "../auth.tsx";
-import { SettingsSection,visibleSettingsSections,type SettingsSectionID } from "./settings-section.tsx";
+import { SettingsSection } from "./settings-section.tsx";
+import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
 export function SettingsOverlay({open,onClose,onResetLayout}:{open:boolean;onClose:()=>void;onResetLayout:()=>void}):React.ReactElement{
  const {t}=useTranslation(),{session}=useAuth();const [section,setSection]=useState<SettingsSectionID>("account");
- const sections=visibleSettingsSections(Boolean(session?.capabilities?.manager));
+ const sections=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"});
  const current=sections.find(item=>item.id===section)||sections[0];
  return <Modal open={open} onCancel={onClose} footer={null} centered width={820} className="tr-settings-overlay" destroyOnHidden title={t("settingsPanel.title")}>
  <div className="tr-settings-hub"><nav className="tr-settings-nav" aria-label={t("settingsPanel.title")}>
