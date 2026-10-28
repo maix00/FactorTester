@@ -9,7 +9,8 @@ CACHE="${NAUTILUS_CACHE:-$ROOT/.artifacts/nautilus-build}"
 TARGET_CACHE="${NAUTILUS_TARGET_CACHE:-$CACHE/target}"
 JOBS="${CARGO_BUILD_JOBS:-1}"
 MEMORY="${NAUTILUS_BUILD_MEMORY:-3g}"
-BUILDER="${NAUTILUS_BUILDER_IMAGE:-traderesearch/nautilus-builder:py314}"
+PLATFORM="${NAUTILUS_BUILD_PLATFORM:-linux/amd64}"
+BUILDER="${NAUTILUS_BUILDER_IMAGE:-traderesearch/nautilus-builder:py314-amd64}"
 # nautilus-model is a large staticlib; codegen-units=1 exceeded a 3 GiB
 # container. Sixteen units keep the peak below that budget on the public host.
 mkdir -p "$OUT" "$CACHE/cargo/registry" "$CACHE/cargo/git" "$TARGET_CACHE"
@@ -28,7 +29,7 @@ git -C "$ROOT" diff --quiet HEAD -- native/traderesearch_nautilus_runtime trader
   echo "runtime composition has uncommitted changes" >&2; exit 1;
 }
 RUNTIME_TREE="$(git -C "$ROOT" ls-tree -r HEAD -- native/traderesearch_nautilus_runtime traderesearch_data/rust)"
-BUILD_ID="$(printf '%s\n' "$REVISION" "$ALPHA_REVISION" "$RUNTIME_TREE" | shasum -a 256 | cut -d' ' -f1)"
+BUILD_ID="$(printf '%s\n' "$REVISION" "$ALPHA_REVISION" "$RUNTIME_TREE" "$PLATFORM" | shasum -a 256 | cut -d' ' -f1)"
 BUILD_OUT="$OUT/$BUILD_ID"
 mkdir -p "$BUILD_OUT"
 CACHED="$OUT/nautilus_trader-$BUILD_ID.whl"
@@ -57,12 +58,12 @@ fi
 echo "building nautilus_trader from local commit $REVISION"
 
 if ! docker image inspect "$BUILDER" >/dev/null 2>&1; then
-  docker build -t "$BUILDER" \
+  docker build --platform "$PLATFORM" -t "$BUILDER" \
     -f "$ROOT/deploy/docker/factortester-public/NautilusBuilder.Dockerfile" \
     "$ROOT/deploy/docker/factortester-public"
 fi
 
-docker run --rm \
+docker run --rm --platform "$PLATFORM" \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
   -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
   -v "$ROOT:/repo:ro" -v "$BUILD_OUT:/wheels" \
