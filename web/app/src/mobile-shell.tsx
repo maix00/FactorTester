@@ -47,7 +47,7 @@ export function MobileShell(): React.ReactElement {
     {entries.map((entry) => <div className="tr-mobile-instance" hidden={entry.id !== active} key={entry.id}>
       <PageInstanceProvider value={{ ...entry, mobile: true, active: entry.id === active, open, back }}>
         <PageErrorBoundary label={entry.pageId}>
-          {!entry.root ? <div className="tr-mobile-page-back"><button type="button" onClick={back}><PageIcon name="back" />{t("back")}</button></div> : null}
+          {!entry.root && !(entry.pageId === "settings" && setting && entry.id === active) ? <div className="tr-mobile-page-back"><button type="button" onClick={back}><PageIcon name="back" />{t("back")}</button></div> : null}
           {entry.pageId === "settings" ? setting && entry.id === active ? <MobileSettingDetail section={setting} onBack={back} /> :
             <MobileSettingsPage onOpen={(section) => { setSetting(section); history.pushState({ ...history.state, trSettings: section }, "", location.href); }} /> : <PageSurface pageId={entry.pageId} />}
         </PageErrorBoundary>
