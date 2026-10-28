@@ -54,6 +54,43 @@ _PRODUCT_DATA_POST_PATHS = frozenset({
 class JobProxyRoutesMixin:
     """Forward execution requests after selection and preserve provenance."""
 
+    def _proxy_node_job_control(self, parsed, *, method):
+        query = parse_qs(parsed.query)
+        if query.get("node_execution") != ["1"]:
+            return False
+        match = re.fullmatch(r"/api/jobs/([A-Za-z0-9._-]{1,128})(/result|/artifacts|/cancel|/stream)?", parsed.path)
+        if match is None:
+            return False
+        suffix = match.group(2) or ""
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        if suffix == "/stream":
+            # Remote Job facts are durable; existing frontend polling is the
+            # fallback until a node-safe shared notification stream exists.
+            json_response(self, {"success": False, "error": "use Job polling"}, 501)
+            return True
+        if method != ("POST" if suffix == "/cancel" else "GET"):
+            return False
+        owner = str(session["username"])
+        manager = query.get("server_id", [self.state.server_id])[0]
+        try:
+            if manager not in {"", "local", self.state.server_id}:
+                from server.modules.single_factor_test.execution_nodes import peer_execution_route
+                route = peer_execution_route(self.state, manager)
+                value = self.state.federation_gateway.public_data(route, kind="execution", operation="job",
+                    principal=owner, payload={"job_id": match.group(1), "suffix": suffix})
+                json_response(self, value["response"], int(value["status"]))
+            else:
+                value = self.state.test_authoring.node_job_operation(job_id=match.group(1), suffix=suffix, owner=owner)
+                json_response(self, value.payload, value.status)
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+        except (ConnectionError, OSError, RuntimeError, ValueError, KeyError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+        return True
+
     def _proxy_nautilus_preview(self, parsed, *, method: str) -> bool:
         """Forward only read-only Nautilus capability/configuration previews.
 
@@ -510,6 +547,8 @@ class JobProxyRoutesMixin:
         )
 
     def _proxy_service_write(self, parsed, *, method: str) -> bool:
+        if self._proxy_node_job_control(parsed, method=method):
+            return True
         patterns = _SERVICE_WRITE_PATTERNS.get(method, ())
         registered_route = any(
             re.fullmatch(pattern, parsed.path) for pattern in patterns
@@ -933,6 +972,8 @@ class JobProxyRoutesMixin:
         }
 
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
+        if self._proxy_node_job_control(parsed, method=method):
+            return True
         if self._proxy_job_collection_request(parsed, method=method):
             return True
         match = re.fullmatch(
@@ -1248,6 +1289,8 @@ class JobProxyRoutesMixin:
         return True
 
     def _proxy_job_stream(self, parsed) -> bool:
+        if self._proxy_node_job_control(parsed, method="GET"):
+            return True
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})/stream", parsed.path,
         )

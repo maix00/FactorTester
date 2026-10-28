@@ -254,6 +254,29 @@ class TestAuthoringService:
         value = str(values.get("include_source", ["0"])[0] or "0")
         return value.strip().lower() in {"1", "true", "yes", "on"}
 
+    def node_job_operation(self, *, job_id: str, suffix: str, owner: str) -> TestAuthoringResponse:
+        """Reuse established owner-scoped handlers without a business listener."""
+        from server.jobs.repository.sqlite import JobRepository
+        record = JobRepository().load(job_id, owner=owner)
+        if record is None or not record.job_spec.get("execution_binding"):
+            return TestAuthoringResponse({"success": False, "error": "node Job not found"}, 404)
+        from flask import Flask, session
+        from server.modules.single_factor_test.backtest_job_reads import (
+            get_test_job, get_test_job_result, list_test_job_artifacts,
+        )
+        from server.modules.single_factor_test.backtest_jobs import cancel_test_job
+        actions = {"": get_test_job, "/result": get_test_job_result,
+                   "/artifacts": list_test_job_artifacts, "/cancel": cancel_test_job}
+        if suffix not in actions:
+            raise ValueError("unsupported node Job operation")
+        app = Flask("traderesearch-job-control")
+        import secrets
+        app.secret_key = secrets.token_bytes(32)
+        with app.test_request_context("/api/jobs/" + job_id + suffix, method="POST" if suffix == "/cancel" else "GET"):
+            session["username"] = owner
+            response = app.make_response(actions[suffix](job_id))
+            return TestAuthoringResponse(response.get_json(), response.status_code)
+
     def write(
         self, method: str, path: str, *, owner: str, payload: dict[str, Any],
         trusted_context: bool = False,

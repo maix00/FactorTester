@@ -58,7 +58,7 @@ class ServiceTokenVerifier:
                     raise PermissionError("inactive service token")
                 audience=claims.get("aud",[])
                 if isinstance(audience,str):audience=[audience]
-                if claims.get("iss")!=self.issuer or self.audience not in audience:
+                if not claims.get("sub") or claims.get("iss")!=self.issuer or self.audience not in audience:
                     raise PermissionError("service token issuer/audience mismatch")
                 expires=float(claims.get("exp") or 0)
                 if expires<=now:raise PermissionError("expired service token")

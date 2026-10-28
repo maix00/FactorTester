@@ -4,6 +4,7 @@ from flask import jsonify
 
 from server.jobs.dispatch.node_service import ExecutionNodeService
 from server.jobs.repository.sqlite import JobRepository
+from server.jobs.assurance import canonical_hash
 from server.modules.single_factor_test import sft_bp
 from server.services.session_runtime import require_user
 
@@ -32,11 +33,39 @@ def visible_targets(owner):
 def bind_prepared_execution(prepared, selection):
     if len(prepared["analyses"]) != 1:
         raise ValueError("an execution target requires exactly one test type")
-    target = selection["target"]
     requirements = prepared["run_spec"].get("data_requirements") or []
-    rows = visible_targets(prepared["owner"] if "owner" in prepared else require_user())
-    from traderesearch_data.execution import offer_from_dict
-    visible = {offer_from_dict(item).source_ref for row in rows if row["target"] == target
+    owner = prepared.get("owner") or require_user()
+    rows = visible_targets(owner)
+    from traderesearch_data.execution import offer_from_dict, requirement_from_dict, deployment_from_dict, compatible_bar_offers
+    if selection.get("mode") == "auto":
+        if selection.get("manager_id") != node_service().manager_id:
+            raise PermissionError("automatic matching is scoped to the selected Manager")
+        matches = []
+        for row in sorted(rows, key=lambda item: item["route_id"]):
+            if not row["online"] or prepared["analyses"][0] not in row["target"]["test_types"]:
+                continue
+            offers = tuple(offer_from_dict(item) for item in row["offers"])
+            sources = {}
+            for raw in requirements:
+                requirement = requirement_from_dict(raw)
+                compatible = compatible_bar_offers(requirement, deployment_from_dict(row["target"]), offers)
+                if not compatible:
+                    break
+                sources[requirement.product_ref] = min(compatible, key=lambda item: item.source_ref).source_ref
+            else:
+                try:
+                    binding = node_service().bind(target=row["target"], requirements=requirements,
+                        selections=sources, test_type=prepared["analyses"][0])
+                except ValueError:
+                    continue
+                matches.append(binding)
+        if not matches:
+            raise ValueError("no authorized online node satisfies all configured Bar requirements")
+        selected = matches[0]
+        selection = {"target": selected["target"],
+                     "sources": {item["requirement"]["product_ref"]: item["source_ref"] for item in selected["inputs"]}}
+    target = selection["target"]
+    visible = {offer_from_dict(item).source_ref for row in rows if canonical_hash(row["target"]) == canonical_hash(target)
                for item in row["offers"]}
     if not set(selection["sources"].values()).issubset(visible):
         raise PermissionError("source installation is not visible to this user")
@@ -46,7 +75,7 @@ def bind_prepared_execution(prepared, selection):
         raise ValueError("Bar requirements must cover exactly the frozen product selection")
     expected = selection.get("expected_installations")
     if expected is not None:
-        actual = {item["source_ref"]: item["installation"] for row in rows if row["target"] == target for item in row["offers"]}
+        actual = {item["source_ref"]: item["installation"] for row in rows if canonical_hash(row["target"]) == canonical_hash(target) for item in row["offers"]}
         if set(expected) != set(selection["sources"].values()) or any(actual.get(ref) != install for ref, install in expected.items()):
             raise ValueError("selected installation changed; refresh execution targets")
     return node_service().bind(target=target, requirements=requirements,

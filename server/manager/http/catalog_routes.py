@@ -1162,6 +1162,9 @@ class CatalogRoutesMixin:
                     method, parsed.path, owner=principal,
                     payload=payload,
                 )
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+            return True
         except TestAuthoringError as exc:
             json_response(self, {
                 "success": False, "error": str(exc), **exc.details,

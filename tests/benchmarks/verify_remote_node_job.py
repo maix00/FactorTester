@@ -18,12 +18,14 @@ import threading
 import time
 from types import SimpleNamespace
 import urllib.parse
+import urllib.error
 import urllib.request
 import uuid
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--automatic',action='store_true')
     parser.add_argument('--federated',action='store_true')
     parser.add_argument('--fixture-db',type=Path,required=True)
     parser.add_argument('--fixture-job',required=True)
@@ -168,6 +170,8 @@ def main():
         assert canonical_hash(directory['targets'][0]['target'])==canonical_hash(asdict(target))
         request={MANAGER_RUN_CONTEXT_KEY:context,'execution_selection':{'target':asdict(target),
             'sources':{x.product_ref:offers[i].source_ref for i,x in enumerate(requirements)}}}
+        if args.automatic:
+            request['execution_selection']={'mode':'auto','manager_id':manager}
         preview=federation.public_data(peer,kind='execution',operation='preview',principal='alice',payload={'request':request})
         if preview['status']!=200:raise AssertionError(preview)
         request['expected_execution_binding_ref']=preview['response']['execution_binding_ref']
@@ -205,6 +209,16 @@ def main():
                 time.sleep(.2)
             if current.status is not JobStatus.SUCCEEDED:
                 raise AssertionError(f'{current.status.value}: {current.error}')
+            if args.federated:
+                for suffix in ("", "/result", "/artifacts"):
+                    response=federation.public_data(peer,kind='execution',operation='job',principal='alice',
+                        payload={'job_id':job_id,'suffix':suffix})
+                    assert response['status']==200, response
+                try:
+                    federation.public_data(peer,kind='execution',operation='job',principal='bob',payload={'job_id':job_id})
+                except urllib.error.HTTPError as denied:
+                    assert denied.code==403
+                else:raise AssertionError('undelegated user accessed Job')
             result=current.result_summary
             assert result['factor_actors']==1 and result['python_factor_bar_callbacks']==0
             assert len(result['strategy_publications'])==len(families)
@@ -224,18 +238,20 @@ def main():
             receipt={'run_spec_hash':record.run_spec_hash,'fills_sha256':fill_digest,'fill_columns':list(fills[0]),'job_id' :job_id,'manager_id':manager,'node_id':node,'status':current.status.value,
                 'seconds':time.perf_counter()-started,'sampled_worker_peak_rss_bytes':max(rss),
                 'manager_job_db':str(repo.db_path),'node_has_manager_job_db':False,
-                'cross_manager_discovery_preview_submit':args.federated,'origin_manager':origin if args.federated else manager,'real_broker':True,'real_native_strategy':True,'authenticated_http':True,'authentication':'real Keycloak service account and introspection',
+                'automatic_matching':args.automatic,'cross_manager_job_reads':args.federated,'cross_manager_discovery_preview_submit':args.federated,'origin_manager':origin if args.federated else manager,'real_broker':True,'real_native_strategy':True,'authenticated_http':True,'authentication':'real Keycloak service account and introspection',
                 'orders':result['orders'],'factor_actors':result['factor_actors'],'strategies':len(families),
                 'attachments':list(report['attachments']),'data_start_ns':min(x.start_ns for x in requirements),
                 'data_end_ns':max(x.end_ns for x in requirements),
                 'scope':'isolated native catalog fixture with real prices; no production deployment or original-paper acceptance'}
             if args.compare_with:
                 prior=json.loads(args.compare_with.read_text())
-                assert prior['manager_id'] != manager and prior['node_id'] != node
+                if not args.automatic:
+                    assert prior['manager_id'] != manager and prior['node_id'] != node
                 assert prior['run_spec_hash'] == record.run_spec_hash
                 assert prior['fills_sha256'] == fill_digest
                 assert prior['orders'] == result['orders']
-                receipt['equivalent_other_node_verified']=True
+                receipt['comparison_verified']=True
+                receipt['equivalent_other_node_verified']=prior['manager_id'] != manager and prior['node_id'] != node
             (args.root/'receipt.json').write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt))
         finally:
             worker.terminate()

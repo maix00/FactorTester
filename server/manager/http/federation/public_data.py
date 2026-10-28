@@ -40,6 +40,7 @@ class FederationPublicDataRoutesMixin:
             if kind == "execution":
                 from server.identity.service_access import authenticate_service
                 identity = authenticate_service(self, required_scope="tr:federation:read")
+                self._execution_identity = identity
                 peers = self.state.federation_registry.servers(include_offline=True)
                 if not identity.manager_id or not any(item["server_id"] == identity.manager_id for item in peers):
                     raise PermissionError("unregistered federated Manager")
@@ -82,6 +83,13 @@ class FederationPublicDataRoutesMixin:
         if kind == "execution":
             if viewer is None:
                 raise PermissionError("execution nodes require an account identity")
+            if operation == "job":
+                suffix = str(payload.get("suffix") or "")
+                if suffix == "/cancel" and "tr:federation:submit" not in self._execution_identity.scopes:
+                    raise PermissionError("federated mutation scope is missing")
+                value = self.state.test_authoring.node_job_operation(
+                    job_id=str(payload.get("job_id") or ""), suffix=suffix, owner=viewer)
+                return {"response": value.payload, "status": value.status}
             if operation == "targets":
                 from server.modules.single_factor_test.execution_nodes import visible_targets
                 return {"targets": visible_targets(viewer), "manager_id": self.state.server_id}

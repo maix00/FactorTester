@@ -1443,6 +1443,7 @@ def preview_research_run():
     return jsonify({
         "success": True,
         "execution_binding_ref": canonical_hash(prepared["execution_binding"]) if prepared.get("execution_binding") else None,
+        "execution_binding": deepcopy(prepared.get("execution_binding")),
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
         "run_spec_version": run_spec["run_spec_version"],
         "task_name": prepared["task_name"],
