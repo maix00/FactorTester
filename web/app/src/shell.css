@@ -585,27 +585,41 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-scalar-values li { padding:6px 0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
 .tr-value-empty { color:var(--muted); font-size:13px; }
 
-/* Unauthenticated compliant-access overlay. */
-.tr-auth-loading { min-height: 100vh; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
-.tr-auth-overlay { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; overflow: auto; background: color-mix(in srgb, var(--bg) 82%, #0b1220); backdrop-filter: blur(6px); }
-.tr-auth-card { width: min(760px, 100%); border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 24px 80px rgb(15 23 42 / 24%); padding: 28px; display: grid; gap: 18px; }
-.tr-auth-card header { display: grid; gap: 6px; }
-.tr-auth-card header > span { color: var(--accent); font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
-.tr-auth-card h1 { margin: 0; font-size: 24px; line-height: 1.25; }
-.tr-auth-card header p { margin: 0; color: var(--muted); font-size: 13px; }
-.tr-auth-compliance { max-height: 210px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--accent) 4%, var(--panel)); padding: 14px 16px; font-size: 12px; line-height: 1.75; color: var(--muted); }
-.tr-auth-compliance p { margin: 0 0 8px; }
-.tr-auth-compliance a, .tr-auth-register, .tr-auth-redirect { color: var(--accent); font-size: 12px; font-weight: 600; }
-.tr-auth-form { display: grid; gap: 12px; }
-.tr-auth-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
-.tr-auth-form input { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); padding: 10px 12px; font-size: 13px; }
-.tr-auth-form input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.tr-auth-submit { border: 0; border-radius: 8px; background: var(--accent); color: #fff; padding: 11px 16px; font-size: 13px; font-weight: 650; cursor: pointer; }
-.tr-auth-submit:disabled { opacity: .55; cursor: not-allowed; }
-.tr-auth-error { margin: 0; color: #b42318; font-size: 12px; }
-.tr-auth-card footer { border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); font-size: 11px; }
-@media (max-width: 640px) { .tr-auth-overlay { padding: 12px; align-items: start; } .tr-auth-card { padding: 20px; margin-top: 8vh; } }
-.tr-settings-action { border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); padding: 6px 10px; font-size: 12px; cursor: pointer; }
-.tr-settings-action:hover { border-color: var(--accent); color: var(--accent); }
-.tr-auth-compliance-link { justify-self: start; margin-top: -8px; }
-.tr-auth-guidance { margin: -6px 0 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); color: var(--muted); font-size: 12px; line-height: 1.6; }
+/* Account surfaces share the application typography and restrained blue/white palette. */
+.tr-auth-loading { min-height:100dvh; display:grid; place-items:center; color:var(--muted); font-size:14px; }
+.tr-auth-overlay, .tr-auth-overlay * { box-sizing:border-box; }
+.tr-auth-overlay { position:fixed; inset:0; z-index:2000; display:grid; place-items:center; padding:32px 24px; overflow:auto; background:rgba(32,43,60,.18); backdrop-filter:blur(2px); }
+.tr-auth-card { width:min(480px,100%); padding:32px; display:grid; gap:24px; border:1px solid #e3e8ef; border-radius:8px; background:#fff; color:#202b3c; box-shadow:0 16px 56px rgba(32,43,60,.12); }
+.tr-auth-card header { position:relative; display:grid; gap:6px; }
+.tr-auth-card header .tr-brand { font-size:16px; font-weight:650; letter-spacing:-.3px; text-transform:none; }
+.tr-auth-card h1 { margin:24px 0 0; font-size:24px; line-height:30px; font-weight:650; letter-spacing:-.4px; }
+.tr-auth-card header p { margin:0; color:#697587; font-size:13px; line-height:20px; }
+.tr-auth-close { position:absolute; top:-4px; right:-4px; width:28px; height:28px; padding:0; display:grid; place-items:center; border:0; border-radius:4px; background:transparent; color:#697587; font-size:16px; cursor:pointer; }
+.tr-auth-close:hover { background:#f3f6fb; color:#202b3c; }
+.tr-auth-switch { display:flex; overflow:hidden; border:1px solid #dce2ea; border-radius:6px; }
+.tr-auth-switch button { flex:1; min-width:0; height:36px; padding:0 12px; border:0; border-radius:0; background:#fff; color:#697587; font:inherit; font-size:13px; font-weight:550; cursor:pointer; }
+.tr-auth-switch button+button { border-left:1px solid #dce2ea; }
+.tr-auth-switch button[aria-pressed=true] { background:#eaf3ff; color:#1677ff; box-shadow:inset 0 0 0 1px #a6cfff; }
+.tr-auth-form { display:grid; gap:18px; }
+.tr-auth-form label { display:grid; gap:8px; font-size:14px; font-weight:500; color:#334155; }
+.tr-auth-form input { width:100%; min-width:0; height:40px; padding:9px 12px; border:1px solid #dce2ea; border-radius:6px; background:#fff; color:#202b3c; font:inherit; font-weight:400; line-height:20px; }
+.tr-auth-form input:focus-visible { border-color:#1677ff; outline:3px solid rgba(22,119,255,.12); outline-offset:0; }
+.tr-auth-submit { height:40px; padding:0 16px; border:0; border-radius:6px; background:#1677ff; color:#fff; font:inherit; font-size:14px; font-weight:600; cursor:pointer; }
+.tr-auth-submit:hover { background:#0969e8; }
+.tr-auth-submit:disabled { opacity:.5; cursor:not-allowed; }
+.tr-auth-error { margin:0; color:#b42318; font-size:13px; line-height:20px; }
+.tr-auth-card footer { display:grid; gap:8px; padding-top:18px; border-top:1px solid #e3e8ef; color:#697587; font-size:13px; line-height:20px; }
+.tr-auth-access summary { color:#1677ff; cursor:pointer; font-weight:500; }
+.tr-auth-access p { margin:10px 0; font-size:12px; line-height:1.65; overflow-wrap:anywhere; }
+.tr-auth-access a,.tr-auth-redirect { color:#1677ff; font-size:13px; }
+.tr-settings-action { border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--text); padding:6px 10px; cursor:pointer; }
+.tr-settings-action:hover { border-color:var(--accent); color:var(--accent); }
+@media(max-width:640px) { .tr-auth-overlay { padding:24px; align-items:safe center; } .tr-auth-card { padding:24px; gap:22px; margin:0; } .tr-auth-card h1 { margin-top:20px; } }
+
+.tr-account-menu { display:flex; align-items:center; gap:10px; width:100%; min-width:0; padding:10px 14px; border:0; background:transparent; color:var(--text,#202b3c); cursor:pointer; font:inherit; text-align:left; }
+.tr-account-menu>span:nth-child(2) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.tr-account-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.tr-mobile-workspace-header>.tr-account-menu { width:auto; max-width:65%; }
+
+.tr-authenticated-app { height:100%; }
+

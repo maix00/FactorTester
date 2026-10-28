@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { AccountActions } from "./account-actions.tsx";
 import { ResultView } from "./result-view.tsx";
 import { Modal } from "antd";
 import { useTranslation } from "react-i18next";
@@ -30,7 +31,7 @@ export function SettingsOverlay({
   onResetLayout: () => void;
 }): React.ReactElement {
   const { t } = useTranslation();
-  const { session, logout } = useAuth();
+  const { session } = useAuth();
   const [section, setSection] = useState<string>("account");
   const [serverInfo, setServerInfo] = useState<Record<string, unknown> | null>(null);
   const [sectionData, setSectionData] = useState<Record<string, unknown> | null>(null);
@@ -177,9 +178,7 @@ export function SettingsOverlay({
               </div>
               <div className="tr-settings-row">
                 <div><b>{t("settingsPanel.accountAction")}</b></div>
-                <button type="button" className="tr-settings-action" onClick={() => { void logout(); onClose(); }}>
-                  {t("settingsPanel.signOut")}
-                </button>
+                <AccountActions/>
               </div>
             </div>
           ) : (

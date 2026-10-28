@@ -1,6 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Brand } from "./components/brand.tsx";
+import { CloseOutlined } from "@ant-design/icons";
+import { loadScript } from "./assets.ts";
+import { request } from "./configuration/api.ts";
+import { notify } from "./notifications/core.ts";
 
 export type AuthSession = {
   username?: string;
@@ -21,9 +25,11 @@ type PublicEntry = {
 type AuthContextValue = {
   session: AuthSession;
   logout: () => Promise<void>;
+  openAuth: (mode:"login"|"register")=>void;
+  registrationEnabled:boolean;
 };
 
-const AuthContext = createContext<AuthContextValue>({ session: null, logout: async () => undefined });
+const AuthContext = createContext<AuthContextValue>({ session: null, logout: async () => undefined, openAuth:()=>undefined, registrationEnabled:false });
 
 export function useAuth(): AuthContextValue {
   return useContext(AuthContext);
@@ -45,6 +51,8 @@ function currentPath(): string {
 }
 
 export function AuthGate({ children }: { children: React.ReactNode }): React.ReactElement {
+  const {t}=useTranslation();
+  const [dialogMode,setDialogMode]=useState<"login"|"register"|null>(null);
   const [session, setSession] = useState<AuthSession>(null);
   const [entry, setEntry] = useState<PublicEntry | null>(null);
   const [checking, setChecking] = useState(true);
@@ -71,28 +79,47 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
   }, []);
 
   const logout = useCallback(async () => {
-    try { await fetch("/auth/logout", { method: "POST", credentials: "same-origin" }); } catch { /* session is cleared locally regardless */ }
-    notifyNative("logout");
-    setSession(null);
-  }, []);
-
-  const value = useMemo(() => ({ session, logout }), [session, logout]);
-  if (checking) return <div className="tr-auth-loading" role="status">…</div>;
-  if (!session) {
-    return <AuthOverlay entry={entry} unavailable={unavailable} onAuthenticated={(next) => {
-      notifyNative("session-updated");
-      setSession(next);
-    }} />;
-  }
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+    try {
+      const response=await fetch("/auth/logout", {method:"POST",credentials:"same-origin"});
+      if(!response.ok && response.status!==401)throw new Error(t("auth.logoutFailed"));
+      notifyNative("logout");setSession(null);setDialogMode(null);
+    } catch {notify({code:"auth.logout.failed",type:"error",message:t("auth.logoutFailed")});}
+  },[t]);
+  const value = useMemo(() => ({session,logout,openAuth:setDialogMode,registrationEnabled:Boolean(entry?.public_registration_enabled)}), [session,logout,entry]);
+  const authenticated=(next:AuthSession):void=>{notifyNative("session-updated");setSession(next);setDialogMode(null);};
+  if(checking)return <div className="tr-auth-loading" role="status">{t("loading")}</div>;
+  return <AuthContext.Provider value={value}>
+    {session ? <div key={session.username||"session"} className="tr-authenticated-app" inert={Boolean(dialogMode)} aria-hidden={dialogMode?true:undefined}>{children}</div>:null}
+    {!session || dialogMode ? <AuthOverlay key={dialogMode||"login"} mode={dialogMode||"login"} entry={entry} unavailable={unavailable}
+      onClose={session?()=>setDialogMode(null):undefined} onAuthenticated={authenticated}/>:null}
+  </AuthContext.Provider>;
 }
 
-function AuthOverlay({ entry, unavailable, onAuthenticated }: {
+function AuthOverlay({ entry, unavailable, onAuthenticated, mode:initialMode, onClose }: {
+  mode:"login"|"register"; onClose?:()=>void;
   entry: PublicEntry | null;
   unavailable: boolean;
   onAuthenticated: (session: AuthSession) => void;
 }): React.ReactElement {
   const { t } = useTranslation();
+  const [mode,setMode]=useState(initialMode);
+  const card=useRef<HTMLElement>(null);
+  useEffect(()=>{
+    const prior=document.activeElement as HTMLElement|null;
+    const escape=(event:KeyboardEvent):void=>{
+      if(event.key==='Escape'&&onClose){event.preventDefault();onClose();}
+      if(event.key==='Tab'){
+        const controls=[...(card.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),a[href],summary')||[])].filter(node=>node.getClientRects().length && (!node.closest("details:not([open])") || node.tagName==="SUMMARY"));
+        const first=controls[0],last=controls.at(-1);
+        if(event.shiftKey && document.activeElement===first){event.preventDefault();last?.focus();}
+        else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first?.focus();}
+      }
+    };
+    document.addEventListener('keydown',escape);
+    return ()=>{document.removeEventListener('keydown',escape);queueMicrotask(()=>{if(prior?.isConnected)prior.focus();});};
+  },[onClose]);
+  const [organization,setOrganization]=useState("");
+  const [confirmation,setConfirmation]=useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -106,14 +133,16 @@ function AuthOverlay({ entry, unavailable, onAuthenticated }: {
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
     setError("");
+    if(mode==="register" && password!==confirmation){setError(t("auth.passwordMismatch"));return;}
+    if(mode==="register" && !entry?.public_registration_enabled)return;
     setRedirect("");
     setSubmitting(true);
     try {
-      const response = await fetch("/auth/login", {
+      const response = await fetch(mode==="register"?"/auth/register":"/auth/login", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, ...(mode==="register"?{organization_id:organization}:{}) }),
       });
       const value = await readJSON(response);
       if (!response.ok || !value.success) {
@@ -122,7 +151,16 @@ function AuthOverlay({ entry, unavailable, onAuthenticated }: {
         if (value.redirect) setRedirect(String(value.redirect));
         return;
       }
-      onAuthenticated(value as AuthSession);
+      const {username:principal,alias,role,capabilities,visitor_login}=value;
+      if(visitor_login){
+        try {
+          await loadScript("/research-static/app/visitor-device.js");
+          const devices=(window as Window & {FTVisitorDevice?:{ensureForSession:(context:{api:typeof request},session:AuthSession)=>Promise<unknown>}}).FTVisitorDevice;
+          if(!devices)throw new Error("Device enrollment unavailable");
+          await devices.ensureForSession({api:request},{username:principal,visitor_login});
+        } catch {notify({code:"auth.device.failed",type:"error",message:t("auth.deviceEnrollmentFailed")});}
+      }
+      onAuthenticated({username:principal,alias,role,capabilities,visitor_login});
     } catch {
       setError(t("auth.networkFailed"));
     } finally {
@@ -132,39 +170,50 @@ function AuthOverlay({ entry, unavailable, onAuthenticated }: {
 
   return (
     <div className="tr-auth-overlay" role="dialog" aria-modal="true" aria-labelledby="tr-auth-title">
-      <section className="tr-auth-card">
+      <section ref={card} className="tr-auth-card">
         <header>
+          {onClose?<button type="button" className="tr-auth-close" onClick={onClose} aria-label={t("close")}><CloseOutlined/></button>:null}
           <Brand />
-          <span>{t("auth.eyebrow")}</span>
-          <h1 id="tr-auth-title">{publicGate ? t("auth.publicTitle") : t("auth.title")}</h1>
-          <p>{publicGate ? t("auth.publicHint") : t("auth.hint")}</p>
+
+          <h1 id="tr-auth-title">{mode==="register"?t("auth.register"):t("auth.title")}</h1>
+          <p>{mode==="register"?t("auth.registerHint"):t("auth.hint")}</p>
         </header>
-        <div className="tr-auth-compliance" tabIndex={0} aria-label={t("auth.compliance")}>
-          <p>{compliance}</p>
-          {entry?.registration_notice ? <p>{entry.registration_notice}</p> : null}
-        </div>
-        <a className="tr-auth-compliance-link" href={fullCompliance}>{t("auth.openCompliance")}</a>
-        {publicGate ? <p className="tr-auth-guidance">{t("auth.publicVisitorHint")}</p> : null}
-        <form className="tr-auth-form" onSubmit={submit}>
+        <nav className="tr-auth-switch" aria-label={t("auth.account")}>
+          <button type="button" aria-pressed={mode==="login"} onClick={()=>{setMode("login");setError("");}}>{t("auth.signIn")}</button>
+          <button type="button" aria-pressed={mode==="register"} onClick={()=>{setMode("register");setError("");}}>{t("auth.register")}</button>
+        </nav>
+        {mode==="register"&&!entry?.public_registration_enabled?<p role="status">{entry?.registration_notice||t("auth.registrationClosed")}</p>:<form className="tr-auth-form" onSubmit={submit}>
           <label>
             <span>{t("auth.username")}</span>
             <input value={username} onChange={(event) => setUsername(event.target.value)}
-              autoComplete="username" required disabled={submitting} />
+              autoComplete="username" autoFocus required disabled={submitting} />
           </label>
           <label>
             <span>{t("auth.password")}</span>
             <input type="password" value={password} onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password" required disabled={submitting} />
+              autoComplete={mode==="register"?"new-password":"current-password"} required disabled={submitting} />
           </label>
+          {mode==="register"?<>
+            <label><span>{t("auth.confirmPassword")}</span><input type="password" autoComplete="new-password" required value={confirmation} onChange={event=>setConfirmation(event.target.value)} disabled={submitting}/></label>
+            <label><span>{t("auth.organization")}</span><input value={organization} onChange={event=>setOrganization(event.target.value)} disabled={submitting}/></label>
+          </>:null}
           <button type="submit" className="tr-auth-submit" disabled={submitting || !username || !password}>
-            {submitting ? t("auth.signingIn") : t("auth.signIn")}
+            {submitting ? t(mode==="register"?"auth.registering":"auth.signingIn") : t(mode==="register"?"auth.register":"auth.signIn")}
           </button>
           {error ? <p className="tr-auth-error" role="alert">{error}</p> : null}
           {redirect ? <a className="tr-auth-redirect" href={redirect}>{t("auth.guidedLogin")}</a> : null}
           {unavailable ? <p className="tr-auth-error" role="alert">{t("auth.unavailable")}</p> : null}
-          {entry?.public_registration_enabled ? <a className="tr-auth-register" href="/login">{t("auth.register")}</a> : null}
-        </form>
-        <footer>{t("auth.complianceFooter")}</footer>
+        </form>}
+        <footer>
+          <span>{t("auth.managedAccess")}</span>
+          <details className="tr-auth-access"><summary>{t("auth.accessInformation")}</summary>
+            <p>{compliance}</p>
+            {entry?.registration_notice?<p>{entry.registration_notice}</p>:null}
+            {publicGate?<p>{t("auth.publicVisitorHint")}</p>:null}
+            <a href={fullCompliance}>{t("auth.openCompliance")}</a>
+            <p>{t("auth.complianceFooter")}</p>
+          </details>
+        </footer>
       </section>
     </div>
   );

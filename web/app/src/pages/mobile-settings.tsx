@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import i18n, { persistLanguage } from "../i18n.ts";
+import { AccountActions } from "../components/account-actions.tsx";
 import { PageIcon } from "../icon.tsx";
 
 const SECTIONS = ["account", "workspace", "language", "server", "devices", "updates"] as const;
@@ -70,6 +71,7 @@ export function MobileSettingDetail({ section, onBack }: { section: MobileSettin
           <div className="tr-mobile-settings-card tr-mobile-settings-stack">
             <div><b>{t("settingsPanel.accountSession")}</b><small>{session?.username || t("settingsPanel.notSignedIn")}</small></div>
             <div><b>{t("settingsPanel.role")}</b><small>{session?.role || "—"}</small></div>
+            <AccountActions/>
           </div>
         ) : (
           <div className="tr-mobile-settings-card"><p>{t("settingsPanel.migrating")}</p></div>
