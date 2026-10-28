@@ -22,7 +22,7 @@ CapacityKind = Literal[
 DailySettlementPolicy = Literal["eligible_products", "disabled"]
 PositionCostBasis = Literal["WEIGHTED_AVERAGE", "FIFO", "LIFO", "HIFO"]
 _FROZEN_EXECUTION_KEYS = frozenset({
-    "data_source_ref", "source_version", "product_scope_refs", "start_utc", "end_utc",
+    "factor_warmup", "data_requirement_ref", "data_source_ref", "source_version", "product_scope_refs", "start_utc", "end_utc",
     "bar_end_timestamps", "execution_price_basis", "execution_timing",
     "fee_mode", "fee_per_contract", "fee_currency",
     "fee_schedule_ref", "venues", "strategy_venue_bindings", "account_model",
@@ -671,8 +671,9 @@ class FrozenExecutionPlan:
     interpreted as a new fee model or as a next-open execution guarantee.
     """
 
-    data_source_ref: str
+    data_source_ref: str | None
     source_version: str | None
+    data_requirement_ref: str | None
     product_scope_refs: tuple[str, ...]
     start_utc: str
     end_utc: str
@@ -686,6 +687,7 @@ class FrozenExecutionPlan:
     instrument_execution_policy: FrozenInstrumentExecutionPolicy
     venues: tuple[dict[str, Any], ...]
     strategy_venue_bindings: tuple[dict[str, Any], ...]
+    factor_warmup: Any = None
 
     def local_nautilus_features(self) -> dict[str, str]:
         """Explicit status of the vendored Nautilus additions in this plan."""
@@ -711,7 +713,8 @@ class FrozenExecutionPlan:
 
     def manifest(self) -> dict[str, object]:
         return {
-            "data_source_ref": self.data_source_ref,
+            "factor_warmup": self.factor_warmup.manifest() if self.factor_warmup else {"mode":"auto","data_start_utc":None,"diagnostic_only":False},
+            **({"data_source_ref": self.data_source_ref} if self.data_source_ref else {"data_requirement_ref": self.data_requirement_ref}),
             "source_version": self.source_version,
             "source_versioned": self.source_version is not None,
             "product_scope_refs": list(self.product_scope_refs),
@@ -771,7 +774,12 @@ def compile_frozen_execution_plan(
     for key, reason in unsupported_features.items():
         if settings.get(key) not in (None, "", (), [], {}):
             raise UnsupportedExecutionConfig(key, reason)
-    source = _nonempty_text(settings.get("data_source_ref"), "data_source_ref")
+    requirement_ref = settings.get("data_requirement_ref")
+    source = None if requirement_ref else _nonempty_text(settings.get("data_source_ref"), "data_source_ref")
+    if requirement_ref:
+        requirement_ref = _nonempty_text(requirement_ref, "data_requirement_ref")
+        if settings.get("data_source_ref"):
+            raise UnsupportedExecutionConfig("data_source_ref", "portable requirement cannot also pin a provider")
     version_value = settings.get("source_version")
     version = None if version_value is None else _nonempty_text(version_value, "source_version")
     raw_scopes = settings.get("product_scope_refs")
@@ -875,8 +883,12 @@ def compile_frozen_execution_plan(
     strategy_venue_bindings = _parse_strategy_venue_bindings(
         settings.get("strategy_venue_bindings"), venues, scopes,
     )
+    from .warmup import freeze_warmup_settings
+    try:factor_warmup=freeze_warmup_settings(settings.get("factor_warmup"))
+    except ValueError as error:raise UnsupportedExecutionConfig("factor_warmup",str(error)) from error
     return FrozenExecutionPlan(
         data_source_ref=source,
+        data_requirement_ref=requirement_ref,
         source_version=version,
         product_scope_refs=scopes,
         start_utc=start,
@@ -891,6 +903,7 @@ def compile_frozen_execution_plan(
         instrument_execution_policy=instrument_policy,
         venues=venues,
         strategy_venue_bindings=strategy_venue_bindings,
+        factor_warmup=factor_warmup,
     )
 
 

@@ -363,7 +363,9 @@ def native_configuration_schema() -> dict[str, object]:
             ),
         },
     ]
+    from .warmup import warmup_configuration_schema
     return {
+        "run_fields": warmup_configuration_schema(),
         "native_version": _NATIVE_VERSION,
         "object": "SimulatedVenueConfig",
         "python_entrypoint": "nautilus_trader.backtest.BacktestEngine.add_venue",

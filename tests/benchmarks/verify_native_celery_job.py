@@ -36,6 +36,9 @@ def main():
     parser.add_argument('--broker',type=localhost,required=True)
     parser.add_argument('--couch-url',type=localhost,required=True)
     parser.add_argument('--credentials-file',type=Path,required=True)
+    parser.add_argument('--expect-warmup-failure',action='store_true',help='verify insufficient history fails before producing reports')
+    parser.add_argument('--trading-start',help='formal start; earlier catalog Bars are warmup only')
+    parser.add_argument('--diagnostic-only',action='store_true',help='explicitly disable warmup; no formal performance')
     parser.add_argument('--frozen-factors-file',type=Path,help='use actual frozen nested family records instead of the probe')
     parser.add_argument('--complex-match',action='store_true',help='exercise nested SignalAlign/Where and partitioned Rust search')
     parser.add_argument('--family-mode',choices=['mixed','group','threshold'],default='mixed')
@@ -87,7 +90,8 @@ class VersionProbe(FactorFamily):
     import pandas as pd
     ids=['Group-1','Group-2'] if args.family_mode=='group' else ['Threshold-1'] if args.family_mode=='threshold' else ['Group-1','Group-2','Threshold-1']
     settings=_minimal_frozen(instrument_execution_policy=freeze_instrument_execution_policy(preset='basic').manifest(),
-        start_utc=pd.Timestamp(min(x['first_available_ns'] for x in receipts),tz='UTC').isoformat(),
+        start_utc=args.trading_start or pd.Timestamp(min(x['first_available_ns'] for x in receipts),tz='UTC').isoformat(),
+        factor_warmup={'mode':'disabled','diagnostic_only':True} if args.diagnostic_only else {'mode':'auto'},
         end_utc=pd.Timestamp(max(x['last_available_ns'] for x in receipts),tz='UTC').isoformat(),
         venues=[dict(name='CFFEX',account_type='MARGIN',oms_type='HEDGING',starting_balances=['1000000 CNY'],base_currency='CNY')],
         strategy_venue_bindings=[dict(strategy_id=s,venue_ids=['CFFEX'],product_scope_refs=['product-group:treasuries']) for s in ids])
@@ -132,6 +136,13 @@ class VersionProbe(FactorFamily):
                 if current.status in {JobStatus.SUCCEEDED,JobStatus.FAILED,JobStatus.CANCELLED}:break
                 if worker.poll() is not None:raise RuntimeError('worker exited; inspect isolated worker.log')
                 time.sleep(.2)
+            if args.expect_warmup_failure:
+                assert current.status is JobStatus.FAILED and 'warmup' in str(current.error)
+                assert not (current.result_summary or {}).get('report_ref')
+                receipt={'status':current.status.value,'expected_failure':'insufficient_warmup',
+                    'job_id':job_id,'error':current.error,'seconds':time.perf_counter()-started,
+                    'signal_ref':frozen['ref'],'no_formal_report':True}
+                (args.root/'receipt.json').write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt));return
             if current.status is not JobStatus.SUCCEEDED:raise AssertionError(f'Job {current.status}: {current.error}')
             result=current.result_summary
             assert result['factor_actors']==1 and result['python_factor_bar_callbacks']==0
@@ -152,7 +163,7 @@ class VersionProbe(FactorFamily):
                 store=CouchDBObjectStore(args.couch_url,database,username=credentials['username'],password=credentials['password'])
                 data=store.get_attachment(ref,stored)
                 assert hashlib.sha256(data).hexdigest()==stored.split('.')[0]
-                if args.complex_match and name=='positions.csv':
+                if (args.complex_match or args.frozen_factors_file) and name=='positions.csv':
                     rows=list(csv.DictReader(io.StringIO(data.decode())))
                     closed_positions=sum(bool(row['ts_closed']) for row in rows)
                     assert closed_positions>0,'target changes must close native HEDGING positions'
@@ -163,7 +174,11 @@ class VersionProbe(FactorFamily):
                     first_signal=-(-first//1800000000000)*1800000000000
                     assert all(pd.Timestamp(row['ts_event']).value>first_signal for row in fills)
 
-            receipt={'signal_ref':frozen['ref'],'signal_alias':frozen['alias'],'complex_match':args.complex_match,'family_mode':args.family_mode,'job_id':job_id,'task_id':task.id,'status':current.status.value,'seconds':time.perf_counter()-started,
+            if result.get('warmup') and result['warmup']['performance_eligible']:
+                store=CouchDBObjectStore(args.couch_url,database,username=credentials['username'],password=credentials['password'])
+                fills=list(csv.DictReader(io.StringIO(store.get_attachment(ref,report['attachments']['fills.csv']).decode())))
+                assert all(pd.Timestamp(row['ts_event']).value>=result['warmup']['trading_start_ns'] for row in fills)
+            receipt={'data_start_utc':pd.Timestamp(min(x['first_available_ns'] for x in receipts),tz='UTC').isoformat(),'data_end_utc':pd.Timestamp(max(x['last_available_ns'] for x in receipts),tz='UTC').isoformat(),'signal_ref':frozen['ref'],'signal_alias':frozen['alias'],'complex_match':args.complex_match,'family_mode':args.family_mode,'job_id':job_id,'task_id':task.id,'status':current.status.value,'seconds':time.perf_counter()-started,
                 'sampled_worker_rss_max_bytes':max(sampled_rss,default=0),'worker_pid':worker.pid,'terminal_worker_pid':current.worker_pid,'result':result,
                 'closed_positions':closed_positions,'couchdb_database':database,'verified_attachments':sorted(report['attachments']),
                 'limits':'local isolated execution of frozen plan; authoring/planning HTTP and production deployment not covered'}

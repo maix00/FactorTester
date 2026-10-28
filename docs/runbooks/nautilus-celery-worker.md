@@ -90,3 +90,23 @@ Job DB/reports/receipt, and verifies the terminal Job plus report attachment
 hashes. RabbitMQ/CouchDB lifetime remains the caller's responsibility. It uses
 normal broker delivery and the real default executor, not eager Celery or mocks.
 It validates frozen-plan execution, not HTTP authoring/planning or exchange rules.
+
+
+### Partitioned-search acceptance
+
+Add `--complex-match` to the isolated worker command to exercise the compatibility
+DSL Where predicate, a causal inner 3-minute SignalAlign, `scope_bars(120)`, an
+independent `lookback=60`, and a 30-minute family signal. Run mixed/group/threshold
+as separate Jobs with fresh output roots. The acceptance verifies one Actor/five
+CSE nodes, identical output slots across consumers, zero Python factor callbacks,
+post-signal fills, native closed positions (no offsetting HEDGING accumulation),
+and all CouchDB attachment hashes. It does not certify official instrument rules
+or original-paper economics. Previously successful transport-only receipts do
+not establish correct HEDGING inventory; use the strengthened acceptance.
+
+Long stress uses `bench_shared_strategy_long_replay --complex-match`. Stage in a
+separate process; use the same base price cycle when comparing lengths. A 2,000
+Bar cycle and a 10,000 Bar cycle can generate very different numbers of orders.
+The new 10,000-cycle baseline exposed missing native position routing; compare
+unchanged inputs and matching final orders/positions, not only elapsed seconds.
+See [measurements and limits](../audits/alpha-rust-entrypoints-2026-10-27.md).

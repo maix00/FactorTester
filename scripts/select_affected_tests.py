@@ -782,5 +782,12 @@ EXACT_PATH_TESTS["tests/benchmarks/bench_complex_match.py"] = ("tests/factors/te
 
 EXACT_PATH_TESTS["tests/benchmarks/freeze_paper_duration.py"] = ("tests/factors/test_alpha_intermediate_queries.py", "tests/server/test_factor_param_resolver.py", "tests/server/test_nautilus_strategy_runspec.py")
 
+FACTOR_WARMUP_TESTS = ("tests/server/test_nautilus_factor_warmup.py", "tests/server/test_nautilus_bridge_config.py", "tests/server/test_nautilus_strategy_family_replay.py", "tests/server/test_nautilus_strategy_runspec.py", "vendor/py-alpha-lib/py-binding/python/tests/test_factor_warmup.py")
+EXACT_PATH_TESTS["server/services/nautilus_bridge/warmup.py"] = FACTOR_WARMUP_TESTS
+EXACT_PATH_TESTS["server/services/nautilus_bridge/strategy_backtest.py"] = (*SHARED_STRATEGY_TESTS, *FACTOR_WARMUP_TESTS)
+EXACT_PATH_TESTS["vendor/py-alpha-lib"] = (*ALPHA_RUNTIME_TESTS, *FACTOR_WARMUP_TESTS)
+
+EXACT_PATH_TESTS["tests/benchmarks/verify_paper_factor_values.py"] = ("tests/server/test_factor_session_rolling.py", "tests/factors/test_complex_match_rust.py", "tests/factors/test_alpha_intermediate_queries.py", "vendor/py-alpha-lib/py-binding/python/tests/test_factor_warmup.py")
+
 if __name__ == "__main__":
     raise SystemExit(main())

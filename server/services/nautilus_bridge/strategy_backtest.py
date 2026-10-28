@@ -136,6 +136,13 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
         consumer['signal_output']=strategy_slots[strategy['strategy_id']]['signal']
     opened={product:_load_input(item) for product,item in inputs.items()}
     preflight_catalogs(opened.values(),max_input_bars=max_bars*len(opened))
+    warmup=None
+    if execution_plan is not None:
+        from .warmup import freeze_warmup_settings,resolve_run_warmup
+        warmup=resolve_run_warmup(spec,{str(p):row[2] for p,row in opened.items()},
+            policy=execution_plan.factor_warmup or freeze_warmup_settings(),
+            trading_start_utc=execution_plan.start_utc,end_utc=execution_plan.end_utc)
+        for consumer in consumers:consumer['trading_start_ns']=warmup['trading_start_ns']
     instruments=[row[3] for row in opened.values()]
     by_strategy={identity:[opened[p][3] for p in scope] for identity,scope in scopes.items()}
     if execution_plan is not None:
@@ -158,9 +165,9 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
         except Exception:
             runtime.raise_if_failed();raise
         runtime.ensure_success()
-        reports=export_backtest_reports(engine,Path(output_dir),venue=venue)
+        reports=export_backtest_reports(engine,Path(output_dir),venue=venue,performance_window=warmup)
         latest={identity:{role:runtime.latest_output(slot) for role,slot in outputs.items()} for identity,outputs in strategy_slots.items()} if inspect_outputs else {}
-        return dict(latest_outputs=latest,engine='nautilus_trader',products=sorted(map(str,products)),**replay,slices=runtime.slice_count,
+        return dict(warmup=warmup,latest_outputs=latest,engine='nautilus_trader',products=sorted(map(str,products)),**replay,slices=runtime.slice_count,
             factor_plan_nodes=runtime.node_count,factor_actors=1,strategy_publications=runtime.consumer_counts,
             python_factor_bar_callbacks=0,rank_passes=runtime.rank_passes,
             strategy_output_slots=strategy_slots,

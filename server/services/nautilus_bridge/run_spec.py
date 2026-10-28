@@ -28,6 +28,7 @@ from server.services.nautilus_bridge.version import NAUTILUS_VERSION
 def freeze_execution_contract(
     settings: dict[str, Any], *, product_scope_refs: list[str],
     native_venue_plan: dict[str, Any], instrument_execution_policy: dict[str, Any],
+    data_requirements: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Freeze the exact subset currently expressible by the Nautilus adapter.
 
@@ -63,42 +64,66 @@ def freeze_execution_contract(
         fields.append({"path": path, "status": "unsupported", "reason": reason})
         blockers.append({"path": path, "reason": reason})
 
+    from .warmup import freeze_warmup_settings,warmup_configuration_schema
+    try:
+        target['factor_warmup']=freeze_warmup_settings(settings.get('factor_warmup')).manifest()
+        for descriptor in warmup_configuration_schema():
+            fields.append({**descriptor,'value':target['factor_warmup'].get(descriptor['path'].split('.')[-1]),
+                'status':'mapped','review_section':'data'})
+    except ValueError as error:blocked('factor_warmup',str(error))
+
     target["venues"] = _resolve_venue_fee_models(
         target["venues"], settings, mapped=mapped, blocked=blocked,
     )
     settings["venues"] = target["venues"]
 
-    source_adapter, source_reason = _source_adapter(settings)
-    if source_adapter is None:
-        blocked("data_source", source_reason)
-    else:
-        target["data_source_ref"] = source_adapter.member_key
-        # Source data is not yet revisioned independently of the file store.
-        # Keep that limitation explicit instead of fabricating a content version.
+    source_adapter = None
+    if data_requirements:
+        from traderesearch_data.execution import requirement_from_dict
+        from server.jobs.assurance import canonical_hash
+        requirements = [requirement_from_dict(item) for item in data_requirements]
+        semantics = {(item.bar_spec, item.price_basis, item.time_semantics) for item in requirements}
+        if len(semantics) != 1:
+            raise ValueError("one run requires a common Bar/time/price contract")
+        target["data_requirement_ref"] = "data-requirements:" + canonical_hash(sorted(item.requirement_ref for item in requirements))
         target["source_version"] = None
         target["bar_end_timestamps"] = True
-        fields.extend((
-            {"path": "data_source", "status": "mapped"},
-            {"path": "freq_fixed", "status": "mapped"},
-        ))
-        contract["source_adapter"] = {
-            "adapter_id": source_adapter.adapter_id,
-            "frequency": source_adapter.frequency,
-            "feed_kind": "bar",
-            "bar_time_semantics": source_adapter.bar_time_semantics,
-            "clock_policy": source_adapter.clock_policy,
-            "supported_book_types": list(source_adapter.supported_book_types),
-        }
-        supported_book_types = set(source_adapter.supported_book_types)
-        for venue in target["venues"]:
-            native = venue.get("native_config") or {}
-            book_type = str(native.get("book_type") or "")
-            if book_type not in supported_book_types:
-                blocked(
-                    f"venues.{venue.get('name', '')}.native_config.book_type",
-                    f"数据源适配器 {source_adapter.adapter_id} 未声明支持 Nautilus BookType {book_type or '—'}；"
-                    f"可用类型：{', '.join(sorted(supported_book_types)) or '无'}",
-                )
+        contract["source_adapter"] = {"feed_kind": "bar", "bar_spec": requirements[0].bar_spec,
+            "price_basis": requirements[0].price_basis, "bar_time_semantics": requirements[0].time_semantics}
+        for key in ("data_source", "data_source_mode", "freq_fixed", "freq_mode"):
+            mapped(key, "portable Bar requirement; provider selected in ExecutionPlan")
+    else:
+        source_adapter, source_reason = _source_adapter(settings)
+        if source_adapter is None:
+            blocked("data_source", source_reason)
+        else:
+            target["data_source_ref"] = source_adapter.member_key
+            # Source data is not yet revisioned independently of the file store.
+            # Keep that limitation explicit instead of fabricating a content version.
+            target["source_version"] = None
+            target["bar_end_timestamps"] = True
+            fields.extend((
+                {"path": "data_source", "status": "mapped"},
+                {"path": "freq_fixed", "status": "mapped"},
+            ))
+            contract["source_adapter"] = {
+                "adapter_id": source_adapter.adapter_id,
+                "frequency": source_adapter.frequency,
+                "feed_kind": "bar",
+                "bar_time_semantics": source_adapter.bar_time_semantics,
+                "clock_policy": source_adapter.clock_policy,
+                "supported_book_types": list(source_adapter.supported_book_types),
+            }
+            supported_book_types = set(source_adapter.supported_book_types)
+            for venue in target["venues"]:
+                native = venue.get("native_config") or {}
+                book_type = str(native.get("book_type") or "")
+                if book_type not in supported_book_types:
+                    blocked(
+                        f"venues.{venue.get('name', '')}.native_config.book_type",
+                        f"数据源适配器 {source_adapter.adapter_id} 未声明支持 Nautilus BookType {book_type or '—'}；"
+                        f"可用类型：{', '.join(sorted(supported_book_types)) or '无'}",
+                    )
 
     window, window_reason = _utc_window(settings)
     if window is None:
@@ -179,7 +204,7 @@ def freeze_execution_contract(
 
     _complete_authoring_field_coverage(
         settings, fields, blockers,
-        source_adapter_available=source_adapter is not None,
+        source_adapter_available=source_adapter is not None or bool(data_requirements),
     )
 
     return contract
@@ -402,7 +427,7 @@ def _complete_authoring_field_coverage(
     contract_owned = {
         "product_scope_refs", "venues", "strategy_venue_bindings",
         "account_model", "execution_model", "shared_market_data",
-        "instrument_execution_policy", "start_utc", "end_utc",
+        "factor_warmup", "instrument_execution_policy", "start_utc", "end_utc",
         "data_source_ref", "source_version", "bar_end_timestamps",
     }
     for key, value in settings.items():
@@ -593,8 +618,16 @@ def _authoring_setting_disposition(
         if not unsupported:
             return "mapped", "DMTM 与持仓成本规则已折叠到逐品种政策"
         return "unsupported", "自定义产品字段必须先冻结为 Nautilus Instrument/历史规则事件"
+    if key=='warmup_mode':
+        native=(settings.get('factor_warmup') or {}).get('mode','auto')
+        if str(value)=='auto' and native=='auto':return 'mapped','由alpha推导预热，冻结factor_warmup与正式交易起点'
+        if str(value)=='none' and native=='disabled' and (settings.get('factor_warmup') or {}).get('diagnostic_only') is True:return 'mapped','仅诊断，禁止输出正式绩效'
+        return 'unsupported','请配置factor_warmup；固定历史须显式冻结数据起点，不能猜交易日日历'
+    if key=='warmup_window':
+        if str(settings.get('warmup_mode') or 'auto')!='fixed':return 'not_applicable','自动模式使用alpha需求；旧固定窗口未启用'
+        return 'unsupported','固定窗口改为factor_warmup的显式源数据起点'
     if key in {"factor_mode", "signal_freq", "basepoint", "daily_basepoint",
-               "warmup_mode", "warmup_window", "calendar_frequency",
+               "calendar_frequency",
                "end_session_skip", "end_session_gap"}:
         return "unsupported", "因子计算/交易日历字段尚未全部接入 Nautilus 事件驱动 FactorExpr 发布器"
     if key in {"strategy_intent_mode", "split_count", "group_index",

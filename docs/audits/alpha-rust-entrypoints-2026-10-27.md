@@ -238,3 +238,102 @@ RSS 由父进程约每0.2秒读取 ps，是采样最大值而非精确峰值。�
 本次实现提交钩子343通过/1跳过。计数有交集。唯一跳过仍为已退役进程内sink测试。
 未执行全仓测试。回退可在授权任务分支 revert ed0dc6ba4 并重建此前 alpha gitlink/组合扩展；
 不能 reset 共享工作区或覆盖另一执行者的前端改动。
+
+
+## Search 路径真实 Job 与长回测验收（2026-10-27，台北）
+
+起点主仓库 `29cc222f4`、alpha `b2d46b3`、Nautilus `1c4c1b83c0`。
+共享 worktree 的前端改动由另一执行者负责，本轮未编辑或提交前端。
+实现/测试提交：主仓库 `60bd5716d`、`90dabe5de`；alpha `6664463`、
+`83054f0`。Nautilus core 未修改。仅本机隔离验收，无推送、部署、生产任务。
+
+### 验收发现并修复的实际错误
+
+长回测不是只看 kernel。10,000 根真实价格循环的合成压力输入，两个分组
+策略在 HEDGING 下不断调仓时，FamilyStrategy 未向 submit_order 传已有
+position_id。本应平仓的订单创建反向持仓；200万 Bar 后798条持仓全部仍开着，
+400万 Bar 后1598条全部仍开着。5秒 macOS sample 的主要热点为
+FamilyStrategy → positions_open_refs → get_positions_for_ids 排序。
+这也说明此前“Job成功且报告存在”的回执不足以证明持仓语义正确。
+
+修复只在 alpha adapter 的 family.rs：从策略/品种过滤后的原生持仓取得 ID，
+调仓订单绑定该 ID，让 Nautilus 原生执行器处理平仓、部分成交和反转。
+不增加平行持仓账本、Python逐Bar回调或Nautilus core补丁。新增真实双策略
+HEDGING 反转测试：修复前失败，修复后每个策略只剩一笔单位持仓，已有持仓
+正常关闭。单策略 NETTING 及共享策略回归也通过。旧错误结果只作诊断证据，
+不作为正确的持仓/收益验收。
+
+### 实际 Celery/RabbitMQ/策略/CouchDB
+
+使用独立 localhost RabbitMQ/CouchDB、真实非 eager worker、默认 Job executor、
+冻结 RunSpec/ExecutionPlan/内嵌 FactorFamily，T2403/TL2406 各10,000根未改动
+分钟行情和时钟。Instrument 规则为明确的测试 probe/basic 配置，不能解释为
+交易所官方历史费用或研报复现。家族的外层信号30m；内层滚动均值2 Bar并以3m
+SignalAlign形成；Where(CURRENT/CANDIDATE/当前内层信号)搜索使用120 Bar分区和
+独立60 Bar回看。全部计算在同一个Rust计划中。
+
+| 模式 | Job | 订单 | 已关闭持仓 |
+|---|---|---:|---:|
+| 混合2个分组+阈值 | acceptance-870e645292d7-native | 975 | 466 |
+| 分组第1/2组 | acceptance-fcd92a65bac6-native | 660 | 313 |
+| 阈值 | acceptance-42bd895ab7ea-native | 315 | 153 |
+
+三者均终态SUCCEEDED，1个Actor/5节点、各策略共享signal输出槽0，
+每策略10,000次发布；分组排序10,000次（不按消费者重复），阈值单独运行排序0次。
+Python因子Bar回调0，最大回放批40 Bar。成交发生在首个已形成30m信号之后，
+期末未关闭持仓数受策略×品种数约束，完整报告的5种HTML/CSV附件经CouchDB
+读回并校验SHA256。worker采样最大RSS分别403.3/405.0/373.8 MiB；是200ms采样，
+不是精确峰值。Celery时间包含启动、网络和轮询，部分与构建并行，不能作吞吐基准。
+
+回执：`/tmp/tr-search-celery-{mixed,group,threshold}-final-20261027/receipt.json`。
+同目录保留Job SQLite、Couch报告JSON与本地HTML/CSV。验收完成后仅本轮worker、
+唯一队列和专属RabbitMQ/CouchDB容器已关闭清理；无常驻测试服务。
+
+### 长回测性能与内存
+
+macOS26.5 arm64，物理CPU10核、RAM24GiB；GTHT Python3.14，Nautilus2.0.0rc8，
+原生组合扩展dev opt=1。各次独立进程，OS文件缓存未清；性能测量期间不并行运行
+本轮测试、构建或其他基准。准备Catalog在另一进程，时间/RSS排除staging，包含
+真实Nautilus引擎、撮合和报告生成。128MiB总查询预算，最大回放批2048 Bar。
+两个策略共享1Actor/5节点、相同signal/confirm输出槽，各源数据由原生Catalog
+扫描和分发，不复制完整Python行情面板。
+
+使用同一个10,000 Bar价格循环、合成连续分钟时钟。不能当作真实交易日历、
+交易所规则或收益证据。200万/400万表示两个产品的Bar总量：
+
+| 总Bar | 订单 | 修复前秒（1次） | 修复后秒（3次） | 中位秒 | 最大RSS MiB |
+|---:|---:|---:|---|---:|---:|
+| 2,000,000 | 798 | 37.8429 | 5.4178 / 5.4571 / 5.4175 | 5.4178 | 510.5 |
+| 4,000,000 | 1598 | 149.8668 | 10.9130 / 10.8315 / 10.5983 | 10.8315 | 573.2 |
+
+修复前后最新因子输出逐项相等、订单数相等；修复后的期末开仓均2条，分别有
+398/798条已关闭持仓。当前机器上两规模均满足本次预算：耗时<20秒、RSS<768MiB。
+样本少且前后重复数不同，不能当作总体统计显著性。只能说这一高换手输入消除了
+已证实的持仓累积与超线性热点，不能宣称所有策略性能最优。
+
+先前2,000 Bar价格循环几乎不换手（只2订单），2百万Bar约5.1秒；
+不能把它和10,000 Bar循环直接比较或宣称400万Bar需要150秒属于正常线性增长。
+
+Rust Search状态另外以10万次更新检查预热后的容量恒定：history<=60、
+events<=61，分区清空复用容量。两个产品各持有自己的窗口状态，共享节点不按
+策略重复。此为计算状态预算，不等于整个进程RSS恒定：Catalog文件元数据、
+Nautilus成交/持仓历史与报告仍会增长。4百万Bar的最大RSS高于2百万，尚无证据
+可声称整个运行内存仅取决于窗口；这里验证的是给定规模下的实际资源预算。
+
+固定回执 `/tmp/tr-search-acceptance-20261027.json` 包含样本、来源提交及Celery
+回执哈希。长回测完整输出：`/tmp/tr-search-final-{1m,2m}-{0,1,2}-20261027/`。
+
+### 正确性与覆盖边界
+
+嵌套3m/1m Where匹配有独立手算oracle，完整及缺失Bar的多个输入形状均逐前缀
+对账batch/增量Rust；另测夜盘冻结交易日、bar_since/bar_distance分区与回看
+反例。未因缺失Bar而提前看到未来信号。核心219项、adapter28项+Catalog集成1项
+通过；主仓提交聚焦检查343通过/1项退役sink跳过（不是缺少扩展），未跑全量测试。
+
+仍不涵盖公网/Linux发布、HTTP authoring/planning、所有日线结束时间/任意日历、
+官方历史交易规则、原研报收益、所有跨品种及任意自定义谓词。一般复杂匹配仍可能
+最坏O(T×lookback)，同一Rust核心与CSE不意味着任意谓词都可O(1)。
+
+回退仅需在获授权的任务工作区反向提交主仓90dabe5de（恢复此前alpha gitlink）并
+重建原生扩展；不得reset共享worktree或覆盖并行前端改动。回退会恢复已知错误，
+所以不能把旧HEDGING结果重新当作正确验收。
