@@ -82,6 +82,13 @@ class DispatchWorker:
         )
         if record is None:
             return {"status": "duplicate", "job_id": message.job_id, "attempt": message.attempt}
+        if hasattr(self.repository, "validate_local_binding"):
+            try:
+                self.repository.validate_local_binding(record)
+            except Exception as exc:
+                self.repository.transition(record.job_id, JobStatus.FAILED, expected=JobStatus.RUNNING,
+                    error={"code": "node_input_binding_changed", "message": str(exc)})
+                return {"status": "failed", "job_id": record.job_id}
         stop = threading.Event()
 
         def heartbeat() -> None:

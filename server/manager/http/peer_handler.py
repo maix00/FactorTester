@@ -13,7 +13,11 @@ from server.manager.http.federation.transfers import TransferFederationRoutesMix
 from server.manager.http.responses import json_response
 
 
+from server.manager.http.federation.execution_nodes import ExecutionNodeRoutesMixin
+
+
 class PeerControlHandler(
+    ExecutionNodeRoutesMixin,
     NodeControlRoutesMixin,
     TransferFederationRoutesMixin,
     FederationRoutesMixin,
@@ -36,6 +40,16 @@ class PeerControlHandler(
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
+        execution_operations = {
+            "/api/federation/execution/register": "register",
+            "/api/federation/execution/job": "operation",
+            "/api/federation/execution/result-file": "report_file",
+            "/api/federation/execution/report": "publish_report",
+        }
+        operation = execution_operations.get(urlparse(self.path).path)
+        if operation:
+            self._execution_node_operation(operation)
+            return
         handlers = {
             "/api/federation/register": self._federation_register,
             "/api/federation/sync/events": self._federation_sync_events,

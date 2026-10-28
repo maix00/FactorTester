@@ -205,3 +205,17 @@ def bind_bar_input(
     if len(selected) != 1:
         raise ValueError("selected source is missing, ambiguous or incompatible")
     return BoundBarInput(requirement, target, selected[0])
+
+
+def requirement_from_dict(value: dict) -> BarRequirement:
+    return BarRequirement(**{**value, "fields": tuple(value["fields"])})
+
+
+def offer_from_dict(value: dict) -> BarOffer:
+    value = {key: item for key, item in value.items() if key != "source_ref"}
+    return BarOffer(**{**value, "installation": BundleInstallation(**value["installation"]),
+                       "fields": tuple(value["fields"])})
+
+
+def deployment_from_dict(value: dict) -> ServiceDeployment:
+    return ServiceDeployment(**{**value, "test_types": tuple(value["test_types"])})

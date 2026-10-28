@@ -26,9 +26,13 @@ class PlanningDispatcher:
 
     def run_once(self, *, limit: int = 10) -> dict[str, int]:
         result = {"claimed": 0, "sent": 0, "failed": 0, "deferred": 0}
-        jobs = self.repository.list_for_deployment(
-            deployment_id=_deployment_id(), statuses=(JobStatus.SUBMITTED,),
-        )
+        deployments = {_deployment_id()}
+        deployments.update(row["deployment_id"] for row in self.repository.list_worker_targets()
+                           if row.get("capabilities", {}).get("execution_target"))
+        jobs = sorted((job for deployment in deployments
+                       for job in self.repository.list_for_deployment(
+                           deployment_id=deployment, statuses=(JobStatus.SUBMITTED,), limit=limit)),
+                      key=lambda job: (job.created_at, job.job_id))
         for job in jobs[:limit]:
             if job.job_role != "primary":
                 continue

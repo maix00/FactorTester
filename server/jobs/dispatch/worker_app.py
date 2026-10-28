@@ -29,6 +29,9 @@ def heartbeat_target_once(
 ) -> bool:
     deployment = (deployment or branding.env("DEPLOYMENT_ID", "")).strip()
     raw_port = service_port if service_port is not None else branding.env("SERVICE_PORT", "")
+    if os.environ.get("TR_MANAGER_ENDPOINT"):
+        repository_from_env().register()
+        return True
     if not deployment or str(raw_port).strip() == "" or not branding.env("JOB_DB", "").strip():
         return False
     port = int(raw_port)
