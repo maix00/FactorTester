@@ -19,10 +19,17 @@ cleanup_target() {
   # The target directory is build state, not a deliverable.  Leaving a 100 GiB
   # debug/incremental tree behind has already exhausted the local disk once.
   rm -rf -- "$TARGET_CACHE"
+  if [[ -n "${BUILD_SRC:-}" ]]; then rm -rf -- "$BUILD_SRC"; fi
 }
 trap cleanup_target EXIT
 [ -f "$SRC/python/pyproject.toml" ] || { echo "missing $SRC/python/pyproject.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
+[[ "$(cd "$SRC" && pwd -P)" == "$(cd "$ROOT/vendor/nautilus_trader" && pwd -P)" ]] || {
+  echo "composed runtime requires this checkout's pinned Nautilus submodule" >&2; exit 1;
+}
+git -C "$ROOT/vendor/py-alpha-lib" diff --quiet HEAD || {
+  echo "alpha submodule has uncommitted changes" >&2; exit 1;
+}
 REVISION="$(git -C "$SRC" rev-parse HEAD)"
 ALPHA_REVISION="$(git -C "$ROOT/vendor/py-alpha-lib" rev-parse HEAD)"
 git -C "$ROOT" diff --quiet HEAD -- native/traderesearch_nautilus_runtime traderesearch_data/rust || {
@@ -31,7 +38,8 @@ git -C "$ROOT" diff --quiet HEAD -- native/traderesearch_nautilus_runtime trader
 RUNTIME_TREE="$(git -C "$ROOT" ls-tree -r HEAD -- native/traderesearch_nautilus_runtime traderesearch_data/rust)"
 BUILD_ID="$(printf '%s\n' "$REVISION" "$ALPHA_REVISION" "$RUNTIME_TREE" "$PLATFORM" | shasum -a 256 | cut -d' ' -f1)"
 BUILD_OUT="$OUT/$BUILD_ID"
-mkdir -p "$BUILD_OUT"
+ALPHA_OUT="$OUT/alpha-$ALPHA_REVISION"
+mkdir -p "$BUILD_OUT" "$ALPHA_OUT"
 CACHED="$OUT/nautilus_trader-$BUILD_ID.whl"
 if [ -f "$CACHED" ]; then
   echo "cached wheel for $REVISION: $CACHED"
@@ -56,6 +64,13 @@ if [ -r /proc/meminfo ]; then
   fi
 fi
 echo "building nautilus_trader from local commit $REVISION"
+# Compile immutable committed inputs even when another agent edits the checkout.
+BUILD_SRC="$(mktemp -d "$CACHE/source-$BUILD_ID.XXXXXX")"
+mkdir -p "$BUILD_SRC/vendor/nautilus_trader" "$BUILD_SRC/vendor/py-alpha-lib"
+git -C "$ROOT" archive HEAD native/traderesearch_nautilus_runtime traderesearch_data/rust | tar -xf - -C "$BUILD_SRC"
+git -C "$SRC" archive "$REVISION" | tar -xf - -C "$BUILD_SRC/vendor/nautilus_trader"
+git -C "$ROOT/vendor/py-alpha-lib" archive "$ALPHA_REVISION" | tar -xf - -C "$BUILD_SRC/vendor/py-alpha-lib"
+
 
 if ! docker image inspect "$BUILDER" >/dev/null 2>&1; then
   docker build --platform "$PLATFORM" -t "$BUILDER" \
@@ -66,7 +81,7 @@ fi
 docker run --rm --platform "$PLATFORM" \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
   -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
-  -v "$ROOT:/repo:ro" -v "$BUILD_OUT:/wheels" \
+  -v "$BUILD_SRC:/repo:ro" -v "$BUILD_OUT:/wheels" -v "$ALPHA_OUT:/alpha-wheels" \
   -v "$CACHE/cargo/registry:/root/.cargo/registry" \
   -v "$CACHE/cargo/git:/root/.cargo/git" \
   -v "$TARGET_CACHE:/target" \
@@ -77,6 +92,8 @@ docker run --rm --platform "$PLATFORM" \
   "$BUILDER" bash -lc '
     set -euo pipefail
     . /root/.cargo/env
+    cd /repo/vendor/py-alpha-lib/py-binding
+    CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /alpha-wheels -i python3.14
     cd /repo/native/traderesearch_nautilus_runtime
     CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /wheels -i python3.14
   '

@@ -80,15 +80,19 @@ address_agent_start() {
     echo "Missing host LAN address service files" >&2
     return 1
   }
-  local paths snapshot log_file python_bin interval
+  local paths snapshot log_file python_bin interval installed_agent
   paths="$(address_agent_paths)"
   snapshot="$(sed -n '1p' <<<"$paths")"
   log_file="$(sed -n '2p' <<<"$paths")"
   mkdir -p "$(dirname "$snapshot")"
   python_bin="$(command -v "${FACTORTESTER_MAINTENANCE_PYTHON:-python3}")"
   interval="$(deployment_value FACTORTESTER_LAN_ADDRESS_INTERVAL_SECONDS 5)"
+  # launchd cannot read a checkout under macOS Documents without TCC grants.
+  # Install the existing standalone helper next to its state instead.
+  installed_agent="$(dirname "$snapshot")/host-lan-address-agent.py"
+  install -m 0500 "$address_agent" "$installed_agent"
   "$python_bin" "$address_agent_service" start \
-    --agent "$address_agent" \
+    --agent "$installed_agent" \
     --snapshot "$snapshot" \
     --log "$log_file" \
     --python "$python_bin" \
