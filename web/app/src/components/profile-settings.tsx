@@ -25,7 +25,7 @@ export function ProfileSettings():React.ReactElement {
    .then(data=>{if(!controller.signal.aborted)setDetail(data.profile);}).catch(reason=>{if(!controller.signal.aborted)setDetailError(reason.message);});
   return()=>controller.abort();
  },[selected,reload]);
- if(selected)return <div className="tr-settings-browser"><Button onClick={()=>setSelected(null)}>{t("back")}</Button>
+ if(selected)return <div className="tr-settings-browser"><Button onClick={()=>setSelected(null)}>{t("settingsPanel.profileList")}</Button>
   {detailError?<Alert type="error" message={detailError} action={<Button onClick={()=>setReload(n=>n+1)}>{t("retry")}</Button>}/>:!detail?<Spin/>:<PropertyGroups groups={[{key:"profile",title:detail.display_name||detail.profile_id,items:[
     {key:"name",label:t("editor.name"),value:detail.display_name||detail.profile_id},
     {key:"owner",label:t("library.owner"),value:detail.owner_alias||detail.owner_ref},
