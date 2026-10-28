@@ -29,3 +29,15 @@ export function runSpecURL(hash: string, serverID?: string): string {
  const params=new URLSearchParams();if(serverID)params.set("server_id",serverID);
  return `/api/run-specs/${encodeURIComponent(value)}${params.size ? `?${params}` : ""}`;
 }
+
+/** Preserve explicit input roles and the Manager's legacy input manifest. */
+export function partitionJobArtifacts(artifacts: Record<string, any>[], inputs: Record<string, any>[] = []): { inputs: Record<string, any>[]; outputs: Record<string, any>[] } {
+  const names = new Set(inputs.map(item => item.name));
+  const result = { inputs: [] as Record<string, any>[], outputs: [] as Record<string, any>[] };
+  for (const item of artifacts) {
+    if (item.state && item.state !== "active") continue;
+    const input = (item.role ?? item.artifact_role) === "input" || names.has(item.name);
+    (input ? result.inputs : result.outputs).push(item);
+  }
+  return result;
+}

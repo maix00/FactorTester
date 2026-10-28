@@ -42,7 +42,7 @@ remote_exec() {
   "${ssh_command[@]}" "$remote" "$@"
 }
 
-for command in git ssh tar; do
+for command in git ssh tar python3; do
   command -v "$command" >/dev/null || {
     echo "missing local command: $command" >&2
     exit 2
@@ -93,13 +93,15 @@ else
   artifact_budget_mb="${TR_NATIVE_ARTIFACT_MAX_MB:-512}"
   [[ "$artifact_budget_mb" =~ ^[1-9][0-9]*$ ]] || { echo "invalid native artifact budget" >&2; exit 2; }
   incoming_kb="$(du -sk "$local_native_context" | awk '{print $1}')"
-  remote_exec "used=\$(du -sk '$native_artifact_root' | awk '{print \$1}'); test \$((used + $incoming_kb)) -le $((artifact_budget_mb * 1024))" || {
+  remote_exec "used=\$(du -sk '$native_artifact_root' | awk '{print \$1}'); test \$((used + 2 * $incoming_kb)) -le $((artifact_budget_mb * 1024))" || {
     echo "native artifacts exceed ${artifact_budget_mb}MiB budget; retain current/rollback and clean unused artifacts before retry" >&2; exit 3;
   }
   upload_context="$(remote_exec "mktemp -d '$native_artifact_root/.upload.XXXXXX'")"
   trap 'remote_exec "rm -rf -- \"$upload_context\"" >/dev/null 2>&1 || true' EXIT
   # Only the two wheels and their receipt are sent, never a source/data tree.
-  tar -C "$local_native_context" -cf - . | "${ssh_command[@]}" "$remote" "tar -xf - -C '$upload_context'"
+  upload_ssh_json="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${ssh_command[@]}" "$remote")"
+  python3 "$repo_root/scripts/server/upload_native_context.py" \
+    --source "$local_native_context" --destination "$upload_context" --ssh-json "$upload_ssh_json"
   remote_exec "cd '$upload_context' && sha256sum -c checksums.sha256 && test \"\$(cat build-id.txt)\" = '$native_build_id' && test ! -e '$native_context' && mv '$upload_context' '$native_context'"
   trap - EXIT
   echo "public native artifacts cache=stored build_id=$native_build_id"
