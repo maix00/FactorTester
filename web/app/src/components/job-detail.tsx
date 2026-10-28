@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, Progress, Select, Spin, Tabs, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
-import { jobURL, jobDetailOf, progressPercent, terminalStatus, type JobReference } from "../job-model.ts";
+import { partitionJobArtifacts, jobURL, jobDetailOf, progressPercent, terminalStatus, type JobReference } from "../job-model.ts";
 import { usePageInstance } from "../page-instance.ts";
 import { readJobArtifact } from "../artifacts.ts";
 import { FactorResults } from "./factor-results.tsx";
@@ -10,6 +10,7 @@ import { seriesArtifact } from "../charts/factor-result.ts";
 import { FrozenRunSpec } from "./frozen-run-spec.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
 import { ResultView } from "./result-view.tsx";
+import { TRDataTable } from "./data-table.tsx";
 import { JobHtmlReport } from "./job-html-report.tsx";
 
 export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
@@ -22,6 +23,9 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const artifactRequest = useRef<AbortController | null>(null);
+  const [artifactPage, setArtifactPage] = useState(1);
+  const [artifactPageSize, setArtifactPageSize] = useState(20);
+  const [outputError, setOutputError] = useState("");
   const [artifactName, setArtifactName] = useState("");
   useEffect(() => () => artifactRequest.current?.abort(), []);
   const downloadArtifact = async (name: string): Promise<void> => {
@@ -36,12 +40,14 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
     if (instance.active === false || !job.job_id) return;
     const controller = new AbortController(); let stream: EventSource | undefined; let fallback: ReturnType<typeof setTimeout> | undefined;
     artifactRequest.current?.abort(); setArtifactName("");
-    setDetail(null); setError(""); setResult(null); setArtifacts([]); setProgress(null);
+    setDetail(null); setError(""); setOutputError(""); setArtifactPage(1); setResult(null); setArtifacts([]); setProgress(null);
     const loadOutputs = async (): Promise<void> => {
       const values = await Promise.allSettled([request(jobURL(job, "/result"), { signal: controller.signal }), request(jobURL(job, "/artifacts"), { signal: controller.signal })]);
       if (controller.signal.aborted) return;
       if (values[0].status === "fulfilled") setResult(values[0].value.result ?? values[0].value);
       if (values[1].status === "fulfilled") setArtifacts(values[1].value.artifacts ?? values[1].value.items ?? []);
+      const failures = values.filter((value): value is PromiseRejectedResult => value.status === "rejected");
+      setOutputError(failures.map(value => String(value.reason?.message || value.reason)).join("; "));
     };
     const load = async (): Promise<boolean> => {
       const data = jobDetailOf(await request(jobURL(job), { signal: controller.signal }));
@@ -78,12 +84,18 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
   if (error) return <Alert type="error" showIcon message={error} action={<Button onClick={() => setRefresh((value) => value + 1)}>{t("retry")}</Button>} />;
   if (!detail) return <Spin />;
   const percent = progressPercent(progress, detail.status);
+  const retained = partitionJobArtifacts(artifacts.length ? artifacts : detail.artifacts || [], detail.input_artifacts || []);
+  const artifactTable = (rows: Record<string, any>[]): React.ReactElement => <TRDataTable rows={rows} rowKey="name" columns={[
+    { title: t("jobs.artifactName"), dataIndex: "name" },
+    { title: t("jobs.download"), key: "download", render: (_, item) => <Button type="link" onClick={() => void downloadArtifact(String(item.name))}>{t("jobs.download")}</Button> },
+  ]} pagination={{ page: artifactPage, pageSize: artifactPageSize, total: rows.length, hideOnSinglePage: true, onChange: (page, size) => { setArtifactPage(page); setArtifactPageSize(size); } }} />;
   return <div className="tr-job-page-detail"><div className="tr-job-state"><Tag color={detail.status === "succeeded" ? "green" : detail.status === "failed" ? "red" : "blue"}>{t(`jobs.states.${detail.status}`, { defaultValue: detail.status })}</Tag>
     {percent !== undefined ? <Progress percent={percent} showInfo status={detail.status === "failed" ? "exception" : !terminalStatus(detail.status) ? "active" : "normal"} /> : null}
     {progress?.phase || progress?.message ? <span className="tr-job-phase">{String(progress.phase || progress.message)}</span> : null}
     {!terminalStatus(detail.status) ? <Button danger onClick={() => { void request(jobURL(job, "/cancel"), { method: "POST" }).then(() => setRefresh((value) => value + 1)).catch((reason) => setError(reason.message)); }}>{t("jobs.cancel")}</Button> : null}</div>
     {detail.error ? <Alert type="error" showIcon message={typeof detail.error === "string" ? detail.error : JSON.stringify(detail.error)} /> : null}
-    <Tabs destroyOnHidden items={[
+    {outputError ? <Alert type="error" showIcon message={outputError} action={<Button onClick={() => setRefresh(value => value + 1)}>{t("retry")}</Button>} /> : null}
+    <Tabs destroyOnHidden onChange={() => setArtifactPage(1)} items={[
       { key: "overview", label: t("jobs.overview"), children: <><PropertyGroups groups={[{key:"job",title:t("jobs.overview"),items:[
         {key:"job",label:t("jobs.jobId"),value:detail.job_id || job.job_id},
         {key:"kind",label:t("configuration.testKind"),value:detail.kind,render:value => t(`configuration.analysisNames.${value}`,{defaultValue:String(value)})},
@@ -96,11 +108,8 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
         { key: "factor-series", label: t("factorResults.title"), children: <FactorResults result={null} artifactName={seriesArtifact(artifacts)} job={job} configuration={detail.configuration || detail.run_spec || detail.job_spec} /> },
       ]} /> : result ? <ResultView value={result} /> : <Empty description={t(terminalStatus(detail.status) ? "empty" : "jobs.waitingResults")} /> },
       { key: "configuration", label: t("jobs.configuration"), children: <FrozenRunSpec hash={detail.run_spec_hash} serverID={job.server_id} /> },
-      { key: "inputs", label: t("jobs.inputs"), children: <div className="tr-job-artifact-list">{artifacts.map((item, index) => {
-        const name = String(item.name || "");
-        return <div className="tr-job-artifact" key={item.name || index}><span>{item.name || item.kind}</span>{name ? <Button type="link" onClick={() => void downloadArtifact(name)}>{t("jobs.download")}</Button> : null}</div>;
-      })}{!artifacts.length ? <Empty description={t("empty")} /> : null}</div> },
-      { key: "outputs", label: t("jobs.output"), children: <><Select aria-label={t("jobs.output")} style={{ width: "100%" }} value={artifactName || undefined} options={artifacts.filter((item) => /\.html?$/i.test(item.name || "")).map((item) => ({ label: item.name, value: item.name }))} onChange={setArtifactName} />
+      { key: "inputs", label: t("jobs.inputs"), children: artifactTable(retained.inputs) },
+      { key: "outputs", label: t("jobs.output"), children: <>{artifactTable(retained.outputs)}<Select aria-label={t("jobs.output")} style={{ width: "100%" }} value={artifactName || undefined} options={retained.outputs.filter((item) => /\.html?$/i.test(item.name || "")).map((item) => ({ label: item.name, value: item.name }))} onChange={setArtifactName} />
         {artifactName ? <JobHtmlReport job={job} name={artifactName} /> : null}</> },
     ]} /></div>;
 }
