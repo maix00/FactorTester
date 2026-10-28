@@ -19,6 +19,7 @@ cleanup_target() {
   # The target directory is build state, not a deliverable.  Leaving a 100 GiB
   # debug/incremental tree behind has already exhausted the local disk once.
   rm -rf -- "$TARGET_CACHE"
+  if [[ -n "${BUILD_SRC:-}" ]]; then rm -rf -- "$BUILD_SRC"; fi
 }
 trap cleanup_target EXIT
 [ -f "$SRC/python/pyproject.toml" ] || { echo "missing $SRC/python/pyproject.toml" >&2; exit 1; }
@@ -63,6 +64,13 @@ if [ -r /proc/meminfo ]; then
   fi
 fi
 echo "building nautilus_trader from local commit $REVISION"
+# Compile immutable committed inputs even when another agent edits the checkout.
+BUILD_SRC="$(mktemp -d "$CACHE/source-$BUILD_ID.XXXXXX")"
+mkdir -p "$BUILD_SRC/vendor/nautilus_trader" "$BUILD_SRC/vendor/py-alpha-lib"
+git -C "$ROOT" archive HEAD native/traderesearch_nautilus_runtime traderesearch_data/rust | tar -xf - -C "$BUILD_SRC"
+git -C "$SRC" archive "$REVISION" | tar -xf - -C "$BUILD_SRC/vendor/nautilus_trader"
+git -C "$ROOT/vendor/py-alpha-lib" archive "$ALPHA_REVISION" | tar -xf - -C "$BUILD_SRC/vendor/py-alpha-lib"
+
 
 if ! docker image inspect "$BUILDER" >/dev/null 2>&1; then
   docker build --platform "$PLATFORM" -t "$BUILDER" \
@@ -73,7 +81,7 @@ fi
 docker run --rm --platform "$PLATFORM" \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
   -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
-  -v "$ROOT:/repo:ro" -v "$BUILD_OUT:/wheels" -v "$ALPHA_OUT:/alpha-wheels" \
+  -v "$BUILD_SRC:/repo:ro" -v "$BUILD_OUT:/wheels" -v "$ALPHA_OUT:/alpha-wheels" \
   -v "$CACHE/cargo/registry:/root/.cargo/registry" \
   -v "$CACHE/cargo/git:/root/.cargo/git" \
   -v "$TARGET_CACHE:/target" \
