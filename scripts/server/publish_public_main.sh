@@ -73,6 +73,11 @@ done
 nautilus_revision="$(bash "$repo_root/scripts/server/nautilus_vendor_revision.sh")"
 export FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision"
 
+# Fail before sending artifacts or Git when the host lacks named contexts.
+remote_exec "docker compose version >/dev/null && docker buildx version >/dev/null" || {
+  echo "public deployment requires Docker Compose and Buildx; install the build plugin before retry" >&2; exit 2;
+}
+
 # Finished native artifacts are versioned separately from Git source releases.
 source "$repo_root/scripts/server/nautilus_build_identity.sh"
 native_build_id="$(nautilus_build_identity "$repo_root" "$repo_root/vendor/nautilus_trader" linux/amd64)"
