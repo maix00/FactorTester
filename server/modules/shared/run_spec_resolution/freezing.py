@@ -8,7 +8,7 @@ from typing import Any
 
 
 def freeze_run_spec_inputs(
-    configuration: dict[str, Any], *, owner: str, analyses: list[str],
+    configuration: dict[str, Any], *, owner: str, analyses: list[str], known_product_refs: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Freeze every library-backed object required by selected analyses.
 
@@ -20,9 +20,11 @@ def freeze_run_spec_inputs(
     from server.services import external_factor_artifacts, factor_revisions
 
     frozen = freeze_product_scope(
-        configuration, owner=owner, analyses=analyses,
+        configuration, owner=owner, analyses=analyses, known_product_refs=known_product_refs,
     )
     frozen = deepcopy(frozen)
+    from server.services.execution_plans import strip_selection
+    frozen["payload"] = strip_selection(frozen["payload"])
     shared = frozen["payload"]["shared"]
     artifacts = external_factor_artifacts.freeze_configured_artifacts(shared)
     if artifacts:
@@ -30,7 +32,7 @@ def freeze_run_spec_inputs(
     return factor_revisions.freeze_factor_revisions(frozen, owner=owner)
 
 
-def freeze_nautilus_execution_policy(configuration: dict[str, Any]) -> dict[str, Any]:
+def freeze_nautilus_execution_policy(configuration: dict[str, Any], *, data_requirements: list[dict] | None = None) -> dict[str, Any]:
     """Replace Nautilus editor presets with a compact immutable policy.
 
     The RunSpec refers to already frozen product selections. It never stores
@@ -200,6 +202,7 @@ def freeze_nautilus_execution_policy(configuration: dict[str, Any]) -> dict[str,
         product_scope_refs=list(scopes),
         native_venue_plan=native_venue_plan,
         instrument_execution_policy=policy_manifest,
+        data_requirements=data_requirements,
     )
 
     # Presets and their UI knobs are intent, not the effective RunSpec
@@ -228,6 +231,9 @@ def freeze_nautilus_execution_policy(configuration: dict[str, Any]) -> dict[str,
         )
     except UnsupportedExecutionConfig as exc:
         raise ValueError(str(exc)) from exc
+    if data_requirements:
+        for key in ("data_source", "data_source_mode", "freq_fixed", "freq_mode"):
+            settings.pop(key, None)
     return frozen
 
 
@@ -251,7 +257,7 @@ def _backtest_product_scope_refs(backtest: dict[str, Any]) -> tuple[str, ...]:
                 return
 
     add(backtest)
-    for collection in ("groups", "ls_configs", "configuration_groups"):
+    for collection in ("groups", "ls_configs", "configuration_groups", "factor_strategy_bindings"):
         for item in backtest.get(collection) or []:
             add(item)
     return tuple(sorted(refs))

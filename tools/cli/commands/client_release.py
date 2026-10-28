@@ -58,12 +58,12 @@ def _echo(value: dict, as_json: bool) -> None:
 
 @click.group("client")
 def client() -> None:
-    """Manage the versioned local FactorTester client distribution."""
+    """Manage the versioned local TradeResearch client distribution."""
 
 
 @click.group("client")
 def operator_client() -> None:
-    """Manage authorized FactorTester client publication."""
+    """Manage authorized TradeResearch client publication."""
 
 
 def _release_source_root() -> Path | None:
@@ -201,7 +201,7 @@ def app_update_restart(as_json: bool) -> None:
     "--legacy-private-key",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help=(
-        "Manifest signing key; Beta defaults to the persistent FactorTester "
+        "Manifest signing key; Beta defaults to the persistent TradeResearch "
         "server release key."
     ),
 )
@@ -263,7 +263,7 @@ def publish_release(**options) -> None:
     source_root = _release_source_root()
     if source_root is None:
         raise click.ClickException(
-            "Run client release from a FactorTester source checkout"
+            "Run client release from a TradeResearch source checkout"
         )
     from tools.cli.release.signing_keys import manifest_private_key
 

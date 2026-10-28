@@ -382,3 +382,46 @@ def oidc_logout_url(
         f"{base_url.rstrip('/')}/realms/{realm.strip('/')}"
         f"/protocol/openid-connect/logout?{urllib.parse.urlencode(query)}"
     )
+
+
+class ServiceOIDCClient(OIDCClient):
+    """Keycloak service grants and introspection; no local JWT verifier."""
+    def _token(self, form: dict) -> dict:
+        import json
+        import urllib.parse
+        from urllib.request import Request
+        from server.manager.domain.federation_transport import FederationTransport
+        if self.client_secret:
+            form = {**form, "client_secret": self.client_secret}
+        request = Request(f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/token",
+            data=urllib.parse.urlencode(form).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+        with FederationTransport().open(request, timeout=self.timeout) as response:
+            raw = response.read(128 * 1024 + 1)
+        if len(raw) > 128 * 1024:
+            raise ValueError("OIDC response exceeds budget")
+        return json.loads(raw)
+
+    def client_credentials(self, *, scope: str = "") -> dict:
+        return self._token({"grant_type": "client_credentials", "client_id": self.client_id,
+                            **({"scope": scope} if scope else {})})
+
+    def exchange_token(self, token: str, *, audience: str, scope: str = "") -> dict:
+        return self._token({"grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "client_id": self.client_id, "subject_token": token,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "audience": audience, **({"scope": scope} if scope else {})})
+
+    def introspect(self, token: str) -> dict:
+        import json
+        import urllib.parse
+        from urllib.request import Request
+        from server.manager.domain.federation_transport import FederationTransport
+        request = Request(f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/token/introspect",
+            data=urllib.parse.urlencode({"token": token, "token_type_hint": "access_token",
+                "client_id": self.client_id, "client_secret": self.client_secret}).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+        with FederationTransport().open(request, timeout=self.timeout) as response:
+            raw=response.read(128*1024+1)
+        if len(raw)>128*1024:raise ValueError("OIDC response exceeds budget")
+        return json.loads(raw)

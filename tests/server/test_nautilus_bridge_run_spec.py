@@ -172,8 +172,9 @@ def test_run_spec_resolves_an_adapter_declared_by_a_different_source(monkeypatch
     from tools.data.source_catalog import (
         DataSourceMember,
         DataSourceMode,
-        NautilusAdapterContract,
     )
+
+    from traderesearch_data.nautilus import NautilusAdapterContract
 
     adapter = NautilusAdapterContract(
         member_key="ExampleRatesContractMIN15",
@@ -338,3 +339,12 @@ def test_run_spec_blocks_unreviewed_authoring_fields():
         and item["status"] == "unsupported"
         for item in contract["fields"]
     )
+
+
+def test_compacted_venue_fields_compile_from_canonical_execution_settings():
+    settings = _settings()
+    backtest = _backtest()
+    expected = freeze_native_venues(backtest, settings)
+    settings['venues'] = backtest.pop('venues')
+    settings['strategy_venue_bindings'] = backtest.pop('strategy_venue_bindings')
+    assert freeze_native_venues(backtest, settings) == expected

@@ -33,7 +33,7 @@ def freeze_native_venues(
     format. Product selections remain references; the execution builder later
     verifies their resolved InstrumentIds against these venue routes.
     """
-    raw_venues = backtest.get("venues")
+    raw_venues = backtest.get("venues", settings.get("venues"))
     if not isinstance(raw_venues, list) or not raw_venues:
         raise UnsupportedVenuePlan("define at least one Nautilus Venue")
 
@@ -116,7 +116,8 @@ def freeze_native_venues(
             "venue starting_balances must sum to initial_capital_major; each venue account is isolated",
         )
 
-    groups = [item for item in backtest.get("groups", ()) if isinstance(item, Mapping)]
+    from server.services.configuration_strategies import execution_groups
+    groups = execution_groups(dict(backtest))
     if not groups:
         raise UnsupportedVenuePlan("at least one strategy instance is required")
     groups_by_id: dict[str, Mapping[str, Any]] = {}
@@ -126,7 +127,7 @@ def freeze_native_venues(
             raise UnsupportedVenuePlan(f"duplicate strategy instance {strategy_id}")
         groups_by_id[strategy_id] = group
 
-    raw_bindings = backtest.get("strategy_venue_bindings") or []
+    raw_bindings = backtest.get("strategy_venue_bindings", settings.get("strategy_venue_bindings")) or []
     if not isinstance(raw_bindings, list):
         raise UnsupportedVenuePlan("strategy_venue_bindings must be an array")
     routes: dict[str, dict[str, Any]] = {}

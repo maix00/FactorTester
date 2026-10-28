@@ -601,10 +601,11 @@ def _compute_ic_groups(
                     roots = [item[2] for item in chunk]
                     try:
                         if prepared is None:
-                            evaluate_factors(roots, products=tester.products, **evaluate_kwargs)
+                            evaluate_factors(roots, products=tester.products, intermediates=("FE","RE"), **evaluate_kwargs)
                         else:
                             evaluate_factors(
                                 roots, products=tester.products, prepared=prepared,
+                                intermediates=("FE","RE"),
                                 **evaluate_kwargs,
                             )
                         for key, factor_list, ic_factor, _source_freq, temporal_support in chunk:

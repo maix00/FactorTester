@@ -1,7 +1,7 @@
 """Freeze exchange trading rules at the event's actual effective time.
 
 The source catalog describes a market-data feed, not a historical rule book.
-Callers must bind an admitted feed to an explicit FieldHistoryProvider and
+Callers must bind an admitted feed to an explicit source-owned provider and
 provide separately versioned session/settlement rules.  No latest snapshot,
 calendar-date guess, or missing-field default is allowed into an execution run.
 """
@@ -18,14 +18,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from tools.data.field_history import (
-    OPENCTP_LATEST_FIELD_PROVIDER,
-    OPENCTP_LATEST_FIELD_SOURCE_KEY,
-    FieldHistoryProvider,
-    HistoricalFieldFallbackPolicy,
-    HistoricalFieldLookupError,
-    HistoricalFieldValue,
-)
+from traderesearch_data.rules import TradingFieldProvider, TradingFieldValue
 
 MARKET_RULE_FIELDS = (
     "VolumeMultiple", "PriceTick", "MinLimitOrderVolume", "MaxLimitOrderVolume",
@@ -49,6 +42,9 @@ class TradingFieldSource:
     member_key: str
     timezone: str
     adapter_id: str
+    related_members: tuple[str, ...] = ()
+    latest_provider: str = ""
+    latest_source_prefix: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +52,7 @@ class HistoricalTradingFieldBinding:
     source: TradingFieldSource
     provider_ref: str
     effective_clock: str
-    provider: FieldHistoryProvider
+    provider: TradingFieldProvider
 
 
 def bind_trading_field_source(resolved_source: Any) -> TradingFieldSource:
@@ -71,9 +67,22 @@ def bind_trading_field_source(resolved_source: Any) -> TradingFieldSource:
         ZoneInfo(capability.timezone)
     except KeyError as exc:
         raise TradingFieldContractError("source timezone is unknown") from exc
+    related = tuple(getattr(resolved_source, "bundle_related_members", ()) or ())
+    if not related or any(not isinstance(value, str) or not value for value in related):
+        raise TradingFieldContractError(
+            "frozen Bundle member has no valid related historical members"
+        )
     return TradingFieldSource(
         capability.family_key, capability.member_key,
-        capability.timezone, capability.adapter_id,
+        capability.timezone, capability.adapter_id, related,
+        latest_provider=str(
+            getattr(getattr(resolved_source, "member", None),
+                    "trading_field_latest_provider", "") or ""
+        ),
+        latest_source_prefix=str(
+            getattr(getattr(resolved_source, "member", None),
+                    "trading_field_latest_source_prefix", "") or ""
+        ),
     )
 
 
@@ -92,9 +101,13 @@ def bind_historical_trading_fields(
         raise TradingFieldContractError("historical fields belong to a different source member")
     provider_ref = str(getattr(source_member, "trading_field_provider_ref", "") or "")
     effective_clock = str(getattr(source_member, "trading_field_effective_clock", "") or "")
-    if provider_ref != "FieldHistory:market_rules:exchange":
+    if not provider_ref:
         raise TradingFieldContractError(
-            f"{source.member_key}: no verified exchange FieldHistory provider binding"
+            f"{source.member_key}: no declared historical trading-field provider binding"
+        )
+    if provider_ref not in source.related_members:
+        raise TradingFieldContractError(
+            f"{source.member_key}: historical provider is not declared by the frozen Bundle"
         )
     if effective_clock != "effective_timestamp_or_trading_day":
         raise TradingFieldContractError(
@@ -106,7 +119,7 @@ def bind_historical_trading_fields(
         raise TradingFieldContractError(
             f"{source.member_key}: historical field provider is unavailable"
         ) from exc
-    if not isinstance(provider, FieldHistoryProvider):
+    if not isinstance(provider, TradingFieldProvider):
         raise TradingFieldContractError(
             f"{source.member_key}: historical field loader returned an invalid provider"
         )
@@ -272,10 +285,13 @@ def _rule_at(
     return max(candidates, key=lambda item: item[0])[1]
 
 
-def _field_evidence(field: str, record: HistoricalFieldValue) -> FieldEvidence:
+def _field_evidence(
+    field: str, record: TradingFieldValue, source: TradingFieldSource,
+) -> FieldEvidence:
     if (record.approximated or not record.provider or not record.source_key
-            or record.provider == OPENCTP_LATEST_FIELD_PROVIDER
-            or record.source_key.startswith(OPENCTP_LATEST_FIELD_SOURCE_KEY)):
+            or (source.latest_provider and record.provider == source.latest_provider)
+            or (source.latest_source_prefix
+                and record.source_key.startswith(source.latest_source_prefix))):
         raise TradingFieldContractError(f"{field}: latest/approximate snapshot is not historical evidence")
     try:
         value = Decimal(str(record.value))
@@ -297,7 +313,7 @@ def _field_evidence(field: str, record: HistoricalFieldValue) -> FieldEvidence:
 
 def resolve_trading_fields_at(
     *, source: TradingFieldSource, instrument: str, event: TradingFieldEvent,
-    provider: FieldHistoryProvider, rules: Iterable[EffectiveRule],
+    provider: TradingFieldProvider, rules: Iterable[EffectiveRule],
 ) -> FrozenTradingFields:
     """Resolve every execution field against the event's exact trading day/time."""
     if not instrument or not source.adapter_id:
@@ -316,13 +332,13 @@ def resolve_trading_fields_at(
             resolved = provider.resolve_at(
                 instrument, name, timestamp,
                 trading_day_resolver=resolver,
-                fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+                fallback="strict_historical",
             )
-        except HistoricalFieldLookupError as exc:
+        except LookupError as exc:
             raise TradingFieldContractError(
                 f"{source.member_key}/{instrument}: missing {name} at {timestamp.isoformat()}: {exc}"
             ) from exc
-        fields.append(_field_evidence(name, resolved))
+        fields.append(_field_evidence(name, resolved, source))
     values = {field.name: field.value for field in fields}
     if values["MinLimitOrderVolume"] > values["MaxLimitOrderVolume"]:
         raise TradingFieldContractError("minimum order volume exceeds maximum")
@@ -334,7 +350,7 @@ def resolve_trading_fields_at(
 
 def iter_trading_field_timeline(
     *, source: TradingFieldSource, instrument: str,
-    events: Iterable[TradingFieldEvent], provider: FieldHistoryProvider,
+    events: Iterable[TradingFieldEvent], provider: TradingFieldProvider,
     rules: Iterable[EffectiveRule],
 ) -> Iterator[FrozenTradingFields]:
     """Stream source-aligned rules without retaining every bar's full snapshot."""
@@ -366,7 +382,7 @@ def iter_trading_field_timeline(
 
 def freeze_trading_field_timeline(
     *, source: TradingFieldSource, instrument: str,
-    events: Iterable[TradingFieldEvent], provider: FieldHistoryProvider,
+    events: Iterable[TradingFieldEvent], provider: TradingFieldProvider,
     rules: Iterable[EffectiveRule],
 ) -> tuple[FrozenTradingFields, ...]:
     """Materialize an auditable timeline when every event snapshot is needed."""

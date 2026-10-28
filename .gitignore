@@ -243,3 +243,6 @@ web/chart-workbench/node_modules/
 .artifacts/
 
 deploy/docker/factortester-public/wheels/nautilus_trader-*.whl
+
+# generated legacy TA wrapper (must not be distributed)
+vendor/py-alpha-lib/py-binding/python/alpha/algo/algo_gen.py

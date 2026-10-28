@@ -20,38 +20,13 @@ if TYPE_CHECKING:
     from tools.parameters.Parameter import Parameter
 
 
+from alpha.factor.annotations import copy_annotation
+
 from .core import FactorExpr, EvaluateContext
 
 
-_LATEX_TIME_UNITS = {
-    'days': r'\mathrm{d}',
-    'hours': r'\mathrm{h}',
-    'minutes': r'\mathrm{min}',
-    'seconds': r'\mathrm{s}',
-    'milliseconds': r'\mathrm{ms}',
-    'microseconds': r'\mu\mathrm{s}',
-    'nanoseconds': r'\mathrm{ns}',
-}
 
 
-def _format_latex_value(value: Any) -> str:
-    """Format scalar expression values without leaking Python repr syntax.
-
-    ``str(pd.Timedelta)`` is a human-readable Python value such as
-    ``25 days 00:00:00``.  In a math environment that becomes a sequence of
-    implicit variables and punctuation.  Keep the canonical duration while
-    making every unit an upright LaTeX operator (``25\\,\\mathrm{d}``).
-    """
-    if isinstance(value, pd.Timedelta):
-        sign = '-' if value < pd.Timedelta(0) else ''
-        components = abs(value).components
-        parts = [
-            rf"{int(getattr(components, name))}\,{unit}"
-            for name, unit in _LATEX_TIME_UNITS.items()
-            if int(getattr(components, name))
-        ]
-        return sign + r'\,'.join(parts) if parts else '0'
-    return str(value)
 
 class ColumnRef(FactorExpr):
     """
@@ -161,17 +136,6 @@ class ColumnRef(FactorExpr):
     def op_name(self) -> str:
         return self.column.value
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        col_to_latex = {
-            'O': 'O_t', 'H': 'H_t', 'L': 'L_t', 'C': 'C_t',
-            'OA': '\\tilde{O}_t', 'HA': '\\tilde{H}_t',
-            'LA': '\\tilde{L}_t', 'CA': '\\tilde{C}_t',
-            'V': 'V_t', 'OI': 'OI_t',
-        }
-        return col_to_latex.get(self.column.value) or self.column.value
 
     def _get_alias(self) -> str:
         return self.column.value
@@ -199,6 +163,9 @@ class CategoryBoolRef(FactorExpr):
     def is_leaf_ref(self) -> bool:
         return True
 
+    def evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+        return self._evaluate(ctx)
+
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         timeline = ctx.panel_timeline
         if timeline is None:
@@ -216,11 +183,6 @@ class CategoryBoolRef(FactorExpr):
     def op_name(self) -> str:
         return f"CAT[{self.category.alias}:{self.category_name}]"
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        return rf"\operatorname{{Cat}}_{{{self.category.alias}:{self.category_name}}}"
 
     def _get_alias(self) -> str:
         raw = f"CAT_{self.category.alias}_{self.category_name}"
@@ -281,32 +243,21 @@ class ParamRef(FactorExpr):
                 if not isinstance(resolved, FactorExpr):
                     raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
                 resolved = resolved.resolve(param_values=param_values, *args, **kwargs)
+                if factor is not None:
+                    from alpha.factor.annotations import scoped_annotations
+                    family=getattr(factor,'family',None)
+                    label=f'{self.param.alias}.{getattr(family,"alias",self.param.alias)}'
+                    resolved=scoped_annotations(resolved,label)
         else:
             resolved = ConstExpr(value)
 
-        if self._is_intermediate:
-            resolved = resolved.as_intermediate(self._intermediate_name, factor=factor)
-        return resolved
+        return copy_annotation(self,resolved)
 
     @property
     def op_name(self) -> str:
         return f"${{{self.param.alias}}}"
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        """LaTeX 变量名。ParamRef 的参数名作为基础变量，如 'P' → P_t。"""
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        param_latex = self._parameter_latex()
-        from tools.parameters import DataColumnParam, FactorParam
-        if isinstance(self.param, (DataColumnParam, FactorParam)):
-            return f"{param_latex}_{{t}}"
-        return param_latex
 
-    def _parameter_latex(self) -> str:
-        # Parameter aliases are identifiers, not LaTeX math delimiters.
-        alias = str(self.param.alias).replace('$', r'\$')
-        return f"\\textcolor{{red}}{{{alias}}}"
 
     def _get_alias(self) -> str:
         return f"P{self.param.alias}"
@@ -339,11 +290,6 @@ class ConstExpr(FactorExpr):
     def op_name(self) -> str:
         return f"const({self.value})"
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        return _format_latex_value(self.value)
 
     def _get_alias(self) -> str:
         v = self.value

@@ -531,7 +531,9 @@ class FactorFamily(UniqueNameObject, FactorExpr):
 
             # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）
             if self._expr is not None:
-                func_expr = self.resolve(self._expr, param_values=param_values, caller=self).as_intermediate()
+                func_expr = self.resolve(self._expr, param_values=param_values, caller=self)
+                if not func_expr._is_intermediate:
+                    func_expr = func_expr.as_intermediate()
                 bp = getattr(self, 'basepoint', 'last')
                 dbp = getattr(self, 'daily_basepoint', None)
                 ess = getattr(self, 'end_session_skip', False)
@@ -571,6 +573,13 @@ class FactorFamily(UniqueNameObject, FactorExpr):
 
         self.factors = factors
         return factors
+
+    def formulas(self, *, parameter_values=None, factor=None):
+        """Pure export: use an already frozen Factor when one is available."""
+        from alpha.factor.presentation import formula_bundle
+        return formula_bundle(self._expr,values=parameter_values,
+                              bound_expression=None if factor is None else factor._expr,
+                              final_name=str(self.alias))
 
     def get_factor_by_alias(self, alias: str):
         """按别名精确查找因子（O(n) 遍历 self.factors）。"""

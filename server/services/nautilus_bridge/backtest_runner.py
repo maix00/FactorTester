@@ -57,6 +57,8 @@ class ReplayReceipt:
     native_iterations: int
     native_orders: int
     native_positions: int
+    native_settlements: int
+    source_inputs: tuple[dict[str, str], ...]
     probe_fill_prices: tuple[str, ...]
     execution_assumptions: tuple[str, ...]
     reports: dict[str, object]
@@ -72,8 +74,8 @@ def _load_input(item: ReplayInput):
         raise ValueError("catalog was not staged with pinned NautilusTrader")
     if receipt.get("contract_uid") != item.expected_contract_uid:
         raise ValueError("catalog contract UID does not match the requested identity")
-    if not item.expected_contract_uid.startswith("CFFEX|F|"):
-        raise ValueError("probe accepts CFFEX futures contracts only")
+    if "|F|" not in str(item.expected_contract_uid):
+        raise ValueError("probe accepts futures contracts only")
     for file in receipt.get("catalog_files", ()):
         path = (folder / file["path"]).resolve(strict=True)
         if not path.is_relative_to(folder):
@@ -91,9 +93,118 @@ def _load_input(item: ReplayInput):
     return folder, catalog, receipt, instruments[0]
 
 
+def preflight_catalogs(opened, *, max_input_bars: int) -> tuple[int, int, int]:
+    """Check frozen row counts before any Bar query or engine allocation.
+
+    Counts belong to the hash-verified receipts, not a caller's estimate.
+    Query boundaries use ts_init, as does Nautilus' Parquet catalog.
+    """
+    if isinstance(max_input_bars, bool) or not isinstance(max_input_bars, int) or max_input_bars <= 0:
+        raise ValueError("replay bar cap must be a positive integer")
+    rows = tuple(opened)
+    if not rows:
+        raise ValueError("replay needs at least one catalog")
+    counts = [int(row[2]["selected_count"]) for row in rows]
+    if any(count <= 0 for count in counts):
+        raise ValueError("catalog receipt needs a positive frozen row count")
+    total = sum(counts)
+    if total > max_input_bars:
+        raise ValueError("catalog receipts exceed the explicit replay bar cap")
+    first = min(int(row[2]["first_available_ns"]) for row in rows)
+    last = max(int(row[2]["last_available_ns"]) for row in rows)
+    if first < 0 or last < first:
+        raise ValueError("catalog receipt has an invalid replay range")
+    return first, last, total
+
+
+from traderesearch_data.shared_cache import batch_input_budget
+
+
+@batch_input_budget
+def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes: int = 20,
+                           max_batch_bars: int = 250_000,
+                           query_memory_limit_bytes: int = 128 * 1024 * 1024,
+                           input_transport: str = "catalog"):
+    """Use Nautilus' native Catalog merge/replay on the configured engine.
+
+    Only frozen receipt validation/configuration crosses Python here. Market
+    batches never enter a Python merge, list conversion or add_data loop.
+    """
+    if isinstance(batch_minutes, bool) or not isinstance(batch_minutes, int) or batch_minutes <= 0:
+        raise ValueError("batch_minutes must be a positive integer")
+    if input_transport not in {"catalog", "shared"}:
+        raise ValueError("unknown input transport")
+    rows = tuple(opened)
+    first, last, expected = preflight_catalogs(rows, max_input_bars=max_input_bars)
+    if isinstance(max_batch_bars, bool) or not isinstance(max_batch_bars, int) or max_batch_bars < 1:
+        raise ValueError("max_batch_bars must be a positive integer")
+    if (isinstance(query_memory_limit_bytes, bool) or not isinstance(query_memory_limit_bytes, int)
+            or query_memory_limit_bytes < 1):
+        raise ValueError("query memory limit must be a positive integer")
+    from nautilus_trader.config import BacktestDataConfig
+    from nautilus_trader.model import InstrumentId, NautilusDataType
+    data = [BacktestDataConfig(
+        data_type=NautilusDataType.Bar, catalog_path=str(folder),
+        bar_types=[str(receipt["bar_type"])],
+        # One streaming table per homogeneous catalog directory. The native
+        # default opens one buffered query per file, multiplying prefetch/RSS.
+        optimize_file_loading=True,
+        start_time=int(receipt["first_available_ns"]),
+        end_time=int(receipt["last_available_ns"]),
+    ) for folder, _catalog, receipt, _instrument in rows]
+    settlement_count = 0
+    for folder, _catalog, receipt, instrument in rows:
+        records = tuple(receipt.get("settlement_records") or ())
+        if not records:
+            continue
+        settlement_count += len(records)
+        data.append(BacktestDataConfig(
+            data_type=NautilusDataType.InstrumentClose, catalog_path=str(folder),
+            instrument_id=InstrumentId.from_str(str(instrument.id)),
+            optimize_file_loading=True,
+            start_time=min(int(item["event_ns"]) for item in records),
+            end_time=max(int(item["event_ns"]) for item in records),
+        ))
+    chunk_size = min(batch_minutes * len(rows), max_batch_bars, 1_000_000)
+    if input_transport == "shared":
+        from .shared_inputs import replay_shared_catalogs
+        total, batches, largest, source_counts = replay_shared_catalogs(engine, rows,
+            chunk_size=chunk_size, max_chunk_events=max_batch_bars,
+            max_input_events=expected + settlement_count, start=first, end=last,
+            query_memory_limit_bytes=query_memory_limit_bytes)
+    else:
+        total, batches, largest, source_counts = engine.run_catalogs(
+            data=data, chunk_size=chunk_size,
+            max_chunk_events=max_batch_bars, start=first, end=last,
+            query_memory_limit_bytes=max(1, query_memory_limit_bytes // len(rows)),
+        )
+    if total < settlement_count:
+        raise ValueError("native replay total is smaller than settlement events")
+    total -= settlement_count
+    expected_source_counts = [int(row[2]["selected_count"]) for row in rows]
+    expected_source_counts.extend(len(row[2]["settlement_records"])
+        for row in rows if row[2].get("settlement_records"))
+    if list(source_counts) != expected_source_counts:
+        raise ValueError("native per-source replay counts differ from frozen receipts")
+    if total != expected or engine.get_result().iterations != expected + settlement_count:
+        raise ValueError("native catalog replay count differs from the frozen receipts")
+    source_inputs = tuple({
+        "bundle_id": str(receipt.get("bundle_id") or ""),
+        "bundle_version": str(receipt.get("bundle_version") or ""),
+        "bundle_fingerprint": str(receipt.get("bundle_fingerprint") or ""),
+        "member_id": str(receipt.get("member_id") or ""),
+        "contract_uid": str(receipt.get("contract_uid") or ""),
+    } for _folder, _catalog, receipt, _instrument in rows)
+    return {"bars": total, "settlements": settlement_count,
+            "source_inputs": source_inputs,
+            "batch_count": batches, "max_batch_bars": largest}
+
+
 def run_small_catalog_replay(
     inputs: tuple[ReplayInput, ...], output_dir: Path, *,
     max_input_bars: int = 2_000, batch_minutes: int = 20,
+    max_batch_bars: int = 250_000,
+    max_replay_days: int = 2,
     synthetic_order_probe: bool = False,
     frozen_factor_ref: str | None = None,
     position_cost_basis: str = "WEIGHTED_AVERAGE",
@@ -125,7 +236,6 @@ def run_small_catalog_replay(
     from nautilus_trader.execution import MakerTakerFeeModel
     from nautilus_trader.model import (
         AccountType,
-        Bar,
         Currency,
         InstrumentId,
         Money,
@@ -162,17 +272,19 @@ def run_small_catalog_replay(
         instrument_id: str(value).rsplit(".", 1)[-1]
         for instrument_id, value in raw_basis_overrides.items()
     }
-    if sum(int(row[2]["selected_count"]) for row in opened) > max_input_bars:
-        raise ValueError("catalog receipts exceed the explicit replay bar cap")
+    if isinstance(max_replay_days, bool) or not isinstance(max_replay_days, int) or max_replay_days <= 0:
+        raise ValueError("max_replay_days must be a positive integer")
+    preflight_catalogs(opened, max_input_bars=max_input_bars)
     first_ns = min(int(row[2]["first_event_ns"]) for row in opened)
     first_available_ns = min(int(row[2]["first_available_ns"]) for row in opened)
     last_ns = max(int(row[2]["last_event_ns"]) for row in opened)
-    if last_ns - first_ns > 2 * 86_400 * 1_000_000_000:
-        raise ValueError("isolated replay window may not span more than two days")
+    if last_ns - first_ns > max_replay_days * 86_400 * 1_000_000_000:
+        raise ValueError(f"isolated replay window exceeds {max_replay_days} days")
     venue = Venue("CFFEX")
     started = time.perf_counter()
     engine = BacktestEngine(config=BacktestEngineConfig(
         trader_id=TraderId.from_str("FT-PROBE-001"),
+        shutdown_on_error=True,
         exec_engine=ExecutionEngineConfig(
             position_cost_basis=cost_basis,
             position_cost_basis_by_instrument={
@@ -208,11 +320,17 @@ def run_small_catalog_replay(
                     self.instrument_id = instrument_id
                     self.bar_type = BarType.from_str(bar_type)
                     self.seen = 0
+                    self.submitted = 0
+                    self.pending = False
+                    self.expected_fill_prices: list[str] = []
 
                 def on_start(self) -> None:
                     self.subscribe_bars(self.bar_type)
 
                 def on_bar(self, bar) -> None:
+                    if self.pending:
+                        self.expected_fill_prices.append(str(bar.open))
+                        self.pending = False
                     self.seen += 1
                     if self.seen not in (2, 5):
                         return
@@ -226,73 +344,24 @@ def run_small_catalog_replay(
                         time_in_force=TimeInForce.AT_THE_OPEN,
                     )
                     self.submit_order(order)
+                    self.submitted += 1
+                    self.pending = True
 
             probe_strategy = ProbeStrategy(ids[0], opened[0][2]["bar_type"])
             engine.add_strategy(probe_strategy)
         else:
             probe_strategy = None
 
-        processed = batches = largest_batch = largest_event_batch = 0
-        next_bar_open_orders = 0
+        replay = replay_catalog_batches(
+            engine, opened, max_input_bars=max_input_bars,
+            batch_minutes=batch_minutes, max_batch_bars=max_batch_bars,
+        )
+        processed, batches, largest_batch = (replay[key] for key in
+                                             ("bars", "batch_count", "max_batch_bars"))
+        largest_event_batch = largest_batch
         timeline_first_ns = first_available_ns
-        next_start_ns = timeline_first_ns
-        previous_batch_end_ns = None
-        probe_seen = 0
-        probe_order_pending = False
-        expected_probe_fill_prices: list[str] = []
-        step_ns = batch_minutes * MINUTE_NS
-        for begin in range(first_ns, last_ns + 1, step_ns):
-            end = min(begin + step_ns - 1, last_ns)
-            bars = []
-            for _, catalog, receipt, _ in opened:
-                bars.extend(catalog.query_bars(
-                    identifiers=[receipt["bar_type"]], start=begin, end=end))
-            if not bars:
-                continue
-            processed += len(bars)
-            if processed > max_input_bars:
-                raise ValueError("catalog query exceeds explicit replay bar cap")
-            largest_batch = max(largest_batch, len(bars))
-            if synthetic_order_probe:
-                for bar in sorted(bars, key=lambda item: int(item.ts_init)):
-                    if str(bar.bar_type.instrument_id) != ids[0]:
-                        continue
-                    if probe_order_pending:
-                        expected_probe_fill_prices.append(str(bar.open))
-                        probe_order_pending = False
-                    probe_seen += 1
-                    if probe_seen in (2, 5):
-                        probe_order_pending = True
-                        next_bar_open_orders += 1
-            events = list(bars)
-            events.sort(key=lambda item: (
-                int(item.ts_init), 0 if isinstance(item, Bar) else 1,
-            ))
-            largest_event_batch = max(largest_event_batch, len(events))
-            batch_start_ns = min(int(event.ts_init) for event in events)
-            batch_end_ns = max(int(event.ts_init) for event in events)
-            if previous_batch_end_ns is not None and batch_start_ns <= previous_batch_end_ns:
-                raise ValueError(
-                    "streaming batch splits or reorders one NautilusTrader replay timestamp"
-                )
-            if batch_end_ns < next_start_ns:
-                raise ValueError("streaming replay clock would move backwards")
-            # add_data copies into NT-owned storage.  Discard the short Python
-            # batch immediately after loading, then run and clear native data.
-            engine.add_data(events)
-            bars.clear()
-            events.clear()
-            engine.run(start=next_start_ns, end=batch_end_ns, streaming=True)
-            engine.clear_data()
-            previous_batch_end_ns = batch_end_ns
-            # Keep the engine clock at the previous batch boundary. NautilusTrader
-            # advances scheduled timers across gaps before delivering the next bar.
-            next_start_ns = batch_end_ns
-            batches += 1
-        expected = sum(int(row[2]["selected_count"]) for row in opened)
-        if processed != expected:
-            raise ValueError(f"catalog replay count {processed} != receipts {expected}")
-        engine.end()
+        next_bar_open_orders = probe_strategy.submitted if probe_strategy is not None else 0
+        expected_probe_fill_prices = probe_strategy.expected_fill_prices if probe_strategy is not None else []
         result = engine.get_result()
         probe_fill_prices: tuple[str, ...] = ()
         if synthetic_order_probe:
@@ -327,6 +396,8 @@ def run_small_catalog_replay(
             native_iterations=result.iterations,
             native_orders=result.total_orders,
             native_positions=result.total_positions,
+            native_settlements=int(replay.get("settlements", 0)),
+            source_inputs=tuple(replay.get("source_inputs", ())),
             probe_fill_prices=probe_fill_prices,
             execution_assumptions=(
                 (

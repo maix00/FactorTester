@@ -40,7 +40,7 @@ def main() -> object:
     )
     from tools.cli.app import cli
 
-    return cli()
+    return cli(prog_name="traderesearch")
 
 
 def manager_main() -> object:
@@ -51,7 +51,7 @@ def manager_main() -> object:
     )
     from tools.cli.manager_app import manager_cli
 
-    return manager_cli()
+    return manager_cli(prog_name="traderesearch-manager")
 
 
 def _trusted_import_root() -> Path | None:

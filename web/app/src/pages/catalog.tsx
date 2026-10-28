@@ -1,301 +1,104 @@
-import React, { useEffect, useState } from "react";
+import { sourceIdentity } from "../source-model.ts";
+import React, { useEffect, useMemo, useState } from "react";
+import { Button, Input, Select, Tabs, Tag } from "antd";
+import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { notify } from "../notifications/core.ts";
+import { StrategyDetail } from "../components/strategy-detail.tsx";
+import { FactorDetail } from "../components/factor-detail.tsx";
+import { FunctionPage } from "../components/function-page.tsx";
+import { TRDataTable } from "../components/data-table.tsx";
+import { DetailsPanel } from "../components/details-panel.tsx";
+import { LibraryCreate } from "../components/library-create.tsx";
+import { ResultView } from "../components/result-view.tsx";
+import { request } from "../configuration/api.ts";
+import { formatDate } from "../format.ts";
+import { usePageInstance } from "../page-instance.ts";
+import { useCompactLayout } from "../configuration/layout.ts";
 
-type Group = { id?: string; name?: string; title?: string; description?: string; member_count?: number; product_count?: number };
-type Product = { id?: string; name?: string; title?: string; data_source?: string };
-type Payload<T> = { groups?: T[]; products?: T[]; sources?: { id: string; name?: string }[] };
+type Row = Record<string, any>;
+type Domain = "products" | "factors" | "strategies";
+const tabsByDomain = { products: ["products", "groups", "sources", "categories", "reference"], factors: ["factors", "families", "sets"], strategies: ["public", "mine", "subordinates", "shared", "strategyFamilies"] };
+const identity = (row: Row): string => String(row.ref || row.factor_ref || row.strategy_ref || row.template_ref || row.family_ref || row.set_ref || row.id || row.family_id || row.bundle_id || row.source_name || row.factor_family_alias || row.alias || row.name || "");
+const title = (row: Row): string => String(row.family_name || row.bundle_name || row.source_name || row.name || row.title || row.factor_family_name || row.factor_alias || row.alias || identity(row));
+const owner = (row: Row): string => String(row.owner_username || row.owner || row.owner_ref || "—");
+const family = (row: Row): string => String(row.factor_family_alias || row.family_alias || row.identity?.family_alias || row.family_ref || "—");
 
-export function CatalogPage(): React.ReactElement {
-  const { t } = useTranslation();
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [selected, setSelected] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-  const [legacy, setLegacy] = useState(false);
-  const [tab, setTab] = useState<"products" | "factors" | "families" | "sets" | "strategies" | "sources" | "categories" | "reference">("products");
-  const [sources, setSources] = useState<{ id: string; name?: string; visitor_data_accessible?: boolean }[]>([]);
-  const [categories, setCategories] = useState<{ id?: string; name?: string; title?: string }[]>([]);
-  const [families, setFamilies] = useState<Record<string, unknown>[]>([]);
-  const [sets, setSets] = useState<Record<string, unknown>[]>([]);
-  const [strategies, setStrategies] = useState<Record<string, unknown>[]>([]);
-  const [strategyPage, setStrategyPage] = useState(1);
-  const [strategyTotal, setStrategyTotal] = useState(0);
-  const [strategyDetail, setStrategyDetail] = useState<string>("");
-  const [strategyData, setStrategyData] = useState<Record<string, unknown> | null>(null);
-  const [factorDetail, setFactorDetail] = useState<string>("");
-  const [factorData, setFactorData] = useState<Record<string, unknown> | null>(null);
-  const [groupDetail, setGroupDetail] = useState<string>("");
-  const [groupData, setGroupData] = useState<Record<string, unknown> | null>(null);
-  const [productSelected, setProductSelected] = useState<Record<string, unknown> | null>(null);
-  const [sourceSelected, setSourceSelected] = useState<Record<string, unknown> | null>(null);
-  const [categorySelected, setCategorySelected] = useState<Record<string, unknown> | null>(null);
-  const [referenceKind, setReferenceKind] = useState("contract");
-  const [referenceRef, setReferenceRef] = useState("");
-  const [referenceData, setReferenceData] = useState<Record<string, unknown> | null>(null);
-  const [familySelected, setFamilySelected] = useState<Record<string, unknown> | null>(null);
-  const [factorSetSelected, setFactorSetSelected] = useState<Record<string, unknown> | null>(null);
-  const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
-
+export function CatalogPage({ domain = "products" }: { domain?: Domain }): React.ReactElement {
+  const { t } = useTranslation(), mobile = useCompactLayout(), instance = usePageInstance();
+  const [tab, setTab] = useState(tabsByDomain[domain][0]);
+  const [rows, setRows] = useState<Row[]>([]), [total, setTotal] = useState(0);
+  const [query, setQuery] = useState(""), [familyFilter, setFamilyFilter] = useState<string>(), [ownerFilter, setOwnerFilter] = useState<string>();
+  const [page, setPage] = useState(1), [size, setSize] = useState(20), [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(false), [error, setError] = useState("");
+  const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<Row | null>(null), [detailError, setDetailError] = useState("");
+  const [creating, setCreating] = useState(false), [detailOpen, setDetailOpen] = useState(false);
+  const serverPaged = domain === "strategies" && !["public", "strategyFamilies"].includes(tab);
   useEffect(() => {
-    fetch("/api/product-library/product-groups?view=summary", { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((payload: Payload<Group>) => setGroups(payload.groups ?? []))
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
-  }, [t]);
-
+    if (tab === "reference") { setRows([]); return; }
+    const controller = new AbortController(); setLoading(true); setError("");
+    const url = domain === "strategies" ? ["public", "strategyFamilies"].includes(tab) ? "/api/strategy-library/factor-strategies" : `/api/strategy-library/strategies?scope=${tab}&page=${page}&limit=${size}&query=${encodeURIComponent(query)}`
+      : tab === "products" ? "/api/product-library/products" : tab === "groups" ? "/api/product-library/product-groups?view=summary" : tab === "sources" ? "/api/product-library/data-sources" : tab === "categories" ? "/api/product-library/categories"
+      : tab === "families" ? "/api/factor-library/families" : tab === "sets" ? "/api/factor-library/factor-sets" : "/api/factor-library/factors";
+    const timer = setTimeout(() => {
+      void request(url, { signal: controller.signal }).then((data) => {
+        if (controller.signal.aborted) return;
+        const items = (tab === "strategyFamilies" ? data.families : undefined) || data.items || data.products || data.groups || data.sources || data.categories || data.factors || data.families || [];
+        setRows(items); setTotal(data.total ?? items.length);
+      }).catch((reason) => { if (!controller.signal.aborted) setError(reason.message); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    }, serverPaged ? 200 : 0);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [domain, tab, serverPaged, serverPaged ? page : 0, serverPaged ? size : 0, serverPaged ? query : "", revision]);
   useEffect(() => {
-    if (tab !== "reference" || !referenceRef) { setReferenceData(null); return; }
-    setLoading(true);
-    fetch(`/api/report-references/validate?kind=${encodeURIComponent(referenceKind)}&target_ref=${encodeURIComponent(referenceRef)}`, { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((value) => setReferenceData(value))
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
-      .finally(() => setLoading(false));
-  }, [tab, referenceKind, referenceRef, t]);
+    setDetail(null); setDetailError(""); if (!selected) return;
+    const controller = new AbortController(), ref = encodeURIComponent(identity(selected));
+    const url = tab === "factors" ? `/api/factor-library/factors/detail?factor_ref=${ref}${selected.owner_username ? `&owner_username=${encodeURIComponent(selected.owner_username)}` : ""}`
+      : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? `/api/strategy-library/strategies/${ref}?include_source=0`
+      : tab === "groups" ? `/api/product-library/product-groups/${ref}` : null;
+    if (!url) { setDetail(selected); return; }
+    void request(url, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data); }).catch((reason) => { if (!controller.signal.aborted) setDetailError(reason.message); });
+    return () => controller.abort();
+  }, [selected, tab, domain]);
+  const displayTitle = (row: Row): string => row.template_ref ? t(`configuration.templates.${row.template_ref.split(":").pop()}`, { defaultValue: title(row) }) : title(row);
+  const filtered = useMemo(() => rows.filter((row) => (serverPaged || !query || [displayTitle(row), family(row), owner(row)].some((value) => value.toLowerCase().includes(query.toLowerCase()))) && (!familyFilter || family(row) === familyFilter) && (!ownerFilter || owner(row) === ownerFilter)), [rows, query, familyFilter, ownerFilter, serverPaged, t]);
+  const visible = serverPaged ? filtered : filtered.slice((page - 1) * size, page * size);
+  const label = (key: string): string => t(domain === "strategies" ? `library.scopes.${key}` : `catalog.${key}`);
+  const select = (row: Row): void => { if (tab === "sources") { instance.open("source-detail", {sourceFamilyId: sourceIdentity(row)}); return; } if (tab === "products") { instance.open("product-detail", { productName: row.name || row.code || row.id, productTitle: row.desc || row.name || row.code }); return; } setSelected(row); if (mobile) setDetailOpen(true); };
+  const contents = detailError ? <div role="alert">{detailError}</div> : tab === "factors" || tab === "families" ? <FactorDetail key={identity(selected || {})} detail={detail} /> : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? <StrategyDetail onRemoved={() => { setSelected(null); setDetailOpen(false); setRevision((value) => value + 1); }} key={identity(selected || {})} detail={detail} onUpdated={(value) => { setSelected(value); setRevision((revision) => revision + 1); }} /> : <ResultView value={detail} />;
+  if (creating) return <FunctionPage title={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}><LibraryCreate kind={domain === "factors" ? "factor" : "strategy"} onCancel={() => setCreating(false)} onCreated={() => { setCreating(false); setRevision((value) => value + 1); }} /></FunctionPage>;
+  return <FunctionPage title={t(`nav.${domain}`)} actions={<><Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} />{domain !== "products" ? <Button type="primary" aria-label={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")} icon={<PlusOutlined />} onClick={() => setCreating(true)}>{t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}</Button> : null}</>}>
+    <Tabs activeKey={tab} onChange={(value) => { setTab(value); setPage(1); setRows([]); setSelected(null); setQuery(""); setOwnerFilter(undefined); setFamilyFilter(undefined); }} items={tabsByDomain[domain].map((key) => ({ key, label: label(key) }))} />
+    {tab === "reference" ? <ReferenceLookup /> : <><div className="tr-library-filters"><Input.Search allowClear aria-label={t("library.search")} placeholder={t("library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
+      {domain === "factors" ? <Select allowClear aria-label={t("library.allFamilies")} placeholder={t("library.allFamilies")} value={familyFilter} options={[...new Set(rows.map(family))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setFamilyFilter(value); setPage(1); }} /> : null}
+      {!serverPaged && domain !== "products" ? <Select allowClear aria-label={t("library.allOwners")} placeholder={t("library.allOwners")} value={ownerFilter} options={[...new Set(rows.map(owner))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setOwnerFilter(value); setPage(1); }} /> : null}
+      <Button onClick={() => { setQuery(""); setFamilyFilter(undefined); setOwnerFilter(undefined); setPage(1); }}>{t("library.reset")}</Button></div>
+    <TRDataTable rows={visible} rowKey={identity} rowSelection={{ type: "radio", selectedRowKeys: selected ? [identity(selected)] : [], onSelect: select }} loading={loading} error={error} pagination={{ page, pageSize: size, total: serverPaged ? total : filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
+      { title: t("editor.name"), key: "name", render: (_: unknown, row: Row) => <button className={`tr-table-link ${selected && identity(row) === identity(selected) ? "is-selected" : ""}`} onClick={() => select(row)}>{displayTitle(row)}{mobile ? <small className="tr-library-row-meta">{domain === "products" ? [row.exchange, row.desc].filter(Boolean).join(" · ") : `${family(row)} · ${owner(row)}`}</small> : null}</button> },
+      ...(domain === "factors" ? [{ title: t("catalog.families"), key: "family", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => family(row) }] : []),
+      ...(domain === "products" ? [
+        ...(tab === "sources" ? [
+          { title: t("sources.provider"), dataIndex: "provider_kind" },
+          { title: t("sources.frequencies"), key: "frequencies", render: (_: unknown, row: Row) => row.availability?.frequency_names?.join(" · ") || "—" },
+          { title: t("sources.products"), key: "products", render: (_: unknown, row: Row) => row.availability?.product_count ?? "—" },
+        ] : [{ title: t("market.exchange"), dataIndex: "exchange", responsive: ["md"] as "md"[] }]),
+        ...(tab === "sources" ? [] : [{ title: t("market.description"), dataIndex: "desc", responsive: ["md"] as "md"[] }]),
+      ] : [
+      { title: t("library.version"), key: "version", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => <span className="tr-version-ref" title={row.current_revision?.revision_ref || row.revision_ref || row.ref}>{row.version || row.current_revision?.revision_ref || row.revision_ref || row.ref || "—"}</span> },
+      { title: t("library.owner"), key: "owner", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => owner(row) },
+      { title: t("jobs.updated"), dataIndex: "updated_at", responsive: ["lg"] as "lg"[], render: (value: string) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—" },
+      ]),
+    ]} />
+    {selected && !mobile && !detailOpen ? <section className="tr-library-detail"><header><h2>{displayTitle(selected)}</h2><Button onClick={() => setDetailOpen(true)}>{t("details")}</Button></header><div className="tr-library-meta">{domain === "factors" && family(selected) !== "—" ? <span>{family(selected)}</span> : null}{owner(selected) !== "—" ? <span>{owner(selected)}</span> : null}{selected.version || selected.current_revision?.revision_number ? <Tag>{selected.version || `r${selected.current_revision.revision_number}`}</Tag> : null}</div>{contents}</section> : null}
+    </>}
+    {selected && detailOpen ? <DetailsPanel title={displayTitle(selected)} onClose={() => setDetailOpen(false)}>{contents}</DetailsPanel> : null}
+  </FunctionPage>;
+}
 
-  useEffect(() => {
-    if (tab !== "families" && tab !== "sets") return;
-    setLoading(true);
-    const path = tab === "families" ? "/api/factor-library/families" : "/api/factor-library/factor-sets";
-    fetch(path, { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((payload: { families?: Record<string, unknown>[]; items?: Record<string, unknown>[] }) => {
-        if (tab === "families") setFamilies(payload.families ?? []); else setSets(payload.items ?? []);
-      })
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
-      .finally(() => setLoading(false));
-  }, [tab, t]);
-
-  useEffect(() => {
-    if (tab !== "sources" && tab !== "categories") return;
-    setLoading(true);
-    const path = tab === "sources" ? "/api/product-library/data-sources" : "/api/product-library/categories";
-    fetch(path, { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((payload: { sources?: typeof sources; categories?: typeof categories }) => {
-        if (tab === "sources") setSources(payload.sources ?? []); else setCategories(payload.categories ?? []);
-      })
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
-      .finally(() => setLoading(false));
-  }, [tab, t]);
-
-  useEffect(() => {
-    if (tab !== "strategies") return;
-    setLoading(true);
-    fetch(`/api/strategy-library/strategies?scope=all&page=${strategyPage}&limit=20`, { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((payload: { items?: Record<string, unknown>[]; total?: number }) => {
-        setStrategies((current) => strategyPage === 1 ? payload.items ?? [] : [...current, ...(payload.items ?? [])]);
-        setStrategyTotal(Number(payload.total ?? 0));
-      })
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
-      .finally(() => setLoading(false));
-  }, [tab, strategyPage, t]);
-
-  useEffect(() => {
-    if (!groupDetail) { setGroupData(null); return; }
-    setGroupData(null);
-    fetch(`/api/product-library/product-groups/${encodeURIComponent(groupDetail)}`, { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((value) => setGroupData(value))
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
-  }, [groupDetail, t]);
-
-  useEffect(() => {
-    if (!factorDetail) { setFactorData(null); return; }
-    setFactorData(null);
-    fetch(`/api/factor-library/factors/detail?factor_ref=${encodeURIComponent(factorDetail)}`, { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((value) => setFactorData(value))
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
-  }, [factorDetail, t]);
-
-  useEffect(() => {
-    if (!strategyDetail) { setStrategyData(null); return; }
-    setStrategyData(null);
-    fetch(`/api/strategy-library/strategies/${encodeURIComponent(strategyDetail)}`, { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((value) => setStrategyData(value))
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
-  }, [strategyDetail, t]);
-
-  useEffect(() => {
-    if (tab !== "factors") return;
-    setLoading(true);
-    fetch("/api/factor-library/factors", { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((payload: { factors?: Record<string, unknown>[] }) => setFactors(payload.factors ?? []))
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
-      .finally(() => setLoading(false));
-  }, [tab, t]);
-
-  useEffect(() => {
-    if (tab !== "products") return;
-    setLoading(true);
-    const query = selected ? `?group_ref=${encodeURIComponent(selected)}` : "";
-    fetch(`/api/product-library/products${query}`, { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((payload: Payload<Product>) => setProducts(payload.products ?? []))
-      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
-      .finally(() => setLoading(false));
-  }, [selected, tab, t]);
-
-  return (
-    <section className="tr-catalog-page">
-      <header>
-        <div><h1>{t("nav.catalog")}</h1><p>{t("catalog.hint")}</p></div>
-        <button type="button" className="tr-toolbar-button" onClick={() => setLegacy(true)}>{t("catalog.legacy")}</button>
-      </header>
-      <div className="tr-catalog-tabs">
-        <button type="button" className={tab === "products" ? "is-active" : ""} onClick={() => setTab("products")}>{t("catalog.products")}</button>
-        <button type="button" className={tab === "factors" ? "is-active" : ""} onClick={() => setTab("factors")}>{t("catalog.factors")}</button>
-        <button type="button" className={tab === "strategies" ? "is-active" : ""} onClick={() => { setTab("strategies"); setStrategyPage(1); }}>{t("catalog.strategies")}</button>
-        <button type="button" className={tab === "families" ? "is-active" : ""} onClick={() => setTab("families")}>{t("catalog.families")}</button>
-        <button type="button" className={tab === "sets" ? "is-active" : ""} onClick={() => setTab("sets")}>{t("catalog.sets")}</button>
-        <button type="button" className={tab === "sources" ? "is-active" : ""} onClick={() => setTab("sources")}>{t("catalog.sources")}</button>
-        <button type="button" className={tab === "categories" ? "is-active" : ""} onClick={() => setTab("categories")}>{t("catalog.categories")}</button>
-        <button type="button" className={tab === "reference" ? "is-active" : ""} onClick={() => setTab("reference")}>{t("catalog.reference")}</button>
-      </div>
-      {tab === "products" ? <div className="tr-catalog-groups">
-        <button type="button" className={selected ? "" : "is-active"} onClick={() => setSelected("")}>{t("catalog.all")}</button>
-        {groups.map((group) => {
-          const id = String(group.id ?? group.name ?? "");
-          return (
-            <div key={id} className={`tr-catalog-group${selected === id ? " is-active" : ""}`}>
-              <button type="button" onClick={() => setSelected(id)}>
-                <b>{group.name ?? group.title ?? id}</b>
-                <small>{group.member_count ?? group.product_count ?? 0} {t("catalog.members")}</small>
-              </button>
-              <button type="button" className="tr-catalog-group-detail" onClick={() => setGroupDetail(id)}>{t("jobs.detail")}</button>
-            </div>
-          );
-        })}
-      </div> : null}
-      <div className="tr-catalog-products">
-        {tab === "reference" ? (
-          <div className="tr-catalog-reference">
-            <select value={referenceKind} onChange={(event) => setReferenceKind(event.target.value)}>
-              <option value="contract">contract</option>
-              <option value="continuous-contract">continuous-contract</option>
-              <option value="factor">factor</option>
-              <option value="strategy">strategy</option>
-            </select>
-            <input value={referenceRef} onChange={(event) => setReferenceRef(event.target.value)} placeholder={t("catalog.referenceHint")} />
-            {referenceData ? <pre className="tr-job-detail">{JSON.stringify(referenceData, null, 2)}</pre> : loading ? <p>{t("loading")}</p> : null}
-          </div>
-        ) : tab === "families" ? (
-          families.length === 0 ? <p>{t("empty")}</p> : families.map((item, index) => (
-            <article key={String(item.family_ref ?? item.id ?? index)}>
-              <button type="button" className="tr-catalog-card-link" onClick={() => setFamilySelected(item)}><b>{String(item.name ?? item.title ?? item.family_ref ?? "—")}</b></button>
-              <small>{String(item.description ?? "")}</small>
-            </article>
-          ))
-        ) : tab === "sets" ? (
-          sets.length === 0 ? <p>{t("empty")}</p> : sets.map((item, index) => (
-            <article key={String(item.set_ref ?? item.id ?? index)}>
-              <button type="button" className="tr-catalog-card-link" onClick={() => setFactorSetSelected(item)}><b>{String(item.name ?? item.title ?? item.set_ref ?? "—")}</b></button>
-              <small>{String(item.description ?? "")}</small>
-            </article>
-          ))
-        ) : tab === "sources" ? (
-          sources.length === 0 ? <p>{t("empty")}</p> : sources.map((source) => (
-            <article key={source.id}>
-              <button type="button" className="tr-catalog-card-link" onClick={() => setSourceSelected(source as unknown as Record<string, unknown>)}><b>{source.name ?? source.id}</b></button>
-              <small>{source.id}</small>
-            </article>
-          ))
-        ) : tab === "categories" ? (
-          categories.length === 0 ? <p>{t("empty")}</p> : categories.map((category, index) => (
-            <article key={String(category.id ?? index)}>
-              <button type="button" className="tr-catalog-card-link" onClick={() => setCategorySelected(category as unknown as Record<string, unknown>)}><b>{category.name ?? category.title ?? category.id ?? "—"}</b></button>
-            </article>
-          ))
-        ) : tab === "strategies" ? (
-          strategies.length === 0 ? <p>{t("empty")}</p> : strategies.map((item, index) => {
-            const ref = String(item.strategy_ref ?? item.id ?? index);
-            return (
-              <article key={ref}>
-                <button type="button" className="tr-catalog-card-link" onClick={() => setStrategyDetail(ref)}>
-                  <b>{String(item.name ?? item.title ?? ref)}</b>
-                </button>
-                <small>{String(item.description ?? "")}</small>
-              </article>
-            );
-          })
-        ) : tab === "factors" ? (
-          factors.length === 0 ? <p>{t("empty")}</p> : factors.map((factor, index) => (
-            <article key={String(factor.ref ?? factor.factor_ref ?? factor.alias ?? index)}>
-              <button type="button" className="tr-catalog-card-link" onClick={() => setFactorDetail(String(factor.ref ?? factor.factor_ref ?? factor.alias ?? ""))}>
-                <b>{String(factor.name ?? factor.alias ?? factor.ref ?? "—")}</b>
-              </button>
-              <small>{String(factor.family_ref ?? factor.family ?? "")}</small>
-            </article>
-          ))
-        ) : loading ? <p>{t("loading")}</p> : products.length === 0 ? <p>{t("empty")}</p> : products.map((product, index) => (
-          <article key={String(product.id ?? product.name ?? index)}>
-            <b>{product.name ?? product.title ?? product.id}</b>
-            <small>{product.data_source ?? ""}</small>
-          </article>
-        ))}
-      </div>
-      {tab === "strategies" && strategies.length < strategyTotal ? (
-        <button type="button" className="tr-mobile-load-more" disabled={loading} onClick={() => setStrategyPage((value) => value + 1)}>{t("more")}</button>
-      ) : null}
-      {familySelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label="factor-family">
-          <div className="tr-legacy-bar"><strong>{String(familySelected.name ?? familySelected.family_ref ?? "")}</strong><button type="button" onClick={() => setFamilySelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(familySelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {factorSetSelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label="factor-set">
-          <div className="tr-legacy-bar"><strong>{String(factorSetSelected.name ?? factorSetSelected.set_ref ?? "")}</strong><button type="button" onClick={() => setFactorSetSelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(factorSetSelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {sourceSelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={String(sourceSelected.name ?? sourceSelected.id ?? "")}>
-          <div className="tr-legacy-bar"><strong>{String(sourceSelected.name ?? sourceSelected.id ?? "")}</strong><button type="button" onClick={() => setSourceSelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(sourceSelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {categorySelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={String(categorySelected.name ?? categorySelected.id ?? "")}>
-          <div className="tr-legacy-bar"><strong>{String(categorySelected.name ?? categorySelected.id ?? "")}</strong><button type="button" onClick={() => setCategorySelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(categorySelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {productSelected ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={String(productSelected.name ?? productSelected.id ?? "")}>
-          <div className="tr-legacy-bar"><strong>{String(productSelected.name ?? productSelected.id ?? "")}</strong><button type="button" onClick={() => setProductSelected(null)}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{JSON.stringify(productSelected, null, 2)}</pre>
-        </div>
-      ) : null}
-      {groupDetail ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={groupDetail}>
-          <div className="tr-legacy-bar"><strong>{groupDetail}</strong><button type="button" onClick={() => setGroupDetail("")}>{t("notifications.close")}</button></div>
-          {groupData ? <pre className="tr-job-detail">{JSON.stringify(groupData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
-        </div>
-      ) : null}
-      {factorDetail ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={factorDetail}>
-          <div className="tr-legacy-bar"><strong>{factorDetail}</strong><button type="button" onClick={() => setFactorDetail("")}>{t("notifications.close")}</button></div>
-          {factorData ? <pre className="tr-job-detail">{JSON.stringify(factorData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
-        </div>
-      ) : null}
-      {strategyDetail ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={t("catalog.strategies")}>
-          <div className="tr-legacy-bar"><strong>{strategyDetail}</strong><button type="button" onClick={() => setStrategyDetail("")}>{t("notifications.close")}</button></div>
-          {strategyData ? <pre className="tr-job-detail">{JSON.stringify(strategyData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
-        </div>
-      ) : null}
-      {legacy ? (
-        <div className="tr-legacy-overlay" role="dialog" aria-label={t("catalog.legacy")}>
-          <div className="tr-legacy-bar"><strong>{t("catalog.legacy")}</strong><button type="button" onClick={() => setLegacy(false)}>{t("notifications.close")}</button></div>
-          <iframe title={t("catalog.legacy")} src="/products?presentation=embedded" />
-        </div>
-      ) : null}
-    </section>
-  );
+function ReferenceLookup(): React.ReactElement {
+  const { t } = useTranslation(); const [kind, setKind] = useState("contract"), [ref, setRef] = useState(""), [lookup, setLookup] = useState("");
+  const [value, setValue] = useState<unknown>(null);
+  useEffect(() => { if (!lookup) { setValue(null); return; } const controller = new AbortController();
+    void request(`/api/report-references/validate?kind=${encodeURIComponent(kind)}&target_ref=${encodeURIComponent(lookup)}`, { signal: controller.signal }).then(setValue).catch((reason) => { if (!controller.signal.aborted) setValue({ error: reason.message }); });
+    return () => controller.abort();
+  }, [lookup, kind]);
+  return <><div className="tr-library-filters"><Select aria-label={t("catalog.reference")} value={kind} onChange={setKind} options={["contract", "continuous-contract", "factor", "strategy"].map((value) => ({ value, label: t(`library.references.${value}`) }))} /><Input.Search aria-label={t("catalog.referenceHint")} placeholder={t("catalog.referenceHint")} value={ref} onChange={(event) => setRef(event.target.value)} onSearch={setLookup} /></div><ResultView value={value} /></>;
 }

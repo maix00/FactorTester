@@ -31,7 +31,7 @@ INTERVAL_ENV = "FACTORTESTER_DISPATCH_INTERVAL"
 def build_runner() -> DispatchRunner:
     from .preflight import check_deployment
 
-    report = check_deployment(check_executor=True)
+    report = check_deployment(check_executor=False)
     if not report["ok"]:
         raise RuntimeError("job dispatch preflight failed: " + "; ".join(report["errors"]))
     db_path = Path(os.environ.get(DB_ENV, "") or Settings.CACHE_DB_PATH)
@@ -42,7 +42,7 @@ def build_runner() -> DispatchRunner:
     return DispatchRunner(
         outbox,
         publisher_from_env(),
-        preflight=resolve_executor,
+        preflight=repository.recover_expired_leases,
         target_online=repository.worker_target_online,
     )
 

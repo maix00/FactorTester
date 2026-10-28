@@ -32,6 +32,10 @@ class DispatchExecutorUnavailable(RuntimeError):
 
 
 def repository_from_env() -> JobRepository:
+    from .remote import remote_repository_from_env
+    remote = remote_repository_from_env()
+    if remote is not None:
+        return remote
     path = branding.env("JOB_DB", "").strip()
     return JobRepository(path) if path else JobRepository()
 
@@ -78,6 +82,8 @@ def execute_dispatch_payload(
         return {"status": "wrong_target", "job_id": message.job_id}
     resolved = executor if executor is not None else resolve_executor()
     repo = repository or repository_from_env()
+    if hasattr(repo, "attempts"):
+        repo.attempts[message.job_id] = message.attempt
     return DispatchWorker(repo).execute(message, resolved)
 
 
@@ -120,6 +126,8 @@ def execute_plan_payload(
     if target_port is not None and message.service_port != int(target_port):
         return {"status": "wrong_target", "job_id": message.job_id}
     repo = repository or repository_from_env()
+    if hasattr(repo, "attempts"):
+        repo.attempts[message.job_id] = message.attempt
     record = repo.load(message.job_id)
     if record is None or record.attempt != message.attempt:
         return {"status": "stale", "job_id": message.job_id}
@@ -138,7 +146,12 @@ def execute_plan_payload(
     })
     sink = _PlanSink()
     try:
-        planner(payload_value, sink, _NeverCancelled())
+        from contextlib import nullcontext
+        source_scope = repo.source_context(record) if hasattr(repo, "source_context") else nullcontext()
+        if hasattr(repo, "source_context"):
+            payload_value["transient_factor_source_scope_id"] = ""
+        with source_scope:
+            planner(payload_value, sink, _NeverCancelled())
     except Exception as exc:
         repo.transition(
             record.job_id, JobStatus.FAILED, expected=JobStatus.PLANNING,
@@ -184,6 +197,12 @@ def create_app(
     resolved_deployment = target_deployment or branding.env("DEPLOYMENT_ID", "").strip() or None
     raw_port = target_port if target_port is not None else branding.env("SERVICE_PORT", "").strip()
     resolved_port = int(raw_port) if raw_port not in (None, "") else None
+    if os.environ.get("TR_MANAGER_ENDPOINT"):
+        from .remote import remote_repository_from_env
+        from .node_service import target_route
+        descriptor = remote_repository_from_env().descriptor
+        resolved_deployment = target_route(descriptor["target"])
+        resolved_port = descriptor["service_port"]
     queue_name = queue
     if resolved_deployment and resolved_port:
         queue_name = f"{queue}.{resolved_deployment}.{resolved_port}"

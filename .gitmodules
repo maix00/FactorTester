@@ -4,3 +4,6 @@
 [submodule "vendor/nautilus_trader"]
 	path = vendor/nautilus_trader
 	url = https://github.com/maix00/nautilus_trader.git
+[submodule "vendor/py-alpha-lib"]
+	path = vendor/py-alpha-lib
+	url = https://github.com/maix00/py-alpha-lib.git

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { ResultView } from "./result-view.tsx";
 import { Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitch } from "./language-switch.tsx";
@@ -95,6 +96,7 @@ export function SettingsOverlay({
   return (
     <Modal
       open={open}
+      aria-label={t("settingsPanel.title")}
       onCancel={onClose}
       footer={null}
       centered
@@ -122,33 +124,29 @@ export function SettingsOverlay({
             <span className="tr-settings-page-icon"><PageIcon name={current.icon} /></span>
             <div>
               <h2>{t(`settingsPanel.sections.${current.id}`)}</h2>
-              <p>{t(`settingsPanel.descriptions.${current.id}`)}</p>
+
             </div>
           </header>
           {current.id === "language" ? (
             <div className="tr-settings-card">
-              <h3>{t("settingsPanel.language")}</h3>
               <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.language")}</b><small>{t("settingsPanel.languageHint")}</small></div>
+                <div><b>{t("settingsPanel.language")}</b></div>
                 <LanguageSwitch />
               </div>
             </div>
           ) : current.id === "workspace" ? (
             <div className="tr-settings-card">
-              <h3>{t("settingsPanel.layout")}</h3>
               <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.layout")}</b><small>{t("settingsPanel.layoutHint")}</small></div>
+                <div><b>{t("settingsPanel.layout")}</b></div>
                 <button type="button" className="tr-toolbar-button" onClick={onResetLayout}>{t("resetLayout")}</button>
               </div>
             </div>
           ) : current.id === "server" ? (
             <div className="tr-settings-card">
-              <h3>{t("settingsPanel.sections.server")}</h3>
-              {serverInfo ? <pre className="tr-job-detail">{JSON.stringify(serverInfo, null, 2)}</pre> : <p>{t("loading")}</p>}
+              {serverInfo ? <ResultView value={serverInfo} /> : <p>{t("loading")}</p>}
             </div>
           ) : current.id === "profiles" ? (
             <div className="tr-settings-card">
-              <h3>{t("settingsPanel.sections.profiles")}</h3>
               {sectionData ? (
                 <div className="tr-doc-pages">
                   {((sectionData.profiles ?? sectionData.items ?? []) as Record<string, unknown>[]).map((profile, index) => {
@@ -157,11 +155,10 @@ export function SettingsOverlay({
                   })}
                 </div>
               ) : <p>{t("loading")}</p>}
-              {profileID ? <pre className="tr-job-detail">{profileData ? JSON.stringify(profileData, null, 2) : t("loading")}</pre> : null}
+              {profileID ? <ResultView value={profileData} /> : null}
             </div>
           ) : current.id === "docs" ? (
             <div className="tr-settings-card">
-              <h3>{t("settingsPanel.sections.docs")}</h3>
               {sectionData ? (
                 <div className="tr-doc-pages">
                   {((sectionData.pages ?? sectionData.items ?? []) as Record<string, unknown>[]).map((doc, index) => {
@@ -174,24 +171,21 @@ export function SettingsOverlay({
             </div>
           ) : ["controlDatabase", "federation", "devices", "quota", "updates", "manager", "profiles"].includes(current.id) ? (
             <div className="tr-settings-card">
-              <h3>{t(`settingsPanel.sections.${current.id}`)}</h3>
-              {sectionData ? <pre className="tr-job-detail">{JSON.stringify(sectionData, null, 2)}</pre> : <p>{t("loading")}</p>}
+              {sectionData ? <ResultView value={sectionData} /> : <p>{t("loading")}</p>}
             </div>
           ) : current.id === "account" ? (
             <div className="tr-settings-card">
-              <h3>{t("settingsPanel.sections.account")}</h3>
               <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.accountSession")}</b><small>{t("settingsPanel.accountHint")}</small></div>
+                <div><b>{t("settingsPanel.accountSession")}</b></div>
                 <span className="tr-settings-value">{session?.username || t("settingsPanel.notSignedIn")}</span>
               </div>
               <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.role")}</b><small>{t("settingsPanel.roleHint")}</small></div>
+                <div><b>{t("settingsPanel.role")}</b></div>
                 <span className="tr-settings-value">{session?.role || "—"}</span>
               </div>
             </div>
           ) : (
             <div className="tr-settings-card tr-settings-migrating">
-              <h3>{t(`settingsPanel.sections.${current.id}`)}</h3>
               <p>{t("settingsPanel.migrating")}</p>
             </div>
           )}

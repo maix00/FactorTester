@@ -16,6 +16,8 @@ deploy/docker/*
 !tools/**
 !sources/
 !sources/**
+!traderesearch_data/
+!traderesearch_data/**
 !scripts/
 !scripts/**
 !static/

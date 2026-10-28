@@ -44,6 +44,11 @@ LEAF_TEST_MODULES = {"calc", "catalog", "group", "backtest", "scripts", "release
 # Precise ownership mappings for modules that previously expanded to most of
 # the repository. Add the directly affected tests here when a domain changes.
 EXACT_PATH_TESTS = {
+    "tools/testers/settings/json_schema.py": ("tests/server/test_configuration_editor_schema.py",),
+    "server/manager/services/test_authoring.py": (
+        "tests/server/test_configuration_editor_schema.py",
+        "tests/server/test_strategy_library.py",
+    ),
     "vendor/nautilus_trader": ("tests/scripts/test_nautilus_extension_build.py",),
     "environment.yml": ("tests/scripts/test_nautilus_extension_build.py",),
     "scripts/test.sh": ("tests/scripts/test_nautilus_extension_build.py",),
@@ -109,16 +114,54 @@ EXACT_PATH_TESTS = {
     ),
     "server/services/nautilus_bridge/catalog.py": (
         "tests/server/test_nautilus_bridge_catalog.py",
+        "tests/server/test_nautilus_catalog_staging.py",
+    ),
+    "server/services/nautilus_bridge/catalog_staging.py": (
+        "tests/server/test_nautilus_catalog_staging.py",
+        "tests/server/test_nautilus_strategy_runspec.py",
+        "tests/server/test_nautilus_bridge_catalog.py",
+    ),
+    "tools/factors/expr/streaming/calendar_window.py": (
+        "tests/server/test_factor_calendar_window.py",
+        "tests/server/test_factor_session_rolling.py",
+        "tests/server/test_nautilus_catalog_staging.py",
     ),
     "tests/benchmarks/bench_nautilus_catalog_staging.py": (
         "tests/server/test_nautilus_bridge_catalog.py",
     ),
+    "tests/benchmarks/bench_strategy_catalog_runtime.py": (
+        "tests/server/test_nautilus_strategy_family_replay.py",
+        "tests/server/test_catalog_streaming_limits.py",
+    ),
     "server/services/nautilus_bridge/backtest_runner.py": (
+        "tests/server/test_catalog_streaming_limits.py",
         "tests/server/test_nautilus_bridge_backtest_runner.py",
         "tests/server/test_nautilus_bridge_reports.py",
+        "tests/server/test_nautilus_strategy_backtest.py",
+        "tests/server/test_nautilus_strategy_family_replay.py",
+    ),
+    "server/services/nautilus_bridge/nautilus_events.py": (
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+    ),
+    "tests/server/test_nautilus_events.py": (
+        "tests/server/test_nautilus_bridge_factor_stream.py",
     ),
     "server/services/nautilus_bridge/factor_stream.py": (
         "tests/server/test_nautilus_bridge_factor_stream.py",
+        "tests/server/test_nautilus_strategy_backtest.py",
+        "tests/server/test_nautilus_strategy_family_replay.py",
+        "tests/server/test_nautilus_strategy_runspec.py",
+    ),
+    "server/services/nautilus_bridge/strategy_families.py": (
+        "tests/server/test_nautilus_strategy_families.py",
+        "tests/server/test_nautilus_strategy_family_replay.py",
+    ),
+    "server/services/nautilus_bridge/strategy_backtest.py": (
+        "tests/server/test_catalog_streaming_limits.py",
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+        "tests/server/test_nautilus_strategy_backtest.py",
+        "tests/server/test_nautilus_strategy_family_replay.py",
+        "tests/server/test_nautilus_strategy_runspec.py",
     ),
     "server/services/nautilus_bridge/rule_transition.py": (
         "tests/server/test_nautilus_bridge_rule_transition.py",
@@ -221,7 +264,7 @@ EXACT_PATH_TESTS = {
         "tests/server/test_job_repository.py",
     ),
     "server/jobs/planning/daemon.py": (
-        "tests/server/test_job_planning_daemon.py",
+        "tests/server/test_job_dispatch_planning.py",
     ),
     "server/modules/single_factor_test/backtest_jobs.py": (
         "tests/server/test_research_job_lifecycle.py",
@@ -401,11 +444,178 @@ EXACT_PATH_TESTS = {
         "tests/data/test_factor_source_versions.py",
     ),
 }
+FACTOR_PLAN_TESTS = (
+    "tests/factors/test_bar_search.py",
+    "tests/factors/test_complex_match_rust.py",
+    "tests/factors/test_shared_timeline.py",
+    "tests/factors/test_panel_timeline.py",
+    "tests/factors/test_signal_alignment.py",
+    "tests/factors/test_groupby_scope.py",
+    "tests/factors/test_groupby_scope_derived_missing.py",
+    "tests/factors/test_groupby_scope_arg_extreme_edges.py",
+    "tests/server/test_factor_session_rolling.py",
+    "tests/factors/test_bar_counts.py",
+    "tests/factors/test_runtime_boundaries.py",
+    "tests/factors/test_rust_plan.py",
+    "tests/factors/test_alpha_factor_public_api.py",
+    "tests/factors/test_groupby_scope_streaming.py",
+    "tests/server/test_factor_calendar_window.py",
+    "tests/server/test_nautilus_bridge_factor_stream.py",
+)
+for _path in (
+    "tools/factors/alpha_plan.py",
+    "tools/factors/expr/rust_plan.py",
+    "tools/factors/expr/groupby_scope_eval.py",
+    "tools/factors/expr/timeline.py",
+    "vendor/py-alpha-lib/py-binding/python/alpha/factor/timeline.py",
+    "vendor/py-alpha-lib/py-binding/python/alpha/factor/plan.py",
+    "vendor/py-alpha-lib/py-binding/python/alpha/factor/scope.py",
+    "tools/factors/expr/rolling.py",
+    "tools/factors/expr/streaming/rust_incremental.py",
+    "tools/factors/expr/streaming/incremental.py",
+    "tools/factors/expr/streaming/__init__.py",
+    "tools/factors/expr/streaming/bar_search.py",
+    "vendor/py-alpha-lib/alpha-algo/src/algo/factor_plan.rs",
+    "vendor/py-alpha-lib/alpha-algo/src/algo/panel_plan.rs",
+    "vendor/py-alpha-lib/alpha-algo/src/algo/session_window.rs",
+    "vendor/py-alpha-lib/py-binding/src/lib.rs",
+    "native/nautilus_factor_bridge/src/lib.rs",
+    "native/nautilus_factor_bridge/src/plan.rs",
+    "native/nautilus_factor_bridge/src/boundary.rs",
+    "native/nautilus_factor_bridge/src/family.rs",
+    "native/nautilus_factor_bridge/src/runtime.rs",
+    "native/nautilus_factor_bridge/src/output.rs",
+    "native/factortester_nautilus_runtime/src/lib.rs",
+    "native/factortester_nautilus_runtime/Cargo.toml",
+    "native/factortester_nautilus_runtime/Cargo.lock",
+    "native/factortester_nautilus_runtime/pyproject.toml",
+    "native/factortester_nautilus_runtime/LICENSE",
+    "native/factortester_nautilus_runtime/README.md",
+    "vendor/py-alpha-lib/alpha-algo/src/algo/factors_ext_cross.rs",
+    "vendor/py-alpha-lib/alpha-algo/src/algo/factors_ext_rolling.rs",
+    "native/nautilus_factor_bridge/src/replay.rs",
+    "native/nautilus_factor_bridge/examples/catalog_replay.rs",
+    "tests/benchmarks/bench_native_factor_replay.py",
+    "native/nautilus_factor_bridge/tests/catalog_runtime.rs",
+    "native/nautilus_factor_bridge/Cargo.toml",
+    "native/nautilus_factor_bridge/Cargo.lock",
+    "vendor/py-alpha-lib/alpha-algo/examples/bench_panel_barrier.rs",
+    "vendor/py-alpha-lib/alpha-algo/examples/bench_window_memory.rs",
+):
+    EXACT_PATH_TESTS[_path] = FACTOR_PLAN_TESTS
+# Alpha is now a gitlink. Legacy paths remain mapped only for removal diffs.
+ALPHA_RUNTIME_TESTS = (*FACTOR_PLAN_TESTS,
+    "tests/scripts/test_nautilus_extension_build.py",
+    "tests/server/test_nautilus_strategy_family_replay.py")
+LATEX_QUERY_TESTS = (*FACTOR_PLAN_TESTS,
+    "tests/server/test_alpha_formula_preview.py",
+    "tests/scripts/test_factor_preview_latex_consistency.py",
+    "vendor/py-alpha-lib/py-binding/python/tests/test_factor_presentation.py",
+    "tests/factors/test_alpha_intermediate_queries.py",
+    "tests/factors/test_latex_operator_semantics.py",
+    "tests/factors/test_parameter_latex.py",
+    "tests/factors/test_intermediate_latex_name.py",
+    "tests/factors/test_factor_expr_contracts.py",
+    "tests/factors/test_factor_family_alias.py",
+    "tests/factors/test_factor_run_result.py",
+    "tests/factors/test_ic_batch_evaluation.py",
+    "tests/factors/test_ic_batch_release.py",
+    "tests/factors/test_test_result_lifecycle.py",
+    "tests/server/test_factor_series_nested_layers.py",
+    "tests/server/test_factor_evaluation_frozen_input.py",
+    "tests/server/test_nautilus_strategy_family_replay.py")
+ALPHA_RUNTIME_TESTS = (*ALPHA_RUNTIME_TESTS, *LATEX_QUERY_TESTS,
+    "vendor/py-alpha-lib/py-binding/python/tests/test_batch_signal_term.py",
+    "vendor/py-alpha-lib/py-binding/python/tests/test_batch_category_distance.py")
+for _path in (
+    "tools/factors/FactorFamily.py", "tools/factors/Factors.py",
+    "tools/factors/FactorRunResult.py", "tools/factors/FactorTester.py",
+    "tools/factors/factor_tester_tasks.py", "tools/factors/evaluation/batch.py",
+    "tools/factors/tester_calc/single_factor_test/ic.py",
+    "server/modules/single_factor_test/ic.py", "server/modules/single_factor_test/evaluation.py",
+    "tools/factors/expr/presentation.py", "tools/factors/expr/core.py",
+    "tools/factors/expr/bar_search.py", "tools/factors/expr/composite.py",
+    "tools/factors/expr/cross_sectional.py", "tools/factors/expr/groupby_scope.py",
+    "tools/factors/expr/leaf.py", "tools/factors/expr/lookback_scope.py",
+    "tools/factors/expr/match_refs.py", "tools/factors/expr/operands.py",
+    "tools/factors/expr/rolling.py", "tools/factors/expr/shift.py",
+    "tools/factors/expr/signal_align.py", "tools/factors/expr/term_structure.py",
+):
+    EXACT_PATH_TESTS[_path] = LATEX_QUERY_TESTS
+for _path in (
+    "server/modules/shared/factor_preview_latex.py", "server/modules/factors/formula.py",
+    "server/modules/factors/__init__.py", "server/manager/web/catalog/factor-detail-shared.js",
+    "server/manager/web/catalog/factor-editor.js", "tests/scripts/fixtures/factor_preview_latex_probe.js",
+):
+    EXACT_PATH_TESTS[_path] = ("tests/server/test_alpha_formula_preview.py",
+        "tests/scripts/test_factor_preview_latex_consistency.py")
+EXACT_PATH_TESTS["server/manager/http/job_proxy_routes.py"] = (
+    *EXACT_PATH_TESTS["server/manager/http/job_proxy_routes.py"],
+    "tests/server/test_alpha_formula_preview.py",
+)
+CLI_NAMING_TESTS = (
+    "tests/cli/test_traderesearch_naming.py", "tests/cli/test_entrypoint_bootstrap.py",
+    "tests/cli/test_multi_port_config.py", "tests/cli/test_http_session.py",
+    "tests/cli/test_manager_commands.py", "tests/cli/test_manager_cli_subprocess.py",
+    "tests/cli/test_manager_access.py", "tests/release/test_client_package_layout.py",
+    "tests/release/test_bundled_runtime_activation.py",
+)
+for _path in (
+    "tools/cli/app.py", "tools/cli/manager_app.py", "tools/cli/__init__.py",
+    "tools/cli/core/display.py", "tools/cli/http.py", "tools/cli/pyproject.toml",
+    "tools/cli/bootstrap/__init__.py", "tools/cli/manager/config.py",
+    "tools/cli/manager/commands.py", "tools/cli/manager/factortester_commands.py",
+    "tools/cli/commands/auth.py", "tools/cli/commands/agent.py", "tools/cli/commands/protocol.py",
+    "tools/cli/commands/client_release.py", "tools/cli/commands/research.py",
+    "tools/cli/release/materialize.py", "scripts/release/assets.py",
+):
+    EXACT_PATH_TESTS[_path] = CLI_NAMING_TESTS
+EXACT_PATH_TESTS["vendor/py-alpha-lib"] = ALPHA_RUNTIME_TESTS
+EXACT_PATH_TESTS["tools/factors/alpha_plan.py"] = (*FACTOR_PLAN_TESTS,"tests/server/test_nautilus_strategy_runspec.py")
+EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
+EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)
+EXACT_PATH_TESTS["tests/factors/test_bar_counts.py"] = ("tests/factors/test_bar_counts.py",)
+EXACT_PATH_TESTS["tests/factors/test_runtime_boundaries.py"] = ("tests/factors/test_runtime_boundaries.py",)
+EXACT_PATH_TESTS["tests/server/test_catalog_streaming_limits.py"] = ("tests/server/test_catalog_streaming_limits.py",)
+EXACT_PATH_TESTS["tests/factors/_scope_extrema_oracle.py"] = ("tests/factors/test_groupby_scope.py", "tests/factors/test_groupby_scope_arg_extreme_edges.py")
+EXACT_PATH_TESTS["tests/factors/rolling_benchmarks/extrema.py"] = ("tests/factors/test_groupby_scope_arg_extreme_edges.py",)
+EXACT_PATH_TESTS["tests/factors/test_shared_timeline.py"] = ("tests/factors/test_shared_timeline.py",)
+
+# Shared native factor execution: retain precise hook selection for new benches
+# (tests/benchmarks is intentionally not a catch-all test module).
+SHARED_STRATEGY_TESTS = (
+    "tests/server/test_nautilus_strategy_family_replay.py",
+    "tests/server/test_nautilus_strategy_runspec.py",
+    "tests/server/test_strategy_plan_freeze.py",
+    "tests/server/test_catalog_streaming_limits.py",
+)
+EXACT_PATH_TESTS["server/modules/single_factor_test/planning.py"] = (
+    *SHARED_STRATEGY_TESTS, "tests/server/test_job_dispatch_planning.py",
+)
+EXACT_PATH_TESTS["tests/benchmarks/bench_shared_strategy_long_replay.py"] = SHARED_STRATEGY_TESTS
+EXACT_PATH_TESTS["tests/benchmarks/verify_native_celery_job.py"] = (
+    *SHARED_STRATEGY_TESTS,"tests/server/test_job_dispatch_celery.py",
+    "tests/server/test_nautilus_job_executor.py",
+)
+
+EXACT_PATH_TESTS["tests/benchmarks/bench_public_batch_signal_term.py"] = (
+    "vendor/py-alpha-lib/py-binding/python/tests/test_batch_signal_term.py",
+    "tests/factors/test_alpha_factor_public_api.py",
+)
+for _path in ("tests/server/test_nautilus_strategy_family_replay.py",
+              "tests/server/test_nautilus_strategy_runspec.py", "tests/server/test_strategy_plan_freeze.py"):
+    EXACT_PATH_TESTS[_path] = (_path,)
+
 PREFIX_PATH_TESTS = {
+    "vendor/py-alpha-lib/": ALPHA_RUNTIME_TESTS,
+    "native/traderesearch_nautilus_runtime/": ALPHA_RUNTIME_TESTS,
+    "native/nautilus_factor_bridge/": ALPHA_RUNTIME_TESTS,
+    "web/app/": ("tests/release/test_configuration_editor_frontend.py",),
+    "static/vendor/web-app/": ("tests/release/test_configuration_editor_frontend.py",),
     "tools/testers/backtest/engines/factors/": (
         "tests/factors/test_factor_expr_incremental.py",
         "tests/factors/test_groupby_scope_derived_missing.py",
-        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope.py",
         "tests/factors/test_groupby_scope_streaming.py",
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
@@ -414,7 +624,7 @@ PREFIX_PATH_TESTS = {
     "tools/factors/expr/streaming/": (
         "tests/factors/test_factor_expr_incremental.py",
         "tests/factors/test_groupby_scope_derived_missing.py",
-        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope.py",
         "tests/factors/test_groupby_scope_streaming.py",
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
@@ -423,7 +633,7 @@ PREFIX_PATH_TESTS = {
     "server/services/versioning/": ("tests/server/test_versioning_revisions.py",),
 }
 FULL_PATHS = {
-    "AGENTS.md", "CONTEXT.md", "conftest.py", "environment.yml", "pytest.ini",
+    "AGENTS.md", "conftest.py", "environment.yml", "pytest.ini",
     "pyproject.toml", "setup.cfg", "requirements.txt", "scripts/test.sh",
     ".githooks/pre-commit", ".githooks/pre-push",
 }
@@ -565,6 +775,19 @@ def main() -> int:
     print(*targets, sep="\n")
     return 0
 
+
+EXACT_PATH_TESTS["tools/factors/expr/bar_search_eval.py"] = FACTOR_PLAN_TESTS
+EXACT_PATH_TESTS["tests/benchmarks/bench_complex_match.py"] = ("tests/factors/test_complex_match_rust.py", "tests/factors/test_bar_search.py")
+
+
+EXACT_PATH_TESTS["tests/benchmarks/freeze_paper_duration.py"] = ("tests/factors/test_alpha_intermediate_queries.py", "tests/server/test_factor_param_resolver.py", "tests/server/test_nautilus_strategy_runspec.py")
+
+FACTOR_WARMUP_TESTS = ("tests/server/test_nautilus_factor_warmup.py", "tests/server/test_nautilus_bridge_config.py", "tests/server/test_nautilus_strategy_family_replay.py", "tests/server/test_nautilus_strategy_runspec.py", "vendor/py-alpha-lib/py-binding/python/tests/test_factor_warmup.py")
+EXACT_PATH_TESTS["server/services/nautilus_bridge/warmup.py"] = FACTOR_WARMUP_TESTS
+EXACT_PATH_TESTS["server/services/nautilus_bridge/strategy_backtest.py"] = (*SHARED_STRATEGY_TESTS, *FACTOR_WARMUP_TESTS)
+EXACT_PATH_TESTS["vendor/py-alpha-lib"] = (*ALPHA_RUNTIME_TESTS, *FACTOR_WARMUP_TESTS)
+
+EXACT_PATH_TESTS["tests/benchmarks/verify_paper_factor_values.py"] = ("tests/server/test_factor_session_rolling.py", "tests/factors/test_complex_match_rust.py", "tests/factors/test_alpha_intermediate_queries.py", "vendor/py-alpha-lib/py-binding/python/tests/test_factor_warmup.py")
 
 if __name__ == "__main__":
     raise SystemExit(main())

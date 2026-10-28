@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from server.services.nautilus_bridge.native_configuration import NAUTILUS_BOOK_TYPES
-from tools.data.source_catalog import NautilusAdapterContract as AdapterContract
+from traderesearch_data.nautilus import NautilusAdapterContract as AdapterContract
 
 _NAUTILUS_BOOK_TYPES = frozenset(NAUTILUS_BOOK_TYPES)
 
@@ -51,6 +51,7 @@ class ResolvedSource:
     adapter: AdapterContract
     execution_provider: Any
     member: Any
+    bundle_related_members: tuple[str, ...] = ()
 
 
 def _items(value: Any) -> tuple[tuple[str, str], ...]:
@@ -109,7 +110,9 @@ class NautilusSourceRegistry:
 
     def __init__(
         self, declarations: Iterable[Any], adapters: Iterable[AdapterContract] = (),
+        bundle_related: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
+        self._bundle_related = dict(bundle_related or {})
         bindings: dict[str, AdapterContract] = {}
         for adapter in adapters:
             if not adapter.member_key or adapter.member_key in bindings:
@@ -221,6 +224,7 @@ class NautilusSourceRegistry:
             adapter=self._bindings[member_key],
             execution_provider=member.execution_provider,
             member=member,
+            bundle_related_members=self._bundle_related.get(str(member_key), ()),
         )
 
 
@@ -234,12 +238,18 @@ def from_server_sources(
     their adapters and register without enumerating contracts or importing
     price services.
     """
-    from sources.registry import load_all_sources
+    from sources.registry import installed_bundles, load_all_sources
     from tools.data.source_catalog import data_source_declarations
 
     load_all_sources()
     declarations = data_source_declarations()
     registered = {member.key for declaration in declarations for member in declaration.members}
+    bundle_related = {
+        member.id: tuple(member.related_members)
+        for bundle in installed_bundles()
+        for member in bundle.members
+    }
     return NautilusSourceRegistry(
         declarations, (adapter for adapter in adapters if adapter.member_key in registered),
+        bundle_related=bundle_related,
     )

@@ -14,7 +14,7 @@ from tools.cli.protocol import negotiate_protocol
 @click.group("protocol", invoke_without_command=True)
 @click.pass_context
 def protocol(ctx: click.Context) -> None:
-    """Inspect or negotiate the remote FactorTester protocol."""
+    """Inspect or negotiate the remote TradeResearch protocol."""
     if ctx.invoked_subcommand is None:
         ctx.invoke(negotiate)
 

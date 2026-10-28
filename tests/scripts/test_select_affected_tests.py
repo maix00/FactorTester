@@ -4,6 +4,18 @@ from pathlib import Path
 from scripts import select_affected_tests as selector
 
 
+def test_configuration_editor_selects_schema_and_real_frontend_checks():
+    assert selector.select({"tools/testers/settings/json_schema.py"}) == (
+        "SCOPED", ["tests/server/test_configuration_editor_schema.py"],
+    )
+    assert selector.select({"web/app/src/pages/test-configuration.tsx"}) == (
+        "SCOPED", ["tests/release/test_configuration_editor_frontend.py"],
+    )
+    assert selector.select({"static/vendor/web-app/configuration-code.js"}) == (
+        "SCOPED", ["tests/release/test_configuration_editor_frontend.py"],
+    )
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=repo, text=True).strip()
 
@@ -28,15 +40,34 @@ def test_shared_and_unclassified_paths_fail_closed():
         "SCOPED", ["tests/scripts/test_nautilus_extension_build.py"],
     )
     assert selector.select({"tools/parameters/base.py"}) == ("FULL", [])
+
+
+def test_factor_plan_changes_select_concrete_consumers_without_full_suite():
+    mode, targets = selector.select({"tools/factors/alpha_plan.py", "vendor/py-alpha-lib/alpha-algo/src/algo/panel_plan.rs"})
+    assert mode == "SCOPED"
+    assert set(targets) == set(selector.FACTOR_PLAN_TESTS) | {"tests/server/test_nautilus_strategy_runspec.py"}
     assert selector.select({"tools/cli/app.py", "mystery/new.py"}) == ("FULL", [])
 
 
 def test_docs_only_skips_and_deleted_test_falls_back_to_module():
     assert selector.select({"docs/adr/new.md"}) == ("SKIP", [])
+    assert selector.select({"CONTEXT.md", "docs/adr/new.md"}) == ("SKIP", [])
+    assert selector.select({"CONTEXT.md", "scripts/build_nautilus_extension.sh"}) == (
+        "SCOPED", ["tests/scripts/test_nautilus_extension_build.py"],
+    )
     assert selector.select({"tests/scripts/support.py"}) == ("SCOPED", ["tests/scripts"])
     assert selector.select({"tests/server/test_nonexistent_deleted.py"}) == (
         "SCOPED", ["tests/server"],
     )
+
+
+def test_alpha_gitlink_and_adapter_extraction_stay_scoped():
+    mode, targets = selector.select({"vendor/py-alpha-lib", ".gitmodules",
+        "vendor/py-alpha-lib/py-binding/tests/usage.py",
+        "native/nautilus_factor_bridge/examples/bench.rs",
+        "native/traderesearch_nautilus_runtime/Cargo.toml"})
+    assert mode == "SCOPED"
+    assert set(targets) == set(selector.ALPHA_RUNTIME_TESTS)
 
 
 def test_rename_considers_both_paths():
@@ -56,7 +87,7 @@ def test_js_only_change_has_no_python_target():
 def test_mixed_python_and_js_change_selects_both_runners():
     mode, targets = selector.select({"tools/cli/app.py", "tests/js/test_report_export.js"})
     assert mode == "SCOPED"
-    assert "tests/cli" in targets
+    assert set(selector.CLI_NAMING_TESTS).issubset(targets)
     assert "tests/js/test_report_export.js" in targets
     assert all((selector.ROOT / path).exists() for path in targets)
 
@@ -139,6 +170,7 @@ def test_nautilus_run_spec_and_source_ui_select_focused_tests():
         "tests/products/test_product_source_projection.py",
         "tests/scripts/test_nautilus_source_overlay.py",
         "tests/server/test_nautilus_preview_routes.py",
+        "tests/server/test_alpha_formula_preview.py",
     }
     assert all((selector.ROOT / path).is_file() for path in targets)
 
@@ -173,8 +205,13 @@ def test_nautilus_execution_bridge_selects_only_its_focused_tests():
         "tests/server/test_nautilus_bridge_historical_rule_events.py",
         "tests/server/test_nautilus_bridge_catalog.py",
         "tests/server/test_nautilus_bridge_backtest_runner.py",
+        "tests/server/test_nautilus_catalog_staging.py",
+        "tests/server/test_catalog_streaming_limits.py",
         "tests/server/test_nautilus_bridge_reports.py",
         "tests/server/test_nautilus_bridge_factor_stream.py",
+        "tests/server/test_nautilus_strategy_backtest.py",
+        "tests/server/test_nautilus_strategy_family_replay.py",
+        "tests/server/test_nautilus_strategy_runspec.py",
         "tests/server/test_nautilus_bridge_rule_transition.py",
         "tests/server/test_nautilus_bridge_historical_fees.py",
         "tests/server/test_nautilus_bridge_trading_fields.py",
@@ -186,7 +223,7 @@ def test_nautilus_execution_bridge_selects_only_its_focused_tests():
         "tests/server/test_group_research_run_module.py",
         "tests/server/test_nautilus_bridge_position_offsets.py",
         "tests/server/test_job_repository.py",
-        "tests/server/test_job_planning_daemon.py",
+        "tests/server/test_job_dispatch_planning.py",
     }
     assert all((selector.ROOT / path).is_file() for path in targets)
 
@@ -283,12 +320,12 @@ def test_factor_expr_streaming_changes_select_bounded_contract_tests():
     assert set(targets) == {
         "tests/factors/test_factor_expr_incremental.py",
         "tests/factors/test_groupby_scope_derived_missing.py",
-        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope.py",
         "tests/factors/test_groupby_scope_streaming.py",
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
         "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
-    }
+    } | set(selector.LATEX_QUERY_TESTS)
 
 
 def test_nautilus_fee_benchmark_edit_selects_fee_contract_tests():
@@ -359,3 +396,38 @@ def test_staged_and_push_ranges_are_separate(tmp_path, monkeypatch):
         "tools/cli/app.py"
     }
     assert selector.pushed_paths(f"refs/heads/feat {base} refs/heads/feat {base}\n") == set()
+
+
+def test_native_catalog_runtime_changes_keep_python_hook_scoped():
+    mode, targets = selector.select({"native/nautilus_factor_bridge/src/replay.rs",
+                                     "native/nautilus_factor_bridge/tests/catalog_runtime.rs",
+                                     "native/nautilus_factor_bridge/Cargo.toml",
+                                     "native/nautilus_factor_bridge/Cargo.lock"})
+    assert mode == "SCOPED"
+    assert set(targets) == set(selector.FACTOR_PLAN_TESTS)
+
+
+def test_latex_and_intermediate_migration_selects_shared_public_contracts():
+    mode,targets=selector.select({'tools/factors/expr/presentation.py',
+        'tools/factors/FactorRunResult.py','server/modules/single_factor_test/evaluation.py'})
+    assert mode=='SCOPED'
+    assert set(targets)==set(selector.LATEX_QUERY_TESTS)
+    assert 'vendor/py-alpha-lib/py-binding/python/tests/test_factor_presentation.py' in targets
+
+
+def test_cli_naming_migration_stays_scoped_to_install_config_help_contracts():
+    mode, targets = selector.select({"tools/cli/pyproject.toml", "tools/cli/http.py",
+        "tools/cli/bootstrap/__init__.py", "tools/cli/manager/config.py",
+        "tools/cli/release/materialize.py", "scripts/release/assets.py"})
+    assert mode == "SCOPED"
+    assert set(targets) == set(selector.CLI_NAMING_TESTS)
+
+
+def test_shared_factor_benchmarks_and_planning_remain_scoped():
+    for path in ("tests/benchmarks/bench_shared_strategy_long_replay.py",
+                 "tests/benchmarks/bench_public_batch_signal_term.py",
+                 "server/modules/single_factor_test/planning.py"):
+        mode, targets = selector.select({path})
+        assert mode == "SCOPED"
+        assert targets and all((selector.ROOT / target).is_file() for target in targets)
+        assert "tests/server" not in targets and "tests/factors" not in targets

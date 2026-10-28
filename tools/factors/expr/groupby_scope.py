@@ -23,9 +23,12 @@ from typing import Any, ClassVar, Optional, Sequence, Union
 
 import pandas as pd
 
+from alpha.factor.annotations import copy_annotation
+
 from .core import EvaluateContext, FactorExpr
 from .groupby_scope_eval import GROUPED_AGGREGATIONS, apply_grouped
 from .leaf import _to_expr
+from .window_semantics import DEFAULT_NAN_POLICY, NanPolicy, PartitionSemantics
 from .lookback_scope import BarCountScope, LookbackScope, SessionScope, TradingDayScope
 from .operands import OperandExpr
 
@@ -46,14 +49,6 @@ def _bound_value(expr: Optional[FactorExpr], ctx: EvaluateContext) -> Optional[i
     return int(value)
 
 
-def _scope_latex(scope: LookbackScope) -> str:
-    if isinstance(scope, TradingDayScope):
-        return r'\text{trading\_day}'
-    if isinstance(scope, SessionScope):
-        return r'\text{session}(' + str(scope.gap) + ')'
-    if isinstance(scope, BarCountScope):
-        return r'\text{bars}(K)'
-    return r'\text{scope}'
 
 
 class GroupByScopeExpr(FactorExpr):
@@ -61,9 +56,12 @@ class GroupByScopeExpr(FactorExpr):
 
     _AGG_OPS: ClassVar[frozenset[str]] = GROUPED_AGGREGATIONS
 
-    def __init__(self, scope: LookbackScope, data: FactorExpr) -> None:
+    def __init__(self, scope: LookbackScope, data: FactorExpr,
+                 min_periods: int | None = 1,
+                 nan_policy: NanPolicy = DEFAULT_NAN_POLICY) -> None:
         self.scope = scope
         self._data = data
+        self._semantics = PartitionSemantics(min_periods, nan_policy)
 
     @property
     def _operands(self) -> Sequence[FactorExpr]:
@@ -75,7 +73,16 @@ class GroupByScopeExpr(FactorExpr):
             type(self).__name__,
             type(scope).__name__,
             getattr(scope, 'gap', None),
+            self._semantics.min_periods,
+            self._semantics.nan_policy.value,
         )
+
+    def semantics(self, *, min_periods: int | None = 1,
+                  nan_policy: NanPolicy = DEFAULT_NAN_POLICY) -> 'GroupByScopeExpr':
+        result = GroupByScopeExpr(self.scope, self._data, min_periods, nan_policy)
+        result.trunc_start = self.trunc_start
+        result.trunc_end = self.trunc_end
+        return result
 
     def _make_grouped_op(self, agg: str, extra: Any = None) -> 'GroupByScopeOp':
         operands: list[FactorExpr] = [self._data]
@@ -84,7 +91,9 @@ class GroupByScopeExpr(FactorExpr):
         if self.trunc_start is not None or self.trunc_end is not None:
             operands.append(self.trunc_start if self.trunc_start is not None else _to_expr(0))
             operands.append(self.trunc_end if self.trunc_end is not None else _to_expr(0))
-        return GroupByScopeOp(agg, self.scope, *operands)
+        return GroupByScopeOp(agg, self.scope, *operands,
+                              min_periods=self._semantics.min_periods,
+                              nan_policy=self._semantics.nan_policy)
 
     # ── 聚合方法（与 rolling 同名，便于统一分发）──
 
@@ -120,7 +129,9 @@ class GroupByScopeExpr(FactorExpr):
 
     def truncate(self, start: Any, end: Any) -> 'GroupByScopeExpr':
         """Restrict the aggregation to positions ``[start, end]`` **of the partition**."""
-        result = GroupByScopeExpr(self.scope, self._data)
+        result = GroupByScopeExpr(self.scope, self._data,
+                                  self._semantics.min_periods,
+                                  self._semantics.nan_policy)
         result.trunc_start = _to_expr(start) if start is not None else None
         result.trunc_end = _to_expr(end) if end is not None else None
         return result
@@ -131,19 +142,6 @@ class GroupByScopeExpr(FactorExpr):
     def _get_alias(self) -> str:
         return 'groupby_scope'
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        scope = _scope_latex(self.scope)
-        start = self.trunc_start
-        end = self.trunc_end
-        if start is not None or end is not None:
-            left = start._to_latex(subst) if isinstance(start, FactorExpr) else str(start)
-            right = end._to_latex(subst) if isinstance(end, FactorExpr) else str(end)
-            return (r'\mathrm{R}^{' + scope
-                    + r',\mathrm{trunc}(' + left + ',' + right + ')}')
-        return r'\mathrm{R}^{' + scope + '}'
 
 
 class GroupByScopeOp(OperandExpr):
@@ -154,9 +152,13 @@ class GroupByScopeOp(OperandExpr):
     rest of the expression layer.
     """
 
-    def __init__(self, op: str, scope: LookbackScope, *operands: FactorExpr) -> None:
+    def __init__(self, op: str, scope: LookbackScope, *operands: FactorExpr,
+                 min_periods: int | None = 1,
+                 nan_policy: NanPolicy = DEFAULT_NAN_POLICY) -> None:
         self.op = op
         self.scope = scope
+        self.min_periods = min_periods
+        self.nan_policy = nan_policy
         super().__init__(op, *operands)
 
     def resolve(self, *args, **kwargs) -> "GroupByScopeOp":
@@ -167,7 +169,9 @@ class GroupByScopeOp(OperandExpr):
         ``GroupByScopeOp.__init__() missing 1 required positional argument: 'scope'``。
         """
         resolved_operands = [opnd.resolve(*args, **kwargs) for opnd in self.operands]
-        return type(self)(self.op, self.scope, *resolved_operands)
+        return copy_annotation(self,type(self)(self.op, self.scope, *resolved_operands,
+                          min_periods=self.min_periods,
+                          nan_policy=self.nan_policy))
 
     @property
     def _has_truncate(self) -> bool:
@@ -210,20 +214,9 @@ class GroupByScopeOp(OperandExpr):
         return (
             type(self).__name__, self.op, type(scope).__name__,
             str(getattr(scope, "gap", "")), getattr(scope, "count", None),
+            self.min_periods, self.nan_policy.value,
         )
 
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        scope = _scope_latex(self.scope)
-        start, end = self.trunc_start, self.trunc_end
-        if start is not None or end is not None:
-            left = start._to_latex(subst) if isinstance(start, FactorExpr) else str(start)
-            right = end._to_latex(subst) if isinstance(end, FactorExpr) else str(end)
-            return (r'\mathrm{R}^{' + scope
-                    + r',\mathrm{trunc}(' + left + ',' + right + ')}')
-        return r'\mathrm{R}^{' + scope + '}'
 
     def _allocate(self, *operands: FactorExpr) -> 'GroupByScopeOp':
         return type(self)(self.op, *operands)
@@ -246,4 +239,6 @@ class GroupByScopeOp(OperandExpr):
             quantile=quantile,
             trunc_start=_bound_value(self.trunc_start, ctx),
             trunc_end=_bound_value(self.trunc_end, ctx),
+            min_periods=self.min_periods if self.min_periods is not None else 1,
+            propagate_nan=self.nan_policy is NanPolicy.PROPAGATE,
         )

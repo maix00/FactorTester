@@ -90,6 +90,40 @@ def test_field_history_is_lazy_strict_historical_and_preserves_raw_mapping(monke
     }]
 
 
+def test_rule_provider_can_use_caller_owned_frame_without_store_reader(monkeypatch):
+    from tools.data import field_history
+
+    frame = field_history.load_historical_field_frame()
+    monkeypatch.setattr(
+        field_history, "load_historical_field_frame",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must use caller frame")),
+    )
+    provider = field_history.load_market_rule_field_provider(frame=frame)
+    assert provider.frame is not None
+
+
+def test_strict_rule_provider_is_cached_per_sqlite_revision(monkeypatch):
+    from tools.data import field_history
+    from sources.LocalCNFutures import CNFutures
+
+    calls = []
+    monkeypatch.setattr(CNFutures, "_rule_revision_for", lambda conn, path: (1, 1))
+    monkeypatch.setattr(
+        field_history, "load_market_rule_field_provider",
+        lambda **kwargs: (calls.append(kwargs), object())[-1],
+    )
+    CNFutures._clear_rule_provider_cache()
+    try:
+        first = CNFutures._strict_exchange_field_history()
+        assert CNFutures._strict_exchange_field_history() is first
+        assert len(calls) == 1
+        monkeypatch.setattr(CNFutures, "_rule_revision_for", lambda conn, path: (2, 2))
+        assert CNFutures._strict_exchange_field_history() is not first
+        assert len(calls) == 2
+    finally:
+        CNFutures._clear_rule_provider_cache()
+
+
 def test_new_server_source_is_projected_without_special_casing(monkeypatch):
     from tools.data.source_catalog import (
         DataSourceDeclaration,
@@ -118,3 +152,191 @@ def test_new_server_source_is_projected_without_special_casing(monkeypatch):
         # Existing registry has no unregister API; restore only this test key.
         from tools.data import source_catalog
         source_catalog._DECLARATIONS.pop("SyntheticForTest", None)
+
+
+def test_rule_revision_tracks_commits_and_database_path(monkeypatch, tmp_path):
+    import sqlite3
+    from tools.data import field_history, hub
+    from sources.LocalCNFutures import CNFutures
+
+    db = tmp_path / "rules.sqlite"
+    table = field_history.HISTORICAL_FIELD_TABLE
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        field_history.ensure_historical_field_schema(conn)
+        conn.execute(
+            f'INSERT INTO "{table}" (provider, source_key, instrument, instrument_type, '
+            "field_name, effective_trading_day, value, value_type, contract_codes) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("p", "s", "AU", "future", "PriceTick", "2025-01-01", "1", "number", "[]"),
+        )
+        conn.commit()
+
+    class FakeHub:
+        def get_store_path(self, key):
+            assert key == "openctp"
+            return db
+
+        def connect_store(self, key):
+            assert key == "openctp"
+            connection = sqlite3.connect(db)
+            connection.row_factory = sqlite3.Row
+            return connection
+
+    monkeypatch.setattr(hub.DataHub, "get_instance", classmethod(lambda cls: FakeHub()))
+    first = CNFutures._rule_store_revision()
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            f'INSERT INTO "{table}" (provider, source_key, instrument, instrument_type, '
+            "field_name, effective_trading_day, value, value_type, contract_codes) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("p", "s2", "AU", "future", "PriceTick", "2025-01-02", "2", "number", "[]"),
+        )
+        conn.commit()
+    second = CNFutures._rule_store_revision()
+    assert first is not None and second is not None
+    assert first[0] == db.resolve().as_posix()
+    assert first != second
+
+
+def test_strict_provider_loads_one_caller_owned_frame_per_revision(monkeypatch, tmp_path):
+    from tools.data import field_history, hub
+    from sources.LocalCNFutures import CNFutures
+
+    db = tmp_path / "rules.sqlite"
+
+    class FakeHub:
+        def get_store_path(self, key):
+            return db
+
+        def connect_store(self, key):
+            return _FakeConnection()
+
+    class _FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, *args):
+            return self
+
+        def rollback(self):
+            return None
+
+    frame = field_history.pd.DataFrame()
+    monkeypatch.setattr(hub.DataHub, "get_instance", classmethod(lambda cls: FakeHub()))
+    monkeypatch.setattr(CNFutures, "_rule_revision_for", lambda conn, path: (1, 1))
+    monkeypatch.setattr(field_history, "ensure_historical_field_schema", lambda conn: None)
+    monkeypatch.setattr(field_history, "load_historical_field_frame",
+                        lambda **kwargs: frame)
+    frames = []
+    sentinel = object()
+    monkeypatch.setattr(
+        field_history, "load_market_rule_field_provider",
+        lambda **kwargs: (frames.append(kwargs["frame"]), sentinel)[-1],
+    )
+    CNFutures._clear_rule_provider_cache()
+    try:
+        assert CNFutures._strict_exchange_field_history() is sentinel
+        assert CNFutures._strict_exchange_field_history() is sentinel
+        assert len(frames) == 1 and frames[0] is frame
+        monkeypatch.setattr(CNFutures, "_rule_revision_for", lambda conn, path: (2, 2))
+        assert CNFutures._strict_exchange_field_history() is sentinel
+        assert len(frames) == 2
+    finally:
+        CNFutures._clear_rule_provider_cache()
+
+
+def test_rule_revision_snapshot_distinguishes_old_and_new_connections(tmp_path):
+    import sqlite3
+    from pathlib import Path
+    from tools.data import field_history
+    from sources.LocalCNFutures.CNFutures import _rule_revision_for
+
+    db = tmp_path / "rules.sqlite"
+    table = field_history.HISTORICAL_FIELD_TABLE
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        field_history.ensure_historical_field_schema(conn)
+        conn.execute(
+            f'INSERT INTO "{table}" (provider, source_key, instrument, instrument_type, '
+            "field_name, effective_trading_day, value, value_type, contract_codes) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("p", "old", "AU", "future", "PriceTick", "2025-01-01", "1", "number", "[]"),
+        )
+        conn.commit()
+    old = sqlite3.connect(db)
+    old.row_factory = sqlite3.Row
+    old.execute("BEGIN")
+    old_revision = _rule_revision_for(old, Path(db))
+    with sqlite3.connect(db) as new:
+        new.execute(
+            f'INSERT INTO "{table}" (provider, source_key, instrument, instrument_type, '
+            "field_name, effective_trading_day, value, value_type, contract_codes) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("p", "new", "AU", "future", "PriceTick", "2025-01-02", "2", "number", "[]"),
+        )
+        new.commit()
+    new_revision = _rule_revision_for(sqlite3.connect(db), Path(db))
+    old.rollback()
+    old.close()
+    assert old_revision != new_revision
+
+
+def test_strict_provider_loading_is_single_flight(monkeypatch, tmp_path):
+    import threading
+    import time
+    from tools.data import field_history, hub
+    from sources.LocalCNFutures import CNFutures
+
+    class FakeConnection:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def execute(self, *args): return self
+        def rollback(self): return None
+
+    class FakeHub:
+        def get_store_path(self, key): return tmp_path / "rules.sqlite"
+        def connect_store(self, key): return FakeConnection()
+
+    monkeypatch.setattr(hub.DataHub, "get_instance", classmethod(lambda cls: FakeHub()))
+    monkeypatch.setattr(CNFutures, "_rule_revision_for", lambda conn, path: (1,))
+    monkeypatch.setattr(field_history, "ensure_historical_field_schema", lambda conn: None)
+    monkeypatch.setattr(field_history, "load_historical_field_frame", lambda **kwargs: object())
+    calls = []
+    sentinel = object()
+    def load(**kwargs):
+        calls.append(1)
+        time.sleep(0.05)
+        return sentinel
+    monkeypatch.setattr(field_history, "load_market_rule_field_provider", load)
+    CNFutures._clear_rule_provider_cache()
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(CNFutures._strict_exchange_field_history())) for _ in range(2)]
+    try:
+        for thread in threads: thread.start()
+        for thread in threads: thread.join()
+        assert calls == [1]
+        assert results == [sentinel, sentinel]
+    finally:
+        CNFutures._clear_rule_provider_cache()
+
+
+def test_rule_revision_query_uses_primary_key_not_history_scan(tmp_path):
+    import sqlite3
+    from tools.data import field_history
+
+    db = tmp_path / "rules.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        field_history.ensure_historical_field_schema(conn)
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN SELECT revision FROM historical_field_revision WHERE id = 1"
+        ).fetchall()
+    detail = " ".join(str(row["detail"]) for row in plan)
+    assert "historical_field_values" not in detail
+    assert "SEARCH" in detail.upper()

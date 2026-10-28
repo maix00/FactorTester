@@ -1,5 +1,15 @@
 name: factortester-job-dispatch
 
+x-shared-input-environment: &shared-input-environment
+  FACTORTESTER_SERVER_ID: ${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}
+  TR_DATA_HOST_ROLE: server
+  TR_EXECUTION_NODE_ID: ${TR_EXECUTION_NODE_ID:?set stable execution node identity}
+  TR_DATA_DEVICE_REF: ${TR_SHARED_STORAGE_ID:?set shared kernel and storage domain identity}
+  TR_SHARED_DATA_CACHE_ROOT: /state/shared-columnar
+  TR_SHARED_DATA_CACHE_BYTES: ${TR_SHARED_DATA_CACHE_BYTES:-536870912}
+  TR_SHARED_DATA_ENTRY_BYTES: ${TR_SHARED_DATA_ENTRY_BYTES:-67108864}
+  TR_DATA_QUERY_CONCURRENCY: ${TR_DATA_QUERY_CONCURRENCY:-4}
+
 x-worker: &worker
   image: factortester-job-worker:local
   build:
@@ -12,6 +22,7 @@ x-worker: &worker
     rabbitmq:
       condition: service_healthy
   environment:
+    <<: *shared-input-environment
     FACTORTESTER_BROKER_URL: amqp://factortester:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672//
     FACTORTESTER_JOB_QUEUE: factortester.jobs
     FACTORTESTER_JOB_DB: ${FACTORTESTER_JOB_DB:?set FACTORTESTER_JOB_DB inside the container}
@@ -61,6 +72,7 @@ services:
       rabbitmq:
         condition: service_healthy
     environment:
+      <<: *shared-input-environment
       FACTORTESTER_BROKER_URL: amqp://factortester:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672//
       FACTORTESTER_JOB_QUEUE: factortester.jobs
       FACTORTESTER_JOB_DB: ${FACTORTESTER_JOB_DB:?set FACTORTESTER_JOB_DB inside the container}
@@ -80,6 +92,7 @@ services:
   worker-8000:
     <<: *worker
     environment:
+      <<: *shared-input-environment
       FACTORTESTER_BROKER_URL: amqp://factortester:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672//
       FACTORTESTER_JOB_QUEUE: factortester.jobs
       FACTORTESTER_JOB_DB: ${FACTORTESTER_JOB_DB:?set FACTORTESTER_JOB_DB inside the container}
@@ -91,6 +104,7 @@ services:
   worker-8001:
     <<: *worker
     environment:
+      <<: *shared-input-environment
       FACTORTESTER_BROKER_URL: amqp://factortester:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672//
       FACTORTESTER_JOB_QUEUE: factortester.jobs
       FACTORTESTER_JOB_DB: ${FACTORTESTER_JOB_DB:?set FACTORTESTER_JOB_DB inside the container}

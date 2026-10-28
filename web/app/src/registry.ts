@@ -7,6 +7,7 @@ export interface PageDefinition {
   scope: PageScope;
   mobileTab?: string;
   icon?: string;
+  sidebarVisible?: boolean;
 }
 
 const pages = new Map<string, PageDefinition>();
@@ -37,10 +38,15 @@ export function pagesForScope(scope: "desktop" | "mobile"): PageDefinition[] {
 
 export const BUILTIN_PAGES: PageDefinition[] = [
   { id: "research", route: "/research?section=researches", title: "研究", scope: "both", mobileTab: "research", icon: "research" },
-  { id: "jobs", route: "/jobs?section=types", title: "运行", scope: "both", mobileTab: "runs", icon: "runs" },
-  { id: "trading", route: "/backtest", title: "交易", scope: "both", mobileTab: "trading", icon: "trading" },
-  { id: "workspace", route: "/research?section=researches", title: "工作区", scope: "mobile", mobileTab: "workspace", icon: "workspace" },
-  { id: "settings", route: "/settings", title: "设置", scope: "mobile", mobileTab: "settings", icon: "account" },
-  { id: "catalog", route: "/products", title: "目录", scope: "desktop", icon: "catalog" },
-  { id: "account", route: "/settings", title: "账户", scope: "desktop", icon: "account" },
+  { id: "configuration", route: "/backtest?view=configuration", title: "测试", scope: "both", mobileTab: "tests", icon: "settings" },
+  { id: "jobs", route: "/jobs?section=types", title: "任务队列", scope: "both", icon: "runs" },
+  { id: "trading", route: "/trading", title: "交易台", scope: "both", mobileTab: "trading", icon: "trading" },
+  { id: "products", route: "/products", title: "产品库", scope: "both", icon: "catalog" },
+  { id: "factors", route: "/factors", title: "因子库", scope: "both", icon: "factor" },
+  { id: "strategies", route: "/strategies?scope=public", title: "策略库", scope: "both", icon: "strategy" },
+  { id: "more", route: "/app?view=more", title: "更多功能", scope: "mobile", mobileTab: "more", icon: "workspace", sidebarVisible: false },
+  { id: "settings", route: "/settings/account", title: "设置", scope: "both", icon: "settings", sidebarVisible: false },
+  { id: "source-detail", route: "/products/sources/detail", title: "数据源族", scope: "both", icon: "catalog", sidebarVisible: false },
+  { id: "product-detail", route: "/products/product", title: "产品详情", scope: "both", icon: "catalog", sidebarVisible: false },
+  { id: "job-detail", route: "/jobs", title: "任务详情", scope: "both", icon: "runs", sidebarVisible: false },
 ];

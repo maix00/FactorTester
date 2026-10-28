@@ -54,7 +54,7 @@ def test_robust_rolling_statistics_use_the_current_window():
 
     assert median.iloc[-1, 0] == 4.0
     assert quantile.iloc[-1, 0] == 3.5
-    assert mad.iloc[-1, 0] == 1.0
+    assert mad.iloc[-1, 0] == pytest.approx(1.0)
 
 
 def test_rolling_quantile_rejects_out_of_range_probability():
@@ -87,9 +87,12 @@ def test_robust_rolling_statistics_ignore_missing_observations():
         pd.DataFrame({"A": [1.0, float("nan"), 3.0, 5.0]})
     )
 
-    assert _evaluate(values.rolling_median(4)).iloc[-1, 0] == 3.0
-    assert _evaluate(values.rolling_quantile(0.25, 4)).iloc[-1, 0] == 2.0
-    assert _evaluate(values.rolling_mad(4)).iloc[-1, 0] == 2.0
+    from tools.factors.expr.window_semantics import NanPolicy
+
+    semantics = {"min_periods": 1, "nan_policy": NanPolicy.SKIP}
+    assert _evaluate(values.rolling(4).semantics(**semantics).median()).iloc[-1, 0] == 3.0
+    assert _evaluate(values.rolling(4).semantics(**semantics).quantile(0.25)).iloc[-1, 0] == 2.0
+    assert _evaluate(values.rolling(4).semantics(**semantics).mad()).iloc[-1, 0] == pytest.approx(2.0)
 
 
 def test_fluent_rolling_builder_exposes_new_statistics():

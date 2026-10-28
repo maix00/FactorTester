@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "bundle_id": "Local",
+  "version": "1",
+  "label": "服务器本地历史数据",
+  "provisioner": "platform",
+  "execution_location": "server",
+  "entrypoints": [
+    "sources.Local.data_source_bundle",
+    "sources.LocalCNFutures.CNFutures",
+    "sources.LocalCNFutures.artifacts"
+  ],
+  "members": [
+    {
+      "id": "LocalCNFuturesMIN1",
+      "kind": "market_data",
+      "data_type": "bar",
+      "frequency": "MIN1",
+      "related_members": [
+        "FieldHistory:market_rules:exchange"
+      ],
+      "integrations": {},
+      "update_policy": {
+        "mode": "mutable_history",
+        "revision_policy": "unversioned",
+        "max_staleness_seconds": 0,
+        "replay_policy": "not_declared"
+      }
+    },
+    {
+      "id": "LocalCNFuturesDAY1",
+      "kind": "market_data",
+      "data_type": "bar",
+      "frequency": "DAY1",
+      "related_members": [
+        "FieldHistory:market_rules:exchange"
+      ],
+      "integrations": {},
+      "update_policy": {
+        "mode": "mutable_history",
+        "revision_policy": "unversioned",
+        "max_staleness_seconds": 0,
+        "replay_policy": "not_declared"
+      }
+    },
+    {
+      "id": "LocalCNFuturesContractMIN1",
+      "kind": "market_data",
+      "data_type": "bar",
+      "frequency": "MIN1",
+      "related_members": [
+        "FieldHistory:market_rules:exchange"
+      ],
+      "integrations": {
+        "nautilus_catalog": "sources.LocalCNFutures.nautilus_catalog:stage_catalogs"
+      },
+      "update_policy": {
+        "mode": "mutable_history",
+        "revision_policy": "unversioned",
+        "max_staleness_seconds": 0,
+        "replay_policy": "not_declared"
+      }
+    },
+    {
+      "id": "LocalCNFuturesContractDAY1",
+      "kind": "market_data",
+      "data_type": "bar",
+      "frequency": "DAY1",
+      "related_members": [
+        "FieldHistory:market_rules:exchange"
+      ],
+      "integrations": {
+        "nautilus_catalog": "sources.LocalCNFutures.nautilus_catalog:stage_catalogs"
+      },
+      "update_policy": {
+        "mode": "mutable_history",
+        "revision_policy": "unversioned",
+        "max_staleness_seconds": 0,
+        "replay_policy": "not_declared"
+      }
+    },
+    {
+      "id": "FieldHistory:market_rules:exchange",
+      "kind": "historical_rules",
+      "data_type": "trading_rule",
+      "frequency": null,
+      "related_members": [],
+      "integrations": {},
+      "update_policy": {
+        "mode": "mutable_history",
+        "revision_policy": "unversioned",
+        "max_staleness_seconds": 0,
+        "replay_policy": "not_declared"
+      }
+    }
+  ],
+  "product_bindings": []
+}

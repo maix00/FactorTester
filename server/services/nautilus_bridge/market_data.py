@@ -197,7 +197,10 @@ def iter_minute_bars(
     previous_time: int | None = None
     previous_uid: str | None = None
     row_number = 0
-    for batch in reader.iter_batches(batch_size=batch_size, columns=sorted(required)):
+    from traderesearch_data.shared_cache import host_input_cache
+    for batch in host_input_cache().iter_parquet_batches(
+        source, batch_size=batch_size, columns=sorted(required),
+    ):
         for row in batch.to_pylist():
             row_number += 1
             clock = minute_clock(row["trade_time"], int(row["trade_timestamp"]), raw_unit=raw_unit)
@@ -286,7 +289,8 @@ def iter_daily_bars(
                 raise ValueError(f"out-of-order or duplicate daily bar for {uid}")
             previous_by_uid[uid] = clock.interval_end_ns
             yield MarketBar(
-                contract_uid=uid, instrument_code=str(row["CONTRACT"] or ""),
+                contract_uid=uid,
+                instrument_code=str(row["CONTRACT"] or "").split(".", 1)[0],
                 trading_day=day, clock=clock,
                 open=_decimal(row["OPEN"], "OPEN"),
                 high=_decimal(row["HIGH"], "HIGH"),
@@ -531,6 +535,8 @@ class FuturesContractSpec:
     margin_maint: Decimal
     provenance: str
     resolved_source: object
+    min_quantity: Decimal | None = None
+    max_quantity: Decimal | None = None
 
     def __post_init__(self) -> None:
         if (not self.provenance or not self.instrument_code or not self.venue
@@ -546,6 +552,16 @@ class FuturesContractSpec:
             raise ValueError("invalid contract lifecycle")
         if self.margin_init < 0 or self.margin_maint < 0:
             raise ValueError("margin ratios must be non-negative")
+        for name in ("min_quantity", "max_quantity"):
+            quantity = getattr(self, name)
+            if quantity is not None and (
+                not isinstance(quantity, Decimal) or not quantity.is_finite()
+                or quantity <= 0 or quantity != quantity.to_integral_value()
+            ):
+                raise ValueError(f"{name} must be a positive whole-contract quantity")
+        if (self.min_quantity is not None and self.max_quantity is not None
+                and self.min_quantity > self.max_quantity):
+            raise ValueError("min_quantity exceeds max_quantity")
         # Keep source authority explicit.  A bare caller-supplied asset class
         # would let a futures contract silently inherit the wrong semantics.
         from server.services.nautilus_bridge.source_registry import ResolvedSource
@@ -603,4 +619,8 @@ def to_nautilus_instrument(spec: FuturesContractSpec):
         ts_event=spec.activation_ns, ts_init=spec.activation_ns,
         margin_init=spec.margin_init, margin_maint=spec.margin_maint,
         exchange=spec.venue,
+        min_quantity=(Quantity.from_str(str(spec.min_quantity.to_integral_value()))
+                      if spec.min_quantity is not None else None),
+        max_quantity=(Quantity.from_str(str(spec.max_quantity.to_integral_value()))
+                      if spec.max_quantity is not None else None),
     )

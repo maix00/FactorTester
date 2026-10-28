@@ -153,5 +153,27 @@ const descriptor = {
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sharedOverlayCalls[1].kind, "data_source_providers");
 
+  const unknownContext = {
+    content: new Element("main"), toolbar: new Element("div"),
+    t: value => value, activeNav() {}, setHeading() {},
+    showNotice: message => { throw new Error(message); },
+  };
+  sourceHelpers.request = async () => ({sources: [{
+    ...descriptor,
+    availability: {status: "not_probed"},
+  }]});
+  window.FTProductSources.list(unknownContext, sourceHelpers);
+  await new Promise(resolve => setImmediate(resolve));
+  let unknownTable = null;
+  const findUnknownTable = node => {
+    if (node?.className === "table-shell") unknownTable = node;
+    for (const child of node?.children || []) findUnknownTable(child);
+  };
+  findUnknownTable(unknownContext.content);
+  assert.deepEqual(
+    unknownTable.rows[0][2].children.map(item => item.textContent),
+    ["尚未探测", "产品数量未报告"],
+  );
+
   console.log("nautilus source overlay contract passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

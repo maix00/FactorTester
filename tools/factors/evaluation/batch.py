@@ -208,6 +208,7 @@ def evaluate_factors(
     factors: Sequence[Any], *, products: Sequence[Any], freq: DataFreq | str,
     start_dt: Any, end_dt: Any, warmup_window: Any = None,
     prepared: PreparedEvaluationBatch | None = None,
+    intermediates=(),
 ) -> EvaluationBatchContext:
     """Evaluate roots serially with shared intermediates under one context.
 
@@ -241,15 +242,48 @@ def evaluate_factors(
         preloaded = _preload(
             factors, eligible, resolved_freq, start_dt, end_dt, warmup_window,
         )
+    shared_keys = set(shared_cache_keys_for_factors(factors))
+    shared_cache: dict[tuple, pd.DataFrame] = {}
+    try:
+        from tools.factors.expr.core import EvaluateContext
+        from tools.factors.expr.rust_plan import evaluate_rust_plan
+
+        plan_expressions = []
+        from alpha.factor.results import IntermediateIndex
+        from tools.factors.expr.leaf import ConstExpr
+        for factor in factors:
+            plan_expressions.extend([factor._expr,factor._func_expr])
+            index=IntermediateIndex(factor._expr) if intermediates else None
+            for key in index.select(intermediates) if index is not None else ():
+                node=index.nodes[key]
+                if isinstance(node,ConstExpr):
+                    shared_cache[key]=node.value
+                else:
+                    plan_expressions.append(node)
+        plan_context = EvaluateContext(
+            products=prepared.products, freq=resolved_freq,
+            preloaded=preloaded, cache={},
+            start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window,
+            panel_timeline=prepared.panel_timeline,
+            shared_cache_keys=frozenset(shared_keys),
+        )
+        planned = evaluate_rust_plan(plan_expressions, plan_context)
+    except Exception:
+        planned = None
+    if planned is not None:
+        for expression, frame in zip(plan_expressions, planned, strict=True):
+            shared_cache[expression._structural_key()] = frame
+            shared_keys.add(expression._structural_key())
     context = EvaluationBatchContext(
         products=prepared.products, freq=resolved_freq, start_dt=start_dt, end_dt=end_dt,
         warmup_window=warmup_window, preloaded=preloaded,
         panel_timeline=prepared.panel_timeline,
-        shared_cache={}, shared_cache_keys=shared_cache_keys_for_factors(factors),
+        shared_cache=shared_cache, shared_cache_keys=frozenset(shared_keys),
     )
     for factor in factors:
         factor.evaluate(
             eligible, freq=resolved_freq, start_dt=start_dt, end_dt=end_dt,
             warmup_window=warmup_window, _evaluation_context=context,
+            **({"intermediates":intermediates} if intermediates else {}),
         )
     return context

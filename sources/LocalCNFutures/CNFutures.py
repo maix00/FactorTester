@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
@@ -194,6 +195,10 @@ def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str
 
 class CNFuturesContract(FuturesContract):
     """中国期货单个合约（固定计价货币 CNY，时区 Asia/Shanghai）。"""
+    def get_instrument_fields(self) -> dict[str, Any]:
+        from .instrument_fields import instrument_fields
+        return instrument_fields(self)
+
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY', timezone='Asia/Shanghai')
         self.DAY1 = _CNFuturesContractTermStructureView(
@@ -272,6 +277,10 @@ class CNFutures(Futures):
     """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
 
     _is_cn_futures_main_product = True
+
+    def get_instrument_fields(self) -> dict[str, Any]:
+        from .instrument_fields import instrument_fields
+        return instrument_fields(self)
 
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  roller_info_path: Optional[str] = None,
@@ -478,12 +487,71 @@ def _asset_class_for_local_future(product: Product) -> str | None:
     return None
 
 
-def _strict_exchange_field_history():
-    from tools.data.field_history import load_market_rule_field_provider
+_RULE_PROVIDER_CACHE: tuple[object, tuple[object, ...], object] | None = None
+_RULE_PROVIDER_LOCK = Lock()
 
-    return load_market_rule_field_provider(
-        include_openctp_latest=False, transaction_fee_source='exchange',
+
+def _rule_revision_for(connection, path: Path) -> tuple[object, ...]:
+    row = connection.execute(
+        "SELECT revision FROM historical_field_revision WHERE id = 1"
+    ).fetchone()
+    if row is None:
+        raise ValueError("rule store has no revision row")
+    return path.as_posix(), int(row[0])
+
+
+def _rule_store_revision() -> tuple[object, ...] | None:
+    """Return the current path/WAL/row revision without opening a caller transaction."""
+    try:
+        from tools.data.hub import DataHub
+        hub = DataHub.get_instance()
+        path = hub.get_store_path('openctp').resolve()
+        with hub.connect_store('openctp') as conn:
+            return _rule_revision_for(conn, path)
+    except Exception:
+        return None
+
+
+def _clear_rule_provider_cache() -> None:
+    global _RULE_PROVIDER_CACHE
+    with _RULE_PROVIDER_LOCK:
+        _RULE_PROVIDER_CACHE = None
+
+
+def _strict_exchange_field_history():
+    """Load strict rules once per committed store revision, in one snapshot."""
+    global _RULE_PROVIDER_CACHE
+    from tools.data.field_history import (
+        ensure_historical_field_schema, load_historical_field_frame,
+        load_market_rule_field_provider,
     )
+    from tools.data.hub import DataHub
+
+    loader = load_market_rule_field_provider
+    try:
+        hub = DataHub.get_instance()
+        path = hub.get_store_path('openctp').resolve()
+    except Exception:
+        return loader(include_openctp_latest=False, transaction_fee_source='exchange')
+    with _RULE_PROVIDER_LOCK:
+        with hub.connect_store('openctp') as conn:
+            ensure_historical_field_schema(conn)
+            conn.execute("SAVEPOINT rule_provider_snapshot")
+            try:
+                revision = _rule_revision_for(conn, path)
+                cached = _RULE_PROVIDER_CACHE
+                if cached is not None and cached[0] is loader and cached[1] == revision:
+                    return cached[2]
+                frame = load_historical_field_frame(connection=conn, ensure_schema=False)
+                provider = loader(
+                    frame=frame, include_openctp_latest=False,
+                    transaction_fee_source='exchange',
+                )
+                _RULE_PROVIDER_CACHE = (loader, revision, provider)
+                return provider
+            finally:
+                conn.execute("ROLLBACK TO rule_provider_snapshot")
+                conn.execute("RELEASE rule_provider_snapshot")
 
 
 def _declare_source_semantics(
@@ -496,6 +564,9 @@ def _declare_source_semantics(
     source.bar_time_semantics = bar_time_semantics
     source.raw_timestamp_unit = raw_timestamp_unit
     source.trading_field_provider_ref = 'FieldHistory:market_rules:exchange'
+    source.trading_field_related_members = ('FieldHistory:market_rules:exchange',)
+    source.trading_field_latest_provider = 'OpenCTP:latest'
+    source.trading_field_latest_source_prefix = 'openctp/latest_snapshot'
     source.trading_field_effective_clock = 'effective_timestamp_or_trading_day'
     source.trading_field_provider_loader = _strict_exchange_field_history
     return source

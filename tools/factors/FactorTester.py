@@ -175,11 +175,12 @@ class FactorTester(UniqueNameObject):
 
     def calc_factor(
         self, factors: Any, parallel: bool = True, max_workers: int = 4,
-        warmup_window: Any = None,
+        warmup_window: Any = None, intermediates=(),
     ) -> None:
         _tasks.calc_factor(
             self.state, factors, parallel=parallel, max_workers=max_workers,
             warmup_window=warmup_window,
+            **({"intermediates":intermediates} if intermediates else {}),
         )
 
     def resolve_factor(self, factor_alias: str) -> Any:

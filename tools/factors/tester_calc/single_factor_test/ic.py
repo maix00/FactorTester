@@ -71,7 +71,7 @@ def run_ic_for_factor(
         # lightweight callers.  Positive support is always passed through.
         if warmup_seconds is not None and warmup_seconds > 0:
             evaluate_kwargs["warmup_window"] = pd.Timedelta(seconds=warmup_seconds)
-        ic_factor.evaluate(tester.products, **evaluate_kwargs)
+        ic_factor.evaluate(tester.products, intermediates=("FE","RE"), **evaluate_kwargs)
         return collect_ic_result(
             tester,
             ic_factor,
@@ -212,8 +212,10 @@ def collect_ic_result(
         ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.end_date)
         ic_series = cast(pd.Series, ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)])
 
-    re_table = ic_factor.get_intermediate("RE")
-    fe_table = ic_factor.get_intermediate("FE")
+    store=getattr(tester.results.get(ic_factor),'intermediate_results',None) if hasattr(tester,'results') else None
+    lookup=store.get if store is not None else ic_factor.get_intermediate
+    re_table = lookup("RE")
+    fe_table = lookup("FE")
     stats = ic_stats(
         ic_series,
         expected_sign=expected_sign,

@@ -55,4 +55,10 @@ def require_nautilus():
             f"found {nautilus_trader.__version__}. Rebuild the vendored extension.",
             pytrace=False,
         )
+    from nautilus_trader.backtest import BacktestEngine
+    if not callable(getattr(BacktestEngine, "run_catalogs", None)):
+        pytest.fail("The native extension lacks configured-engine Catalog replay; rebuild the vendored extension.",
+                    pytrace=False)
+    if not callable(getattr(native, "attach_factor_family", None)):
+        pytest.fail("The extension lacks the shared Rust FactorActor runtime; rebuild the composed runtime.", pytrace=False)
     return nautilus_trader

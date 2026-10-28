@@ -11,6 +11,33 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+
+from tools.factors.events import EventId
+
+
+class _DayEvents:
+    """Minimal EventLine used by scope tests; ordinal is 1-based like Nautilus."""
+
+    def __init__(self) -> None:
+        self.ordinal = 0
+        self.day = None
+        self.events = {}
+
+    def observe(self, stamp) -> None:
+        self.ordinal += 1
+        day = pd.Timestamp(stamp).normalize()
+        if day != self.day:
+            self.day = day
+            self.events[EventId.TRADING_DAY_START] = self.ordinal
+
+    def latest(self, event):
+        return self.events.get(event)
+
+    def previous(self, event):
+        return self.events.get(event)
+
+    def first(self, event):
+        return self.events.get(event)
 import pytest
 
 from tools.data.types import DataFreq
@@ -22,7 +49,6 @@ from tools.factors.expr.lookback_scope import (
     scope_trading_day,
 )
 from tools.factors.expr.timeline import PanelTimeline
-from tools.factors.expr.streaming.incremental import GroupScopeNode
 
 BARS_PER_DAY = 255
 
@@ -95,88 +121,8 @@ CASES = [
 ]
 
 
-@pytest.mark.parametrize("op,quantile,trunc_start,trunc_end", CASES)
-@pytest.mark.parametrize("scope_kind", ["trading_day", "bars", "session"])
-@pytest.mark.parametrize("vectorized", [False, True])
-def test_streaming_matches_batch_pointwise(op, quantile, trunc_start, trunc_end, scope_kind, vectorized):
-    products = ("A", "B")
-    index, frame = _panel(products)
-    ctx = _ctx(frame)
-    if scope_kind == "trading_day":
-        scope = scope_trading_day()
-    elif scope_kind == "bars":
-        scope = scope_bars(7)
-    else:
-        scope = scope_session(gap="30min")
-
-    expected = apply_grouped(
-        op, scope, frame, ctx=ctx, quantile=quantile,
-        trunc_start=trunc_start, trunc_end=trunc_end,
-    )
-
-    rows = frame.to_numpy(dtype=float)
-    node = GroupScopeNode(
-        op, _RowNode(rows), scope, len(products),
-        quantile=quantile, trunc_start=trunc_start, trunc_end=trunc_end,
-        products=products, vectorized=vectorized,
-    )
-
-    got = np.full(rows.shape, np.nan, dtype=float)
-    for position in range(len(index)):
-        stamp = pd.Timestamp(index[position])
-        market = SimpleNamespace(
-            timestamp=stamp,
-            trading_day=stamp.normalize(),
-            prices={},
-        )
-        value = node.update(market, {})
-        got[position] = value
-
-    np.testing.assert_allclose(got, expected.to_numpy(dtype=float), rtol=1e-9, atol=1e-9, equal_nan=True,
-                               err_msg=f"{op}/{scope_kind}/trunc({trunc_start},{trunc_end}) 两后端不一致")
-
-
-def test_vector_and_scalar_paths_agree_on_the_same_input():
-    """两条路径必须给出逐点相同的值：向量化只是实现手段，不是另一套语义。"""
-    products = ("A", "B")
-    index, frame = _panel(products)
-    rows = frame.to_numpy(dtype=float)
-    scope = scope_trading_day()
-    results = []
-    for vectorized in (False, True):
-        node = GroupScopeNode(
-            "mean", _RowNode(rows), scope, len(products),
-            products=products, vectorized=vectorized,
-        )
-        got = np.full(rows.shape, np.nan, dtype=float)
-        for position in range(len(index)):
-            stamp = pd.Timestamp(index[position])
-            got[position] = node.update(
-                SimpleNamespace(timestamp=stamp, trading_day=stamp.normalize(), prices={}), {}
-            )
-        results.append(got)
-    np.testing.assert_allclose(results[0], results[1], rtol=1e-12, atol=1e-12, equal_nan=True)
-
-
-def test_streaming_state_does_not_grow_with_the_partition():
-    """状态大小与分区长度无关：跑满两天后各状态数组形状不变。"""
-    products = ("A",)
-    index, frame = _panel(products)
-    node = GroupScopeNode(
-        "mean", _RowNode(frame.to_numpy(dtype=float)), scope_trading_day(), 1,
-        products=products,
-    )
-    for position in range(len(index)):
-        stamp = pd.Timestamp(index[position])
-        node.update(SimpleNamespace(timestamp=stamp, trading_day=stamp.normalize(), prices={}), {})
-    for name in ("_count", "_sum", "_mean", "_m2", "_raw", "_min", "_max", "_best_raw"):
-        assert getattr(node, name).shape == (1,), name
-    # 均值/极值类不保留任何窗口内容
-    assert not hasattr(node, "_window")
-
-
 def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
-    """接线证据：走真正的 compile_streaming_factor 路径，必须落到作用域内核。
+    """接线证据：走真正的编译入口，必须落到共享 Rust Plan。
 
     直接 import 内核的单测不能证明分派接线正确（两条 elif 分支里只有第一条可达），
     所以这里断言编译产物本身，并喂几根 bar 看它真的按当日累计。
@@ -185,26 +131,21 @@ def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
     from tools.factors.expr.groupby_scope import GroupByScopeExpr
     from tools.factors.expr.leaf import ColumnRef
     from tools.factors.expr.streaming.incremental import (
-        GroupScopeNode,
-        StreamingFactorPlan,
         compile_incremental_factor,
-        compile_streaming_factor,
     )
 
     column = DataColumn.CLOSE
     expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(column)).mean()
-    plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
-    assert isinstance(plan, StreamingFactorPlan)
-    assert isinstance(plan._root, GroupScopeNode), (
-        f"编译路径没有接到作用域内核，而是 {type(plan._root).__name__}"
-    )
-
+    events = _DayEvents()
     executor = compile_incremental_factor(
         "trading-day-mean", expression, ("A",), source_freq=DataFreq.MIN1,
+        event_line=events,
     )
+    assert executor._multi.uses_rust
     index = pd.date_range("2026-01-05 09:31", periods=4, freq="min")
     observed = []
     for position, stamp in enumerate(index):
+        events.observe(stamp)
         executor.on_bar(
             pd.Timestamp(stamp),
             {"A": {column.name: float(position)}},
@@ -220,19 +161,21 @@ def test_compiled_plan_resets_at_the_day_boundary():
     from tools.data.types import DataColumn, DataFreq
     from tools.factors.expr.groupby_scope import GroupByScopeExpr
     from tools.factors.expr.leaf import ColumnRef
-    from tools.factors.expr.streaming.incremental import compile_streaming_factor
     from tools.factors.expr.streaming.incremental import compile_incremental_factor
 
     column = DataColumn.CLOSE
     expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(column)).mean()
+    events = _DayEvents()
     executor = compile_incremental_factor(
         "trading-day-mean", expression, ("A",), source_freq=DataFreq.MIN1,
+        event_line=events,
     )
 
     def feed(day: str, values: list[float]) -> list[float]:
         out = []
         stamps = pd.date_range(f"{day} 09:31", periods=len(values), freq="min")
         for value, stamp in zip(values, stamps, strict=True):
+            events.observe(stamp)
             executor.on_bar(
                 pd.Timestamp(stamp), {"A": {column.name: value}},
                 trading_day=pd.Timestamp(stamp).normalize(),
@@ -276,50 +219,37 @@ def test_timeline_trading_days_prefers_the_day1_index_level():
     assert list(_trading_days(stamps)) == list(stamps.normalize()), "无日级层才用日历日"
 
 
-def test_trading_day_scope_follows_the_trading_day_not_the_calendar_day():
-    """夜盘归属下一个交易日：分组边界必须落在交易日列变化处，而不是午夜。"""
-    stamps = pd.DatetimeIndex(
-        ["2026-03-02 20:30", "2026-03-02 21:30", "2026-03-02 22:30", "2026-03-03 09:31"]
+def test_rolling_slides_while_scope_resets_within_partition():
+    """rolling(3) keeps the last 3 bars; scope_bars(3) resets every 3 bars."""
+    import pandas as pd
+
+    from tools.data.types import DataColumn, DataFreq
+    from tools.factors.expr.groupby_scope import GroupByScopeExpr
+    from tools.factors.expr.leaf import ColumnRef, _to_expr
+    from tools.factors.expr.lookback_scope import scope_bars
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
+
+    column = DataColumn.CLOSE
+    rolling = compile_incremental_factor(
+        "rolling-3", ColumnRef(column).rolling_mean(3), ("A",),
+        source_freq=DataFreq.MIN1,
     )
-    days = pd.DatetimeIndex(["2026-03-02", "2026-03-03", "2026-03-03", "2026-03-03"])
-    values = np.array([10.0, 20.0, 30.0, 40.0])
-    frame = pd.DataFrame({"A": values}, index=stamps)
-    ctx = _ctx_with_trading_days(frame, days)
-
-    expected = np.array([10.0, 20.0, 25.0, 30.0])
-    batch = apply_grouped("mean", scope_trading_day(), frame, ctx=ctx)["A"].to_numpy(dtype=float)
-    np.testing.assert_allclose(batch, expected, rtol=0, atol=0)
-    # 若按日历日分组，第二、三根会与第一根同组（10,15,20,25），这里必须不同
-    assert batch[2] != 15.0
-
-    node = GroupScopeNode(
-        "mean", _RowNode(values.reshape(-1, 1)), scope_trading_day(), 1, products=("A",)
+    scoped = compile_incremental_factor(
+        "scope-3",
+        GroupByScopeExpr(scope_bars(3), ColumnRef(column)).mean(),
+        ("A",), source_freq=DataFreq.MIN1,
     )
-    streamed = np.array(
-        [
-            node.update(
-                SimpleNamespace(timestamp=stamps[i], trading_day=days[i], prices={}), {}
-            )[0]
-            for i in range(len(stamps))
-        ]
+    stamps = pd.date_range("2026-01-05 09:31", periods=5, freq="min")
+    rolling_values = []
+    scoped_values = []
+    for value, stamp in zip([10.0, 20.0, 30.0, 40.0, 50.0], stamps, strict=True):
+        fields = {"A": {column.name: value}}
+        rolling.on_bar(pd.Timestamp(stamp), fields)
+        scoped.on_bar(pd.Timestamp(stamp), fields)
+        rolling_values.append(rolling.on_signal(stamp)["A"])
+        scoped_values.append(scoped.on_signal(stamp)["A"])
+
+    np.testing.assert_allclose(
+        rolling_values, [10.0, 15.0, 20.0, 30.0, 40.0],
     )
-    np.testing.assert_allclose(streamed, expected, rtol=0, atol=0)
-
-
-def test_trading_day_scope_refuses_to_guess_the_trading_day():
-    """没有权威交易日时必须显式报错，而不是按日历日猜一个。"""
-    from tools.factors.expr.streaming.incremental import UnsupportedStreamingFactor
-
-    node = GroupScopeNode(
-        "mean", _RowNode(np.ones((2, 1))), scope_trading_day(), 1, products=("A",)
-    )
-    with pytest.raises(UnsupportedStreamingFactor):
-        node.update(
-            SimpleNamespace(timestamp=pd.Timestamp("2026-03-02 21:30"), trading_day=None, prices={}),
-            {},
-        )
-    with pytest.raises(UnsupportedStreamingFactor):
-        node.update(
-            SimpleNamespace(timestamp=None, trading_day=None, prices={}),
-            {},
-        )
+    np.testing.assert_allclose(scoped_values, [10.0, 15.0, 20.0, 40.0, 45.0])

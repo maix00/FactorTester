@@ -31,6 +31,7 @@ if FACTOR_WORKSPACE:
         term_spread,
         where,
         window_bars,
+        interval_bars,
     )
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.Factors import Factor

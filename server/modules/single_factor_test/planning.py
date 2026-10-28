@@ -80,22 +80,34 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
     if not isinstance(settings, dict) or not isinstance(source, dict):
         raise ValueError("NautilusTrader RunSpec is missing its frozen source/settings")
 
-    source_key = str(settings.get("data_source_ref") or "").strip()
-    frequency = str(source.get("frequency") or "").strip().upper()
-    if not source_key or not frequency:
-        raise ValueError("NautilusTrader RunSpec has no frozen source member/frequency")
-    try:
-        adapter = from_server_sources().adapter_for(
-            source_key=source_key,
-            frequency=frequency,
-            instrument_scope="physical_contract",
-        )
-    except UnsupportedNautilusSource as exc:
-        raise ValueError(str(exc)) from exc
-    if (adapter.adapter_id != source.get("adapter_id")
-            or adapter.frequency != frequency
-            or source.get("feed_kind") != "bar"):
-        raise ValueError("frozen Nautilus source adapter differs from the registered adapter")
+    portable = bool(run_spec.get("data_requirements"))
+    if portable:
+        from types import SimpleNamespace
+        binding = data.get("execution_binding") or {}
+        inputs = binding.get("inputs") or []
+        if not inputs:
+            raise ValueError("portable RunSpec requires an explicit execution binding")
+        runtime = inputs[0]["runtime_adapter"]
+        adapter = SimpleNamespace(**runtime)
+        source_key = runtime["member_key"]
+        frequency = runtime["frequency"]
+    else:
+        source_key = str(settings.get("data_source_ref") or "").strip()
+        frequency = str(source.get("frequency") or "").strip().upper()
+        if not source_key or not frequency:
+            raise ValueError("NautilusTrader RunSpec has no frozen source member/frequency")
+        try:
+            adapter = from_server_sources().adapter_for(
+                source_key=source_key,
+                frequency=frequency,
+                instrument_scope="physical_contract",
+            )
+        except UnsupportedNautilusSource as exc:
+            raise ValueError(str(exc)) from exc
+        if (adapter.adapter_id != source.get("adapter_id")
+                or adapter.frequency != frequency
+                or source.get("feed_kind") != "bar"):
+            raise ValueError("frozen Nautilus source adapter differs from the registered adapter")
 
     # Capability names here are earned by real engine tests and are identical
     # to the capabilities accepted when a ResearchRun is created. Optional
@@ -139,7 +151,8 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
             "end_utc": str(settings["end_utc"]),
         })
 
-    backtest_groups = backtest.get("groups") or []
+    from server.services.configuration_strategies import execution_groups
+    backtest_groups = execution_groups(backtest)
     if not isinstance(backtest_groups, list) or not backtest_groups:
         raise ValueError("NautilusTrader RunSpec has no strategy instances")
     strategies: list[dict[str, Any]] = []
@@ -170,9 +183,13 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         str(item.get("ref") or "")
         for item in factors if isinstance(item, dict) and item.get("ref")
     })
-    strategy = _strategy_execution_block(data, shared)
+    from server.services.factor_strategy_templates import compile_factor_strategy_bindings
+    frozen_families=compile_factor_strategy_bindings(configuration)
+    families=_strategy_execution_blocks({"strategy_specs":frozen_families} if frozen_families else data,shared)
+    strategy=families[0] if len(families)==1 else None
     resolved = {
-        "kind": "nautilus_strategy_family" if strategy else "backtest",
+        "kind": "nautilus_strategy_family" if families else "backtest",
+        **({"execution_binding": data["execution_binding"]} if portable else {}),
         "run_spec_version": NAUTILUS_RUN_SPEC_VERSION,
         "run_spec_sha256": hash_run_spec(run_spec),
         "execution": compiled.manifest(),
@@ -193,10 +210,39 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         "catalog_staging": catalog_staging_requests(run_spec),
         "external_factor_artifacts": _artifact_plan_rows(data),
     }
+    if portable:
+        import os
+        budget = int(os.environ.get("TR_MAX_INPUT_BARS", "1000000"))
+        if not 1 <= budget <= 10000000:
+            raise ValueError("invalid node Bar input budget")
+        resolved["max_input_bars"] = budget
+        requirements = run_spec["data_requirements"]
+        if any(item["start_ns"] > pd.Timestamp(compiled.start_utc).value
+               or item["end_ns"] < pd.Timestamp(compiled.end_utc).value for item in requirements):
+            raise ValueError("input requirements do not cover the formal run interval")
+        resolved["run_window"] = {
+            "start": pd.Timestamp(min(item["start_ns"] for item in requirements), tz="UTC").isoformat(),
+            "end": pd.Timestamp(max(item["end_ns"] for item in requirements), tz="UTC").isoformat(),
+        }
+    if families:
+        resolved["strategy_families"] = families
     if strategy:
         resolved["strategy"] = strategy
     return resolved, []
 
+
+
+def _strategy_execution_blocks(data,shared):
+    specs=data.get('strategy_specs') or data.get('strategy_plan') or []
+    families=[];seen=set()
+    for i,spec in enumerate(specs):
+        block=_strategy_execution_block({'strategy_specs':[spec]},shared)
+        if block is None:
+            raise ValueError('strategy has no supported native factor family execution')
+        identity=str(spec.get('strategy_id') or spec.get('id') or f'FactorFamily-{i:03}')
+        if identity in seen:raise ValueError('duplicate strategy family id')
+        seen.add(identity);families.append({**block,'strategy_id':identity})
+    return families
 
 
 def _strategy_execution_block(data: dict[str, Any], shared: Any) -> dict[str, Any] | None:
@@ -205,7 +251,7 @@ def _strategy_execution_block(data: dict[str, Any], shared: Any) -> dict[str, An
     if not isinstance(specs, list) or not specs or not isinstance(specs[0], dict):
         return None
     spec = specs[0]
-    kind = str(spec.get("strategy_kind") or spec.get("source_name") or "").strip()
+    kind = str(spec.get("template_kind") or spec.get("strategy_kind") or spec.get("source_name") or "").strip()
     parameters = spec.get("parameters") if isinstance(spec.get("parameters"), dict) else {}
     if kind == "threshold":
         family = {
@@ -222,6 +268,9 @@ def _strategy_execution_block(data: dict[str, Any], shared: Any) -> dict[str, An
     else:
         return None
     roles = spec.get("factor_roles")
+    if not roles and spec.get("factor_bindings"):
+        records={str(x.get("ref")):x for x in (shared or {}).get("factors",[]) if isinstance(x,dict)}
+        roles={role:{"ref":ref,"alias":records.get(ref,{}).get("alias","")} for role,ref in spec["factor_bindings"].items()}
     if not isinstance(roles, dict) or not roles:
         role = str(spec.get("factor_role") or "factor")
         alias = str((spec.get("data") or {}).get("factor") or "").strip()
@@ -421,7 +470,10 @@ def build_execution_plan(kind: str, data: dict[str, Any]) -> dict[str, Any]:
     return {
         "plan_version": 1,
         "kind": resolved.get("kind") or kind,
+        **({"max_input_bars": resolved["max_input_bars"]} if "max_input_bars" in resolved else {}),
         "strategy": resolved.get("strategy"),
+        **({"strategy_families": resolved["strategy_families"]} if "strategy_families" in resolved else {}),
+        **({"execution_binding": resolved["execution_binding"]} if "execution_binding" in resolved else {}),
         "catalog_staging": resolved.get("catalog_staging"),
         "source_adapter": resolved.get("source_adapter"),
         "run_window": resolved.get("run_window"),

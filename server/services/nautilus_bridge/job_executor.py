@@ -175,7 +175,8 @@ class _ReplayRunner:
             run_small_catalog_replay,
         )
 
-        plan = self.record.execution_plan or {}
+        frozen_plan = self.record.execution_plan or {}
+        plan = {**frozen_plan, **(frozen_plan.get("resolved") or {})}
         raw_inputs = plan.get("catalog_inputs")
         if not isinstance(raw_inputs, list) or not raw_inputs:
             sink.emit_error(
@@ -237,7 +238,8 @@ class _ReplayRunner:
         result["reports_dir"] = str(output)
         from server.jobs.storage.couchdb_reports import publish_job_report
 
-        report_ref = publish_job_report(
+        publisher = getattr(self.context.repository, "publish_report", publish_job_report)
+        report_ref = publisher(
             job_id=self.record.job_id, attempt=self.record.attempt,
             owner=self.record.owner, reports_dir=str(output),
             metadata={"engine": "nautilus_trader", "mode": "catalog_replay"},
@@ -257,7 +259,8 @@ class _StrategyRunner:
             run_strategy_family_run_spec,
         )
 
-        plan = self.record.execution_plan or {}
+        frozen_plan = self.record.execution_plan or {}
+        plan = {**frozen_plan, **(frozen_plan.get("resolved") or {})}
         root = Path(os.environ.get("FACTORTESTER_NAUTILUS_CATALOG_ROOT", "/data")).resolve()
         for value in (plan.get("catalog_inputs") or {}).values():
             folder = Path(str(value.get("catalog_dir") or "")).resolve()
@@ -285,7 +288,8 @@ class _StrategyRunner:
         result["reports_dir"] = str(output)
         from server.jobs.storage.couchdb_reports import publish_job_report
 
-        report_ref = publish_job_report(
+        publisher = getattr(self.context.repository, "publish_report", publish_job_report)
+        report_ref = publisher(
             job_id=self.record.job_id, attempt=self.record.attempt,
             owner=self.record.owner, reports_dir=str(output),
             metadata={"engine": "nautilus_trader", "mode": "strategy_family"},

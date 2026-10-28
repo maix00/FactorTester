@@ -1,0 +1,65 @@
+[package]
+name = "traderesearch-nautilus-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "LGPL-3.0-only"
+
+[lib]
+name = "_libnautilus"
+crate-type = ["cdylib"]
+
+[features]
+default = []
+extension-module = ["nautilus-pyo3/extension-module"]
+arrow = ["nautilus-pyo3/arrow"]
+betfair = ["nautilus-pyo3/betfair"]
+coinapi = ["nautilus-pyo3/coinapi"]
+high-precision = ["nautilus-pyo3/high-precision"]
+mimalloc = ["nautilus-pyo3/mimalloc"]
+redis = ["nautilus-pyo3/redis"]
+postgres = ["nautilus-pyo3/postgres"]
+defi = ["nautilus-pyo3/defi"]
+hypersync = ["nautilus-pyo3/hypersync"]
+tracing-bridge = ["nautilus-pyo3/tracing-bridge"]
+
+[dependencies]
+nautilus-pyo3 = { path = "../../vendor/nautilus_trader/crates/pyo3", features = ["embedding"] }
+nautilus-backtest = { path = "../../vendor/nautilus_trader/crates/backtest", features = ["python", "streaming"] }
+nautilus-model = { path = "../../vendor/nautilus_trader/crates/model" }
+nautilus-factor-bridge = { path = "../../vendor/py-alpha-lib/adapters/nautilus", features = ["nautilus-backtest"] }
+pyo3 = { version = "0.30.1", features = ["macros", "extension-module"] }
+serde_json = "1"
+anyhow = "1"
+traderesearch-data-io = { path = "../../traderesearch_data/rust" }
+nautilus-core = { path = "../../vendor/nautilus_trader/crates/core" }
+nautilus-data = { path = "../../vendor/nautilus_trader/crates/data" }
+nautilus-serialization = { path = "../../vendor/nautilus_trader/crates/serialization", features = ["arrow"] }
+nautilus-persistence = { path = "../../vendor/nautilus_trader/crates/persistence" }
+
+[patch.crates-io]
+nautilus-trading = { path = "../../vendor/nautilus_trader/crates/trading" }
+nautilus-execution = { path = "../../vendor/nautilus_trader/crates/execution" }
+nautilus-persistence = { path = "../../vendor/nautilus_trader/crates/persistence" }
+nautilus-backtest = { path = "../../vendor/nautilus_trader/crates/backtest" }
+nautilus-common = { path = "../../vendor/nautilus_trader/crates/common" }
+nautilus-model = { path = "../../vendor/nautilus_trader/crates/model" }
+nautilus-core = { path = "../../vendor/nautilus_trader/crates/core" }
+arrow = { path = "../../vendor/nautilus_trader/patches/arrow-compat" }
+parquet = { path = "../../vendor/nautilus_trader/patches/parquet-compat" }
+pyo3-stub-gen = { path = "../../vendor/nautilus_trader/patches/pyo3-stub-gen" }
+
+[profile.dev]
+opt-level = 0
+debug = false # Improves compile times
+debug-assertions = false
+overflow-checks = false # test profile keeps these on for catching overflow bugs
+strip = "debuginfo" # Improves compile times
+lto = false
+panic = "unwind"
+incremental = true
+
+# Compile third-party deps at opt-level=1 in dev/test profiles. Workspace
+# members keep opt-level=0 (fast iteration); deps recompile rarely so the
+# small one-off compile cost pays off in faster test/run loops.
+[profile.dev.package."*"]
+opt-level = 1

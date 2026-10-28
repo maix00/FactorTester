@@ -22,8 +22,6 @@ class MatchValueRef(FactorExpr):
     def _structural_key(self) -> tuple:
         return (type(self).__name__, self.role)
 
-    def _to_latex(self, subst=None) -> str:
-        return "X_t" if self.role == "current" else "X_{t-k}"
 
     def _get_alias(self) -> str:
         return self.role.upper()

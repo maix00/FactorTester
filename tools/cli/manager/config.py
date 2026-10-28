@@ -12,11 +12,11 @@ import platform
 import subprocess
 from urllib.parse import urlparse
 
-from tools.cli.http import DEFAULT_HOME, HOME_ENV
+from tools.cli.http import DEFAULT_HOME, HOME_ENV, config_env
 
 
-MANAGER_CONFIG_ENV = "FACTORTESTER_MANAGER_CONFIG"
-MANAGER_TOKEN_ENV = "FACTORTESTER_MANAGER_TOKEN"
+MANAGER_CONFIG_ENV = "TRADERESEARCH_MANAGER_CONFIG"
+MANAGER_TOKEN_ENV = "TRADERESEARCH_MANAGER_TOKEN"
 KEYCHAIN_SERVICE = "com.gtht.factortester.manager"
 
 
@@ -38,10 +38,10 @@ class ManagerConfig:
 
 
 def manager_config_path() -> Path:
-    configured = os.environ.get(MANAGER_CONFIG_ENV)
+    configured = config_env(MANAGER_CONFIG_ENV)
     if configured:
         return Path(configured).expanduser()
-    home = Path(os.environ.get(HOME_ENV, str(DEFAULT_HOME))).expanduser()
+    home = Path(config_env(HOME_ENV) or str(DEFAULT_HOME)).expanduser()
     return home / "manager.json"
 
 
@@ -62,7 +62,7 @@ def load_manager_config(path: Path | None = None) -> ManagerConfig:
     target = path or manager_config_path()
     if not target.is_file():
         raise FileNotFoundError(
-            "Manager 尚未配置，请先运行 factortester-manager configure"
+            "Manager 尚未配置，请先运行 traderesearch-manager configure"
         )
     payload = json.loads(target.read_text(encoding="utf-8"))
     return ManagerConfig.from_url(str(payload.get("base_url") or ""))
@@ -74,7 +74,7 @@ class ManagerCredentialStore:
         self.account = sha256(config.base_url.encode()).hexdigest()
 
     def read(self) -> str:
-        environment = os.environ.get(MANAGER_TOKEN_ENV, "").strip()
+        environment = (config_env(MANAGER_TOKEN_ENV) or "").strip()
         if environment:
             return environment
         if platform.system() == "Darwin":

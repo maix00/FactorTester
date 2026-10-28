@@ -42,6 +42,13 @@ services:
     # file gives the kernel somewhere to page under pressure).
     mem_limit: ${FACTORTESTER_PUBLIC_MEMORY_LIMIT:-0}
     environment:
+      TR_DATA_HOST_ROLE: server
+      TR_EXECUTION_NODE_ID: ${TR_EXECUTION_NODE_ID:?set stable execution node identity}
+      TR_DATA_DEVICE_REF: ${TR_SHARED_STORAGE_ID:?set shared kernel and storage domain identity}
+      TR_SHARED_DATA_CACHE_ROOT: /state/shared-columnar
+      TR_SHARED_DATA_CACHE_BYTES: ${TR_SHARED_DATA_CACHE_BYTES:-536870912}
+      TR_SHARED_DATA_ENTRY_BYTES: ${TR_SHARED_DATA_ENTRY_BYTES:-67108864}
+      TR_DATA_QUERY_CONCURRENCY: ${TR_DATA_QUERY_CONCURRENCY:-4}
       FACTORTESTER_ALLOW_PUBLIC_REGISTRATION: "0"
       FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT: ${FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT:?set FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT}
       FACTORTESTER_FEDERATION_CA_FILE: /run/trust/federation-ca.crt

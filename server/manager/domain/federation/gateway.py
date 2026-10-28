@@ -200,6 +200,23 @@ class FederatedGateway:
         Profile, and factor metadata operations and never accepts source-code
         or device-local path requests.
         """
+        if kind == "execution":
+            if not route.remote or not route.online:
+                raise ValueError("remote Manager is unavailable")
+            from server.identity.service_access import ServiceHTTPClient, configured_client
+            clients = getattr(self, "_execution_clients", None)
+            if clients is None:
+                self._execution_clients = clients = {}
+            endpoint = self._peer_url(route, "")
+            client = clients.get(endpoint)
+            if client is None:
+                if len(clients) >= 64:
+                    clients.clear()
+                client = clients[endpoint] = ServiceHTTPClient(endpoint,
+                    oidc=configured_client("TR_FEDERATION_OIDC"), response_limit=MAX_ENVELOPE_BYTES)
+            return client.post_json("/api/federation/public-data", {
+                "kind": kind, "operation": operation, "principal": principal,
+                "payload": dict(payload or {})})
         if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         request_payload = {

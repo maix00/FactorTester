@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAUTILUS_ROOT="${ROOT_DIR}/vendor/nautilus_trader"
 PYTHON_SOURCE="${NAUTILUS_ROOT}/python"
+COMPOSITION_ROOT="${ROOT_DIR}/native/traderesearch_nautilus_runtime"
 ENV_NAME="${FT_ENV_NAME:-GTHT}"
 BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 DEV_OPT_LEVEL="${CARGO_PROFILE_DEV_OPT_LEVEL:-1}"
@@ -31,10 +32,13 @@ runtime_is_ready() {
   local state
   state="$(conda run --no-capture-output -n "${ENV_NAME}" python -c '
 import importlib
+import hashlib
+import json
+import os
 from pathlib import Path
 import sys
 
-expected_version, expected_source = sys.argv[1:]
+expected_version, expected_source, mode = sys.argv[1:]
 try:
     import nautilus_trader
     native = importlib.import_module("nautilus_trader._libnautilus")
@@ -54,8 +58,48 @@ if nautilus_trader.__version__ != expected_version:
 if not package_path.is_relative_to(source) or not native_path.is_relative_to(source):
     print("needs-build")
     raise SystemExit(0)
+from nautilus_trader.backtest import BacktestEngine
+if (not callable(getattr(BacktestEngine, "run_catalogs", None))
+        or not callable(getattr(native, "attach_factor_family", None))
+        or not callable(getattr(native, "replay_shared_inputs", None))):
+    print("needs-build")
+    raise SystemExit(0)
+# A matching package version does not imply the local Rust edits are built.
+# Only inspect native build inputs; Cargo still owns incremental dependency tracking.
+rust_root = source.parent
+build_inputs = [rust_root / name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")]
+build_inputs.extend(path for path in (rust_root / "crates").rglob("*")
+                    if path.suffix in {".rs", ".toml"})
+repo_root = rust_root.parent.parent
+for folder in (repo_root / "native", repo_root / "traderesearch_data/rust", repo_root / "vendor/py-alpha-lib/alpha-algo", repo_root / "vendor/py-alpha-lib/adapters/nautilus"):
+    for directory, children, files in os.walk(folder):
+        children[:] = [name for name in children if name not in {"target", ".git", "__pycache__"}]
+        build_inputs.extend(Path(directory) / name for name in files
+                            if Path(name).suffix in {".rs", ".toml", ".lock"})
+fingerprint = hashlib.sha256()
+for path in sorted(set(build_inputs)):
+    if path.is_file():
+        stat = path.stat()
+        fingerprint.update(f"{path}:{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}\n".encode())
+stat = native_path.stat()
+current = {"source_signature": fingerprint.hexdigest(),
+           "binary": [str(native_path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]}
+receipt = rust_root / "target/traderesearch-runtime-receipt.json"
+if mode == "record":
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    temporary = receipt.with_suffix(".tmp")
+    temporary.write_text(json.dumps(current))
+    os.replace(temporary, receipt)
+else:
+    try:
+        previous = json.loads(receipt.read_text())
+    except (OSError, ValueError):
+        previous = None
+    if previous != current:
+        print("needs-build")
+        raise SystemExit(0)
 print(f"ready: NautilusTrader {expected_version}: {native_path}")
-' "${EXPECTED_VERSION}" "${PYTHON_SOURCE}")"
+' "${EXPECTED_VERSION}" "${PYTHON_SOURCE}" "${1:-check}")"
   [[ "${state}" == ready:* ]]
 }
 
@@ -71,13 +115,13 @@ fi
 
 echo "Building vendored NautilusTrader ${EXPECTED_VERSION} in ${ENV_NAME} (dev profile, opt=${DEV_OPT_LEVEL}, ${BUILD_JOBS} jobs)."
 echo "Cargo artifacts are reused from ${NAUTILUS_ROOT}/target."
-cd "${PYTHON_SOURCE}"
+cd "${NAUTILUS_ROOT}"
 CARGO_BUILD_JOBS="${BUILD_JOBS}" \
 CARGO_PROFILE_DEV_OPT_LEVEL="${DEV_OPT_LEVEL}" \
 CARGO_TARGET_DIR="${NAUTILUS_ROOT}/target" \
-  conda run --no-capture-output -n "${ENV_NAME}" maturin develop --profile dev --locked
+  conda run --no-capture-output -n "${ENV_NAME}" maturin develop --profile dev --locked --manifest-path "${COMPOSITION_ROOT}/Cargo.toml"
 
-runtime_is_ready || {
+runtime_is_ready record || {
   echo "NautilusTrader build completed, but the pinned native extension did not load from the vendor source." >&2
   exit 1
 }

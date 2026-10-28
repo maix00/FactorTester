@@ -169,7 +169,26 @@ class CatalogRoutesMixin:
         )
         category_id = category_ids[0] if len(category_ids) == 1 else ",".join(category_ids)
         try:
-            if parsed.path == "/api/product-library/data-sources":
+            if parsed.path == "/api/product-library/installed-bundles":
+                if visitor is not None:
+                    json_response(
+                        self,
+                        {"success": False, "error": "visitor cannot inspect installed bundles"},
+                        403,
+                    )
+                    return True
+                from server.services.product_catalog_projection import (
+                    installed_bundle_descriptors,
+                )
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "metadata_only": True,
+                    "sources": list(
+                        installed_bundle_descriptors(execution_location="server")
+                    ),
+                }
+            elif parsed.path == "/api/product-library/data-sources":
                 sources = self.state.federated_source_descriptors(
                     refresh=str(query.get("refresh", [""])[0]).lower()
                     in {"1", "true", "yes"},
@@ -1058,6 +1077,11 @@ class CatalogRoutesMixin:
                     }, 404)
                     return True
                 value = {"success": True, "origin": "server"}
+            elif payload.get("source_ref"):
+                if visitor is not None:
+                    raise PermissionError("remote node market reads require an account")
+                from server.manager.services.execution_market import read_node_market
+                value = read_node_market(self.state, principal=principal, payload=payload)
             else:
                 value = self.state.client_state.product_price_series(payload)
         except PermissionError as exc:
@@ -1096,6 +1120,33 @@ class CatalogRoutesMixin:
             else str(session["username"])
         )
         try:
+            if method == "POST" and parsed.path == "/api/test-authoring/execution-plan/resolve":
+                from server.manager.services.execution_plan_resolution import resolve
+                value = resolve(self.state, owner=principal, request=self._json_body(1024*1024))
+                json_response(self, value)
+                return True
+            selected_manager = parse_qs(parsed.query).get("server_id", [self.state.server_id])[0]
+            if (selected_manager not in {"", "local", self.state.server_id}
+                    and parsed.path in {"/api/test-authoring/execution-targets", "/api/runs", "/api/runs/preview"}):
+                from server.modules.single_factor_test.execution_nodes import peer_execution_route
+                route = peer_execution_route(self.state, selected_manager)
+                if method == "GET":
+                    value = self.state.federation_gateway.public_data(route, kind="execution", operation="targets", principal=principal)
+                else:
+                    from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
+                    payload = self._json_body(1024*1024)
+                    payload.pop(MANAGER_RUN_CONTEXT_KEY, None)
+                    directory = self.state.federation_gateway.public_data(route, kind="execution", operation="targets", principal=principal)
+                    payload["_execution_capability_directory"] = directory["targets"]
+                    payload[MANAGER_RUN_CONTEXT_KEY] = self.state.test_authoring.prepare_run_context(
+                        payload, owner=principal, strategy_library=self.state.test_authoring.strategy_library)
+                    value = self.state.federation_gateway.public_data(route, kind="execution",
+                        operation="preview" if parsed.path.endswith("preview") else "submit",
+                        principal=principal, payload={"request": payload})
+                    json_response(self, value["response"], int(value["status"]))
+                    return True
+                json_response(self, {"success": True, **value})
+                return True
             if method == "GET":
                 response = self.state.test_authoring.get(
                     parsed.path,
@@ -1118,6 +1169,9 @@ class CatalogRoutesMixin:
                     method, parsed.path, owner=principal,
                     payload=payload,
                 )
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+            return True
         except TestAuthoringError as exc:
             json_response(self, {
                 "success": False, "error": str(exc), **exc.details,

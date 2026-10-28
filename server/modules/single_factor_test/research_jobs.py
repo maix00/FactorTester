@@ -316,13 +316,22 @@ def _prepare_local_research_run_request(
     # legacy worker input bundle.  This keeps library revisions and inline
     # configuration sources out of the worker-specific request format.
     configuration_payload = configuration.get("payload")
+    from server.services.execution_plans import selection as saved_execution_selection
+    document_metadata = saved_execution_selection(configuration_payload or {})
+    if document_metadata:
+        if document_metadata["analyses"] != analyses:
+            raise _RunRequestError("test type differs from the saved ExecutionPlan", status_code=409)
+        retention_mode = document_metadata["retention_mode"]
+        data = {**data, "execution_selection": document_metadata["execution"]}
     backtest_configuration = (
         configuration_payload.get("analyses", {}).get("backtest")
         if isinstance(configuration_payload, dict)
         and isinstance(configuration_payload.get("analyses"), dict)
         else None
     )
-    if isinstance(backtest_configuration, dict) and "strategy_bindings" in backtest_configuration:
+    if isinstance(backtest_configuration, dict) and any(
+        key in backtest_configuration for key in ("strategy_bindings", "factor_strategy_bindings")
+    ):
         from server.services.strategy_bindings import compile_configuration_strategies
 
         try:
@@ -359,6 +368,16 @@ def _prepare_local_research_run_request(
         raise _RunRequestError(
             f"configuration missing analyses: {missing}"
         )
+    directory = data.get("_execution_capability_directory")
+    known_product_refs = frozenset()
+    if data.get("execution_selection", {}).get("bundles"):
+        from server.modules.single_factor_test.execution_nodes import visible_targets
+        if directory is None:
+            directory = visible_targets(owner)
+            data = {**data,"_execution_capability_directory":directory}
+        bundle_keys = {(item["bundle_id"],item["owner"]) for item in data["execution_selection"]["bundles"]}
+        known_product_refs = frozenset(offer["product_ref"] for row in directory for offer in row["offers"]
+            if (offer["installation"]["bundle_id"],offer["installation"]["owner"]) in bundle_keys)
     try:
         with transient_factor_source_scope(
             owner=owner,
@@ -369,7 +388,7 @@ def _prepare_local_research_run_request(
             )
 
             frozen_configuration = freeze_run_spec_inputs(
-                configuration, owner=owner, analyses=analyses,
+                configuration, owner=owner, analyses=analyses, known_product_refs=known_product_refs,
             )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
@@ -398,8 +417,14 @@ def _prepare_local_research_run_request(
                 freeze_nautilus_execution_policy,
             )
 
+            if data.get("execution_selection", {}).get("bundles") and not data.get("data_requirements"):
+                from server.modules.single_factor_test.execution_nodes import requirements_for_configuration, visible_targets
+                directory = data.get("_execution_capability_directory")
+                if directory is None:
+                    directory = visible_targets(owner)
+                data = {**data, "data_requirements": requirements_for_configuration(frozen_configuration, data["execution_selection"], directory)}
             frozen_configuration = freeze_nautilus_execution_policy(
-                frozen_configuration,
+                frozen_configuration, data_requirements=data.get("data_requirements"),
             )
         except ValueError as exc:
             raise _RunRequestError(str(exc)) from exc
@@ -416,6 +441,13 @@ def _prepare_local_research_run_request(
         "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    if data.get("data_requirements"):
+        from dataclasses import asdict
+        from traderesearch_data.execution import requirement_from_dict
+        try:
+            run_spec["data_requirements"] = [asdict(requirement_from_dict(item)) for item in data["data_requirements"]]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _RunRequestError("invalid portable Bar requirements") from exc
     if "backtest" in analyses:
         run_spec["runtime_setting_normalization"] = {
             "schema_version": 1,
@@ -572,6 +604,7 @@ def _prepare_local_research_run_request(
         }
     return {
         "workspace_id": workspace_id,
+        "execution_selection": deepcopy(data.get("execution_selection")),
         "task_name": task_name,
         "acting_profile_ref": acting_profile_ref,
         "acting_profile_name": acting_profile_name,
@@ -687,8 +720,20 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         prepared = load_manager_run_context(context, owner=owner)
     else:
         prepared = _prepare_local_research_run_request(data, owner=owner)
-    _reject_unavailable_nautilus_run(prepared)
-    _validate_mounted_run_windows(prepared)
+    selected_execution = prepared.get("execution_selection") or data.get("execution_selection")
+    if selected_execution:
+        from server.modules.single_factor_test.execution_nodes import bind_prepared_execution
+        try:
+            prepared["execution_binding"] = bind_prepared_execution(prepared, selected_execution)
+            from server.jobs.assurance import canonical_hash
+            expected = data.get("expected_execution_binding_ref")
+            if expected and expected != canonical_hash(prepared["execution_binding"]):
+                raise ValueError("execution installation changed since preview; preview again")
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            raise _RunRequestError(str(exc), status_code=422) from exc
+    if not prepared.get("execution_binding"):
+        _reject_unavailable_nautilus_run(prepared)
+        _validate_mounted_run_windows(prepared)
     return prepared
 
 
@@ -779,6 +824,7 @@ def _capability_plans(prepared: dict, *, owner: str) -> list[dict[str, object]]:
                 **_execution_payload(prepared["frozen_configuration"], kind),
                 "_owner": owner,
                 "run_spec": prepared["run_spec"],
+                **({"execution_binding": prepared["execution_binding"]} if prepared.get("execution_binding") else {}),
                 "run_spec_hash": research_runs.hash_run_spec(
                     prepared["run_spec"],
                 ),
@@ -920,8 +966,8 @@ def _submit_kind(
             or payload.get("retention_mode")
             or "summary"
         ),
-        deployment_id=_deployment_id(),
-        service_port=detect_port(request.environ),
+        deployment_id=(payload.get("execution_binding") or {}).get("route_id") or _deployment_id(),
+        service_port=(payload.get("execution_binding") or {}).get("service_port") or detect_port(request.environ),
         source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
         runner_path=runner,
         job_spec=deepcopy(payload),
@@ -1313,6 +1359,8 @@ def submit_research_run():
                 "step_mode": step_mode,
                 "output_requests": output_requests,
                 "run_spec": run_spec,
+                **({"execution_binding": prepared["execution_binding"]} if prepared.get("execution_binding") else {}),
+                "execution_selection": deepcopy(prepared.get("execution_selection")),
                 "execution_plan": deepcopy(next(
                     (plan for plan in (_plans or ()) if plan.get("kind") == kind),
                     {},
@@ -1414,6 +1462,7 @@ def preview_research_run():
             "authority": "unavailable",
             "error": str(exc),
         }
+    from server.jobs.assurance import canonical_hash
     presentation = run_spec_presentation(
         run_spec,
         run_spec_hash=research_runs.hash_run_spec(run_spec),
@@ -1421,6 +1470,8 @@ def preview_research_run():
     )
     return jsonify({
         "success": True,
+        "execution_binding_ref": canonical_hash(prepared["execution_binding"]) if prepared.get("execution_binding") else None,
+        "execution_binding": deepcopy(prepared.get("execution_binding")),
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
         "run_spec_version": run_spec["run_spec_version"],
         "task_name": prepared["task_name"],

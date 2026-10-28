@@ -1,0 +1,454 @@
+# ADR 180：因子边界输入与共享交易日窗口
+
+状态：部分实施，存在代码偏离。对应 #443；2026-10-26。
+
+## 决策
+
+- `SessionReset` 是事件分段累计的唯一算子状态实现。编译器在 Plan manifest
+  声明 `boundaries` 的稳定顺序，边界叶节点从 channel × product 的 `u8` 切片读取。
+  `MarketBar` 携带该次已完成切片的边界标记，Rust 内核只借用输入。
+- 事件由源适配器提供。`event_line.latest` 的新 occurrence、显式逐产品标记，或
+  权威 `trading_day` 可以触发重置；不从系统日期猜测交易日，也不把交易日误作日内 session。
+- Nautilus 的 `FactorBoundary` 自定义数据必须先于同时间片 Bar 到达；迟到的边界
+  明确失败。Actor 限制待处理边界数量，复用零值缓冲，与不完整行情一起过期清理。
+- DataActor 的原生 `on_bar` 与手动切片入口复用同一个截面等待和执行路径。
+  每个完整切片只更新一次，只有一个最近输出，不另存一份结果历史。
+- batch 与 incremental 都使用 `SessionWindow` 解析接收位置。完整日历的预计
+  Bar 容量不能充当实际回放位置；中途开始、缺 Bar、union 空行均须保持正确边界。
+  同 session 更新为 O(1)，换 session 二分定位；日历不逐 Bar 克隆。
+- `interval_bars` 是逐产品、包含两端、只计已形成原始 Bar 的因果序列。
+  batch 用线性前缀计数；streaming 用一个整数，O(1) 状态。NaN 观测仍计数，union 空行不计。
+  固定 `window_bars` 保留窗口容量的标量语义，不把异步产品不同容量伪装为同一标量。
+
+## 并行与共享边界
+
+PanelPlan 按拓扑节点完成整批计算：产品 lane → 截面节点 → 后续产品 lane。
+这已构成批量屏障，不另建逐 Bar rayon 调度器。在线增量仍使用同一有状态内核。
+同一引擎、冻结产品顺序、输入源、时钟、事件语义的一组因子应合并为一个 Plan，
+策略只消费发布结果；不能仅凭因子名字共享不同输入语义的 Actor。
+
+## 分段与 timeline 的单向依赖
+
+分段数值运算统一在 alpha-algo：公开 alpha.factor 与 tools 适配器均调用矩阵
+`scope:*` 或具有权威日历的 `session_rolling:*`，不再保留 Python 逐 Bar 聚合。
+旧标量极值循环仅作为 tests 下的独立 oracle 和基准，不是运行 fallback。
+同分区极值并列选择最早观测；截断右端后候选集合冻结，但到当前 Bar 的年龄仍变化。
+普通 min/max 继续压缩相等值，避免为修复 arg 极值而增加普通极值的缓存。
+
+Timeline 的唯一实现位于 `alpha.factor.timeline`，不导入 FactorTester。
+tools.timeline 只将 DataIndex 的源频率、事件时间和交易日标签传入该实现；
+旧构造器是适配类，compact/scatter 直接复用公开函数。同频矩阵 Plan 直接使用
+已经形成的 observed/day 数组；不重复 factorize，也不为每个算子建立目录。
+稀疏产品取源频率和冻结产品的 union；原始 NaN 仍是观测，union 空行不是观测。
+对齐保留已知的夜盘交易日和事件时刻，未知标签明确失败，不能静默改成自然日。
+
+公开 SessionScope 不再使用不存在的 gap_ns；静态 session 直接进入共享 Rust
+session-window resolver，作用域身份包含完整冻结日历，防止不同日历被 CSE 合并。
+
+同机 GTHT Python 3.14，5000 行 × 4 产品、scope_bars(250) 的 mean，4 次本地运行
+丢弃首次热身：逐 Bar 适配中位 2.142541 ms，矩阵适配中位 0.230667 ms，末行相同。
+这是局部合成入口测量，不含真实 Job/I/O，也不是跨规模的最优性结论。
+
+## 验证及性能证据
+
+本机 arm64、Rust 1.99.1、release、已编译且已热身；不含源码编译、数据 I/O 或浏览器。
+`bench_panel_barrier`：8 产品 × 100,000 Bar，mean(480) → zscore → mean(20)，
+5 次测量；单线程中位 28.494 ms，4 线程中位 11.725 ms，checksum 相同。
+macOS `/usr/bin/time -l` 进程峰值 RSS 分别为 34,439,168 与 46,301,184 字节。
+四线程约快 2.43 倍，但增加约 11.3 MiB，不能据此宣称所有规模或真实 Job 都更快。
+另有逐元素测试同时对账单线程 batch、四线程 batch 和 incremental，非仅 checksum 比较。
+
+## 未完成边界
+
+- 实际策略构造器的所有 role 已合并到一个共享 Plan，使用 RunSpec 冻结 ref，
+  不再生成 role 名称伪 ref。Rust 策略借用同一发布，只保留目标缓冲及计数。
+  跨不同策略构造器的运行级合并仍需核对，不能据单策略多 role 的测试声称全部完成。
+- 实际家族 runner 的逐 Bar 因子与策略消费已改为 Rust Actor，见末节；
+  Celery/公网及任意用户策略的端到端覆盖仍不能据此声称完成。
+- `StreamingFactorPlan`、`compile_streaming_factor`、`RustIntervalNode` 及旧 bar-search
+  状态机已删除；测试改走真实 Rust 编译入口并覆盖跨交易日扩展与淘汰。
+  `streaming/incremental.py` 仅保留编译适配、单输出视图与窗口/事件元数据解析。
+- 完整日频 SignalAlign close、稀疏产品增量观测掩码等不得凭节点存在声称验收。
+
+没有执行全仓测试、公网负载、推送或部署。
+
+## 固定窗口树节点内存修复
+
+`OrderStatisticTree` 删除最后一个相同值时回收节点槽位，插入优先复用空闲槽位。
+节点存储随历史最大活跃窗口增长，而不再随回测长度增长；计数重复值仍共用一个节点。
+quantile、rank、MAD 共用此树，无第二套回收实现，也无逐 Bar 全树扫描。
+
+本机 release、固定窗口 480、100 万个不同值、5 次运行，`bench_window_memory quantile`：
+修复前耗时中位 149.397 ms，峰值 RSS 364,380,160 字节；修复后中位 149.401 ms，
+峰值 RSS 1,884,160 字节。RSS 是包含五次运行及分配器行为的进程峰值，并非单树大小；
+此实验说明该输入下内存增长消失，不代表整个 Job 的内存或所有算子的耗时。
+回归同时验证 quantile/rank/MAD 的数值、窗口 480 的长期节点上界、重复值删除后复用。
+
+## 行情加载前限制与分批回放
+
+probe 和策略复用 `iter_catalog_bar_batches`。先读取已经校验文件哈希的目录收据，
+检查总行数上限，再按 `first_available_ns`/`last_available_ns` 及固定时间批查询。
+Nautilus 的 Parquet 查询过滤 `ts_init`，不能把 `ts_event` 当作可用时间边界。
+策略复用原生 `streaming=True` 回放，加载一个批次后释放 Python 批次，执行后
+`clear_data`；失败也清理当前原生输入。两产品真实小窗口回放验证跨批次策略状态持续。
+
+时间批不是任意数据频率下的固定条数上限；总体条数上限来自冻结收据，任务资源限制
+仍是独立保护。不能把该改动宣称为零复制或无需控制 Nautilus Cache/报告大小。
+
+## 2026-10-27 正确性复核（第一批）
+
+固定截断快路径必须先确认 `trunc_start <= trunc_end`，再转换无符号宽度；
+反向区间走空区间结果，不能溢出。独立测试 oracle 改为直接枚举候选集合，
+不调用生产实现，覆盖 `[NaN, 1, 2].truncate(0, 0)` 和反向截断。
+
+scope 极值合同：候选集合为 `[start, min(end, current)]`；有效值不足
+`min_periods` 或传播模式下候选中含 NaN 时输出 NaN。忽略模式下当前 NaN
+不额外清空结果，候选区间外的 NaN 不影响结果；正负无穷参与极值排序。
+并列保留最早位置。归一化为 `(current - winner) / (current - start)`，
+单点输出 0，缺失值不压缩 Bar 距离。raw 与 rolling/truncate 的坐标对齐
+仍须单独验证，不能由本批 scope 测试推导已完成所有入口一致性。
+
+Actor 完整切片直接从现有槽位填充复用的数值缓冲，删除临时 `Vec<Bar>`。
+到齐计数只在空槽第一次填充时增加，覆盖重复品种、过期和未来切片路径；
+每根 Bar 不再扫描所有槽位。尚未测端到端分配次数或真实 Job 峰值 RSS，
+不据此宣称整条回测零分配。
+
+## raw 坐标与移动截断窗口（第二批）
+
+raw 返回父窗口左端开始的 Bar 偏移，可以直接作为同一窗口下一层 truncate
+的端点；不是距当前时点的年龄。归一化极值仍使用上述年龄/位置跨度公式。
+固定截断的延迟队列保存候选获胜位置，输出时再转换坐标，避免延迟后的
+归一化比例被错误冻结。动态结束点为负表示空候选，不再被误当作“未指定”。
+
+batch 的截断 rolling 原先把不断移动、但落在当前 Bar 之前的结束点传给
+区间状态机，可能冻结旧候选。现在该分支复用 FactorPlanKernel 的 rolling
+路径；不新增第二套窗口算法。未截断窗口仍直接使用 IntervalKernel。
+独立标量扫描对所有输入前缀逐点验证 min/max 的位置与均值，包括重复极值、
+NaN、正负无穷、反向与单元素候选。bridge 回归验证 raw 输出再次用作
+truncate 端点时选回同一原始值。该验收不等同于原研报真实 Job 验收。
+
+## 2026-10-27 原生流式查询接线与目标边界
+
+Nautilus 的 `query_batch_session` 已有 typed pages 和时间戳对齐，本次只补
+Python `query_bar_batches` 的薄绑定；`next_batch`、关闭和错误清理均由原生
+session 持有。可独立指定软批大小及同时间戳组硬上限；跨数据源仍需检查
+合并后的整组数量。查询按冻结收据的 ts_init 可用时刻限定范围，不改写
+Bar 的 ts_event。转换后的 Catalog 读回验证也应使用可用时刻。
+
+DataFusion 查询内存池预算与 spill 上限独立于回放批大小。清理查询表时
+只复用 memory_pool 和 disk_manager，必须重建文件列表与元数据缓存；
+保留整个 RuntimeEnv 会使新增的 Catalog 批次不可见。真实追加批次读回测试
+已覆盖该回归。DataFusion 并非所有分配都受内存池约束，仍需 worker 的
+进程级资源限制；本次不宣称整进程内存上界已完成验收。
+
+目标是 Rust 数据面与 FactorTester 控制面：注册、权限、冻结身份及 RunSpec
+留在 FactorTester；扫描、排序、跨品种合并、共享 Cache 和回放分发归 Nautilus。
+因子 bridge 必须进入同一个 runtime，不能另起数据管理器重新读一份行情。
+相同输入/时钟的因子共享计划，订单与账户状态保持各自归属。首次转换生成的
+日历、范围与摘要应冻结复用；实时适配器与历史回放遵守相同的事件/可用时刻
+合同，但不共享可变回放缓存。
+
+0ea29dd68 交付时的 Python 绑定、逐 Bar 迭代及 heap 合并是过渡实现，不是目标架构，
+不得把本次读取改进称为零 Python per-Bar 或完整 Rust Job。后续切换必须以
+Nautilus 原生 BacktestNode/DataIterator 分发给 FactorActor 与执行系统，完成
+同一真实任务的读取次数、跨语言调用、耗时、峰值 RSS 及结果逐点对账后，
+再删除过渡读取/合并与 Python 因子事件适配器。
+
+聚焦验证：真实 T/TL Catalog、真实阈值/分组 Strategy、原生 batch 绑定及
+合成清理/多源时间戳组测试共 18 项通过；原生 session 9 项、查询预算重置
+1 项通过。均非全仓测试，也未在公网运行负载。
+
+容量样本（仅一次、缓存未清空）：macOS arm64、GTHT Python 3.14、Nautilus
+本机 dev opt-level=1；T/TL 各 500 根真实分钟 Bar、共享 CLOSE rolling(20)
+计划和原生分组 Strategy。1000 根回放分 25 批，最大 40 根，发布 500 次、
+计划 2 节点。转换 Catalog 后的进程峰值已达 282,312,704 字节，回放/报告后
+峰值 386,826,240 字节；回放与报告耗时 0.159604 秒。耗时不含前面的转换，
+峰值包含转换且是高水位；该样本不是泄漏证明、端到端 Job 基准或提速比例。
+
+## 原生 BacktestNode 与 FactorActor 接线（2026-10-27）
+
+`nautilus_factor_bridge::replay::attach_factor_plan` 在调用方已经冻结的
+BacktestRunConfig 上注册一个共享 Actor。调用方继续运行同一个 Nautilus
+BacktestNode；Catalog 扫描、跨文件归并、分批回放及 DataEngine 分发均使用
+Nautilus 的实现。bridge 不另建读取器或 Cache，不使 Nautilus core 依赖 alpha。
+调用者必须在 node.run 后检查返回的 FactorReplayHandle；Nautilus 默认仅记录
+Actor 回调错误，因此因子首次错误另行保存并请求系统停止，不能据 node.run
+返回成功就发布结果。结束时未到齐的产品切片同样失败。
+
+Actor 启动时订阅冻结的 BarType。产品次序保留 Plan 给定次序，不再字典排序；
+Bar 的 InstrumentId 映射到对应产品槽位。OHLCV 字段一次解析为枚举，以 kernel
+既有的 product-major 输入布局填充复用缓冲；未知字段（如 Bar 没有的持仓量）
+明确拒绝，不能代替为收盘价。字段数在读取 Catalog 前对齐 Plan 的冻结输入需求。
+输入时钟 timestamp_ns 表示 Bar 时刻，available_at_ns 表示该切片全部输入实际
+可用的最晚时刻；FactorUpdate 同时保留两者。正常路径不锁共享错误状态，也不再
+每次逐个比较冻结的产品字符串；错误锁仅在失败或结束检查时使用。
+
+验证入口：`native/nautilus_factor_bridge/tests/catalog_runtime.rs`。纯 Rust 创建
+真实 Nautilus Catalog，分两文件写入 8 根测试 Bar，以 chunk_size=2 原生回放，
+不经过 Python，也不手动调用 Actor 的 Bar 回调。逐点校验 rolling(2) 均值、HIGH、
+Bar/可用时刻；Cache bar_capacity=1，因子仍保持跨批次状态。未知字段和字段数
+错误在读取前失败。另有双产品字段布局与产品次序回归，测试 Actor 完成切片的
+可用时刻为各输入 ts_init 最大值。该测试不是原研报、真实 T/TL Job 或策略收益验收。
+
+BacktestNode 支持由 feature `nautilus-backtest` 隔离，默认 bridge 不拉入回放后端。
+新增 Catalog 后端依赖由独立 bridge Cargo.lock 固定；与 wheel 的锁文件不同会
+使首次构建编译部分不同小版本依赖。不能把首次冷构建耗时当作增量部署耗时。
+
+## 原生输出与真实分钟数据校验（2026-10-27）
+
+`FactorOutputSink` 在原生 Actor 内借用当前输出，允许 write/finish 返回错误。
+首次错误进入 FactorReplayHandle，Nautilus 停止后必须检查；空输出、未到齐切片、
+写入失败与结束刷新失败不能被当成成功。该接口本身不保证调用方有界，验收工具
+使用 64 KiB BufWriter 逐行写入，不保存输出历史。正常写入路径不使用共享锁。
+
+冻结 JSON 的 columns 在读取前与 Bar 字段顺序对齐；允许未被计算节点使用的
+时钟来源列，但不得缺少节点引用列。期限曲线尚未接入该 Bar runtime 时明确拒绝；
+需要 boundary 的计划必须同时声明冻结的 FactorBoundary CustomData 输入，并在
+原生读取前注册其 codec。不能向这些通道静默传空值。这些是 bridge 接线校验，
+不是新建行情读取器、Cache 或撮合器。
+
+真实 T/TL 数据逐点核验暴露两项计算错误，并在共享 alpha-algo 核心修复：
+
+- SignalAlign last：源时钟跨过多个目标网格点（如休市）时，原实现取了发现缺口的
+  较晚 Bar。现在以最后已到达的目标网格点作 as-of，严格模式排除该点本身；
+  O(1) 跳过缺失网格，不逐个扫描。小型手算输入和每个前缀覆盖 inclusive/strict，
+  bridge 覆盖内层 signal 连接外层 Where。first、其他 anchor/partial 的全组合
+  尚未完成同等级验证，不能由本次结果推定全部通过。
+- Sum/Mean：增删窗口值的浮点误差可翻转相等阈值的比较。例：20 根周期价格
+  经 5,000 次更新后原结果为 101.65000000000002；真实样本也出现均值
+  101.64999999999999 与信号 101.65 导致 Where 翻转。共享补偿求和用于
+  session 窗口和截断扫描，增删仍为 O(1)，每状态多一个 f64；不引入 Decimal、
+  窗口重扫或比较容差。独立参考使用 math.fsum，另测大数消去的小残差。
+
+可复现入口：`tests/benchmarks/bench_native_factor_replay.py` 与独立 Rust 示例
+`catalog_replay`（feature nautilus-backtest）。Python 仅冻结输入并作独立对账；
+被计时的原生进程由 Nautilus BacktestNode 读取、归并、分发，再计算和写出。
+该示例没有交易策略、订单或报告，不是生产 Job runner。
+
+测量环境：macOS arm64，GTHT Python 3.14，原生 dev opt-level=1；没有清空系统
+文件缓存，每规模一次预热后 3 个独立进程样本。T/TL 共用 4 输出计划：rolling20
+均值、5 分钟 last 信号、Where、shift；chunk_size=40、Cache 每 BarType 只存
+1 根。各 500 根的原生读/算/写中位数 0.115 秒，峰值 62,128,128 字节；
+各 2,000 根约 0.45 秒、约 90 MB（约 86 MiB）。全部输出、产品、事件时刻、
+可用时刻逐点校验。记录 source/binary SHA256 与逐样本耗时/RSS；输入收据冻结
+数据来源。夹具每 3 根写一个 Parquet 文件，大量文件元数据也影响 RSS；两种
+规模不能证明内存恒定。计时不含 Python 初次转换和参考面板，不能与此前 Python
+整进程高水位比较成提速或内存下降比例，也不是原研报收益、公网或 CouchDB 验收。
+
+聚焦验证：native bridge 26 项与真实 Catalog 集成 1 项；公开 API/测试选择器
+82 项；session window 26 项；Plan 26 项。正确性提交 hook 额外选择 138 项通过。
+没有执行全仓测试。该里程碑仅验证原生接线和离线工具；后续实际回放切换见下节。
+
+## 实际策略入口移除 Python 合并（2026-10-27）
+
+旧 `iter_catalog_bar_batches`、heapq.merge、逐批 Python add_data/run/clear 循环
+已删除，小窗口市场/开盘成交验收也没有保留旧路径。基准程序不保存旧合并器副本。
+实际家族/RunSpec runner 通过薄接口 BacktestEngine.run_catalogs 调用 Nautilus
+既有 Catalog 查询、DataIterator 归并、同时间戳对齐分批及原生回放循环。该方法是
+本地增加的接入接口；底层回放算法与 BacktestNode 共用，没有另写数据引擎。
+已经配置好的 Venue、账户、费用、成本法等引擎状态保留原样，不换成验收用的
+默认引擎。该变化不声称已补全先前未接通的 DMTM/历史规则等配置分支。
+
+查询内存预算仍按输入数分摊（总计 128 MiB 的已跟踪查询预算），并在原生查询端
+限制同时间戳组、在跨来源对齐后限制整个批次。超限报错，不截断或拆散同时间戳。
+实际迭代数与总收据、逐来源收据分别比较，不能让一个来源少一条、另一个多一条
+在总数上相消。逐来源数量在原生批次抵达时 O(1) 累加，不在每根 Bar 上查询数据库。
+DataFusion 预算不覆盖所有分配，仍需要 worker 的进程级硬限制。
+
+同时修复真实阈值家族误调用 members() 的错误；分组使用成员选择、阈值使用
+方向决策。目标单数量读取 Nautilus 的实际持仓及去重后的未完成订单，不再维护
+一份“已提交买单就是持仓”的集合。首次策略/因子回调异常请求原生停止，并传回
+runner，不能仅记录日志后导出成功报告。独立真实测试覆盖两类策略、下一 Bar
+开盘成交、双产品跨文件/批次、跨来源硬上限及回调失败不发布报告。
+
+日历摘要在 Catalog 首次转换时增量累计并冻结到收据；每个交易日/合约仅保存
+start/end/count。TradingCalendarWindow 的两种来源入口和 staging 复用同一摘要
+累加器，移除按 Bar 保存时间元组的实现。RunSpec 从冻结摘要建立日历，不再重扫
+价格源。旧收据缺少摘要时明确要求 restage，依赖日历的因子不得猜测日历；固定
+窗口不强制要求其不需要的日历。真实来源禁止二次读取的测试已通过。
+
+本次本机 GTHT 扩展已重建。构建入口检查 run_catalogs 能力及 Rust 构建输入的
+mtime，避免相同版本号的旧扩展直接被判定为已构建；增量依赖判定仍交给 Cargo。
+没有修改 Nautilus core 来依赖因子库，也未增加常驻数据服务。
+
+该里程碑当时仍使用 Python on_bar 因子适配；此部分已由下一节的原生消费端替代。
+Celery/RabbitMQ、原研报策略、公网及持久化端到端验收仍须继续。
+
+本地测量（parent d22606240 / Nautilus 01a1e56793）：
+`tests/benchmarks/bench_strategy_catalog_runtime.py` 使用已冻结的真实 T/TL 各
+2,000 根分钟 Bar，共 4,000 根、100 批、最大 40 根；共享 rolling20 信号，
+分组家族产生 1 笔订单及 2,000 次因子发布，并导出 Nautilus 报告。macOS arm64、
+GTHT Python 3.14、native dev opt-level=1，Cache 保持现有默认设置；没有清空文件
+缓存。3 个独立进程的回放/策略/报告耗时为 0.829、0.679、0.687 秒，中位数
+0.687 秒，整进程峰值最大 331,759,616 字节（约 316 MiB）。这包含 Python
+策略适配、输入收据校验及报告依赖，不含首次源转换与 Celery/broker；因子引用
+和账户为验收夹具，不能当成已注册研报因子的真实公网 Job。没有保留旧合并器
+作性能基准，也不据不同边界的历史样本声称提速比例或泄漏上界。
+
+验证：原生 node 23 项、Python 聚焦 74 项、提交 hook 121 项通过，均非全仓测试。
+子模块与父仓库均本地提交，未推送或部署。
+
+## 实际策略消费端切换 Rust FactorActor（2026-10-27）
+
+实际 `run_strategy_family_run_spec` / 家族 runner 保留 Python 的冻结引用解析、
+输入收据预检、引擎配置与报告导出；行情回放期间，数据从 Nautilus Catalog 经
+DataEngine 到共享 FactorActor，再经原生消息总线交给 Rust 家族 Strategy。
+删除 `factor_stream.py`、Python Trader/FamilyTrader 回调、Python 家族成员与
+方向计算，以及无引用的 Python EventTimeline；不保留自动回退。
+
+`native/factortester_nautilus_runtime` 是组合根，生成同一个
+`nautilus_trader._libnautilus` 扩展，保留原来的 Python 功能 feature 与版本，
+避免第二个动态库产生独立的 Cache、Actor 注册表或撮合状态。Nautilus 仅增加
+可选 embedding 初始化入口，默认上游构建不变，不引入因子依赖。
+构建脚本使用成功构建的输入/二进制指纹收据；依赖重编译仍由 Cargo 决定。
+首次组合需构建完整扩展，不是秒级冷构建；热缓存验证 Cargo 0.58 秒完成，
+下一次脚本直接识别已构建。脚本启动扫描开销不在该 Cargo 时间中。
+
+同一冻结输入/时钟的多 role 在原有公共编译器做 CSE，不另写计划编译器。
+一个 Actor 维护一份 kernel、有限乱序切片及最近结果；消费者借用发布内容，
+只保留可复用目标缓冲。同一个输出的分组策略共用一次排序，NaN 不进入排名，
+同值按品种标识排序。持仓及待成交数量从 Nautilus Cache 读取，使用 Decimal，
+不复制整段行情或另维护模拟持仓。普通运行不保存因子输出历史；可选诊断 trace
+使用共享的 64 KiB JSONL 写出器。原生消息接收端是线程绑定的，不要求 sink 为 Send。
+
+冻结日历通过单调游标在完整切片上发出 bar/交易日/session 边界，不逐 Bar 建立
+Python datetime 或保存事件历史；缺少必需日历、未知边界、范围错误或消费者失败
+均中止回放并向 runner 返回失败。Nautilus 继续负责账户、撮合和订单；未补全的
+历史交易规则、DMTM 等不因本次接线而变为已支持。
+
+真实本机验证使用 T2403/TL2406 价格 Catalog，不 mock 引擎、Actor 或策略。
+双策略集成样本：16 根输入、8 个完整时间片、2 节点，两个消费者各收到 8 次，
+共享排名只执行 8 次；订单真实成交。独立逐点参考检查 SignalAlign/Where 的值、
+事件时刻及可用时刻；另测分段重置、缺日历/越界失败。Python profile 检查没有
+进入旧因子/策略 on_bar/on_signal。原生 28 项及 Catalog 集成 1 项通过，
+alpha-algo 214 项通过；父仓提交 hook 聚焦 232 项通过，未运行全仓测试。
+
+性能入口仍为 `tests/benchmarks/bench_strategy_catalog_runtime.py`。Mac16,12、
+24 GiB 内存、macOS arm64、GTHT Python 3.14、dev opt-level=1；同一冻结 T/TL
+各 2,000 根、100 批、最大 40 根，rolling20 分组策略，默认 Cache，输出报告，
+不输出逐点 trace。未清空文件缓存，3 次顺序独立进程：1.081196、0.662701、
+0.671587 秒，中位 0.671587 秒；整进程峰值分别为 343,703,552、334,626,816、
+336,527,360 字节。旧 Python 回调同入口中位 0.687269 秒，峰值最大
+331,759,616 字节；样本不足以声称显著提速或节省整进程内存。每次均只有一个
+Actor、2,000 次发布/排序和一笔 TL2406 BUY 1，下一 Bar 01:32 UTC 开盘价
+101.53 成交，与前次结果相同。耗时包含预检及报告，不含首次源转换或 Celery。
+
+剩余限制：实际 runner 目前只接受已有阈值/分组家族及一条冻结策略路由；底层
+多消费者共享已验证，但运行级跨家族自动合并仍需接线。稀疏/异步产品、期限曲线、
+自定义边界仍须权威事件输入，不能用空数据代替。收据校验仍可能读取文件字节，
+不能称整个流程只读磁盘一次。查询预算不等于整个进程内存硬上限。未验收
+Celery/RabbitMQ、公网、CouchDB 或原研报收益，也未推送或部署。
+
+
+## alpha 独立仓库与 adapter 归属（2026-10-27）
+
+按用户确认，Nautilus bridge 及阈值/横截面分组两个公共因子策略归 alpha，
+策略库管理、用户策略注册、权限、冻结版本、RunSpec、Job 与 UI 归 TradeResearch。
+`vendor/py-alpha-lib` 从普通 vendored 源码转换为固定提交 submodule；先在 alpha
+提交现有公开因子 API/Rust Plan 快照，再提交 `adapters/nautilus`。主仓不再
+维护 `native/nautilus_factor_bridge` 副本。迁入的 11 个 Rust 源码/测试/示例
+逐文件与迁移前相同，不重写算法、缓存、撮合或策略决策。
+
+alpha 核心工作区排除 adapter，保持不依赖任何回测框架。adapter 是独立 Cargo
+工作区，通过可选 feature 依赖 Nautilus 包。当前接口要求 0.67.0 及本项目固定
+修订的配置引擎回放 API；不能仅凭同版本号就认定任意发布 wheel 兼容。
+`native/traderesearch_nautilus_runtime` 是宿主组合根，将 adapter 的 Nautilus
+依赖 patch 到同一 submodule 源码，与原有 Python 功能链接成唯一扩展。
+`test_alpha_nautilus_adapter.py` 从该 manifest 提取 source patches 后运行
+adapter 独立工作区测试，不复制依赖列表或 adapter 代码。
+
+新组合 crate/目录、缓存收据和文档使用 TradeResearch 命名。现有 Catalog
+收据字段、冻结 ID 与旧接口名不在这次迁移中重命名，避免把代码归属变更
+混入数据格式迁移。历史段落中的旧路径描述各自提交当时的状态。
+
+共享 Actor/Plan、输出借用、可复用目标缓冲、分组排序共享与有界查询继续沿用，
+不会按策略创建独立行情历史或第二个引擎。独立依赖图检查确认 alpha-algo、
+bridge、Nautilus core/model/common 各一份。迁移不增加逐 Bar 检查或读取。
+
+本轮 alpha 核心 214 项、adapter 原生 28 项与 Catalog 集成 1 项、GTHT
+真实策略/构建/限流聚焦 54 项通过。实际组合扩展已经重建，随后再次执行构建
+脚本直接识别已构建。首次 adapter 测试构建在固定 Rust 1.99.0 下包含
+DataFusion/Nautilus 的独立 feature/profile 依赖编译，耗时约 10 分钟；
+组合扩展输出的 4 分 6 秒包含等待该 target 锁，实际只重编译 bridge 和组合
+crate。不能把等待/首次依赖编译解释成回测耗时或承诺秒级冷构建。
+
+同一冻结 T2403/TL2406 各 2,000 根真实 Bar，共 4,000 根、100 批、最大40根；
+macOS arm64/Mac16,12、24 GiB、GTHT Python3.14、dev opt1，Cache 默认、
+未清空系统缓存、不启用 trace。3 次顺序独立进程耗时 0.917402、0.706484、
+0.679370 秒，中位 0.706484；峰值 RSS 分别337,231,872、338,755,584、
+333,283,328 字节。前次原生版本中位0.671587、峰值最大343,703,552字节；
+此规模与噪声不足以证明显著变化或最优性。本次没有同时运行本任务的构建/测试，
+但宿主机不是独占基准环境。各次均一个Actor、2节点、2,000次发布/排序，
+TL2406 BUY1在2024-01-02 01:32 UTC以101.53成交，经济结果与前次相同。
+报告/预检包含在耗时内，首次源转换、Celery、网络与部署不包含。
+
+alpha 源码及桥接分别提交，主仓固定新的 gitlink；这些本地提交尚未推送，
+其他设备在获取提交之前不能仅靠远端 submodule URL复现新版本。没有部署、
+公网负载、完整研报收益或长回测内存稳定性验收。
+
+## alpha 公式与显式中间结果（2026-10-27）
+
+公式算子排版、注解遍历、嵌套命名空间、参数符号/代值公式和查询索引迁入
+`alpha.factor`。TradeResearch 只保留领域字段适配和调用 facade；移除表达式
+各算子的重复 LaTeX 方法。`as_intermediate` 不参与计算身份、CSE 或调度，
+只保存名称/来源字符串，不持有 Factor/Family（及其历史结果）的强引用。
+同一内层家族的不同参数实例按参数路径命名，避免内外同名参数与查询名冲突。
+公式导出不运行因子、不登记新 Factor、不读取行情、不修改模板。
+
+中间输出由请求显式选择；普通计算默认不保留。批量主输出、函数输出与选择
+的中间输出在同一 Rust Plan 中计算，结构键去重，不为查询重算。
+`IntermediateResults` 借用本次批结果，流式模式仅替换最新帧；完整序列仅在
+因子序列检查/IC 等明确调用时收集。原生查询从已安装共享 Actor 的最新输出
+槽读取，查询时复制所选产品向量；Actor 生命周期/身份校验防止跨运行取值。
+此功能不承诺所有历史结果都可事后查询，不自动保存历史。
+
+旧记录的序列化公式模板拼装亦归 alpha（renderer version 7），后端仅重导出。
+旧编辑页面不再本地重写公式，经过现有认证 factor-library Manager 代理请求
+统一预览，再交给 KaTeX。预览不触发目录同步；请求大小/深度/展开长度只在
+预览入口检查，不增加逐 Bar 成本。页面防抖、仅在途去重与响应代次检查防止
+旧预览覆盖新参数。没有数据库迁移或新增同步协议。
+
+聚焦契约覆盖注解身份不变、嵌套参数/多实例、显式查询复用与旧帧释放、真实
+原生 Actor 槽查询、页面 JSON 传输/乱序响应、KaTeX 与认证代理。组合扩展
+已重建。真实 T/TL 共4,000 Bar，3次顺序独立进程（不同时运行本任务测试），
+耗时0.638630/0.651982/0.655471秒，峰值RSS最大336,969,728字节；仍为一个
+Actor、2节点、100批最大40根、2,000次发布/排序，成交与前次一致。
+环境与上段基准相同，未清系统缓存。小样本不能证明显著加速、长回测容量或
+性能最优；未运行公网/Celery负载。生成物保留于仓库外基准目录。
+
+本轮最终聚焦Python契约148项通过、1项已退役旧Celery sink测试跳过；原生
+adapter 28项与Catalog集成1项通过，非全量平台测试。alpha提交`7e99875`。
+
+
+## 2026-10-27 公开 batch 与多策略接线补充
+
+此节取代上文“跨策略仍待接通”和 Python heap/按时间批回放的过渡状态。
+公开 SignalAlign 的网格/采样和 TermStructure 的数学统一到 alpha Rust Plan；
+Python 仅提供冻结分区、曲线输入和输出视图。无 Python 数学 fallback。
+同输入/时钟的多个策略共享 Actor/CSE；产品局部祖先共享，横截面及其后代按
+策略产品集合区分。NETTING 的重叠独立目标必须拒绝，HEDGING 使用原生持仓归属。
+
+实际 Catalog 回放启用 Nautilus optimize_file_loading，避免同精度目录每文件各建
+预取查询。它不是新读取基础设施；数量/时间戳组/查询预算保护继续独立生效。
+不同精度文件的原生回退仍需单独容量验证。最新测量与公开 batch 的小输入
+SignalAlign 开销回归均记录在 [本轮审计](../audits/alpha-rust-entrypoints-2026-10-27.md)。
+不以此宣称所有算子、所有时钟、Linux/Celery/公网均已验收。
+
+
+## 2026-10-27 搜索范围统一为分区
+
+用户明确确认：`bar_since`、`bar_distance` 的 `scope_bars(K)` 与 ADR155
+一致，按每个产品已观测源 Bar 每 K 根形成非重叠分区，禁止跨段搜索。
+它不是滑动窗口。夜盘使用冻结交易日标签；session 按观测间隔重置。
+独立 `lookback=N` 表示最多回看 N 根已观测 Bar，可与 scope 组合；
+`scope=None, lookback=N` 提供纯滑动搜索。两者均未提供时拒绝构造。
+
+公开 batch、兼容 DSL 和原生计划均编译至 alpha 的 Search 节点与
+BarSearchState；复杂 Where 谓词引用其他因子时，依赖在当前时刻读取，
+不是在候选历史时刻重算。内层信号仅在形成后向外层因果前填。
+搜索结构身份升为 v2，避免旧滚动语义与新分区语义共用冻结身份。
+Python 搜索数学实现删除；保留的 observed-mask 函数仅适配网格元数据。
+
+本轮聚焦测试92项通过，包括分区/回看反例、夜盘交易日、嵌套3分钟信号
+在1分钟搜索中的逐前缀 batch/增量对账。此回执尚不代表新 Search 节点
+已通过真实 Celery Job、重建后的 Nautilus 组合扩展或长任务容量验收。

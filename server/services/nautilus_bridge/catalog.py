@@ -18,12 +18,16 @@ import time
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import Callable, Iterator
 
 from server.services.nautilus_bridge.market_data import (
+    DailySettlementRecord,
     FuturesContractSpec,
     MarketBar,
+    iter_daily_bars,
     iter_minute_bars,
     to_nautilus_bar,
+    to_nautilus_daily_settlement,
     to_nautilus_instrument,
 )
 from server.services.nautilus_bridge.version import NAUTILUS_VERSION
@@ -57,8 +61,8 @@ def _assert_readback(catalog, bar_type, source_bars: list[MarketBar]) -> None:
     """Query only the just-written window; compare every value and clock."""
     read = catalog.query_bars(
         identifiers=[str(bar_type)],
-        start=source_bars[0].clock.interval_end_ns,
-        end=source_bars[-1].clock.interval_end_ns,
+        start=source_bars[0].clock.available_at_ns,
+        end=source_bars[-1].clock.available_at_ns,
     )
     if len(read) != len(source_bars):
         raise ValueError(f"catalog readback count {len(read)} != {len(source_bars)}")
@@ -93,15 +97,28 @@ class CatalogReceipt:
     elapsed_ms: float
     process_peak_rss_bytes: int
     max_batch_bars: int
+    session_summaries: tuple[dict[str, str | int], ...] = ()
+    settlement_records: tuple[dict[str, str | int], ...] = ()
+    bundle_id: str = ""
+    bundle_version: str = ""
+    bundle_fingerprint: str = ""
+    member_id: str = ""
 
 
-def stage_contract_minute_catalog(
+from traderesearch_data.shared_cache import batch_input_budget
+
+
+@batch_input_budget
+def _stage_contract_catalog(
     source_path: str | Path, target_dir: str | Path, *,
     contract_uid: str, instrument_spec: FuturesContractSpec,
     start_ns: int, end_ns: int,
+    bars: Iterator[MarketBar], bar_type_suffix: str,
     batch_bars: int = 4_096, max_bars: int = 100_000,
+    bundle_id: str = "", bundle_version: str = "",
+    bundle_fingerprint: str = "", member_id: str = "",
 ) -> CatalogReceipt:
-    """Write one contract's unadjusted MIN1 bars in bounded NT batches.
+    """Shared bounded NT writer for one source-owned Bar contract.
 
     A new sibling staging directory is renamed only after every chunk can be
     read back.  Neither the source nor an existing target is modified.  The
@@ -125,7 +142,7 @@ def stage_contract_minute_catalog(
     if nt_version != NAUTILUS_VERSION:
         raise RuntimeError(f"NautilusTrader pin mismatch: {nt_version}")
     instrument = to_nautilus_instrument(instrument_spec)
-    bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")
+    bar_type = BarType.from_str(f"{instrument.id}-{bar_type_suffix}")
     started = time.perf_counter()
     initial_stat = source.stat()
     source_hash = _sha256_file(source)
@@ -137,7 +154,11 @@ def stage_contract_minute_catalog(
         first: MarketBar | None = None
         last: MarketBar | None = None
         selected_count = 0
+        settlement_records: list[dict[str, str | int]] = []
+        settlement_events = []
         batch: list[MarketBar] = []
+        from tools.factors.expr.streaming.calendar_window import TradingSessionSummary
+        session_summary = TradingSessionSummary()
 
         def flush() -> None:
             if not batch:
@@ -149,9 +170,7 @@ def stage_contract_minute_catalog(
             _assert_readback(catalog, bar_type, batch)
             batch.clear()
 
-        for bar in iter_minute_bars(
-            source, start_ns=start_ns, end_ns=end_ns, batch_size=batch_bars,
-        ):
+        for bar in bars:
             if not isinstance(bar, MarketBar):
                 raise TypeError("continuous roll marker cannot enter contract catalog")
             if bar.contract_uid != contract_uid:
@@ -162,6 +181,28 @@ def stage_contract_minute_catalog(
             if selected_count > max_bars:
                 raise ValueError("selected window exceeds explicit max_bars budget")
             selected_hash.update(_bar_digest_line(bar))
+            if bar.settlement_price is not None:
+                settlement_records.append({
+                    "contract_uid": bar.contract_uid,
+                    "trading_day": bar.trading_day.isoformat(),
+                    "event_ns": bar.clock.interval_end_ns,
+                    "settlement_price": str(bar.settlement_price),
+                })
+                settlement_events.append(to_nautilus_daily_settlement(
+                    DailySettlementRecord(
+                        contract_uid=bar.contract_uid,
+                        instrument_id=str(instrument.id),
+                        trading_day=bar.trading_day,
+                        settlement_price=bar.settlement_price,
+                        timestamp_ns=bar.clock.interval_end_ns,
+                        rule_set_ref=instrument_spec.provenance,
+                        source_path=str(source),
+                        row_number=bar.row_number,
+                    ),
+                    instrument=instrument, instrument_spec=instrument_spec,
+                ))
+            session_summary.add(bar.trading_day, bar.clock.interval_open_ns,
+                                bar.clock.interval_end_ns)
             if first is None:
                 first = bar
             last = bar
@@ -169,6 +210,8 @@ def stage_contract_minute_catalog(
             if len(batch) == batch_bars:
                 flush()
         flush()
+        if settlement_events:
+            catalog.write_instrument_closes(settlement_events)
         if first is None or last is None:
             raise ValueError("source contains no bars in selected window")
         final_stat = source.stat()
@@ -177,10 +220,12 @@ def stage_contract_minute_catalog(
         ):
             raise RuntimeError("source changed while catalog was staged")
 
+        import pyarrow.parquet as pq
         files = tuple({
             "path": file.relative_to(staged).as_posix(),
             "bytes": file.stat().st_size,
             "sha256": _sha256_file(file),
+            "type_name": (pq.read_schema(file).metadata or {}).get(b"type_name", b"").decode(),
         } for file in sorted(staged.rglob("*.parquet")))
         receipt = CatalogReceipt(
             schema_version=1, engine=f"NautilusTrader {nt_version}",
@@ -198,6 +243,14 @@ def stage_contract_minute_catalog(
             catalog_files=files,
             elapsed_ms=round((time.perf_counter() - started) * 1000, 3),
             process_peak_rss_bytes=_peak_rss_bytes(), max_batch_bars=batch_bars,
+            session_summaries=tuple({
+                "trading_day": item.trading_day.isoformat(),
+                "start_ns": item.start_ns, "end_ns": item.end_ns,
+                "bar_count": item.bar_count,
+            } for item in session_summary.sessions()),
+            settlement_records=tuple(settlement_records),
+            bundle_id=bundle_id, bundle_version=bundle_version,
+            bundle_fingerprint=bundle_fingerprint, member_id=member_id,
         )
         receipt_path = staged / "factor_tester_catalog_receipt.json"
         receipt_path.write_text(json.dumps(asdict(receipt), ensure_ascii=False,
@@ -207,3 +260,71 @@ def stage_contract_minute_catalog(
     except Exception:
         shutil.rmtree(staged)
         raise
+
+
+def load_catalog_settlement_records(
+    catalog_dir: str | Path, *, contract_uid: str,
+) -> tuple[dict[str, str | int], ...]:
+    """Read the persisted DAY1 settlement observations for one staged catalog."""
+    folder = Path(catalog_dir)
+    receipt = json.loads((folder / "factor_tester_catalog_receipt.json").read_text())
+    if receipt.get("contract_uid") != contract_uid:
+        raise ValueError("catalog settlement identity differs from requested contract")
+    records = receipt.get("settlement_records") or ()
+    for item in records:
+        if item.get("contract_uid") != contract_uid:
+            raise ValueError("settlement record belongs to another contract")
+        if not str(item.get("trading_day") or "") or not str(item.get("settlement_price") or ""):
+            raise ValueError("settlement record is incomplete")
+    return tuple(records)
+
+
+def stage_contract_minute_catalog(
+    source_path: str | Path, target_dir: str | Path, *,
+    contract_uid: str, instrument_spec: FuturesContractSpec,
+    start_ns: int, end_ns: int,
+    batch_bars: int = 4_096, max_bars: int = 100_000,
+    bundle_id: str = "", bundle_version: str = "",
+    bundle_fingerprint: str = "", member_id: str = "",
+) -> CatalogReceipt:
+    """Write one contract's unadjusted MIN1 bars in bounded NT batches."""
+    return _stage_contract_catalog(
+        source_path, target_dir, contract_uid=contract_uid,
+        instrument_spec=instrument_spec, start_ns=start_ns, end_ns=end_ns,
+        bars=iter_minute_bars(Path(source_path), start_ns=start_ns, end_ns=end_ns,
+                              batch_size=batch_bars),
+        bar_type_suffix="1-MINUTE-LAST-EXTERNAL",
+        batch_bars=batch_bars, max_bars=max_bars,
+        bundle_id=bundle_id, bundle_version=bundle_version,
+        bundle_fingerprint=bundle_fingerprint, member_id=member_id,
+    )
+
+
+def stage_contract_daily_catalog(
+    source_path: str | Path, target_dir: str | Path, *,
+    contract_uid: str, instrument_spec: FuturesContractSpec,
+    start_ns: int, end_ns: int, product_codes: set[str],
+    session_for_day: Callable, source_time_unit: str = "validated",
+    batch_bars: int = 4_096, max_bars: int = 100_000,
+    bundle_id: str = "", bundle_version: str = "",
+    bundle_fingerprint: str = "", member_id: str = "",
+) -> CatalogReceipt:
+    """Write one contract's date-labelled DAY1 bars in bounded NT batches.
+
+    The source label is never the event time; ``session_for_day`` supplies the
+    source-owned exchange calendar used by ``daily_clock``.
+    """
+    return _stage_contract_catalog(
+        source_path, target_dir, contract_uid=contract_uid,
+        instrument_spec=instrument_spec, start_ns=start_ns, end_ns=end_ns,
+        bars=iter_daily_bars(
+            Path(source_path), product_codes=product_codes,
+            session_for_day=session_for_day, raw_unit=source_time_unit,
+            batch_size=batch_bars, start_ns=start_ns, end_ns=end_ns,
+            contract_uids={contract_uid},
+        ),
+        bar_type_suffix="1-DAY-LAST-EXTERNAL",
+        batch_bars=batch_bars, max_bars=max_bars,
+        bundle_id=bundle_id, bundle_version=bundle_version,
+        bundle_fingerprint=bundle_fingerprint, member_id=member_id,
+    )

@@ -127,7 +127,7 @@ def sift_product_by_volumes(
 def calc_factor(
     state: "FactorTesterState", factors: "Factor|List[Factor]",
     parallel: bool = True, max_workers: int = 4,
-    warmup_window: pd.Timedelta | None = None,
+    warmup_window: pd.Timedelta | None = None, intermediates=(),
 ) -> None:
     from tools.factors.Factors import Factor
     from tools.factors.FactorTester import _active_tester
@@ -162,6 +162,7 @@ def calc_factor(
                 or batch[0].family._source_freq,
                 start_dt=state.start_dt, end_dt=state.end_dt,
                 warmup_window=warmup_window,
+                **({"intermediates":intermediates} if intermediates else {}),
             )
         else:
             remaining.extend(batch)
@@ -178,6 +179,7 @@ def calc_factor(
             factor.evaluate(
                 state.products, start_dt=state.start_dt, end_dt=state.end_dt,
                 warmup_window=warmup_window,
+                **({"intermediates":intermediates} if intermediates else {}),
             )
 
         with ThreadPoolExecutor(max_workers=min(max_workers, len(factors))) as pool:
@@ -193,6 +195,7 @@ def calc_factor(
             factor.evaluate(
                 state.products, start_dt=state.start_dt, end_dt=state.end_dt,
                 warmup_window=warmup_window,
+                **({"intermediates":intermediates} if intermediates else {}),
             )
 
 

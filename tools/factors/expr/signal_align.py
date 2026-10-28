@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from tools.parameters.Parameter import Parameter
 
 
+from alpha.factor.annotations import copy_annotation
+
 from .core import FactorExpr, EvaluateContext
 from .composite import CompositeExpr
 
@@ -358,12 +360,7 @@ class SignalAlign(CompositeExpr):
             end_session_skip=self.end_session_skip,
             end_session_gap=self.end_session_gap,
         )
-        if self._is_intermediate:
-            resolved = resolved.as_intermediate(
-                self._intermediate_name,
-                factor=kwargs.get('caller', None),
-            )
-        return resolved
+        return copy_annotation(self,resolved)
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
         data = values[0]
@@ -404,18 +401,3 @@ class SignalAlign(CompositeExpr):
     def _get_alias(self) -> str:
         inner = self.operands[0]._get_alias()
         return f'SIGNAL_{inner}'
-
-    def _to_latex(self, subst: dict | None = None) -> str:
-        sk = self._structural_key()
-        if subst is not None and sk in subst:
-            return f"{subst[sk]}_t"
-        operand = self.operands[0]
-        operand_key = operand._structural_key()
-        if subst is not None and operand_key in subst:
-            inner = f"{subst[operand_key]}_t"
-        else:
-            inner = operand._to_latex(subst)
-        frequency = str(self.signal_freq if self.signal_freq is not None else '$F')
-        frequency = frequency.replace('$', r'\$')
-        return (r'\operatorname{Resample}_{\textcolor{red}{' + frequency
-                + r'}}\left(' + inner + r'\right)')

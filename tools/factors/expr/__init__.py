@@ -36,6 +36,7 @@ if FACTOR_WORKSPACE:
         _resolve_windows,
         _rolling_argmaxmin,
         window_bars,
+        interval_bars,
     )
     from .shift import ShiftOp, _is_zero_shift_period, _strip_latex_time_subscript
     from .signal_align import SignalAlign, signal_align
@@ -92,6 +93,7 @@ __factor_workspace__ = (
     "bar_since",
     "bar_distance",
     "window_bars",
+    "interval_bars",
     "OPEN",
     "HIGH",
     "LOW",

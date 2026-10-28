@@ -34,7 +34,7 @@ def configure(host: str, port: int | None, base_url: str, server_id: str) -> Non
         from tools.cli.server_connection import discover_server
         config = discover_server(config, server_id)
     save_config(config)
-    click.echo(f"已配置 FactorTester 服务: {config.base_url}")
+    click.echo(f"已配置 TradeResearch 服务: {config.base_url}")
 
 
 @click.command()

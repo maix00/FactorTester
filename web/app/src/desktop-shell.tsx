@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { Dropdown, Tooltip } from "antd";
+import { MoreOutlined } from "@ant-design/icons";
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -7,34 +9,49 @@ import {
 } from "dockview-react";
 import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.ts";
 import { PageIcon } from "./icon.tsx";
+import { PageInstanceProvider, newPageInstanceId, type PageArguments } from "./page-instance.ts";
 import { PageSurface } from "./surface.tsx";
-import { ConfigProvider } from "antd";
+import { AppTheme } from "./components/app-theme.tsx";
+import { Brand } from "./components/brand.tsx";
 import { useTranslation } from "react-i18next";
-import zhCN from "antd/locale/zh_CN";
-import enUS from "antd/locale/en_US";
 import { SettingsOverlay } from "./components/settings-overlay.tsx";
 import { PageErrorBoundary } from "./error-boundary.tsx";
 import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
-function Panel(props: IDockviewPanelProps<{ pageId: string }>): React.ReactElement {
+function Panel(props: IDockviewPanelProps<{ pageId: string; args?: PageArguments; ordinal?: number }>): React.ReactElement {
+  const { t } = useTranslation();
+  const [visible, setVisible] = useState(props.api.isVisible);
+  useEffect(() => { const subscription = props.api.onDidVisibilityChange((event) => setVisible(event.isVisible)); return () => subscription.dispose(); }, [props.api]);
   return (
-    <div className="tr-tab-layer" data-tab-layer={props.params.pageId}>
-      <PageErrorBoundary label={props.params.pageId}><PageSurface pageId={props.params.pageId} /></PageErrorBoundary>
+    <div className="tr-tab-layer" data-tab-layer={props.params.pageId} aria-hidden={!visible} inert={!visible}>
+      <PageInstanceProvider value={{ id: props.api.id, pageId: props.params.pageId, args: props.params.args || {}, mobile: false, active: visible,
+        open: (pageId, args) => {
+          const page = getPage(pageId); if (!page) return;
+          props.containerApi.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: t(`nav.${page.id}`, { defaultValue: page.title }),
+            params: { pageId, args, ordinal: props.containerApi.panels.filter((p) => p.params?.pageId === pageId).length + 1 }, renderer: "always" });
+        } }}><PageErrorBoundary label={props.params.pageId}><PageSurface pageId={props.params.pageId} /></PageErrorBoundary></PageInstanceProvider>
     </div>
   );
 }
 
-function Tab(props: IDockviewPanelHeaderProps<{ pageId: string }>): React.ReactElement {
+function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number }>): React.ReactElement {
   const page = getPage(props.params.pageId);
   const { t } = useTranslation();
   const title = page ? t(`nav.${page.id}`, { defaultValue: page.title }) : (props.api.title ?? props.params.pageId);
   return (
     <span className="tr-dock-tab" title={title}>
       <PageIcon name={page?.icon} />
-      <span className="tr-dock-tab-title" title={title}>{title}</span>
-      <button type="button" className="tr-dock-close" aria-label="关闭" onClick={() => props.api.close()}>×</button>
+      <span className="tr-dock-tab-title" title={title}>{title}{(props.params.ordinal || 1) > 1 ? ` ${props.params.ordinal}` : ""}</span>
+      <Dropdown trigger={["click"]} menu={{ items: [
+        { key: "right", label: t("panelLayout.right") }, { key: "bottom", label: t("panelLayout.below") },
+        { key: "maximize", label: t("panelLayout.maximize") }, { key: "restore", label: t("panelLayout.restore") },
+      ], onClick: ({ key }) => {
+        if (key === "right" || key === "bottom") props.api.moveTo({ group: props.api.group, position: key });
+        else if (key === "maximize") props.api.maximize(); else props.api.exitMaximized();
+      } }}><button type="button" className="tr-dock-arrange" aria-label={t("panelLayout.menu")} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}><MoreOutlined /></button></Dropdown>
+      <button type="button" className="tr-dock-close" aria-label={t("close")} onClick={() => props.api.close()}>×</button>
     </span>
   );
 }
@@ -45,8 +62,8 @@ const LAYOUT_KEY = "tr.workspace.layout.v2";
 type DockviewApi = DockviewReadyEvent["api"];
 
 export function DesktopShell(): React.ReactElement {
-  const { t, i18n } = useTranslation();
-  const pages = pagesForScope("desktop");
+  const { t } = useTranslation();
+  const pages = pagesForScope("desktop").filter((page) => page.sidebarVisible !== false);
   const label = (page: { id: string; title: string }): string => t(`nav.${page.id}`, { defaultValue: page.title });
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [active, setActive] = useState(pages[0]?.id ?? "research");
@@ -56,6 +73,8 @@ export function DesktopShell(): React.ReactElement {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
     return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
   });
+
+  useEffect(() => { if (api) for (const panel of api.panels) { const page = getPage(panel.params?.pageId); if (page) panel.api.setTitle(t(`nav.${page.id}`, { defaultValue: page.title })); } }, [api, t]);
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>): void => {
     event.preventDefault();
@@ -79,17 +98,16 @@ export function DesktopShell(): React.ReactElement {
     if (!api) return;
     const page = pages.find((item) => item.id === pageId);
     if (!page) return;
-    const panel = api.getPanel(page.id);
-    if (panel) panel.api.setActive();
-    else api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
+    api.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: label(page),
+      params: { pageId, ordinal: api.panels.filter((panel) => panel.params?.pageId === pageId).length + 1 }, renderer: "always" });
   };
 
   const resetLayout = (): void => {
     if (!api) return;
     localStorage.removeItem(LAYOUT_KEY);
     api.clear();
-    for (const page of pages.filter((item) => ["research", "jobs", "trading"].includes(item.id))) {
-      api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
+    for (const page of pages.filter((item) => ["research", "configuration"].includes(item.id))) {
+      api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: label(page), params: { pageId: page.id }, renderer: "always" });
     }
   };
 
@@ -100,14 +118,18 @@ export function DesktopShell(): React.ReactElement {
       const raw = localStorage.getItem(LAYOUT_KEY);
       if (raw) {
         event.api.fromJSON(JSON.parse(raw));
-        restored = true;
+        for (const panel of [...event.api.panels]) {
+          if (panel.params?.pageId === "account") panel.api.close();
+          else if (panel.params?.pageId === "catalog") panel.api.updateParameters({ pageId: "products" });
+        }
+        restored = event.api.panels.length > 0;
       }
     } catch {
       restored = false;
     }
     if (!restored) {
-      for (const page of pages.filter((item) => ["research", "jobs", "trading"].includes(item.id))) {
-        event.api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
+      for (const page of pages.filter((item) => ["research", "configuration"].includes(item.id))) {
+        event.api.addPanel({ id: newPageInstanceId(page.id), component: "page", tabComponent: "page", title: label(page), params: { pageId: page.id }, renderer: "always" });
       }
     }
     event.api.onDidActivePanelChange(({ panel }) => {
@@ -120,18 +142,14 @@ export function DesktopShell(): React.ReactElement {
   };
 
   return (
-    <ConfigProvider locale={i18n.language.startsWith("en") ? enUS : zhCN} theme={{ token: {
-      colorPrimary: "#087cff", colorBorder: "#d9d9de", borderRadius: 8,
-      colorBgContainer: "#ffffff", colorText: "#1d1d1f", colorTextSecondary: "#74747a",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
-    } }}>
+    <AppTheme>
     <DesktopNotificationHost />
     <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
     <div className={`tr-app-shell${collapsed ? " is-collapsed" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
-      <aside className="tr-sidebar" aria-label="主导航">
+      <aside className="tr-sidebar" aria-label={t("mainNavigation")}>
         <div className="tr-sidebar-header">
           <button type="button" className="tr-sidebar-brand" onClick={() => open(pages[0]?.id ?? "research")}>
-            <span className="tr-sidebar-title">TradeResearch</span>
+            <span className="tr-sidebar-title"><Brand /></span>
           </button>
           <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? t("expand") : t("collapse")} title={collapsed ? t("expand") : t("collapse")} onClick={() => {
               setCollapsed((value) => {
@@ -143,27 +161,25 @@ export function DesktopShell(): React.ReactElement {
             <PageIcon name="sidebar" />
           </button>
         </div>
-        <div className="tr-sidebar-resize" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" onPointerDown={startResize} />
+        <div className="tr-sidebar-resize" role="separator" aria-orientation="vertical" aria-label={t("resizeSidebar")} onPointerDown={startResize} />
         <nav className="tr-module-nav">
           {pages.map((page) => (
+            <Tooltip key={page.id} title={collapsed ? label(page) : undefined} placement="right">
             <button
               key={page.id}
               type="button"
               className={`tr-nav-item${active === page.id ? " is-active" : ""}`}
-              data-tooltip={page.title}
-              aria-label={page.title}
-              title={page.title}
+              aria-label={label(page)}
               onClick={() => open(page.id)}
             >
               <PageIcon name={page.icon} />
               <span className="tr-nav-label">{label(page)}</span>
-            </button>
+            </button></Tooltip>
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
-        <button type="button" className="tr-sidebar-reset" onClick={() => setSettingsOpen(true)}>{t("settings")}</button>
         <button type="button" className="tr-account-button" onClick={() => setSettingsOpen(true)}>
-          <PageIcon name="account" />
+          <PageIcon name="settings" />
           <span className="tr-nav-label">{t("settings")}</span>
         </button>
       </aside>
@@ -173,6 +189,6 @@ export function DesktopShell(): React.ReactElement {
         </section>
       </main>
     </div>
-    </ConfigProvider>
+    </AppTheme>
   );
 }

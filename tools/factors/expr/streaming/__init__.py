@@ -1,15 +1,15 @@
 """Bounded incremental execution for canonical FactorExpr expressions."""
 
 from .incremental import (
-    IncrementalFactorExecutor,
+    SingleFactorIncrementalExecutor,
     UnsupportedStreamingFactor,
     compile_incremental_factor,
-    compile_streaming_factor,
+    compile_incremental_factors,
 )
 
 __all__ = [
-    "IncrementalFactorExecutor",
+    "SingleFactorIncrementalExecutor",
     "UnsupportedStreamingFactor",
     "compile_incremental_factor",
-    "compile_streaming_factor",
+    "compile_incremental_factors",
 ]

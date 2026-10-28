@@ -28,6 +28,43 @@ class TradingSession:
             raise ValueError("session bar count must be non-negative")
 
 
+class TradingSessionSummary:
+    """Incremental source metadata: one aggregate per trading day/contract.
+
+    No per-Bar time tuples are retained. Contract counts are combined by max,
+    preserving the calendar's existing overlapping-contract semantics.
+    """
+
+    def __init__(self) -> None:
+        self._groups: dict[tuple[object, object], list[int]] = {}
+
+    def add(self, day: object, start_ns: int, end_ns: int, *,
+            contract: object = None, count: int = 1) -> None:
+        if day is None or end_ns <= start_ns or count < 1:
+            raise ValueError("invalid trading session summary")
+        key = (day, contract)
+        previous = self._groups.get(key)
+        if previous is None:
+            self._groups[key] = [start_ns, end_ns, count]
+        else:
+            previous[0] = min(previous[0], start_ns)
+            previous[1] = max(previous[1], end_ns)
+            previous[2] += count
+
+    def sessions(self) -> tuple[TradingSession, ...]:
+        by_day: dict[object, list[int]] = {}
+        for (day, _), (start, end, count) in self._groups.items():
+            previous = by_day.get(day)
+            if previous is None:
+                by_day[day] = [start, end, count]
+            else:
+                previous[0] = min(previous[0], start)
+                previous[1] = max(previous[1], end)
+                previous[2] = max(previous[2], count)
+        return tuple(sorted((TradingSession(day, *values) for day, values in by_day.items()),
+                            key=lambda item: item.start_ns))
+
+
 class TradingCalendarWindow:
     """Map a session lookback to the exact minute-bar window size."""
 
@@ -69,23 +106,14 @@ class TradingCalendarWindow:
         session opens at the earliest night open and closes at the latest day
         close.  Calendar dates alone are never used to derive the day.
         """
-        grouped: dict[object, list[tuple[int, int]]] = {}
+        summary = TradingSessionSummary()
         for bar in bars:
             day = getattr(bar, "trading_day", None)
             clock = getattr(bar, "clock", None)
             if day is None or clock is None:
                 raise ValueError("bars need trading_day and clock fields")
-            grouped.setdefault(day, []).append(
-                (int(clock.interval_open_ns), int(clock.interval_end_ns))
-            )
-        if not grouped:
-            raise ValueError("bars contain no trading sessions")
-        sessions: list[TradingSession] = []
-        for day, intervals in grouped.items():
-            start = min(item[0] for item in intervals)
-            end = max(item[1] for item in intervals)
-            sessions.append(TradingSession(day, start, end, len(intervals)))
-        return cls(tuple(sorted(sessions, key=lambda item: item.start_ns)))
+            summary.add(day, int(clock.interval_open_ns), int(clock.interval_end_ns))
+        return cls(summary.sessions())
 
     @classmethod
     def from_contract_bars(cls, bars: object) -> "TradingCalendarWindow":
@@ -95,31 +123,16 @@ class TradingCalendarWindow:
         maximum count observed for that trading day across contracts, not the
         sum: overlapping contracts must not multiply the window size.
         """
-        grouped: dict[tuple[object, object], list[tuple[int, int]]] = {}
+        summary = TradingSessionSummary()
         for bar in bars:
             day = getattr(bar, "trading_day", None)
             clock = getattr(bar, "clock", None)
             contract = getattr(bar, "contract_uid", None)
             if day is None or clock is None:
                 raise ValueError("bars need trading_day and clock fields")
-            grouped.setdefault((day, contract), []).append(
-                (int(clock.interval_open_ns), int(clock.interval_end_ns))
-            )
-        if not grouped:
-            raise ValueError("bars contain no trading sessions")
-        by_day: dict[object, list[tuple[int, int]]] = {}
-        counts: dict[object, int] = {}
-        for (day, _contract), intervals in grouped.items():
-            by_day.setdefault(day, []).extend(intervals)
-            counts[day] = max(counts.get(day, 0), len(intervals))
-        sessions = [
-            TradingSession(
-                day, min(item[0] for item in intervals),
-                max(item[1] for item in intervals), counts[day],
-            )
-            for day, intervals in by_day.items()
-        ]
-        return cls(tuple(sorted(sessions, key=lambda item: item.start_ns)))
+            summary.add(day, int(clock.interval_open_ns), int(clock.interval_end_ns),
+                        contract=contract)
+        return cls(summary.sessions())
 
     def max_window_size(self, lookback_sessions: int) -> int:
         """Largest minute-bar window over all frozen sessions."""

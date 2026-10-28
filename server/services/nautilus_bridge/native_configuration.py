@@ -206,7 +206,7 @@ def native_configuration_schema() -> dict[str, object]:
             "path": "starting_balances", "native_parameter": "starting_balances",
             "label": "初始余额（Nautilus Money）", "type": "money_array",
             "section": "account", "default": [],
-            "help": "每行一个 '<金额> <币种>'；FactorTester 当前只接受 RunSpec 基础币种。",
+            "help": "每行一个 '<金额> <币种>'；TradeResearch 当前只接受 RunSpec 基础币种。",
         },
     ]
     native_parameters = [
@@ -225,17 +225,17 @@ def native_configuration_schema() -> dict[str, object]:
     venue_field_parameters = {str(field["native_parameter"]) for field in venue_fields}
 
     # Most add_venue arguments pass straight through to the Nautilus Python
-    # API.  Model handles and FactorTester's one-currency rule need a thin
+    # API.  Model handles and TradeResearch's one-currency rule need a thin
     # serialization adapter; they are not independent matching/account logic.
     adapter_parameters = {
         "margin_model": "RunSpec selects StandardMarginModel or LeveragedMarginModel.",
         "fill_model": "RunSpec tags a Nautilus FillModel; the engine factory constructs that native model.",
-        "fee_model": "RunSpec tags a Nautilus FeeModel or a FactorTester historical-fee adapter.",
+        "fee_model": "RunSpec tags a Nautilus FeeModel or a TradeResearch historical-fee adapter.",
         "latency_model": "RunSpec tags a Nautilus LatencyModel; the engine factory constructs that native model.",
     }
     fixed_mappings = {
-        "venue": ("FactorTester Venue identity", "nt_native", "venues[].name", "Passed as Nautilus Venue."),
-        "base_currency": ("RunSpec shared account currency", "mapped", "base_currency", "FactorTester currently freezes one base currency for every Venue."),
+        "venue": ("TradeResearch Venue identity", "nt_native", "venues[].name", "Passed as Nautilus Venue."),
+        "base_currency": ("RunSpec shared account currency", "mapped", "base_currency", "TradeResearch currently freezes one base currency for every Venue."),
     }
     direct_parameters = {
         "oms_type": "venues[].oms_type",
@@ -290,7 +290,7 @@ def native_configuration_schema() -> dict[str, object]:
             }
         elif parameter in adapter_parameters:
             row = {
-                "parameter": parameter, "owner": "FactorTester 序列化适配器",
+                "parameter": parameter, "owner": "TradeResearch 序列化适配器",
                 "status": "ft_adapter",
                 "runspec_path": f"venues[].native_config.{parameter}",
                 "note": adapter_parameters[parameter],
@@ -353,7 +353,7 @@ def native_configuration_schema() -> dict[str, object]:
         },
         {
             "parameter": "daily_settlement",
-            "owner": "FactorTester official-settlement InstrumentClose adapter",
+            "owner": "TradeResearch official-settlement InstrumentClose adapter",
             "status": "unsupported",
             "runspec_path": "instrument_execution_policy.daily_settlement",
             "native_parameters": "InstrumentClose(DAILY_SETTLEMENT)",
@@ -363,7 +363,9 @@ def native_configuration_schema() -> dict[str, object]:
             ),
         },
     ]
+    from .warmup import warmup_configuration_schema
     return {
+        "run_fields": warmup_configuration_schema(),
         "native_version": _NATIVE_VERSION,
         "object": "SimulatedVenueConfig",
         "python_entrypoint": "nautilus_trader.backtest.BacktestEngine.add_venue",
@@ -398,7 +400,7 @@ def native_configuration_schema() -> dict[str, object]:
         "excluded": {
             "modules": "只能使用已登记的版本化 SimulationModule；当前没有可供 RunSpec 选择的注册模块。",
             "defer_option_settlement": "Rust SimulatedVenueConfig 有此字段，但 Python BacktestEngine.add_venue 未暴露；Nautilus 默认值为 true。",
-            "base_currency": "Nautilus 支持 Venue 多币种账户；当前 FactorTester RunSpec 使用统一基础币种并将其映射到各 Venue。",
+            "base_currency": "Nautilus 支持 Venue 多币种账户；当前 TradeResearch RunSpec 使用统一基础币种并将其映射到各 Venue。",
             "python_model_objects": "不能把运行时对象或任意 Python 实例写入 RunSpec。",
             "VolumeSensitiveFillModel": "固定 Nautilus Python API 没有暴露近期成交量更新入口；该模型仍使用 Rust 内部常量 1000，无法按当前或历史 Bar 成交量撮合，因此不能作为可执行 RunSpec 选项。",
         },

@@ -1,37 +1,79 @@
+import pytest
+
+import pytest
 from server.services.nautilus_bridge.catalog_staging import _ns
+
+
+def test_staged_calendar_reuses_frozen_day_summary_without_source_access(tmp_path, monkeypatch):
+    from datetime import date
+    from tests.nautilus_runtime import require_nautilus
+    from tests.server.test_nautilus_bridge_backtest_runner import _real_catalog
+    from server.services.nautilus_bridge.catalog_staging import build_run_spec_session_calendar
+    require_nautilus()
+    item = _real_catalog(tmp_path, count=8)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("calendar must not scan source prices again")
+    monkeypatch.setattr("server.services.nautilus_bridge.market_data.iter_minute_bars", forbidden)
+    calendar = build_run_spec_session_calendar(catalogs={"T": {
+        "catalog_dir": str(item.catalog_dir), "contract_uid": item.expected_contract_uid,
+    }})
+    assert len(calendar.sessions) == 1
+    session = calendar.sessions[0]
+    assert session.trading_day == date(2024, 1, 2)
+    assert session.bar_count == 8
+    assert session.end_ns - session.start_ns == 8 * 60_000_000_000
+
+
+def test_session_summary_keeps_aggregate_state_for_overlapping_contracts():
+    from tools.factors.expr.streaming.calendar_window import TradingSessionSummary
+    summary = TradingSessionSummary()
+    for bar in range(10_000):
+        summary.add("day", bar, bar + 1, contract="A")
+    for bar in range(5_000):
+        summary.add("day", bar, bar + 1, contract="B")
+    assert len(summary._groups) == 2
+    session, = summary.sessions()
+    assert (session.start_ns, session.end_ns, session.bar_count) == (0, 10_000, 10_000)
 
 
 def test_catalog_window_timestamp_is_utc():
     assert _ns("2024-01-02T00:00:00Z") == 1704153600000000000
 
 
-def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_path):
+@pytest.mark.parametrize("selected", ["CFFEX|F|T|2403", "Product/Futures/CNFutures/_products/T.CFE"])
+def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_path, selected):
     from types import SimpleNamespace
     from server.services.nautilus_bridge import catalog_staging
+    from sources.LocalCNFutures import nautilus_catalog
 
-    product = SimpleNamespace(get_parent_product=lambda: SimpleNamespace(
+    parent = SimpleNamespace(
+        name="T.CFE", alias="T.CFE",
         get_contract_list=lambda start, end: [
             {"uid": "CFFEX|F|T|2403", "start_ts": 1700611200000, "end_ts": 1708387200000},
         ],
-    ))
-    monkeypatch.setattr(catalog_staging, "find_contract_product", lambda uid: product)
-    monkeypatch.setattr(catalog_staging, "cn_futures_trading_spec_fields",
-                        lambda product: {"point_value": 10000, "min_tick": 0.005,
+    )
+    product = SimpleNamespace(get_parent_product=lambda: parent)
+    monkeypatch.setattr("sources.LocalCNFutures.CNFutures.get_all_futures", lambda: [parent])
+    monkeypatch.setattr(nautilus_catalog, "find_contract_product", lambda uid: product)
+    monkeypatch.setattr(nautilus_catalog, "instrument_fields",
+                        lambda product: {"multiplier": 10000, "price_increment": 0.005,
                                          "long_margin_ratio": 0.02, "short_margin_ratio": 0.02,
                                          "trading_spec_source": "test"})
-    monkeypatch.setattr(catalog_staging, "contract_data_path_for",
+    monkeypatch.setattr(nautilus_catalog, "contract_data_path_for",
                         lambda uid, product: "/data/T2403.parquet")
-    monkeypatch.setattr(catalog_staging, "build_contract_spec",
+    monkeypatch.setattr(nautilus_catalog, "build_contract_spec",
                         lambda uid, **kwargs: SimpleNamespace(
                             activation_ns=1700611200000000000,
                             expiration_ns=1708473600000000000,
                         ))
     captured = {}
-    monkeypatch.setattr(catalog_staging, "stage_contract_minute_catalog",
-                        lambda source, target, **kwargs: captured.update(
-                            source=source, target=str(target), **kwargs))
+    calls = []
+    def stage(source, target, **kwargs):
+        calls.append(str(target))
+        captured.update(source=source, target=str(target), **kwargs)
+    monkeypatch.setattr(nautilus_catalog, "stage_contract_minute_catalog", stage)
     result = catalog_staging.stage_run_spec_catalogs(
-        staging_requests=[{"paths": ["CFFEX|F|T|2403"]}],
+        staging_requests=[{"paths": [selected]}, {"paths": [selected]}],
         source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
         start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
         target_root=tmp_path,
@@ -39,3 +81,303 @@ def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_pa
     assert result["T"]["contract_uid"] == "CFFEX|F|T|2403"
     assert captured["target"].endswith("CFFEX_F_T_2403")
     assert captured["contract_uid"] == "CFFEX|F|T|2403"
+    assert len(calls) == 1
+
+
+def test_stage_catalogs_rejects_multiple_contracts_for_one_product(monkeypatch, tmp_path):
+    import pytest
+    from types import SimpleNamespace
+    from server.services.nautilus_bridge import catalog_staging
+    from sources.LocalCNFutures import nautilus_catalog
+
+    rows = [
+        {"uid": "CFFEX|F|T|2403", "start_ts": 1700611200000, "end_ts": 1708387200000},
+        {"uid": "CFFEX|F|T|2406", "start_ts": 1700611200000, "end_ts": 1717171200000},
+    ]
+    product = SimpleNamespace(get_parent_product=lambda: SimpleNamespace(
+        get_contract_list=lambda start, end: rows,
+    ))
+    calls = []
+    monkeypatch.setattr(nautilus_catalog, "find_contract_product", lambda uid: product)
+    monkeypatch.setattr(nautilus_catalog, "instrument_fields",
+                        lambda product: {"multiplier": 10000, "price_increment": 0.005,
+                                         "long_margin_ratio": 0.02, "short_margin_ratio": 0.02,
+                                         "trading_spec_source": "test"})
+    monkeypatch.setattr(nautilus_catalog, "contract_data_path_for",
+                        lambda uid, product: f"/data/{uid.rsplit('|', 1)[-1]}.parquet")
+    monkeypatch.setattr(nautilus_catalog, "build_contract_spec",
+                        lambda uid, **kwargs: SimpleNamespace(
+                            activation_ns=1700611200000000000,
+                            expiration_ns=1708473600000000000,
+                        ))
+    monkeypatch.setattr(nautilus_catalog, "stage_contract_minute_catalog",
+                        lambda source, target, **kwargs: calls.append(str(target)))
+    with pytest.raises(ValueError, match="multiple contracts"):
+        catalog_staging.stage_run_spec_catalogs(
+            staging_requests=[{"paths": [row["uid"] for row in rows]}],
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+            start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+            target_root=tmp_path,
+        )
+    assert len(calls) == 0
+
+
+def test_stage_run_spec_catalogs_dispatches_day1_reader(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from server.services.nautilus_bridge import catalog_staging
+    from sources.LocalCNFutures import nautilus_catalog
+
+    parent = SimpleNamespace(
+        name="T.SHFE", alias="T.SHFE",
+        trading_day_sessions="09:00-11:30,13:30-15:00",
+        trading_day_close_time="15:00",
+        get_term_structure_path=lambda: "/data/term.parquet",
+        get_contract_list=lambda start, end: [
+            {"uid": "CFFEX|F|T|2403", "start_ts": 1700611200000, "end_ts": 1708387200000},
+        ],
+    )
+    product = SimpleNamespace(get_parent_product=lambda: parent)
+    captured = {}
+    monkeypatch.setattr(nautilus_catalog, "find_contract_product", lambda uid: product)
+    monkeypatch.setattr(nautilus_catalog, "instrument_fields",
+                        lambda product: {"multiplier": 10000, "price_increment": 0.005,
+                                         "long_margin_ratio": 0.02, "short_margin_ratio": 0.02,
+                                         "trading_spec_source": "test"})
+    monkeypatch.setattr(nautilus_catalog, "build_contract_spec",
+                        lambda uid, **kwargs: SimpleNamespace(
+                            activation_ns=1700611200000000000,
+                            expiration_ns=1708473600000000000,
+                        ))
+    def stage_daily(source, target, **kwargs):
+        captured.update(source=str(source), target=str(target), **kwargs)
+    monkeypatch.setattr(nautilus_catalog, "stage_contract_daily_catalog", stage_daily)
+    result = catalog_staging.stage_run_spec_catalogs(
+        staging_requests=[{"paths": ["CFFEX|F|T|2403"]}],
+        source_key="LocalCNFuturesContractDAY1", frequency="DAY1",
+        start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+        target_root=tmp_path,
+    )
+    assert result["T"]["contract_uid"] == "CFFEX|F|T|2403"
+    from datetime import date
+    assert captured["source"] == "/data/term.parquet"
+    assert captured["product_codes"] == {"T.SHFE"}
+    open_dt, close_dt = captured["session_for_day"](date(2024, 1, 2))
+    assert (open_dt.hour, open_dt.minute) == (9, 0)
+    assert (close_dt.hour, close_dt.minute) == (15, 0)
+
+
+def test_build_contract_spec_validates_bundle_supplied_native_margin():
+    import pytest
+    from sources.LocalCNFutures import nautilus_catalog
+    row = {"start_ts": 1700611200000, "end_ts": 1708387200000}
+    base = {"multiplier": 10000, "price_increment": 0.005,
+            "margin_init": 0.02, "margin_maint": 0.02, "trading_spec_source": "test"}
+    for field in ("margin_init", "margin_maint"):
+        for invalid in (None, "bad", float("inf"), float("nan"), "-Infinity", -0.02):
+            with pytest.raises(ValueError):
+                nautilus_catalog.build_contract_spec(
+                    "CFFEX|F|T|2403", product=object(), contract_row=row,
+                    spec_fields={**base, field: invalid},
+                    source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+                )
+
+
+def test_market_member_must_declare_related_history_member(monkeypatch, tmp_path):
+    import pytest
+    from dataclasses import replace
+    from server.services.nautilus_bridge import catalog_staging
+    from sources.registry import installed_bundles
+
+    bundle = installed_bundles()[0]
+    member = next(item for item in bundle.members if item.id == "LocalCNFuturesContractMIN1")
+    bundle = replace(bundle, members=(replace(member, related_members=()),))
+    monkeypatch.setattr(catalog_staging, "installed_bundles", lambda: (bundle,))
+    with pytest.raises(ValueError, match="does not declare its historical rules member"):
+        catalog_staging.stage_run_spec_catalogs(
+            staging_requests=[{"paths": ["CFFEX|F|T|2403"]}],
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+            start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+            target_root=tmp_path,
+        )
+
+
+def test_empty_catalog_request_fails_before_activation(monkeypatch, tmp_path):
+    import pytest
+    from server.services.nautilus_bridge import catalog_staging
+    from sources.registry import installed_bundles
+
+    bundle = installed_bundles()[0]
+    monkeypatch.setattr(catalog_staging, "installed_bundles", lambda: (bundle,))
+    monkeypatch.setattr(catalog_staging, "import_module",
+                        lambda name: pytest.fail("empty request activated source"))
+    with pytest.raises(ValueError, match="no members"):
+        catalog_staging.stage_run_spec_catalogs(
+            staging_requests=[], source_key="LocalCNFuturesContractMIN1",
+            frequency="MIN1", start_utc="2024-01-02T00:00:00Z",
+            end_utc="2024-01-03T00:00:00Z", target_root=tmp_path,
+        )
+
+
+def _bundle_with_loader():
+    from dataclasses import replace
+    from sources.registry import installed_bundles
+    bundle = installed_bundles()[0]
+    member = next(item for item in bundle.members if item.id == "LocalCNFuturesContractMIN1")
+    member = replace(member, id="ExampleRates", frequency="MIN15",
+                     related_members=(),
+                     integrations=(("nautilus_catalog", "external_rates.catalog:stage"),))
+    return replace(bundle, bundle_id="external", members=(member,))
+
+
+def test_staging_dispatches_source_owned_non_cn_loader(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from server.services.nautilus_bridge import catalog_staging
+    bundle = _bundle_with_loader()
+    monkeypatch.setattr(catalog_staging, "installed_bundles", lambda: (bundle,))
+    captured = []
+    result = {"EXAMPLE": {"catalog_dir": str(tmp_path), "contract_uid": "neutral:rate"}}
+    def stage(request):
+        captured.append(request)
+        return result
+    def activate(name):
+        assert name == "external_rates.catalog"
+        return SimpleNamespace(stage=stage)
+    monkeypatch.setattr(catalog_staging, "import_module", activate)
+    requests = [{"paths": ["neutral:rate"]}]
+    actual = catalog_staging.stage_run_spec_catalogs(
+        staging_requests=requests, source_key="ExampleRates", frequency="MIN15",
+        start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+        target_root=tmp_path)
+    assert actual is result
+    assert len(captured) == 1
+    from dataclasses import FrozenInstanceError
+    from traderesearch_data.nautilus import CatalogLoadRequest
+
+    assert isinstance(captured[0], CatalogLoadRequest)
+    with pytest.raises(FrozenInstanceError):
+        captured[0].source_key = "other"
+    assert captured[0].staging_requests[0].paths == ("neutral:rate",)
+    assert captured[0].start_ns == 1704153600000000000
+    assert captured[0].target_root is tmp_path
+    assert captured[0].frequency == "MIN15"
+    assert captured[0].related_members == ()
+    assert captured[0].bundle_id == "external"
+    assert captured[0].member_id == "ExampleRates"
+    assert captured[0].bundle_fingerprint.startswith("sha256:")
+
+
+def test_invalid_source_selection_never_activates_or_creates_catalog(monkeypatch, tmp_path):
+    from dataclasses import replace
+    import pytest
+    from server.services.nautilus_bridge import catalog_staging
+    bundle = _bundle_with_loader()
+    member = bundle.members[0]
+    inventories = [
+        (), (bundle, bundle), (replace(bundle, execution_location="client"),),
+        (replace(bundle, members=(replace(member, kind="historical_rules"),)),),
+        (replace(bundle, members=(replace(member, frequency="DAY1"),)),),
+        (replace(bundle, members=(replace(member, data_type="trade_tick"),)),),
+        (replace(bundle, members=(replace(member, integrations=()),)),),
+    ]
+    monkeypatch.setattr(catalog_staging, "import_module",
+                        lambda name: pytest.fail("invalid selection activated source"))
+    target = tmp_path / "not-created"
+    for inventory in inventories:
+        monkeypatch.setattr(catalog_staging, "installed_bundles", lambda: inventory)
+        with pytest.raises(ValueError):
+            catalog_staging.stage_run_spec_catalogs(
+                staging_requests=[], source_key="ExampleRates", frequency="MIN15",
+                start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+                target_root=target)
+        assert not target.exists()
+
+
+def test_importing_staging_does_not_load_concrete_sources():
+    import subprocess
+    import sys
+    from pathlib import Path
+    code = """
+import sys
+from server.services.nautilus_bridge.catalog_staging import stage_run_spec_catalogs
+assert 'server.modules.shared.price_services' not in sys.modules
+assert 'server.services.nautilus_bridge.market_data' not in sys.modules
+assert not any(name.startswith(('tools.', 'sources.LocalCNFutures', 'nautilus_trader.')) for name in sys.modules)
+"""
+    subprocess.run([sys.executable, "-S", "-c", code], check=True, capture_output=True,
+                   cwd=Path(__file__).resolve().parents[2], text=True)
+
+
+def test_day1_session_starts_at_previous_night_trading_day():
+    from datetime import date
+    from types import SimpleNamespace
+    from sources.LocalCNFutures.nautilus_catalog import _session_for_day
+
+    product = SimpleNamespace(
+        trading_day_sessions="09:00-11:30,13:30-15:00",
+        night_session="21:00-02:30",
+        trading_day_close_time="15:00",
+    )
+    session = _session_for_day(product, {date(2024, 1, 2): date(2024, 1, 1)})
+    open_dt, close_dt = session(date(2024, 1, 2))
+    assert (open_dt.year, open_dt.month, open_dt.day, open_dt.hour, open_dt.minute) == (
+        2024, 1, 1, 21, 0,
+    )
+    assert (close_dt.day, close_dt.hour, close_dt.minute) == (2, 15, 0)
+
+
+def test_bundle_native_margin_fields_reach_instrument_unchanged(monkeypatch):
+    from decimal import Decimal
+    from types import SimpleNamespace
+    from tests.nautilus_runtime import require_nautilus
+    from tests.nautilus_source_fixture import resolved_contract_minute_source
+    from sources.LocalCNFutures import nautilus_catalog
+    from server.services.nautilus_bridge.market_data import to_nautilus_instrument
+
+    require_nautilus()
+    resolved = resolved_contract_minute_source()
+    monkeypatch.setattr(nautilus_catalog, "from_server_sources",
+                        lambda: SimpleNamespace(resolve=lambda *args, **kwargs: resolved))
+    # Bundle-provided native fields must not be recomputed by the bridge.
+    fields = {"price_increment": "0.005", "multiplier": "10000",
+              "margin_init": "0.025", "margin_maint": "0.02",
+              "min_quantity": "2.0", "max_quantity": "20",
+              "trading_spec_source": "synthetic test fixture"}
+    spec = nautilus_catalog.build_contract_spec(
+        "CFFEX|F|T|2403", product=object(),
+        contract_row={"start_ts": 1700611200000, "end_ts": 1708387200000},
+        spec_fields=fields, source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+    )
+    instrument = to_nautilus_instrument(spec)
+    assert instrument.margin_init == Decimal("0.025")
+    assert instrument.margin_maint == Decimal("0.02")
+    assert str(instrument.min_quantity) == "2"
+    assert str(instrument.max_quantity) == "20"
+
+
+def test_bundle_resolves_products_once_per_run_and_uses_actual_run_window(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from traderesearch_data.nautilus import CatalogLoadRequest, CatalogStagingRequest
+    from sources.LocalCNFutures import CNFutures as source
+    from sources.LocalCNFutures.nautilus_catalog import _contract_requests
+    calls = []
+    available = ["CFFEX|F|T|2403"]
+    def contracts(start, end):
+        calls.append((start, end))
+        return [{"uid": uid} for uid in available]
+    monkeypatch.setattr(source, "get_all_futures", lambda: [SimpleNamespace(
+        name="T.CFE", alias="T.CFE", get_contract_list=contracts)])
+    path = "Product/Futures/CNFutures/_products/T.CFE"
+    request = CatalogLoadRequest(
+        source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+        bundle_id="Local", bundle_version="1", bundle_fingerprint="sha256:" + "a" * 64,
+        member_id="LocalCNFuturesContractMIN1",
+        related_members=("FieldHistory:market_rules:exchange",),
+        staging_requests=(CatalogStagingRequest((path,)), CatalogStagingRequest((path,))),
+        start_utc="2024-01-02T00:00:00Z", end_utc="2024-02-03T00:00:00Z",
+        start_ns=1704153600000000000, end_ns=1706918400000000000, target_root=tmp_path)
+    selections = _contract_requests(request)
+    assert [item.paths for item in selections] == [("CFFEX|F|T|2403",)] * 2
+    assert calls == [("2024-01-02", "2024-02-03")]
+    available[:] = ["CFFEX|F|T|2406"]
+    assert _contract_requests(request)[0].paths == ("CFFEX|F|T|2406",)
+    assert len(calls) == 2  # no stale expansion shared between executions

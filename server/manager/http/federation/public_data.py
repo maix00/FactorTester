@@ -31,18 +31,25 @@ class FederationPublicDataRoutesMixin:
     """Serve bounded read-only data that a peer may present to its users."""
 
     def _federation_public_data(self) -> None:
-        if not self._has_federation_proxy_token():
-            json_response(self, {
-                "success": False,
-                "error": "federation proxy is unauthorized",
-            }, 401)
-            return
         try:
             request = self._json_body(256 * 1024)
             kind = str(request.get("kind") or "").strip()
             operation = str(request.get("operation") or "").strip()
             principal = str(request.get("principal") or "").strip()
             payload = request.get("payload")
+            if kind == "execution":
+                from server.identity.service_access import authenticate_service
+                identity = authenticate_service(self, required_scope="tr:federation:read")
+                self._execution_identity = identity
+                peers = self.state.federation_registry.servers(include_offline=True)
+                if not identity.manager_id or not any(item["server_id"] == identity.manager_id for item in peers):
+                    raise PermissionError("unregistered federated Manager")
+                if principal not in identity.principals:
+                    raise PermissionError("principal is not delegated to this Manager client")
+                if operation == "submit" and "tr:federation:submit" not in identity.scopes:
+                    raise PermissionError("federated submission scope is missing")
+            elif not self._has_federation_proxy_token():
+                raise PermissionError("federation proxy is unauthorized")
             if not kind or not operation or not principal:
                 raise ValueError("federated public-data request is incomplete")
             if not isinstance(payload, dict):
@@ -73,6 +80,33 @@ class FederationPublicDataRoutesMixin:
         payload: dict[str, object],
     ) -> dict[str, object]:
         viewer = None if principal == VISITOR_PRINCIPAL else principal
+        if kind == "execution":
+            if viewer is None:
+                raise PermissionError("execution nodes require an account identity")
+            if operation == "resolve-selection":
+                from server.modules.single_factor_test.execution_nodes import bind_prepared_execution
+                prepared = payload["prepared"]
+                if not isinstance(prepared,dict):raise ValueError("input requirements are required")
+                prepared = {**prepared,"owner":viewer}
+                return {"binding":bind_prepared_execution(prepared,payload["selection"])}
+            if operation == "job":
+                suffix = str(payload.get("suffix") or "")
+                if suffix == "/cancel" and "tr:federation:submit" not in self._execution_identity.scopes:
+                    raise PermissionError("federated mutation scope is missing")
+                value = self.state.test_authoring.node_job_operation(
+                    job_id=str(payload.get("job_id") or ""), suffix=suffix, owner=viewer)
+                return {"response": value.payload, "status": value.status}
+            if operation == "targets":
+                from server.modules.single_factor_test.execution_nodes import visible_targets
+                return {"targets": visible_targets(viewer), "manager_id": self.state.server_id}
+            if operation in {"preview", "submit"}:
+                path = "/api/runs/preview" if operation == "preview" else "/api/runs"
+                request = payload.get("request")
+                if not isinstance(request, dict):
+                    raise ValueError("frozen execution request is required")
+                value = self.state.test_authoring.write("POST", path, owner=viewer, payload=request, trusted_context=True)
+                return {"response": value.payload, "status": value.status}
+            raise ValueError("unsupported execution operation")
         if kind == "storage" and operation == "profile-inventory":
             if viewer is None:
                 raise PermissionError("Profile storage requires an account identity")

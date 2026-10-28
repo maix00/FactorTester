@@ -1,6 +1,16 @@
 # 架构决策记录
 
-本目录记录 FactorTester 的架构决策。ADR 是当前实现的可审计说明，不是脱离源码
+- [188 — 执行节点、来源安装与可移植数据需求](188-execution-nodes-and-portable-data-requirements.md)
+
+- [187 — 同主机共享数据与按测试类型选择执行服务](187-host-shared-inputs-and-test-services.md)
+
+- [184 — 数据源自行维护适配器的类型化 Bundle](184-source-owned-typed-bundles.md)
+
+- [182 — TradeResearch CLI 分阶段命名迁移](182-traderesearch-cli-naming.md)
+
+- [181 — Schema-driven test configuration editor](181-schema-driven-test-configuration-editor.md)
+
+本目录记录 TradeResearch 的架构决策。ADR 是当前实现的可审计说明，不是脱离源码
 长期维护的愿望清单；每次架构迁移都必须同时说明已落地边界、尚未迁移的遗留和验收条件。
 
 ## 编号与文件
@@ -61,3 +71,4 @@ ADR-156 对 ADR-040、ADR-047、ADR-094、ADR-142 的 Graph 专属约束作部�
 - [156 — 退役 Research Graph，采用 Agent WorkflowRun 与独立研究对象](156-retire-research-graph-agent-workflow.md)
 - [157 — Run 级样本使用合同，不再依赖 TrialPlan](157-run-sample-use-without-trial-plan.md)
 - [158 — 稳定数据源身份与源管理的行情更新](158-source-identity-and-source-managed-market-data.md)
+- [180 — 因子边界输入与共享交易日窗口](180-factor-boundary-input-and-shared-session-windows.md)

@@ -38,7 +38,9 @@ def catalog_staging_requests(run_spec: dict[str, Any]) -> list[dict[str, Any]]:
         if any(not isinstance(path, str) or not path.strip() for path in paths):
             raise ValueError(f"Nautilus product scope contains an invalid path: {scope}")
         entry = by_scope.setdefault(scope, {"scope_ref": scope, "paths": [], "strategy_ids": []})
-        entry["paths"] = sorted(set(entry["paths"]) | {str(path) for path in paths})
+        # Product-to-Instrument resolution belongs to the selected Bundle at
+        # execution time, with the compiled run window. Planning is metadata-only.
+        entry["paths"] = sorted(set(entry["paths"]) | set(paths))
         strategy_id = str(group.get("id") or "").strip()
         if strategy_id:
             entry["strategy_ids"] = sorted(set(entry["strategy_ids"]) | {strategy_id})
