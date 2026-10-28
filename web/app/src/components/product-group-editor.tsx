@@ -7,9 +7,10 @@ import { useCompactLayout } from "../configuration/layout.ts";
 
 type Group = Record<string, any>;
 
-export function ProductGroupEditor({ group, onSaved, onCancel }: {
+export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
   group?: Group | null;
   onSaved: (value: Group) => void;
+  onDeleted: () => void;
   onCancel: () => void;
 }): React.ReactElement {
   const { t } = useTranslation();
@@ -19,6 +20,7 @@ export function ProductGroupEditor({ group, onSaved, onCancel }: {
   const [categories, setCategories] = useState<string[]>((Array.isArray(group?.category_ids) ? group.category_ids : []).map((value: unknown) => String(value)));
   const [categoryOptions, setCategoryOptions] = useState<{ value: string; label: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
   const groupRef = String(group?.group_ref || group?.ref || "");
   useEffect(() => {
@@ -28,6 +30,15 @@ export function ProductGroupEditor({ group, onSaved, onCancel }: {
       .catch(() => { if (!controller.signal.aborted) setCategoryOptions([]); });
     return () => controller.abort();
   }, []);
+  const remove = async (): Promise<void> => {
+    setBusy(true); setError("");
+    try {
+      await request(`/api/product-library/product-groups/${encodeURIComponent(groupRef)}`, { method: "DELETE" });
+      onDeleted();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally { setBusy(false); setConfirming(false); }
+  };
   const save = async (): Promise<void> => {
     setBusy(true); setError("");
     try {
@@ -55,7 +66,8 @@ export function ProductGroupEditor({ group, onSaved, onCancel }: {
       <Form.Item label={t("productGroup.categories")} help={t("productGroup.categoriesHint")}>
         <Select mode="multiple" aria-label={t("productGroup.categories")} value={categories} options={categoryOptions} onChange={setCategories} />
       </Form.Item>
-      <Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button>
+      {confirming ? <Alert type="warning" showIcon message={t("productGroup.deleteTitle")} description={t("productGroup.deleteHint")} action={<div className="tr-inline-actions"><Button danger loading={busy} onClick={() => void remove()}>{t("productGroup.deleteConfirm")}</Button><Button onClick={() => setConfirming(false)}>{t("configuration.cancel")}</Button></div>} /> : null}
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button>{groupRef && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("productGroup.delete")}</Button> : null}</div>
     </Form>
   </div>;
   return mobile ? <DetailsPanel title={t(groupRef ? "productGroup.edit" : "productGroup.create")} onClose={onCancel}>{content}</DetailsPanel> : content;
