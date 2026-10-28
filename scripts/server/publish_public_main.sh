@@ -24,6 +24,8 @@ ssh_command=(
   -o BatchMode=yes
   -o ConnectTimeout="${FACTORTESTER_SSH_CONNECT_TIMEOUT:-20}"
   -o ConnectionAttempts=1
+  -o ServerAliveInterval=15
+  -o ServerAliveCountMax=4
   -o StrictHostKeyChecking=yes
 )
 if [[ -n "${FACTORTESTER_SSH_PORT:-}" ]]; then
