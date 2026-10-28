@@ -58,7 +58,7 @@ RUN python -m compileall -q -b /runtime \
     && find /runtime -type d -name __pycache__ -prune -exec rm -rf {} + \
     && PYTHONPATH=/runtime /build/factortester-cli --help \
         >/tmp/factortester-help \
-    && grep -F 'FactorTester CLI' /tmp/factortester-help >/dev/null
+    && grep -F 'TradeResearch CLI' /tmp/factortester-help >/dev/null
 
 FROM factortester-public-deps AS factortester-public
 ARG NAUTILUS_VENDOR_REVISION
@@ -197,7 +197,7 @@ RUN set -eu; \
     test -x /usr/local/bin/factortester; \
     test ! -e /usr/local/bin/factortester-manager; \
     factortester --help >/tmp/factortester-help; \
-    grep -F 'FactorTester CLI' /tmp/factortester-help >/dev/null; \
+    grep -F 'TradeResearch CLI' /tmp/factortester-help >/dev/null; \
     rm -f /tmp/factortester-help; \
     mkdir /opt/factortester/app/.git; \
     printf '%s\n' "$FACTORTESTER_REVISION" > /opt/factortester/app/.deployment-revision; \
