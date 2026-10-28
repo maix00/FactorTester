@@ -43,7 +43,8 @@ services:
     mem_limit: ${FACTORTESTER_PUBLIC_MEMORY_LIMIT:-0}
     environment:
       TR_DATA_HOST_ROLE: server
-      TR_DATA_DEVICE_REF: ${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}
+      TR_EXECUTION_NODE_ID: ${TR_EXECUTION_NODE_ID:?set stable execution node identity}
+      TR_DATA_DEVICE_REF: ${TR_SHARED_STORAGE_ID:?set shared kernel and storage domain identity}
       TR_SHARED_DATA_CACHE_ROOT: /state/shared-columnar
       TR_SHARED_DATA_CACHE_BYTES: ${TR_SHARED_DATA_CACHE_BYTES:-536870912}
       TR_SHARED_DATA_ENTRY_BYTES: ${TR_SHARED_DATA_ENTRY_BYTES:-67108864}

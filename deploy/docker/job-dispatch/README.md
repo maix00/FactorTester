@@ -84,9 +84,13 @@ The target queue names are not a substitute for a shared Job database. A worker
 on another server must never be given this server's Job DB path.
 
 Shared input prerequisites: use the same host `FACTORTESTER_STATE_ROOT` and
-Manager `FACTORTESTER_SERVER_ID` in the Manager/business and dispatch Compose
-projects. They resolve the cache to the same `shared-columnar` directory, with
-one resource policy and a stable device scope. Container users must have
+Manager `FACTORTESTER_SERVER_ID` (control authority), `TR_EXECUTION_NODE_ID`
+(execution installation identity), and `TR_SHARED_STORAGE_ID` (kernel/backing-file
+cache domain) in the colocated business and dispatch Compose projects. Independent
+nodes use distinct node IDs, including two independent nodes on one physical host.
+Only processes sharing the actual kernel, backing files and trusted cache may
+reuse a storage-domain ID. They resolve the cache to the same `shared-columnar`
+directory with one resource policy; the cache domain does not identify a source. Container users must have
 compatible numeric UID/file permissions; do not make the cache world-writable.
 Workers must not mint a separate Manager identity. Client-owned sources remain
 isolated and are not uploaded by this configuration.
@@ -96,3 +100,10 @@ result caching, queue-aware lifetime management, or aggregate host RAM admission
 The cache byte limit bounds cached files, not process RSS. Docker Desktop
 containers and native macOS processes do not share one kernel page cache.
 See ADR-187 for pending work and acceptance; no containers are started by this change.
+
+These Compose projects still describe local execution. They do not enable remote
+workers: remote nodes must use authenticated Job/input/result transport through
+the existing authority and queue, never mount a Manager SQLite file. Bundle
+installations differ by node even when their package/version is equal. RunSpec
+Bar requirements are portable; exact installation selection belongs to the
+ExecutionPlan. See ADR-188 for compatibility and remaining routing work.
