@@ -51,7 +51,7 @@ def test_composed_identity_and_canonical_stage(tmp_path):
 def test_finished_wheel_hit_skips_capacity_checks_and_compilation(tmp_path):
     import hashlib
     root=tmp_path/'repo';scripts=root/'scripts/server';scripts.mkdir(parents=True)
-    for name in ['native_wheel_build.sh','native_build_lock.py','nautilus_build_identity.sh']:
+    for name in ['native_wheel_build.sh','native_build_lock.py','nautilus_build_identity.sh','complete_nautilus_wheel.sh']:
         shutil.copy(ROOT/'scripts/server'/name,scripts/name)
     (scripts/'check_local_build_capacity.sh').write_text('exit 44\n')
     for folder in [root,root/'vendor/nautilus_trader',root/'vendor/py-alpha-lib']:
@@ -63,7 +63,13 @@ def test_finished_wheel_hit_skips_capacity_checks_and_compilation(tmp_path):
     python_source=root/'vendor/nautilus_trader/python';python_source.mkdir();(python_source/'pyproject.toml').touch()
     identity=run(['bash','-c',f'source "{scripts}/nautilus_build_identity.sh"; nautilus_build_identity "{root}" "{root}/vendor/nautilus_trader" linux/amd64'],root,check=True).stdout.strip()
     out=tmp_path/'wheels';folder=out/identity;folder.mkdir(parents=True)
-    wheel=folder/'nautilus_trader-2.0.0rc8-cp314-cp314-linux_x86_64.whl';wheel.write_bytes(b'test receipt content')
+    wheel=folder/'nautilus_trader-2.0.0rc8-cp314-cp314-linux_x86_64.whl'
+    with zipfile.ZipFile(wheel,'w') as package:
+        for name in ['__init__.py','_fixup.py','backtest/__init__.py','analysis/tearsheet.py']:
+            package.writestr('nautilus_trader/'+name,'# fixture')
+    alpha_revision=run(['git','rev-parse','HEAD'],root/'vendor/py-alpha-lib',check=True).stdout.strip()
+    alpha_dir=out/('alpha-'+alpha_revision);alpha_dir.mkdir()
+    (alpha_dir/'py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl').write_bytes(b'fixture')
     (folder/'checksums.sha256').write_text(f'{hashlib.sha256(wheel.read_bytes()).hexdigest()}  {wheel}\n')
     command=['bash',str(scripts/'native_wheel_build.sh')]
     env={**os.environ,'NAUTILUS_WHEEL_DIR':str(out),'NAUTILUS_CACHE':str(tmp_path/'cache')}

@@ -42,7 +42,8 @@ RUN sed -i \
 COPY deploy/requirements-public-linux.txt /tmp/requirements-public-linux.txt
 RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
     && python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
-        -r /tmp/requirements-public-linux.txt
+        -r /tmp/requirements-public-linux.txt \
+    && python -c "import celery, plotly; print('execution dependencies ready')"
 
 # Keep the dependency layers cached from the previous release; explicitly
 # remove the inherited setuid bit before any Profile Agent is started.

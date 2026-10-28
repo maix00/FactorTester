@@ -6,7 +6,8 @@ NAUTILUS_ROOT="${ROOT_DIR}/vendor/nautilus_trader"
 PYTHON_SOURCE="${NAUTILUS_ROOT}/python"
 COMPOSITION_ROOT="${ROOT_DIR}/native/traderesearch_nautilus_runtime"
 ENV_NAME="${FT_ENV_NAME:-GTHT}"
-BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+HOST_TARGET="${CARGO_TARGET_DIR:-${ROOT_DIR}/.artifacts/nautilus-build/host-target}"
 DEV_OPT_LEVEL="${CARGO_PROFILE_DEV_OPT_LEVEL:-1}"
 
 if [[ ! -f "${NAUTILUS_ROOT}/rust-toolchain.toml" || ! -f "${PYTHON_SOURCE}/pyproject.toml" ]]; then
@@ -84,7 +85,7 @@ for path in sorted(set(build_inputs)):
 stat = native_path.stat()
 current = {"source_signature": fingerprint.hexdigest(),
            "binary": [str(native_path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]}
-receipt = rust_root / "target/traderesearch-runtime-receipt.json"
+receipt = repo_root / ".artifacts/runtime-receipts/traderesearch-runtime-receipt.json"
 if mode == "record":
     receipt.parent.mkdir(parents=True, exist_ok=True)
     temporary = receipt.with_suffix(".tmp")
@@ -103,7 +104,24 @@ print(f"ready: NautilusTrader {expected_version}: {native_path}")
   [[ "${state}" == ready:* ]]
 }
 
+enforce_host_cache_budget() {
+  [[ -d "$HOST_TARGET" ]] || return 0
+  local used_kb limit_gb
+  used_kb="$(du -sk "$HOST_TARGET" | awk '{print $1}')"
+  limit_gb="${NAUTILUS_HOST_CACHE_MAX_GB:-4}"
+  [[ "$limit_gb" =~ ^[1-9][0-9]*$ ]] || { echo "invalid host Cargo cache budget" >&2; return 2; }
+  if (( used_kb > limit_gb * 1024 * 1024 )); then
+    if [[ "$HOST_TARGET" == "$ROOT_DIR/.artifacts/nautilus-build/host-target" ]]; then
+      cargo clean --manifest-path "$COMPOSITION_ROOT/Cargo.toml" --target-dir "$HOST_TARGET"
+      echo "host Cargo cache evicted: exceeded ${limit_gb}GiB; installed extension and receipt retained"
+    else
+      echo "external Cargo cache exceeds budget; left untouched: $HOST_TARGET" >&2
+    fi
+  fi
+}
+
 if runtime_is_ready; then
+  enforce_host_cache_budget
   echo "NautilusTrader extension is already built from the pinned vendor source."
   exit 0
 fi
@@ -114,14 +132,16 @@ if ! conda run -n "${ENV_NAME}" maturin --version >/dev/null 2>&1; then
 fi
 
 echo "Building vendored NautilusTrader ${EXPECTED_VERSION} in ${ENV_NAME} (dev profile, opt=${DEV_OPT_LEVEL}, ${BUILD_JOBS} jobs)."
-echo "Cargo artifacts are reused from ${NAUTILUS_ROOT}/target."
+echo "Cargo artifacts are reused from ${HOST_TARGET}."
 cd "${NAUTILUS_ROOT}"
 CARGO_BUILD_JOBS="${BUILD_JOBS}" \
 CARGO_PROFILE_DEV_OPT_LEVEL="${DEV_OPT_LEVEL}" \
-CARGO_TARGET_DIR="${NAUTILUS_ROOT}/target" \
+CARGO_TARGET_DIR="${HOST_TARGET}" \
   conda run --no-capture-output -n "${ENV_NAME}" maturin develop --profile dev --locked --manifest-path "${COMPOSITION_ROOT}/Cargo.toml"
 
 runtime_is_ready record || {
   echo "NautilusTrader build completed, but the pinned native extension did not load from the vendor source." >&2
   exit 1
 }
+
+enforce_host_cache_budget
