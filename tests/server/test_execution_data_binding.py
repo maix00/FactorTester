@@ -95,3 +95,27 @@ def test_projection_from_other_authority_cannot_bind_to_same_node_name():
     foreign = replace(first, installation=replace(first.installation, authority="manager-z"))
     assert compatible_bar_offers(_requirement(), _target(), (foreign,)) == ()
     assert first.source_ref != foreign.source_ref
+
+
+def test_portable_execution_contract_does_not_import_source_registry(monkeypatch):
+    from tests.server.test_nautilus_bridge_run_spec import _settings, _backtest
+    from server.services.nautilus_bridge.venues import freeze_native_venues
+    from server.services.nautilus_bridge.config import freeze_instrument_execution_policy, compile_frozen_execution_plan
+    from server.services.nautilus_bridge.run_spec import freeze_execution_contract
+    import server.services.nautilus_bridge.run_spec as compiler
+    from dataclasses import asdict
+    def forbidden(*args, **kwargs):
+        raise AssertionError("portable compile must not inspect local source installations")
+    monkeypatch.setattr(compiler, "_source_adapter", forbidden)
+    settings=_settings()
+    contract=freeze_execution_contract(settings,product_scope_refs=["scope:a"],
+        native_venue_plan=freeze_native_venues(_backtest(),settings),
+        instrument_execution_policy=freeze_instrument_execution_policy(preset="basic").manifest(),
+        data_requirements=[asdict(_requirement())])
+    assert contract["blockers"] == []
+    assert "data_source_ref" not in contract["settings"]
+    assert contract["settings"]["data_requirement_ref"].startswith("data-requirements:")
+    compiled=compile_frozen_execution_plan(contract["settings"],feed_kind="bar",
+        adapter_capabilities=frozenset({"native_bar_open_market_orders"}))
+    assert compiled.data_source_ref is None
+    assert compiled.manifest()["data_requirement_ref"] == contract["settings"]["data_requirement_ref"]

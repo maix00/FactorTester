@@ -30,7 +30,7 @@ def freeze_run_spec_inputs(
     return factor_revisions.freeze_factor_revisions(frozen, owner=owner)
 
 
-def freeze_nautilus_execution_policy(configuration: dict[str, Any]) -> dict[str, Any]:
+def freeze_nautilus_execution_policy(configuration: dict[str, Any], *, data_requirements: list[dict] | None = None) -> dict[str, Any]:
     """Replace Nautilus editor presets with a compact immutable policy.
 
     The RunSpec refers to already frozen product selections. It never stores
@@ -200,6 +200,7 @@ def freeze_nautilus_execution_policy(configuration: dict[str, Any]) -> dict[str,
         product_scope_refs=list(scopes),
         native_venue_plan=native_venue_plan,
         instrument_execution_policy=policy_manifest,
+        data_requirements=data_requirements,
     )
 
     # Presets and their UI knobs are intent, not the effective RunSpec
@@ -228,6 +229,9 @@ def freeze_nautilus_execution_policy(configuration: dict[str, Any]) -> dict[str,
         )
     except UnsupportedExecutionConfig as exc:
         raise ValueError(str(exc)) from exc
+    if data_requirements:
+        for key in ("data_source", "data_source_mode", "freq_fixed", "freq_mode"):
+            settings.pop(key, None)
     return frozen
 
 

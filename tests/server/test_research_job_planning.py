@@ -22,7 +22,7 @@ def _run_spec():
         "run_spec_version": NAUTILUS_RUN_SPEC_VERSION,
         "configuration": {
             "shared": {
-                "factors": [{"ref": "factor:v2:abc"}],
+                "factors": [{"ref": "factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
                 "product_selections": {
                     "scope:t": {
                         "paths": ["Product/Futures/CNFutures/_products/T.CFE"],
@@ -106,7 +106,7 @@ def test_backtest_plan_uses_only_immutable_nautilus_runspec(monkeypatch):
         "product_scope_ref": "scope:t",
         "venue_ids": ["CFFEX"],
     }]
-    assert plan["resolved"]["factor_refs"] == ["factor:v2:abc"]
+    assert plan["resolved"]["factor_refs"] == ["factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
     assert plan["resolved"]["data_requirements"] == [{
         "product_scope_ref": "scope:t",
         "resolution_sha256": "scope-resolution-sha256",

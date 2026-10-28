@@ -90,7 +90,7 @@ class FederationPublicDataRoutesMixin:
                 request = payload.get("request")
                 if not isinstance(request, dict):
                     raise ValueError("frozen execution request is required")
-                value = self.state.test_authoring.write("POST", path, owner=viewer, payload=request)
+                value = self.state.test_authoring.write("POST", path, owner=viewer, payload=request, trusted_context=True)
                 return {"response": value.payload, "status": value.status}
             raise ValueError("unsupported execution operation")
         if kind == "storage" and operation == "profile-inventory":

@@ -63,11 +63,17 @@ class ExecutionNodeService:
                or any(not isinstance(v, str) or not v for v in item.values())
                for item in runtime.values()):
             raise ValueError("invalid source adapter metadata")
+        endpoint = str(payload.get("market_endpoint") or "")
+        if endpoint:
+            from urllib.parse import urlparse
+            url = urlparse(endpoint)
+            if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.query or url.fragment:
+                raise ValueError("invalid node market endpoint")
         route = target_route(asdict(target))
         self.repository.heartbeat_worker_target(
             route, port, node_id, ttl_seconds=60,
             capabilities={"execution_target": asdict(target), "offers": [asdict(x) for x in offers],
-                          "runtime_adapters": runtime},
+                          "runtime_adapters": runtime, "market_endpoint": endpoint},
         )
         return {"route_id": route, "service_port": port}
 
@@ -128,6 +134,25 @@ class ExecutionNodeService:
         args = payload.get("args") or {}
         if action == "load":
             return {"record": record_to_wire(record)}
+        if action in {"input_manifest", "input_block"}:
+            if record.status not in {JobStatus.PLANNING, JobStatus.RUNNING}:
+                raise ValueError("inputs require an active JobAttempt")
+            files = [item for item in self.repository.list_artifacts(job_id=record.job_id, owner=record.owner)
+                     if item["artifact_role"] == "input" and item["state"] == "active"]
+            if len(files) > 256:
+                raise ValueError("Job input file count exceeds budget")
+            if action == "input_manifest":
+                return {"files": [{key: value for key, value in item.items() if key != "relative_path"} for item in files]}
+            matches = [item for item in files if item["name"] == args.get("name")]
+            offset = args.get("offset")
+            if len(matches) != 1 or type(offset) is not int or not 0 <= offset <= matches[0]["size_bytes"]:
+                raise ValueError("invalid input block")
+            from server.jobs.artifacts import resolve_artifact_path
+            import base64
+            with resolve_artifact_path(matches[0]["relative_path"]).open("rb") as handle:
+                handle.seek(offset)
+                block = handle.read(256*1024)
+            return {"data": base64.b64encode(block).decode("ascii")}
         if action == "claim":
             # Revalidate live deployment/source before claiming or loading data.
             binding = record.job_spec["execution_binding"]
@@ -172,11 +197,14 @@ class ExecutionNodeService:
                 raise ValueError("Job is not running or planning")
             if self.repository.cancel_requested(record.job_id, record.attempt):
                 status = JobStatus.CANCELLED
+            supplied_ref = (args.get("result_summary") or {}).get("report_ref")
+            if supplied_ref and supplied_ref != record.report_ref:
+                raise ValueError("terminal report ref was not published for this Job")
             updated = self.repository.transition(record.job_id, status,
                 expected=record.status, **args)
             report_ref = (updated.result_summary or {}).get("report_ref")
-            if report_ref:
-                self.repository.set_report_ref(record.job_id, str(report_ref))
+            if report_ref and report_ref != record.report_ref:
+                raise ValueError("terminal report ref was not published for this Job")
             return {"record": record_to_wire(updated)}
         raise ValueError("unsupported node Job operation")
 
@@ -204,14 +232,8 @@ class ExecutionNodeService:
             raise ValueError("result block exceeds budget")
         folder = artifact_root() / record.job_id / f"node-results-{record.attempt}"
         folder.mkdir(parents=True, exist_ok=True)
-        with (folder / ".upload.lock").open("a+b") as lock:
+        with (folder.parent / f".node-results-{record.attempt}.lock").open("a+b") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            files = tuple(p for p in folder.iterdir() if p.name != ".upload.lock")
-            used = sum(p.stat().st_size for p in files)
-            quota = self.repository.storage_quota(owner=record.owner, default_bytes=default_user_quota_bytes())
-            if (len(files) > 32 or used + len(block) > min(quota, 128*1024**2)
-                    or self.repository.storage_usage(owner=record.owner) + used + len(block) > quota):
-                raise ValueError("Job result storage budget exceeded")
             path = folder / name
             existing = path.stat().st_size if path.exists() else 0
             if existing != offset:
@@ -221,6 +243,15 @@ class ExecutionNodeService:
                         if current.read(len(block)) == block:
                             return {"offset": existing}
                 raise ValueError("result upload offset changed")
+            files = tuple(p for p in folder.iterdir() if p.name != ".upload.lock")
+            used = sum(p.stat().st_size for p in files)
+            registered = self.repository.list_artifacts(job_id=record.job_id, owner=record.owner)
+            registered_paths = {item["relative_path"] for item in registered if item.get("state") == "active"}
+            staging = sum(p.stat().st_size for p in files if p.relative_to(artifact_root()).as_posix() not in registered_paths)
+            quota = self.repository.storage_quota(owner=record.owner, default_bytes=default_user_quota_bytes())
+            if ((len(files) >= 32 and not (folder / name).exists()) or used + len(block) > min(quota, 128*1024**2)
+                    or self.repository.storage_usage(owner=record.owner) + staging + len(block) > quota):
+                raise ValueError("Job result storage budget exceeded")
             with path.open("ab") as handle:
                 handle.write(block)
             if path.stat().st_size == size:
@@ -252,7 +283,11 @@ class ExecutionNodeService:
         expected = {item["name"] for item in registered if item.get("state") == "active"}
         if not set(names).issubset(expected):
             raise ValueError("report contains unverified files")
+        if {path.name for path in folder.iterdir() if path.is_file()} != set(names):
+            raise ValueError("report has incomplete or unverified files")
         ref = publish_job_report(job_id=record.job_id, attempt=record.attempt,
                                  owner=record.owner, reports_dir=str(folder),
                                  metadata={"node_id": node_id, "engine": "nautilus_trader"})
+        if ref:
+            self.repository.set_report_ref(record.job_id, ref)
         return {"report_ref": ref}

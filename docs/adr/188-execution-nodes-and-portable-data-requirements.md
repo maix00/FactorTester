@@ -71,3 +71,43 @@ traderesearch_data/execution.py 是标准库中立合同，匹配仅运行于规
 
 本批聚焦合同测试验证节点隔离、跨节点需求可移植、包升级后的计划失效、价格/时间/
 字段/覆盖不一致拒绝与显式选择；Compose 检查只验证静态环境配置，不等于容器实测。
+
+## 2026-10-28 接线进展（不是全项完成）
+
+执行注册/Job RPC 使用 Keycloak client credentials + introspection，不使用转移节点的
+自定义签名注册。服务 token 分别绑定 node_id/manager_id、API audience 与 scopes；
+联邦 execution 的 principal 必须在该服务客户端的显式委托清单中，提交另需 submit scope。
+旧 transfer 认证只保留给既有文件/对象传输，不能作为 execution 的降级认证。
+服务令牌内省缓存上限 256 条、最长 5 秒，权限检查在每次调用执行；控制面调用不进入
+逐 Bar 计算热路径。不同 realm 的通用 token exchange 不作已支持假设。
+
+平台控制面提供联邦 execution targets、preview、submit；发现不要求远端已有业务端口，
+不读取 Bundle 字节或逐一实例化插件。RunSpec 需求与 source selection 分离，预览绑定摘要
+用于提交复核，worker 在加载前检查本地安装及实际 adapter/book type。节点只持私有元数据，
+不挂载 Manager Job 数据库。既有 outbox/leases、Celery/RabbitMQ、报告权威继续复用。
+远程 chart 通过节点 HTTP 读取、点数/字节预算约束，无同名本地 fallback。
+
+真实隔离验收：Keycloak 26.0、RabbitMQ、独立 Celery worker、原生 Nautilus 公共策略，
+T/TL 两个产品各 10,000 根 1m Bar（2024-01-02 至 2024-03-05，含预热），3 策略共享
+1 FactorActor，无 Python factor per-Bar callback。两个 Manager/节点注册分别运行的
+RunSpec hash 和成交摘要一致。Manager A 客户端经真实 B peer HTTP 完成目录、预览、
+提交并运行成功；预览与提交 hash 一致，903 订单、5 报告附件摘要校验。
+这不是公网验收、原研报复现或完整容量验收；目录和输入 fixture 预先准备，worker 时间
+不包含安装与原始 catalog staging。采样 RSS 也不等于分配器精确峰值或全宿主总内存。
+
+## 基础设施取舍
+
+复用 Keycloak 认证/组/机构与受限管理员能力；复用 RabbitMQ 的确认、ACL、Federation/
+Shovel（只在独立 broker 确有跨域投递需求时配置）。不新增消息中转器。Globus Compute
+具备 endpoint/worker、任务执行和结果回传、资源/身份隔离能力，但依赖其托管服务，
+与已用 Celery 重叠；只核对能力，不引入依赖。
+
+参考：[Keycloak](https://www.keycloak.org/securing-apps/token-exchange)、
+[RabbitMQ](https://www.rabbitmq.com/docs/federation)、
+[Globus endpoints](https://globus-compute.readthedocs.io/en/main/endpoints/endpoints.html)。
+
+仍需独立收尾：用户/组/机构层级的细粒度资源授权和 `/app` 管理 UI、可下载桌面节点的
+签名发布、旧用户/页面/UniqueNameObject 权威的有序移除、实际本机/公网 Docker 发布，
+以及 host aggregate admission/长回测容量。操作员 execution-node Compose 不能冒充
+已经完成客户端安装功能。用户已新增本机/公网 Docker 配置部署授权；本 ADR 不授予
+额外 Git 集成或迁移权限。

@@ -146,7 +146,12 @@ def execute_plan_payload(
     })
     sink = _PlanSink()
     try:
-        planner(payload_value, sink, _NeverCancelled())
+        from contextlib import nullcontext
+        source_scope = repo.source_context(record) if hasattr(repo, "source_context") else nullcontext()
+        if hasattr(repo, "source_context"):
+            payload_value["transient_factor_source_scope_id"] = ""
+        with source_scope:
+            planner(payload_value, sink, _NeverCancelled())
     except Exception as exc:
         repo.transition(
             record.job_id, JobStatus.FAILED, expected=JobStatus.PLANNING,

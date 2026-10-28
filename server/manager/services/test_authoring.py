@@ -69,6 +69,7 @@ class TestAuthoringService:
                     "/api/jobs/artifact-capabilities",
                     "/api/test-authoring/modules",
                     "/api/test-authoring/configuration-schema",
+                    "/api/test-authoring/execution-targets",
                 }
                 or cls._SETTINGS_RE.fullmatch(path)
                 or cls._SETTINGS_SUMMARY_RE.fullmatch(path)
@@ -80,7 +81,7 @@ class TestAuthoringService:
             )
         if method == "POST":
             return bool(
-                path == "/api/test-authoring/workspaces"
+                path in {"/api/test-authoring/workspaces", "/api/runs", "/api/runs/preview"}
                 or cls._SAVE_TEMPLATE_RE.fullmatch(path)
                 or cls._LOAD_TEMPLATE_RE.fullmatch(path)
                 or cls._STRATEGIES_RE.fullmatch(path)
@@ -139,6 +140,9 @@ class TestAuthoringService:
         owner: str,
         query: dict[str, list[str]] | None = None,
     ) -> TestAuthoringResponse:
+        if path == "/api/test-authoring/execution-targets":
+            from server.modules.single_factor_test.execution_nodes import visible_targets
+            return TestAuthoringResponse({"success": True, "targets": visible_targets(owner)})
         if path == "/api/test-authoring/configuration-schema":
             from tools.testers.settings.json_schema import configuration_editor_contract
 
@@ -252,8 +256,28 @@ class TestAuthoringService:
 
     def write(
         self, method: str, path: str, *, owner: str, payload: dict[str, Any],
+        trusted_context: bool = False,
     ) -> TestAuthoringResponse:
         from server.services import research_configurations, research_workspaces
+
+        if method == "POST" and path in {"/api/runs", "/api/runs/preview"}:
+            # Adapt the existing control API functions; never start a Flask
+            # listener or import/run an execution engine in the Manager.
+            from flask import Flask, session
+            from server.modules.single_factor_test.research_jobs import (
+                submit_research_run, preview_research_run,
+            )
+            if not trusted_context:
+                from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
+                payload = {key: value for key, value in payload.items() if key != MANAGER_RUN_CONTEXT_KEY}
+            app = Flask("traderesearch-run-control")
+            import secrets
+            app.secret_key = secrets.token_bytes(32)
+            with app.test_request_context(path, method="POST", json=payload):
+                session["username"] = owner
+                value = submit_research_run() if path == "/api/runs" else preview_research_run()
+                response = app.make_response(value)
+                return TestAuthoringResponse(response.get_json(), response.status_code)
 
         if match := self._STRATEGIES_RE.fullmatch(path):
             from server.manager.services.test_authoring_strategies import write

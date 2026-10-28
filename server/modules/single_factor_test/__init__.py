@@ -29,6 +29,7 @@ def allow_same_host_job_reads(response):
     return response
 
 from . import (  # noqa: F401
+    execution_nodes,
     agent_flow_routes,
     backtest_job_reads,
     backtest_jobs,

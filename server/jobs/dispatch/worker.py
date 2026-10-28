@@ -77,6 +77,10 @@ class DispatchWorker:
     ) -> dict[str, Any]:
         pid = os.getpid() if worker_pid is None else int(worker_pid)
         owner = worker_id or f"{socket.gethostname()}:{pid}:{uuid.uuid4().hex[:12]}"
+        if hasattr(self.repository, "validate_local_binding"):
+            pending = self.repository.load(message.job_id)
+            if pending is None or (pending.deployment_id, pending.service_port, pending.run_spec_hash, pending.job_spec_hash) != (message.deployment_id, message.service_port, message.run_spec_hash, message.job_spec_hash):
+                return {"status": "invalid_dispatch", "job_id": message.job_id}
         record = self.repository.claim_attempt(
             message.job_id, message.attempt, worker_pid=pid, worker_id=owner,
         )
@@ -102,10 +106,13 @@ class DispatchWorker:
         beat = threading.Thread(target=heartbeat, name="job-lease-heartbeat", daemon=True)
         beat.start()
         try:
-            outcome = executor.execute(
-                record, message,
-                ExecutionContext(self.repository, record.job_id, record.attempt),
-            )
+            from contextlib import nullcontext
+            source_scope = self.repository.source_context(record) if hasattr(self.repository, "source_context") else nullcontext()
+            with source_scope:
+                outcome = executor.execute(
+                    record, message,
+                    ExecutionContext(self.repository, record.job_id, record.attempt),
+                )
         except Exception as exc:
             if self.repository.cancel_requested(record.job_id, record.attempt):
                 self.repository.transition(
