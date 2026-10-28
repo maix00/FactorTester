@@ -88,7 +88,8 @@ body { margin: 0; }
 .tr-mobile-shell { min-height: 100vh; padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); color: var(--text); background: var(--bg); }
 .tr-mobile-tabs { position: fixed; right: 0; bottom: 0; left: 0; z-index: 10; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, transparent); backdrop-filter: blur(12px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 @media (max-width: 760px) {
-  .tr-app-shell { display: block; }
+  .tr-app-shell, .tr-app-shell.is-collapsed { grid-template-columns: var(--tr-sidebar-collapsed) minmax(0, 1fr); }
+  .tr-app-shell.is-compact .tr-sidebar-header { display: none; }
   .tr-page-surface { padding: 16px; }
 }
 
@@ -356,10 +357,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 
 .tr-mobile-open-row { grid-template-columns:32px 1fr 16px; text-align:left; }
 .tr-mobile-open-row > span:nth-child(2) { text-align:left; }
-.tr-mobile-detail-page { position:fixed; inset:0; z-index:1000; background:white; overflow:auto; padding:0 20px 24px; }
-.tr-mobile-detail-page > header { position:sticky; top:0; background:white; z-index:1; min-height:72px; display:flex; align-items:center; gap:12px; border-bottom:1px solid #e8ecf2; }
-.tr-mobile-detail-page h2 { font-size:18px; margin:0; overflow:hidden; text-overflow:ellipsis; }
-.tr-mobile-detail-page > div { padding-top:20px; }
 .tr-catalog-page > header,.tr-research-page > header { min-height:88px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #e8ecf2; padding:20px 8px; margin-bottom:24px; }
 .tr-catalog-page h1,.tr-research-page h1 { font-size:24px; margin:0; }
 .tr-catalog-tabs { padding-bottom:16px; border-bottom:1px solid #e8ecf2; margin-bottom:24px; }
