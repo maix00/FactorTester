@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import { useTranslation } from "react-i18next";
+import { DocsSettings } from "./docs-settings.tsx";
+import { ProfileSettings } from "./profile-settings.tsx";
 import { DeviceSettings } from "./device-settings.tsx";
 import { AccountActions } from "./account-actions.tsx";
 import { ResultView } from "./result-view.tsx";
@@ -21,17 +23,11 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
  const [error,setError]=useState("");const [reload,setReload]=useState(0);
   const [serverInfo, setServerInfo] = useState<Record<string, unknown> | null>(null);
   const [sectionData, setSectionData] = useState<Record<string, unknown> | null>(null);
-  const [docPage, setDocPage] = useState<string>("");
-  const [docContent, setDocContent] = useState<string>("");
-  const [profileID, setProfileID] = useState<string>("");
-  const [profileData, setProfileData] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
     const controller=new AbortController();setError("");setSectionData(null);
     const endpoints: Record<string, string> = {
       controlDatabase: "/api/control-database/config",
       manager: "/api/worktrees",
-      docs: "/api/docs/index",
-      profiles: "/api/client/profiles",
       mihomo: "/api/admin/mihomo",
       federation: "/api/federation/config",
       quota: "/api/jobs/storage",
@@ -45,26 +41,6 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
       .catch(reason => {if(!controller.signal.aborted)setError(reason.message);});
     return ()=>controller.abort();
   }, [section,reload]);
-
-  useEffect(() => {
-    const controller=new AbortController();
-    if (section !== "profiles" || !profileID) { setProfileData(null); return; }
-    fetch(`/api/client/profiles/${encodeURIComponent(profileID)}`, { credentials: "same-origin", signal:controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((value) => {if(!controller.signal.aborted)setProfileData(value);})
-      .catch(reason => {if(!controller.signal.aborted)setError(reason.message);});
-    return ()=>controller.abort();
-  }, [section,profileID,reload]);
-
-  useEffect(() => {
-    const controller=new AbortController();
-    if (section !== "docs" || !docPage) { setDocContent(""); return; }
-    fetch(`/api/docs/pages/${encodeURIComponent(docPage)}`, { credentials: "same-origin", signal:controller.signal })
-      .then((response) => response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((value) => {if(!controller.signal.aborted)setDocContent(value);})
-      .catch(reason => {if(!controller.signal.aborted)setError(reason.message);});
-    return ()=>controller.abort();
-  }, [section,docPage,reload]);
 
   useEffect(() => {
     const controller=new AbortController();
@@ -94,31 +70,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
             <div className="tr-settings-card">
               {serverInfo ? <ResultView value={serverInfo} /> : <Spin tip={t("loading")}/>}
             </div>
-          ) : section === "profiles" ? (
-            <div className="tr-settings-card">
-              {sectionData ? (
-                <div className="tr-doc-pages">
-                  {((sectionData.profiles ?? sectionData.items ?? []) as Record<string, unknown>[]).map((profile, index) => {
-                    const id = String(profile.profile_id ?? profile.id ?? index);
-                    return <button key={id} type="button" className={profileID === id ? "is-active" : ""} onClick={() => setProfileID(id)}>{String(profile.name ?? profile.title ?? id)}</button>;
-                  })}
-                </div>
-              ) : <Spin tip={t("loading")}/>}
-              {profileID ? <ResultView value={profileData} /> : null}
-            </div>
-          ) : section === "docs" ? (
-            <div className="tr-settings-card">
-              {sectionData ? (
-                <div className="tr-doc-pages">
-                  {((sectionData.pages ?? sectionData.items ?? []) as Record<string, unknown>[]).map((doc, index) => {
-                    const slug = String(doc.slug ?? doc.path ?? doc.id ?? index);
-                    return <button key={slug} type="button" className={docPage === slug ? "is-active" : ""} onClick={() => setDocPage(slug)}>{String(doc.title ?? doc.name ?? slug)}</button>;
-                  })}
-                </div>
-              ) : <Spin tip={t("loading")}/>}
-              {docPage ? <pre className="tr-job-detail">{docContent || t("loading")}</pre> : null}
-            </div>
-          ) : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "profiles", "mihomo"].includes(section) ? (
+          ) : section === "profiles" ? <ProfileSettings/> : section === "docs" ? <DocsSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
               {sectionData ? <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>
