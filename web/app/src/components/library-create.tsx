@@ -9,7 +9,7 @@ import type { JSONObject } from "../configuration/draft.ts";
 export function LibraryCreate({ kind, onCreated, onCancel, strategy }: { strategy?: JSONObject; kind: "factor" | "strategy"; onCreated: (value: JSONObject) => void; onCancel: () => void }): React.ReactElement {
   const { t } = useTranslation();
   const mobile = useCompactLayout();
-  const finish = (value: JSONObject): void => { if (mobile && history.state?.trDetail) history.back(); onCreated(value); };
+  const finish = (value: JSONObject): void => { if (mobile && !strategy && history.state?.trDetail) history.back(); onCreated(value); };
   const [families, setFamilies] = useState<JSONObject[]>([]), [family, setFamily] = useState("");
   const initialRevision = (strategy?.current_revision || {}) as JSONObject;
   const [name, setName] = useState(String(strategy?.name || "")), [source, setSource] = useState(String(initialRevision.source_code || "")), [entry, setEntry] = useState(String(initialRevision.entrypoint || "Strategy")), [params, setParams] = useState(JSON.stringify(initialRevision.requirements || {}, null, 2));
@@ -47,7 +47,7 @@ export function LibraryCreate({ kind, onCreated, onCancel, strategy }: { strateg
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
   };
-  const content = <div className="tr-library-create">{!mobile ? <div className="tr-inline-editor-heading"><h2>{t(strategy ? "strategyDetail.edit" : kind === "factor" ? "editor.newFactor" : "editor.newStrategy")}</h2><Button type="text" onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
+  const content = <div className="tr-library-create">{(!mobile || strategy) ? <div className="tr-inline-editor-heading">{strategy ? <h2>{t("strategyDetail.edit")}</h2> : null}<Button onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       {kind === "factor" ? <><Form.Item label={t("editor.newFamily")}><Switch checked={newFamily} disabled={!!createdFamily} onChange={setNewFamily} /></Form.Item>
@@ -60,5 +60,5 @@ export function LibraryCreate({ kind, onCreated, onCancel, strategy }: { strateg
       <Button type="primary" loading={busy} disabled={kind === "strategy" ? !name || !source : newFamily ? !name || !source : !family} onClick={() => void save()}>{t("configuration.save")}</Button>
     </Form>
   </div>;
-  return mobile ? <DetailsPanel title={t(strategy ? "strategyDetail.edit" : kind === "factor" ? "editor.newFactor" : "editor.newStrategy")} onClose={onCancel}>{content}</DetailsPanel> : content;
+  return mobile && !strategy ? <DetailsPanel title={t(kind === "factor" ? "editor.newFactor" : "editor.newStrategy")} onClose={onCancel}>{content}</DetailsPanel> : content;
 }
