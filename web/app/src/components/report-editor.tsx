@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Button, Form, Input } from "antd";
+import { Alert, Button, Form, Input } from "antd";
 import { ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
@@ -16,6 +16,7 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const operationPending = useRef(false);
   const operationRequest = useRef<AbortController | null>(null);
@@ -23,23 +24,24 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
   const loadRevision = useRef(0);
   const [attachments, setAttachments] = useState<Record<string, unknown>[]>([]);
 
-  const load = async (signal?: AbortSignal): Promise<void> => {
+  const load = async (signal?: AbortSignal): Promise<boolean> => {
     const revision = ++loadRevision.current;
     return Promise.all([
       request(`/api/research-reports/${encodeURIComponent(publicationID)}`, { signal }),
       request(`/api/research-reports/${encodeURIComponent(publicationID)}/projection`, { signal }),
       request(`/api/research-reports/${encodeURIComponent(publicationID)}/attachments`, { signal }),
     ]).then(([doc, proj, files]) => {
-      if (signal?.aborted || revision !== loadRevision.current || activePublication.current !== publicationID) return;
+      if (signal?.aborted || revision !== loadRevision.current || activePublication.current !== publicationID) return false;
       setDocument(doc.document ?? doc);
       setProjection(proj.projection ?? proj);
       setAttachments(files.attachments ?? files.items ?? []);
-    }).catch((error: Error) => { if (!signal?.aborted && revision === loadRevision.current && activePublication.current === publicationID) notify({ code: "report.load", type: "error", message: t("loadFailed"), description: error.message }); });
+      setLoadError(""); return true;
+    }).catch((error: Error) => { if (!signal?.aborted && revision === loadRevision.current && activePublication.current === publicationID) { setLoadError(error.message); notify({ code: "report.load", type: "error", message: t("loadFailed"), description: error.message }); } return false; });
   };
-  useEffect(() => { const controller = new AbortController(); setDocument(null); setProjection(null); setAttachments([]); setSelected([]); setTitle(""); setBody(""); setBusy(false); operationPending.current = false; operationRequest.current = null; void load(controller.signal); return () => { controller.abort(); operationRequest.current?.abort(); ++loadRevision.current; }; }, [publicationID]);
+  useEffect(() => { const controller = new AbortController(); setDocument(null); setLoadError(""); setProjection(null); setAttachments([]); setSelected([]); setTitle(""); setBody(""); setBusy(false); operationPending.current = false; operationRequest.current = null; void load(controller.signal); return () => { controller.abort(); operationRequest.current?.abort(); ++loadRevision.current; }; }, [publicationID]);
 
   const apply = async (operation: Record<string, unknown>): Promise<boolean> => {
-    if (!document?._rev || operationPending.current) return false;
+    if (!document?._rev || loadError || operationPending.current) return false;
     operationPending.current = true; setBusy(true);
     const controller = new AbortController(); operationRequest.current = controller;
     return request(`/api/research-reports/${encodeURIComponent(publicationID)}/operations`, {
@@ -48,7 +50,7 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
       body: JSON.stringify({ base_rev: document._rev, operation }),
     }).then(async () => {
       if (activePublication.current !== publicationID) return false;
-      await load(controller.signal); return !controller.signal.aborted;
+      return await load(controller.signal);
     }).catch((error: Error) => { if (!controller.signal.aborted && activePublication.current === publicationID) notify({ code: "report.operation", type: "error", message: t("report.operationFailed"), description: error.message }); return false; })
       .finally(() => { if (operationRequest.current === controller) { operationRequest.current = null; operationPending.current = false; if (activePublication.current === publicationID) setBusy(false); } });
   };
@@ -69,14 +71,15 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
 
   return (
     <div className="tr-report-editor">
+      {loadError ? <Alert type="error" showIcon message={t("report.reloadRequired")} description={loadError} action={<Button onClick={() => void load()}>{t("retry")}</Button>} /> : null}
       <Form layout="vertical" className="tr-report-add">
-        <Form.Item label={t("report.paragraphTitle")}><Input aria-label={t("report.paragraphTitle")} disabled={busy} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("report.paragraphTitle")} /></Form.Item>
-        <Form.Item label={t("report.paragraphBody")}><Input.TextArea aria-label={t("report.paragraphBody")} disabled={busy} autoSize={{ minRows: 4, maxRows: 12 }} value={body} onChange={(event) => setBody(event.target.value)} placeholder={t("report.paragraphBody")} /></Form.Item>
-        <Button aria-label={t("report.addParagraph")} type="primary" loading={busy} disabled={busy || !firstChapter || !body.trim()} onClick={() => {
+        <Form.Item label={t("report.paragraphTitle")}><Input aria-label={t("report.paragraphTitle")} disabled={busy || !!loadError} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("report.paragraphTitle")} /></Form.Item>
+        <Form.Item label={t("report.paragraphBody")}><Input.TextArea aria-label={t("report.paragraphBody")} disabled={busy || !!loadError} autoSize={{ minRows: 4, maxRows: 12 }} value={body} onChange={(event) => setBody(event.target.value)} placeholder={t("report.paragraphBody")} /></Form.Item>
+        <Button aria-label={t("report.addParagraph")} type="primary" loading={busy} disabled={busy || !!loadError || !firstChapter || !body.trim()} onClick={() => {
           void apply({ op: "insert_component", chapter_id: firstChapter, component: { kind: "paragraph", title, body } }).then(saved => { if (saved) { setTitle(""); setBody(""); } });
         }}>{t("report.addParagraph")}</Button>
       </Form>
-      {selected.length ? <Button danger disabled={busy} onClick={batchDelete}>{t("report.removeSelected", { count: selected.length })}</Button> : null}
+      {selected.length ? <Button danger disabled={busy || !!loadError} onClick={batchDelete}>{t("report.removeSelected", { count: selected.length })}</Button> : null}
       {attachments.length ? (
         <section className="tr-report-chapter">
           <h3>{t("report.attachments")}</h3>
@@ -93,8 +96,8 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
             <h3>
               {chapter.title || chapterID}
               <span className="tr-report-chapter-actions">
-                {chapterIndex > 0 ? <Button size="small" disabled={busy} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapterIndex > 1 ? String(chapters[chapterIndex - 2].chapter_id ?? chapters[chapterIndex - 2].component_id ?? "") : null })} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} /> : null}
-                {chapterIndex < chapters.length - 1 ? <Button size="small" disabled={busy} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapters[chapterIndex + 1].chapter_id ?? chapters[chapterIndex + 1].component_id ?? "" })} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} /> : null}
+                {chapterIndex > 0 ? <Button size="small" disabled={busy || !!loadError} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapterIndex > 1 ? String(chapters[chapterIndex - 2].chapter_id ?? chapters[chapterIndex - 2].component_id ?? "") : null })} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} /> : null}
+                {chapterIndex < chapters.length - 1 ? <Button size="small" disabled={busy || !!loadError} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapters[chapterIndex + 1].chapter_id ?? chapters[chapterIndex + 1].component_id ?? "" })} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} /> : null}
               </span>
             </h3>
             {(chapter.components ?? []).map((component, index, list) => (
@@ -105,20 +108,20 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
                 </div>
                 <div className="tr-report-component-actions">
                   {component.component_id && index > 0 ? (
-                    <Button size="small" disabled={busy} onClick={() => apply({
+                    <Button size="small" disabled={busy || !!loadError} onClick={() => apply({
                       op: "move_component", chapter_id: chapterID, component_id: component.component_id,
                       parent_id: component.parent_id || "root",
                       after_component_id: index > 1 ? list[index - 2]?.component_id || "" : "",
                     })} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} />
                   ) : null}
                   {component.component_id && index < list.length - 1 ? (
-                    <Button size="small" disabled={busy} onClick={() => apply({
+                    <Button size="small" disabled={busy || !!loadError} onClick={() => apply({
                       op: "move_component", chapter_id: chapterID, component_id: component.component_id,
                       parent_id: component.parent_id || "root",
                       after_component_id: list[index + 1]?.component_id || "",
                     })} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} />
                   ) : null}
-                  {component.component_id ? <Button size="small" disabled={busy} onClick={() => apply({
+                  {component.component_id ? <Button size="small" disabled={busy || !!loadError} onClick={() => apply({
                     op: "remove_component", chapter_id: chapterID, component_id: component.component_id,
                   })}>{t("report.remove")}</Button> : null}
                 </div>
