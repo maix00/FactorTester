@@ -1,10 +1,25 @@
 /** A server snapshot is replaced by its live inventory, never added to it. */
 export type QuotaRecord = Record<string, any>;
-export type QuotaServer = { id: string; data: QuotaRecord; snapshot: boolean; observedAt?: unknown };
+export type QuotaServer = { id: string; data: QuotaRecord; snapshot: boolean; observedAt?: unknown; queueAllowed?: boolean };
 export type QuotaCategory = { group: string; bytes: number; billedBytes: number; count: number; lastObserved: unknown[] };
+export type CleanupTarget = { server: QuotaServer; preview: QuotaRecord };
+export type CleanupPlan = { live: CleanupTarget[]; offline: QuotaServer[]; count: number; bytes: number };
 
 const amount = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 const time = (value: unknown): number => typeof value === "number" ? value * 1000 : typeof value === "string" ? Date.parse(value) || 0 : 0;
+
+/** Only use a complete server preview; the server verifies its token at execution. */
+export function cleanupPlan(servers: QuotaServer[], pending: QuotaRecord[], group = ""): CleanupPlan {
+  const live: CleanupTarget[] = [], offline: QuotaServer[] = [];
+  for (const server of servers) {
+    if (!server.snapshot && group !== "output:historical") {
+      const preview = group ? (server.data.cleanup_business_groups || []).find((item: QuotaRecord) => item.group === group) : server.data.cleanup_preview;
+      if (preview && amount(preview.artifact_count) && typeof preview.token === "string" && preview.token && typeof preview.bytes === "number" && Number.isFinite(preview.bytes) && preview.bytes >= 0) live.push({ server, preview });
+    }
+    if (server.snapshot && server.queueAllowed !== false && (!group || group === "output:historical") && amount(server.data.output_bytes) && amount(server.data.output_count) && server.observedAt && !pending.some(item => item.server_id === server.id && (item.status === "pending" || item.status === "executing"))) offline.push(server);
+  }
+  return { live, offline, count: live.reduce((sum, item) => sum + amount(item.preview.artifact_count), 0) + offline.reduce((sum, server) => sum + amount(server.data.output_count), 0), bytes: live.reduce((sum, item) => sum + amount(item.preview.bytes), 0) + offline.reduce((sum, server) => sum + amount(server.data.output_bytes), 0) };
+}
 
 export function aggregateQuota(servers: QuotaServer[], profile: QuotaRecord | null, pending: QuotaRecord[]): QuotaCategory[] {
   const categories = new Map<string, QuotaCategory>();

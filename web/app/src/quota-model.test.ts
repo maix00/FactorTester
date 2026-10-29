@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateQuota } from "./quota-model.ts";
+import { aggregateQuota, cleanupPlan } from "./quota-model.ts";
 
 test("combines distinct servers and latest profile observations without counting snapshots twice", () => {
   const rows = aggregateQuota([
@@ -26,4 +26,15 @@ test("preserves unclassified artifact bytes that are absent from business groups
   assert.equal(rows.reduce((sum, row) => sum + row.billedBytes, 0), 22);
   assert.equal(rows.find(row => row.group === "output:historical")?.bytes, 5);
   assert.equal(rows.find(row => row.group === "input:other")?.bytes, 5);
+});
+
+test("cleanup targets require an intact preview or observed offline inventory", () => {
+  const live = { id: "live", snapshot: false, data: { cleanup_preview: { artifact_count: 2, bytes: 7, token: "v1" }, cleanup_business_groups: [{ group: "output:data", artifact_count: 1, bytes: 3, token: "v2" }] } };
+  const offline = { id: "offline", snapshot: true, observedAt: "2026-01-01", data: { output_bytes: 10, output_count: 2 } };
+  const noToken = { id: "invalid", snapshot: false, data: { cleanup_preview: { artifact_count: 5, bytes: 8 } } };
+  assert.deepEqual(cleanupPlan([live, offline, noToken], []).count, 4);
+  assert.equal(cleanupPlan([live, offline], [], "output:data").bytes, 3);
+  assert.equal(cleanupPlan([live, offline], [{ server_id: "offline", status: "pending" }]).offline.length, 0);
+  assert.equal(cleanupPlan([{ ...offline, observedAt: undefined }], []).offline.length, 0);
+  assert.equal(cleanupPlan([{ ...offline, queueAllowed: false }], []).offline.length, 0);
 });
