@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentProfileLabel, agentRuntimeAvailability, isUnboundAgentRuntimeError, selfAgentProfile } from "./agent-assistant-model.ts";
+import { agentAssistantSetupStep, agentProfileLabel, agentRuntimeAvailability, isUnboundAgentRuntimeError, selfAgentProfile } from "./agent-assistant-model.ts";
 
 test("self profile resolution requires an explicitly marked self profile", () => {
   assert.equal(selfAgentProfile(null), null);
@@ -21,6 +21,13 @@ test("assistant runtime availability follows explicit Manager binding metadata",
   assert.equal(agentRuntimeAvailability({ profile_id: "self", runtime: { runtime_kind: "server", configured: false } }), "unbound");
   assert.equal(agentRuntimeAvailability({ profile_id: "self", runtime: { runtime_kind: "client", configured: true } }), "server-required");
   assert.equal(agentRuntimeAvailability({ profile_id: "self", runtime: { runtime_kind: "server" } }), "unknown");
+});
+
+test("assistant setup guides binding and claim as separate explicit steps", () => {
+  assert.equal(agentAssistantSetupStep({ profile_id: "self" }), "bind-server");
+  assert.equal(agentAssistantSetupStep({ profile_id: "self", runtime: { runtime_kind: "server", configured: true } }), "claim-agent");
+  assert.equal(agentAssistantSetupStep({ profile_id: "self", runtime: { runtime_kind: "server", configured: true }, active_claim: { claim_id: "claim" } }), "ready");
+  assert.equal(agentAssistantSetupStep({ profile_id: "self", runtime: { runtime_kind: "client", configured: true } }), "client-runtime");
 });
 
 test("unbound runtime errors are recognized without classifying unrelated failures", () => {

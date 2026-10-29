@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Drawer, Spin } from "antd";
+import { Alert, Button, Drawer, Select, Spin, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { useCompactLayout } from "../configuration/layout.ts";
 import { loadScript } from "../assets.ts";
-import { agentProfileLabel, agentRuntimeAvailability, isUnboundAgentRuntimeError, selfAgentProfile, type AgentProfile } from "../agent-assistant-model.ts";
+import { agentAssistantSetupStep, agentProfileLabel, isUnboundAgentRuntimeError, selfAgentProfile, type AgentProfile } from "../agent-assistant-model.ts";
+import { AgentModelSetupModal } from "./agent-model-setup-modal.tsx";
 
 type LegacyChatRoot = HTMLElement & { __ftBeforeTabSave?: () => void };
 type LegacyChatHost = HTMLElement & { __ftBeforeTabSave?: () => void };
@@ -13,6 +14,19 @@ type LegacyWindow = Window & {
   FTStaticLoader?: { loadGroups: (groups: string[]) => Promise<unknown> };
   FTI18n?: { t?: (key: string, fallback?: string) => string };
   FTAgentChat?: { render: (context: Record<string, unknown>, profile: AgentProfile, options: Record<string, unknown>) => Promise<LegacyChatRoot> };
+};
+
+type AgentModelProvider = {
+  provider_id: string;
+  label: string;
+  default_model: string;
+};
+type AgentRuntimeCapability = {
+  runtime: string;
+  executable_label?: string;
+  protocols?: string[];
+  protocol_details?: Array<{ protocol: string; label?: string }>;
+  network_route_details?: Array<{ network_route: string; label: string }>;
 };
 
 type AgentAssistantProps = {
@@ -26,7 +40,13 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [setupRequired, setSetupRequired] = useState<"unbound" | "server-required" | "" >("");
+  const [setupRequired, setSetupRequired] = useState<"unbound" | "server-required" | "claim" | "" >("");
+  const [providers, setProviders] = useState<AgentModelProvider[]>([]);
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState<AgentRuntimeCapability[]>([]);
+  const [providerID, setProviderID] = useState("");
+  const [setupBusy, setSetupBusy] = useState(false);
+  const [setupError, setSetupError] = useState("");
+  const [modelSetupOpen, setModelSetupOpen] = useState(false);
   const [profile, setProfile] = useState<AgentProfile | null>(null);
   const mountRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<LegacyChatRoot | null>(null);
@@ -47,6 +67,77 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
     rootRef.current = null;
   }, []);
 
+  const loadProviders = useCallback(async (preferredProviderID = ""): Promise<void> => {
+    setSetupError("");
+    try {
+      const value = await request("/api/client/agent-models?runtime_kind=server");
+      const nextProviders = Array.isArray(value.providers) ? value.providers as AgentModelProvider[] : [];
+      setRuntimeCapabilities(Array.isArray(value.runtime_capabilities) ? value.runtime_capabilities as AgentRuntimeCapability[] : []);
+      setProviders(nextProviders);
+      setProviderID((current) => [preferredProviderID, current].find((candidate) =>
+        candidate && nextProviders.some((item) => item.provider_id === candidate)) || nextProviders[0]?.provider_id || "");
+    } catch (cause) {
+      setProviders([]);
+      setRuntimeCapabilities([]);
+      setProviderID("");
+      setSetupError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+
+  const refreshSelfProfile = useCallback(async (): Promise<AgentProfile> => {
+    const profilesPayload = await request("/api/client/profiles");
+    const self = selfAgentProfile(profilesPayload.profiles);
+    if (!self) throw new Error(t("assistant.noProfile"));
+    setProfile(self);
+    return self;
+  }, [t]);
+
+  const continueAfterSetup = useCallback((nextStep: "claim" | ""): void => {
+    setSetupError("");
+    setSetupRequired(nextStep);
+    pendingRef.current = null;
+    setRetry((value) => value + 1);
+  }, []);
+
+  const bindServerRuntime = useCallback(async (): Promise<void> => {
+    const current = profileRef.current;
+    if (!current || setupBusy) return;
+    setSetupBusy(true);
+    setSetupError("");
+    try {
+      await request("/api/client/profile-runtime", {
+        method: "POST",
+        body: JSON.stringify({ profile_id: current.profile_id, runtime_kind: "server", executor_id: "" }),
+      });
+      const updated = await refreshSelfProfile();
+      await loadProviders();
+      continueAfterSetup(updated.active_claim ? "" : "claim");
+    } catch (cause) {
+      setSetupError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSetupBusy(false);
+    }
+  }, [continueAfterSetup, loadProviders, refreshSelfProfile, setupBusy]);
+
+  const claimAgent = useCallback(async (): Promise<void> => {
+    const current = profileRef.current;
+    if (!current || !providerID || setupBusy) return;
+    setSetupBusy(true);
+    setSetupError("");
+    try {
+      await request("/api/client/profile-claims", {
+        method: "POST",
+        body: JSON.stringify({ profile_id: current.profile_id, provider_id: providerID }),
+      });
+      await refreshSelfProfile();
+      continueAfterSetup("");
+    } catch (cause) {
+      setSetupError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSetupBusy(false);
+    }
+  }, [continueAfterSetup, providerID, refreshSelfProfile, setupBusy]);
+
   const loadAssistant = useCallback((): Promise<void> => {
     if (pendingRef.current) return pendingRef.current;
     setLoading(true);
@@ -56,9 +147,20 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
       const profilesPayload = await request("/api/client/profiles");
       const self = selfAgentProfile(profilesPayload.profiles);
       if (!self) throw new Error(t("assistant.noProfile"));
-      const availability = agentRuntimeAvailability(self);
-      if (availability === "server-required" || availability === "unbound") {
-        setSetupRequired(availability);
+      setProfile(self);
+      const setupStep = agentAssistantSetupStep(self);
+      if (setupStep === "client-runtime") {
+        setSetupRequired("server-required");
+        return;
+      }
+      if (setupStep === "bind-server") {
+        setSetupRequired("unbound");
+        await loadProviders();
+        return;
+      }
+      if (setupStep === "claim-agent") {
+        setSetupRequired("claim");
+        await loadProviders();
         return;
       }
       if (!mountRef.current) throw new Error(t("assistant.mountUnavailable"));
@@ -115,7 +217,7 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
       if (aliveRef.current) setLoading(false);
     });
     return pendingRef.current;
-  }, [i18n.language, t]);
+  }, [i18n.language, loadProviders, t]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -138,10 +240,42 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
   const retryLoad = (): void => { pendingRef.current = null; setRetry((value) => value + 1); };
   const width = compact ? "100vw" : 560;
   const content = <>
-    {setupRequired ? <div className="tr-agent-assistant-error"><Alert type="warning" showIcon message={t(setupRequired === "unbound" ? "assistant.runtimeUnbound" : "assistant.serverRuntimeRequired")} description={t("assistant.runtimeSetupHint")} /><div className="tr-agent-assistant-setup-actions"><Button size="small" onClick={() => window.location.assign("/research?section=profiles")}>{t("assistant.openProfileSettings")}</Button></div></div> : null}
+    {setupRequired === "server-required" ? <div className="tr-agent-assistant-setup">
+      <Alert type="info" showIcon message={t("assistant.clientRuntimeTitle")} description={t("assistant.clientRuntimeHint")} />
+      {profile && !profile.active_claim ? <Button loading={setupBusy} onClick={() => void bindServerRuntime()}>{t("assistant.switchToServerRuntime")}</Button> : null}
+      {profile?.active_claim ? <Typography.Text type="secondary">{t("assistant.releaseClientClaimFirst")}</Typography.Text> : null}
+      {setupError ? <Alert type="error" showIcon message={setupError} /> : null}
+    </div> : null}
+    {setupRequired === "unbound" ? <div className="tr-agent-assistant-setup">
+      <Typography.Text type="secondary">{t("assistant.runtimeSetupHint")}</Typography.Text>
+      <div className="tr-agent-assistant-setup-step"><span className="tr-agent-assistant-step-number">1</span><div><strong>{t("assistant.bindRuntimeTitle")}</strong><Typography.Paragraph type="secondary">{t("assistant.bindRuntimeHint")}</Typography.Paragraph></div></div>
+      <Button type="primary" loading={setupBusy} onClick={() => void bindServerRuntime()}>{t("assistant.bindRuntime")}</Button>
+      {setupError ? <Alert type="error" showIcon message={setupError} /> : null}
+    </div> : null}
+    {setupRequired === "claim" ? <div className="tr-agent-assistant-setup">
+      <div className="tr-agent-assistant-setup-step"><span className="tr-agent-assistant-step-number">2</span><div><strong>{t("assistant.claimAgentTitle")}</strong><Typography.Paragraph type="secondary">{t("assistant.claimAgentHint")}</Typography.Paragraph></div></div>
+      {providers.length ? <>
+        <label className="tr-agent-assistant-provider-label" htmlFor="tr-agent-assistant-provider">{t("assistant.modelProvider")}</label>
+        <Select id="tr-agent-assistant-provider" value={providerID || undefined} onChange={setProviderID} options={providers.map((item) => ({ value: item.provider_id, label: `${item.label} · ${item.default_model}` }))} />
+        <div className="tr-agent-assistant-provider-actions">
+          <Button type="primary" loading={setupBusy} disabled={!providerID} onClick={() => void claimAgent()}>{t("assistant.claimAgent")}</Button>
+          <Button disabled={setupBusy || !runtimeCapabilities.length} onClick={() => setModelSetupOpen(true)}>{t("assistant.addModelProvider")}</Button>
+        </div>
+      </> : <>
+        <Typography.Paragraph type="secondary">{setupError || t("assistant.noServerProvider")}</Typography.Paragraph>
+        <div className="tr-agent-assistant-setup-actions"><Button type="primary" disabled={!runtimeCapabilities.length} onClick={() => setModelSetupOpen(true)}>{t("assistant.addModelProvider")}</Button><Button size="small" onClick={() => void loadProviders()}>{t("assistant.refreshProviders")}</Button></div>
+      </>}
+      {setupError && providers.length ? <Alert type="error" showIcon message={setupError} /> : null}
+    </div> : null}
     {error ? <div className="tr-agent-assistant-error"><Alert type="error" showIcon message={t("assistant.loadFailed")} description={error} action={<Button size="small" icon={<ReloadOutlined />} onClick={retryLoad}>{t("assistant.retry")}</Button>} /></div> : null}
     {!rootRef.current && !error && !setupRequired ? <div className="tr-agent-assistant-loading" role="status"><Spin size="small" />{loading ? t("assistant.loading") : t("assistant.openHint")}</div> : null}
     <div className="tr-agent-assistant-mount" ref={mountRef} />
+    <AgentModelSetupModal
+      open={modelSetupOpen}
+      onCancel={() => setModelSetupOpen(false)}
+      capabilities={runtimeCapabilities}
+      onSaved={(id) => { setModelSetupOpen(false); void loadProviders(id); }}
+    />
   </>;
 
   if (presentation === "panel") {

@@ -10,12 +10,21 @@ export type AgentProfile = {
 };
 
 export type AgentRuntimeAvailability = "ready" | "server-required" | "unbound" | "unknown";
+export type AgentAssistantSetupStep = "ready" | "bind-server" | "claim-agent" | "client-runtime";
 
 export function agentRuntimeAvailability(profile: AgentProfile): AgentRuntimeAvailability {
-  if (profile.runtime?.runtime_kind !== "server") return "server-required";
+  if (profile.runtime?.runtime_kind === "client") return "server-required";
+  if (profile.runtime?.runtime_kind !== "server") return "unknown";
   if (profile.runtime.configured === false) return "unbound";
   if (profile.runtime.configured === true) return "ready";
   return "unknown";
+}
+
+export function agentAssistantSetupStep(profile: AgentProfile): AgentAssistantSetupStep {
+  const availability = agentRuntimeAvailability(profile);
+  if (availability === "server-required") return "client-runtime";
+  if (availability !== "ready") return "bind-server";
+  return profile.active_claim ? "ready" : "claim-agent";
 }
 
 export function isUnboundAgentRuntimeError(message: string): boolean {

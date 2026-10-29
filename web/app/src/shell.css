@@ -334,6 +334,20 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-agent-assistant-title span { overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .tr-agent-assistant-error { flex: 0 0 auto; padding: 16px; }
 .tr-agent-assistant-setup-actions { display: flex; justify-content: flex-start; margin-top: 10px; }
+.tr-agent-assistant-setup { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 16px; min-height: 0; overflow: auto; padding: 24px; }
+.tr-agent-assistant-setup > .ant-btn { min-width: 180px; }
+.tr-agent-assistant-setup-step { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 12px; width: min(100%, 560px); }
+.tr-agent-assistant-step-number { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 50%; color: var(--panel); background: var(--accent); font-size: 13px; font-weight: 700; }
+.tr-agent-assistant-setup-step > div { min-width: 0; }
+.tr-agent-assistant-setup-step strong { display: block; margin: 2px 0 4px; font-size: 14px; }
+.tr-agent-assistant-setup-step .ant-typography { margin: 0; }
+.tr-agent-assistant-provider-label { margin: 0 0 -10px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.tr-agent-assistant-provider-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tr-agent-model-setup-modal .ant-form-item { margin-bottom: 14px; }
+.tr-agent-model-setup-modal .ant-form-item-label { padding-bottom: 4px; }
+.tr-agent-model-setup-modal .ant-form-item-label > label { color: var(--muted); font-size: 12px; font-weight: 600; }
+.tr-agent-model-setup-modal .tr-agent-model-test-result { margin-bottom: 14px; overflow-wrap: anywhere; }
+.tr-agent-model-setup-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 4px; }
 .tr-agent-assistant-loading { display: flex; flex: 1; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 13px; }
 .tr-agent-assistant-mount { flex: 1; min-height: 0; overflow: hidden; }
 .tr-agent-assistant-mount:empty { display: none; }
@@ -345,6 +359,10 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-agent-assistant-mount xpertai-chatkit { display: block; }
 @media (max-width: 760px) {
   .tr-agent-assistant-drawer .ant-drawer-content-wrapper { max-width: 100vw; }
+  .tr-agent-assistant-setup { padding: 18px; }
+  .tr-agent-model-setup-modal { max-width: calc(100vw - 24px); }
+  .tr-agent-model-setup-actions { align-items: stretch; flex-direction: column-reverse; }
+  .tr-agent-model-setup-actions > .ant-space { width: 100%; justify-content: flex-end; }
 }
 
 /* The mobile workspace has one shared, persistent action bar above each page. */
