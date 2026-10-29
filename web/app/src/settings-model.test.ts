@@ -11,9 +11,7 @@ test("Manager capability does not imply super administrator operations", () => {
   assert.equal(ids.includes("manager"),true);assert.equal(ids.includes("controlDatabase"),false);
   assert.deepEqual(visibleSettingsSections({manager:true,superAdmin:true}),SETTINGS_SECTIONS);
 });
-test("the unified permissions page requires the explicit administration permission", () => {
-  const ordinary = visibleSettingsSections({manager:true,superAdmin:false});
-  assert.equal(ordinary.some(item=>item.id==="permissions"),false);
-  const administrators = visibleSettingsSections({manager:true,superAdmin:false,canManagePermissions:true});
-  assert.equal(administrators.filter(item=>item.id==="permissions").length,1);
+test("permission administration is not duplicated in personal settings", () => {
+  const ids=visibleSettingsSections({manager:true,superAdmin:true}).map(item=>item.id);
+  assert.equal(ids.includes("permissions" as never),false);
 });

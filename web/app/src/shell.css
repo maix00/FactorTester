@@ -621,14 +621,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-settings-content { max-height:75vh; overflow:auto; padding-right:8px; }
 .tr-settings-card { padding:0; border:0; background:transparent; }
 .tr-settings-row { border-top:0; }
-.tr-agent-permission-settings > .ant-typography { max-width: 760px; margin: 0 0 18px; }
-.tr-agent-permission-form { display: grid; gap: 14px; max-width: 720px; }
-.tr-agent-permission-form label { display: grid; gap: 6px; min-width: 0; }
-.tr-agent-permission-form label > span { color: var(--muted); font-size: 12px; font-weight: 600; }
-.tr-agent-permission-form .ant-select { width: 100%; }
-.tr-agent-permission-form > .ant-btn { justify-self: start; min-width: 112px; }
-.tr-agent-permission-list { margin-top: 24px; }
-.tr-agent-permission-list h3 { margin: 0 0 10px; font-size: 14px; }
 .tr-settings-alert { margin: 10px 0; }
 @media(max-width:760px) {
  .tr-record-values > div { grid-template-columns:minmax(100px,36%) minmax(0,1fr); gap:16px; padding:10px 0; }
