@@ -3,6 +3,22 @@ import type { CleanupPlan } from "./quota-model.ts";
 type Request = (url: string, options?: RequestInit) => Promise<any>;
 export type CleanupResult = { deleted: number; queued: number; failures: { server: string; reason: string }[] };
 
+/** Retrieve a fresh job-specific preview before deleting one job's outputs. */
+export async function jobCleanupPreview(serverId: string, jobId: string, request: Request): Promise<any> {
+  if (!serverId || !jobId) throw new Error("Missing server or job identity");
+  const previewQuery = new URLSearchParams({ server_id: serverId, job_id: jobId });
+  const data = await request(`/api/jobs/storage?${previewQuery}`);
+  if (data.storage_server_id !== serverId) throw new Error("Storage server identity mismatch");
+  const preview = data.job_cleanup_preview;
+  if (!preview || !Number.isInteger(preview.artifact_count) || preview.artifact_count <= 0 || !Number.isInteger(preview.bytes) || preview.bytes < 0 || typeof preview.token !== "string" || !preview.token) throw new Error("Missing job cleanup preview");
+  return preview;
+}
+export async function deleteJobOutputs(serverId: string, jobId: string, preview: any, request: Request): Promise<any> {
+  if (!serverId || !jobId || !preview || !Number.isInteger(preview.artifact_count) || preview.artifact_count <= 0 || !Number.isInteger(preview.bytes) || preview.bytes < 0 || typeof preview.token !== "string" || !preview.token) throw new Error("Invalid job cleanup preview");
+  const query = new URLSearchParams({ cleanup: "eligible", server_id: serverId, job_id: jobId, expected_count: String(preview.artifact_count), expected_bytes: String(preview.bytes), expected_token: preview.token });
+  return request(`/api/jobs/artifacts?${query}`, { method: "DELETE" });
+}
+
 /** Send each server its own frozen preview. A failed server never prevents later targets. */
 export async function executeCleanup(plan: CleanupPlan, group: string, request: Request): Promise<CleanupResult> {
   const result: CleanupResult = { deleted: 0, queued: 0, failures: [] };
