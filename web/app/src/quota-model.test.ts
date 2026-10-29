@@ -20,3 +20,10 @@ test("cancelled commands restore billing and credits never deduct protected inpu
   assert.equal(pending.find(row => row.group === "input:factor")?.billedBytes, 4);
   assert.equal(pending.find(row => row.group === "output:data")?.billedBytes, 0);
 });
+
+test("preserves unclassified artifact bytes that are absent from business groups", () => {
+  const rows = aggregateQuota([{ id: "a", snapshot: false, data: { output_artifact_bytes: 15, input_artifact_bytes: 7, business_groups: [{ quota_group: "output:data", bytes: 10 }, { quota_group: "input:factor", bytes: 2 }] } }], null, []);
+  assert.equal(rows.reduce((sum, row) => sum + row.billedBytes, 0), 22);
+  assert.equal(rows.find(row => row.group === "output:historical")?.bytes, 5);
+  assert.equal(rows.find(row => row.group === "input:other")?.bytes, 5);
+});
