@@ -426,7 +426,7 @@ class CoreGetRoutesMixin:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return True
             capability_session = dict(session)
-            capability_session["admin_capabilities"] = _admin_capabilities(
+            capability_session["admin_capabilities"] = session.get("admin_capabilities") if session.get("keycloak_subject") else _admin_capabilities(
                 str(session.get("username") or ""), str(session.get("role") or ""),
             )
             json_response(self, {"success": True, **capability_session})

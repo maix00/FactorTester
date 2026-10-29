@@ -14,7 +14,7 @@ RESOURCE_REF = "global"
 ACTION = "use"
 
 
-def can_use_agent_assistant(username: str, role: str = "") -> bool:
+def can_use_agent_assistant(username: str, role: str = "", keycloak_roles=()) -> bool:
     """Check live permission entries against the caller's Keycloak subjects.
 
     Super administrators retain the existing platform administration access.
@@ -22,6 +22,9 @@ def can_use_agent_assistant(username: str, role: str = "") -> bool:
     unavailable, group/org membership cannot be trusted and access fails
     closed. Direct grants work without Keycloak configuration.
     """
+    from server.identity.auth_mode import auth_mode
+    if auth_mode() == "keycloak":
+        return bool(username) and "agent_assistant:use" in keycloak_roles
     principal = str(username or "").strip()
     if not principal:
         return False

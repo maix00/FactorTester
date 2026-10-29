@@ -521,6 +521,10 @@ class SessionStateMixin:
         return result
 
     def session(self, token: str) -> dict[str, object] | None:
+        from server.identity.auth_mode import auth_mode
+        if auth_mode() == "keycloak":
+            from server.identity.user_session import keycloak_session
+            return keycloak_session(token)
         now = time.time()
         with self._session_lock:
             self._cleanup_sessions_locked(now)

@@ -51,7 +51,7 @@ class AgentRoutesMixin:
             return None
         principal = str(session.get("username") or "").strip()
         role = str(session.get("role") or "")
-        if can_use_agent_assistant(principal, role):
+        if can_use_agent_assistant(principal, role, session.get("keycloak_roles", ())):
             return session
         json_response(
             self,
