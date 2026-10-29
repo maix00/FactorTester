@@ -8,6 +8,7 @@ import { AccountActions } from "./account-actions.tsx";
 import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
 import { QuotaSummary } from "./quota-summary.tsx";
+import { request } from "../configuration/api.ts";
 import { useAuth } from "../auth.tsx";
 
 import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
@@ -36,8 +37,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
     };
     const endpoint = endpoints[section];
     if (!endpoint) { setSectionData(null); return; }
-    fetch(endpoint, { credentials: "same-origin", signal:controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+    request(endpoint, { signal: controller.signal })
       .then((value) => {if(!controller.signal.aborted)setSectionData(value);})
       .catch(reason => {if(!controller.signal.aborted)setError(reason.message);});
     return ()=>controller.abort();
@@ -46,8 +46,8 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
   useEffect(() => {
     const controller=new AbortController();
     if (section !== "server") return;
-    fetch("/api/server/network-info", { credentials: "same-origin", signal:controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+    setServerInfo(null);
+    request("/api/server/network-info", { signal: controller.signal })
       .then((value) => {if(!controller.signal.aborted)setServerInfo(value);})
       .catch(reason => {if(!controller.signal.aborted)setError(reason.message);});
     return ()=>controller.abort();
