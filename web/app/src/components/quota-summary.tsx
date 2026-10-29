@@ -6,6 +6,7 @@ import { aggregateQuota, cleanupPlan, type CleanupPlan, type QuotaRecord, type Q
 import { executeCleanup } from "../quota-cleanup.ts";
 import { notify } from "../notifications/core.ts";
 import { DetailsPanel } from "./details-panel.tsx";
+import { QuotaJobs } from "./quota-jobs.tsx";
 import { TRDataTable } from "./data-table.tsx";
 import { ResultView } from "./result-view.tsx";
 
@@ -21,6 +22,7 @@ export function QuotaSummary({ data, onRefresh }: { data: Record<string, any>; o
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [error, setError] = useState(""), [revision, setRevision] = useState(0), [page, setPage] = useState(1), [size, setSize] = useState(20);
   const [historyOpen, setHistoryOpen] = useState(false), [busy, setBusy] = useState(false);
+  const [jobGroup, setJobGroup] = useState("");
   const mutation = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -105,8 +107,9 @@ export function QuotaSummary({ data, onRefresh }: { data: Record<string, any>; o
         { key: "usage", title: t("quota.usage"), render: (_, row) => row.bytes === row.billedBytes ? bytes(row.bytes) : `${bytes(row.billedBytes)} / ${bytes(row.bytes)}` },
         { key: "scope", title: t("quota.scope"), render: (_, row) => t(row.lastObserved.length ? "quota.lastObserved" : "quota.current") },
         { key: "count", title: t("quota.count"), render: (_, row) => row.count || "—" },
-        { key: "action", title: t("quota.action"), render: (_, row) => row.group.startsWith("output:") ? confirmCleanup(cleanupPlan(inventory.servers, inventory.pending, row.group), row.group) : t("quota.protected") },
+        { key: "action", title: t("quota.action"), render: (_, row) => row.group.startsWith("output:") ? <div className="tr-inline-actions">{row.group !== "output:historical" ? <Button disabled={!inventory.ready} onClick={() => setJobGroup(row.group)}>{t("quota.jobDetails")}</Button> : null}{confirmCleanup(cleanupPlan(inventory.servers, inventory.pending, row.group), row.group)}</div> : t("quota.protected") },
       ]} />
+      {jobGroup ? <QuotaJobs key={jobGroup} group={jobGroup} servers={inventory.servers} onClose={() => setJobGroup("")} onRefresh={onRefresh} /> : null}
       {historyOpen ? <DetailsPanel title={t("quota.offlineDetails")} onClose={() => setHistoryOpen(false)}><p>{t("quota.offlineExplanation")}</p><TRDataTable rows={historyRows} rowKey="id" pagination={{ page: 1, pageSize: Math.max(20, historyRows.length), total: historyRows.length, hideOnSinglePage: true, onChange: () => undefined }} columns={[
         { key: "server", title: t("quota.server"), render: (_, server) => server.id },
         { key: "usage", title: t("quota.usage"), render: (_, server) => typeof server.data.output_bytes === "number" ? bytes(server.data.output_bytes) : "—" },
