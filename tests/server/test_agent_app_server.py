@@ -1559,60 +1559,16 @@ def test_profile_agent_routes_deny_without_explicit_assistant_permission(
     assert _response(handler)["code"] == "permission_denied"
 
 
-def test_agent_permission_admin_route_sets_and_lists_audited_rule(
-    tmp_path, monkeypatch,
-):
-    from server.manager.http import agent_app_routes
-
+def test_agent_permission_admin_route_is_retired_without_creating_database(tmp_path, monkeypatch):
     db = tmp_path / "permissions.db"
     monkeypatch.setenv("TRADERESEARCH_PERMISSIONS_DB", str(db))
-    monkeypatch.setattr(
-        agent_app_routes, "can_use_agent_assistant", lambda *_args: True,
-    )
-
-    class AdminHandler(_AppHandler):
-        def _session(self):
-            return {"username": "root", "role": "super_admin"}
-
-    handler = AdminHandler(
-        None, None,
-        {"subject": "group:research/quant", "effect": "allow", "reason": "Team use"},
-    )
-    assert handler._post_agent_app_routes(
-        urlparse("/api/admin/agent-permissions"),
-    )
-    assert handler.response_status == 200
-
-    handler = AdminHandler(None, None)
-    assert handler._get_agent_app_routes(
-        urlparse("/api/admin/agent-permissions"),
-    )
-    value = _response(handler)
-    assert value["permissions"] == [{
-        "subject": "group:research/quant",
-        "resource_ref": "global",
-        "scope": "explicit",
-        "effect": "allow",
-        "created_by": "root",
-        "reason": "Team use",
-    }]
-    assert value["audit"][0]["actor"] == "root"
-
-    handler = AdminHandler(
-        None, None,
-        {"subject": "group:research/quant", "effect": "remove", "reason": "Access withdrawn"},
-    )
-    assert handler._post_agent_app_routes(
-        urlparse("/api/admin/agent-permissions"),
-    )
-    assert _response(handler)["removed"] is True
-    handler = AdminHandler(None, None)
-    assert handler._get_agent_app_routes(
-        urlparse("/api/admin/agent-permissions"),
-    )
-    value = _response(handler)
-    assert value["permissions"] == []
-    assert value["audit"][0]["new_effect"] == ""
+    handler = _AppHandler(None, None, {"subject": "user:alice", "effect": "allow"})
+    assert handler._post_agent_app_routes(urlparse("/api/admin/agent-permissions"))
+    assert handler.response_status == 410
+    handler = _AppHandler(None, None)
+    assert handler._get_agent_app_routes(urlparse("/api/admin/agent-permissions"))
+    assert handler.response_status == 410
+    assert not db.exists()
 
 
 def test_profile_agent_runtime_events_update_conversation_metadata(tmp_path):
@@ -1702,6 +1658,7 @@ def test_profile_agent_runtime_events_update_conversation_metadata(tmp_path):
 
 
 def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.manager.http.agent_routes.can_use_agent_assistant", lambda *_args: True)
     monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
@@ -1731,6 +1688,7 @@ def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
 
 
 def test_provider_test_route_returns_stable_error_classification(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.manager.http.agent_routes.can_use_agent_assistant", lambda *_args: True)
     def reject(_provider):
         raise AgentProviderHealthError(
             "provider rejected the API key (HTTP 401)",
