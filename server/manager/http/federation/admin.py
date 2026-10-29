@@ -2,22 +2,84 @@
 
 from __future__ import annotations
 
-from server.manager.http.responses import json_response
-from server.manager.domain.organization_scope import configured_managed_organizations
-from server.identity.realm_groups import organization_group_path
+from urllib.parse import urlsplit
+
 from server.identity.federation_identity_sync import (
     DESTINATION_ALLOWED_ATTRIBUTE,
-    IdentitySyncTransitionError,
     SOURCE_ENABLED_ATTRIBUTE,
-    assert_source_sync_can_be_disabled,
+    IdentitySyncTransitionError,
+    IdentitySyncVerificationUnavailable,
+    assert_destination_sync_can_be_disabled,
     group_sync_value,
     manager_keycloak_admin_adapter,
     organization_group_from_admin_scope,
     organization_group_paths,
     set_group_sync_value,
 )
+from server.identity.realm_groups import organization_group_path
+from server.manager.domain.federation import ServiceRoute
+from server.manager.domain.organization_scope import configured_managed_organizations
+from server.manager.http.responses import json_response
+
 
 class FederationAdminRoutesMixin:
+    def _public_identity_sync_verifier_route(self) -> ServiceRoute:
+        """Resolve the configured public Manager from its live peer lease."""
+        config = self.state.federation_config()
+        bootstrap_url = str(config.get("bootstrap_url") or "").strip()
+        suffix = "/api/federation/register"
+        if not bootstrap_url.endswith(suffix):
+            raise IdentitySyncVerificationUnavailable(
+                "public Manager is not configured for federation"
+            )
+        configured_base = bootstrap_url[:-len(suffix)].rstrip("/")
+        configured = urlsplit(configured_base)
+        if not configured.scheme or not configured.netloc:
+            raise IdentitySyncVerificationUnavailable(
+                "public Manager federation address is invalid"
+            )
+
+        peers = self.state.federation_registry.servers(include_offline=True)
+        matching: list[dict[str, object]] = []
+        for peer in peers:
+            if not bool(peer.get("public_server", peer.get("role") == "main")):
+                continue
+            transfer = peer.get("transfer_node")
+            transfer = transfer if isinstance(transfer, dict) else {}
+            endpoint = str(transfer.get("peer_control_endpoint") or "").strip().rstrip("/")
+            if endpoint == configured_base:
+                matching.append(peer)
+        if len(matching) != 1:
+            raise IdentitySyncVerificationUnavailable(
+                "configured public Manager has no unique registered peer"
+            )
+        peer = matching[0]
+        if not bool(peer.get("online")):
+            raise IdentitySyncVerificationUnavailable(
+                "public Manager is offline; sync cannot be disabled"
+            )
+        server_id = str(peer.get("server_id") or "").strip()
+        transfer = peer.get("transfer_node")
+        transfer = transfer if isinstance(transfer, dict) else {}
+        peer_endpoint = str(transfer.get("peer_control_endpoint") or "").strip()
+        proxy_token = str(peer.get("proxy_token") or "").strip()
+        if not server_id or not peer_endpoint or not proxy_token:
+            raise IdentitySyncVerificationUnavailable(
+                "public Manager peer route is incomplete"
+            )
+        return ServiceRoute(
+            server_id=server_id,
+            role=str(peer.get("role") or ""),
+            branch=str(peer.get("branch") or ""),
+            revision=str(peer.get("revision") or ""),
+            port=0,
+            peer_control_endpoint=peer_endpoint,
+            proxy_token=proxy_token,
+            remote=True,
+            online=True,
+            public_server=True,
+        )
+
     def _local_source_organization_paths(self) -> set[str]:
         """Resolve only the organizations this internal Manager represents."""
         state = self.state
@@ -210,6 +272,18 @@ class FederationAdminRoutesMixin:
             enabled = payload.get(expected_field)
             if type(enabled) is not bool:
                 raise ValueError(f"{expected_field} must be a boolean")
+            verifier_route = None
+            if not is_public:
+                if group_path not in local_source_paths or (
+                    not is_super and group_path not in organization_paths
+                ):
+                    raise PermissionError(
+                        "organization is outside the caller's Keycloak scope"
+                    )
+                if not enabled:
+                    # Use the peer lease before any Keycloak call. Offline or
+                    # unknown public Managers reject this transition immediately.
+                    verifier_route = self._public_identity_sync_verifier_route()
             adapter = manager_keycloak_admin_adapter()
             groups = adapter.group_representations()
             available_paths = set(organization_group_paths(groups))
@@ -231,14 +305,32 @@ class FederationAdminRoutesMixin:
                 DESTINATION_ALLOWED_ATTRIBUTE
                 if is_public else SOURCE_ENABLED_ATTRIBUTE
             )
-            if not enabled and not is_public:
+            if not enabled and is_public:
                 from server.identity.user_session import oidc_settings
 
-                assert_source_sync_can_be_disabled(
+                assert_destination_sync_can_be_disabled(
                     adapter,
                     group_path=group_path,
                     roles_client_id=oidc_settings()["roles_client_id"],
                 )
+            elif not enabled:
+                assert verifier_route is not None
+                try:
+                    result = self.state.federation_gateway.check_identity_sync_disable(
+                        verifier_route,
+                        requester_server_id=self.state.server_id,
+                        requester_proxy_token=self.state.federation_proxy_token(),
+                        group_path=group_path,
+                    )
+                except Exception as exc:
+                    raise IdentitySyncVerificationUnavailable(
+                        "public Manager did not return a verifiable sync decision"
+                    ) from exc
+                if result.get("allowed") is not True:
+                    raise IdentitySyncTransitionError(
+                        "public Manager rejected the sync-disable request; "
+                        "review administrator continuity in its Keycloak realm"
+                    )
             updated = set_group_sync_value(
                 adapter,
                 group_path=group_path,
@@ -256,6 +348,12 @@ class FederationAdminRoutesMixin:
                 "code": "identity_sync_admin_handoff_required",
                 "error": str(exc),
             }, 409)
+        except IdentitySyncVerificationUnavailable as exc:
+            json_response(self, {
+                "success": False,
+                "code": "identity_sync_verifier_unavailable",
+                "error": str(exc),
+            }, 503)
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
         except (TypeError, ValueError, OSError, LookupError) as exc:

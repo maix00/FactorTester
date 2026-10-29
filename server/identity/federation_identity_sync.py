@@ -8,22 +8,23 @@ opt-in and destination allow policy.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import os
+import re
+import time
 from pathlib import Path
 from typing import Any
 
 from server.identity.keycloak import KeycloakAdminAdapter
 from server.identity.realm_groups import GROUP_ROOT
 from server.identity.user_session import oidc_settings
-from server.identity.realm_groups import organization_group_path
-
 
 SOURCE_ENABLED_ATTRIBUTE = "tr_identity_sync_enabled"
 DESTINATION_ALLOWED_ATTRIBUTE = "tr_identity_sync_allowed"
 PUBLIC_LOGIN_ROLE = "public_server:login"
 ADMIN_ROLE = "admin_console:manage"
-GTHT_ORGANIZATION_ID = "GTHT"
-GTHT_SYNC_HANDOFF_SUPER_ADMIN = "MaxJJW"
 IDENTITY_SYNC_ATTRIBUTES = frozenset({
     SOURCE_ENABLED_ATTRIBUTE,
     DESTINATION_ALLOWED_ATTRIBUTE,
@@ -31,7 +32,55 @@ IDENTITY_SYNC_ATTRIBUTES = frozenset({
 
 
 class IdentitySyncTransitionError(PermissionError):
-    """A policy transition would violate the GTHT admin handoff invariant."""
+    """A policy transition would violate public-manager admin continuity."""
+
+
+class IdentitySyncVerificationUnavailable(ConnectionError):
+    """The public Manager cannot provide a current sync-disable decision."""
+
+
+def identity_sync_disable_signature(
+    secret: str,
+    *,
+    requester_server_id: str,
+    group_path: str,
+    issued_at: int,
+    request_id: str,
+) -> str:
+    """Sign one short-lived decision request with the requester's peer secret."""
+    message = json.dumps(
+        [requester_server_id, group_path, int(issued_at), request_id],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hmac.new(str(secret).encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def verify_identity_sync_disable_signature(
+    secret: str,
+    *,
+    requester_server_id: str,
+    group_path: str,
+    issued_at: int,
+    request_id: str,
+    signature: str,
+    now: float | None = None,
+) -> bool:
+    """Verify a bounded, short-lived peer decision request."""
+    selected_request_id = str(request_id or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", selected_request_id):
+        return False
+    current = time.time() if now is None else float(now)
+    if abs(current - int(issued_at)) > 30:
+        return False
+    expected = identity_sync_disable_signature(
+        secret,
+        requester_server_id=requester_server_id,
+        group_path=group_path,
+        issued_at=issued_at,
+        request_id=selected_request_id,
+    )
+    return hmac.compare_digest(expected, str(signature or ""))
 
 
 def manager_keycloak_admin_adapter() -> KeycloakAdminAdapter:
@@ -125,48 +174,65 @@ def set_group_sync_value(
     )
 
 
-def assert_source_sync_can_be_disabled(
+def assert_destination_sync_can_be_disabled(
     adapter: KeycloakAdminAdapter,
     *,
     group_path: str,
     roles_client_id: str,
 ) -> None:
-    """Require a completed MaxJJW handoff before disabling GTHT sync.
+    """Check public-realm administrator continuity before disabling sync.
 
-    The role-holder list is fetched only when an administrator requests this
-    transition. An unavailable, malformed, or over-limit Keycloak result
-    fails closed; no role is removed implicitly by this operation.
+    This bounded check runs once, only when the public Manager is asked to
+    disable one organization's inbound sync. Active global super administrators
+    belonging to that organization must first be removed from the role, and at
+    least one active super administrator in another organization must remain.
+    Missing or over-limit Keycloak data fails closed. This is a precondition
+    check; it never changes role assignments.
     """
-    if group_path != organization_group_path(GTHT_ORGANIZATION_ID):
-        return
-    users = adapter.client_role_users(roles_client_id, ADMIN_ROLE)
-    enabled_usernames: list[str] = []
+    users = adapter.client_role_users(
+        roles_client_id, ADMIN_ROLE, page_size=100, max_users=1000,
+    )
+    organization_admin_count = 0
+    external_admin_count = 0
+    organization_prefix = f"{GROUP_ROOT}/organizations/"
     for user in users:
-        if user.get("enabled") is not True:
+        enabled = user.get("enabled")
+        if type(enabled) is not bool:
+            raise RuntimeError("Keycloak admin role holder omitted enabled status")
+        if not enabled:
             continue
         username = str(user.get("username") or "").strip()
-        if not username:
-            raise RuntimeError("Keycloak admin role holder has no username")
-        enabled_usernames.append(username)
-    folded = [name.casefold() for name in enabled_usernames]
-    if len(set(folded)) != len(folded):
-        raise RuntimeError("Keycloak admin role holders have ambiguous usernames")
-    handoff = GTHT_SYNC_HANDOFF_SUPER_ADMIN.casefold()
-    if handoff in folded:
-        if len(enabled_usernames) == 1:
-            raise IdentitySyncTransitionError(
-                "GTHT public sync cannot be disabled while MaxJJW is the only "
-                "active super administrator; assign another super administrator "
-                "first, then remove MaxJJW's super administrator role"
+        user_id = str(user.get("id") or "").strip()
+        if not username or not user_id:
+            raise RuntimeError("Keycloak admin role holder omitted identity")
+        paths = adapter.user_group_paths(user_id, page_size=100, max_groups=1000)
+        organization_roots = set()
+        for path in paths:
+            if not path.startswith(organization_prefix):
+                continue
+            organization_id = path[len(organization_prefix):].split("/", 1)[0]
+            if organization_id:
+                organization_roots.add(
+                    f"{organization_prefix}{organization_id}"
+                )
+        if not organization_roots:
+            raise RuntimeError(
+                "Keycloak super administrator has no verifiable organization membership"
             )
+        belongs_to_organization = group_path in organization_roots
+        if belongs_to_organization:
+            organization_admin_count += 1
+        else:
+            external_admin_count += 1
+    if not external_admin_count:
         raise IdentitySyncTransitionError(
-            "Remove MaxJJW's super administrator role in Keycloak before "
-            "disabling GTHT public sync"
+            "sync cannot be disabled: an active super administrator in another "
+            "organization must first be assigned in the public Keycloak realm"
         )
-    if not enabled_usernames:
+    if organization_admin_count:
         raise IdentitySyncTransitionError(
-            "GTHT public sync cannot be disabled until another active super "
-            "administrator is assigned in Keycloak"
+            "sync cannot be disabled yet: remove the public super administrator "
+            "role from this organization's users, then retry"
         )
 
 
