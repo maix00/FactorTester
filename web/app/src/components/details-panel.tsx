@@ -1,8 +1,14 @@
-import React, { useEffect, useRef } from "react";
+import React, { createContext, useContext, useEffect, useRef } from "react";
 import { Button, Modal } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useCompactLayout } from "../configuration/layout.ts";
+const DismissContext = createContext<(() => void) | null>(null);
+/** Reuse the panel's history-aware close action for a form inside that panel. */
+export function DetailsCancelButton({ onCancel, closePanel, disabled }: { onCancel: () => void; closePanel: boolean; disabled?: boolean }): React.ReactElement {
+  const dismiss = useContext(DismissContext), { t } = useTranslation();
+  return <Button disabled={disabled} onClick={closePanel && dismiss ? dismiss : onCancel}>{t("configuration.cancel")}</Button>;
+}
 export function DetailsPanel({ title, onClose, children, width = 960 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }): React.ReactElement {
   const mobile = useCompactLayout(), { t } = useTranslation();
   const id = useRef(crypto.randomUUID()), close = useRef(onClose); close.current = onClose;
@@ -23,5 +29,5 @@ export function DetailsPanel({ title, onClose, children, width = 960 }: { title:
       wrapper:{overflow:"hidden"},content:{height:"100dvh",borderRadius:0,padding:0,display:"flex",flexDirection:"column"},
       header:{padding:"16px 20px",margin:0,borderBottom:"1px solid var(--line)",flexShrink:0},
       body:{padding:20,overflow:"auto",minHeight:0,flex:1},
-    } : {body:{maxHeight:"75vh",overflow:"auto"}}}>{children}</Modal>;
+    } : {body:{maxHeight:"75vh",overflow:"auto"}}}><DismissContext.Provider value={dismiss}>{children}</DismissContext.Provider></Modal>;
 }
