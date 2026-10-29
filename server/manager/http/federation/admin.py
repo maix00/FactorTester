@@ -3,8 +3,270 @@
 from __future__ import annotations
 
 from server.manager.http.responses import json_response
+from server.manager.domain.organization_scope import configured_managed_organizations
+from server.identity.realm_groups import organization_group_path
+from server.identity.federation_identity_sync import (
+    DESTINATION_ALLOWED_ATTRIBUTE,
+    IdentitySyncTransitionError,
+    SOURCE_ENABLED_ATTRIBUTE,
+    assert_source_sync_can_be_disabled,
+    group_sync_value,
+    manager_keycloak_admin_adapter,
+    organization_group_from_admin_scope,
+    organization_group_paths,
+    set_group_sync_value,
+)
 
 class FederationAdminRoutesMixin:
+    def _local_source_organization_paths(self) -> set[str]:
+        """Resolve only the organizations this internal Manager represents."""
+        state = self.state
+        organization_ids = tuple(
+            str(value).strip()
+            for value in (getattr(state, "managed_organizations", ()) or ())
+            if str(value).strip()
+        )
+        if not organization_ids:
+            organization_ids = configured_managed_organizations(
+                public_server=False,
+                server_role=str(getattr(state, "server_role", "") or ""),
+            )
+        return {organization_group_path(value) for value in organization_ids}
+
+    def _identity_sync_admin_context(self) -> tuple[dict[str, object] | None, bool, set[str]]:
+        session = self._session()
+        if session is None or not self._has_secure_ui_transport():
+            return session, False, set()
+        is_super = self._has_super_admin_session()
+        if is_super:
+            return session, True, set()
+        groups = session.get("keycloak_groups") or ()
+        organization_paths = {
+            path for path in (
+                organization_group_from_admin_scope(value)
+                for value in groups
+            ) if path
+        }
+        return session, False, organization_paths
+
+    @staticmethod
+    def _group_display_name(group: dict[str, object], group_path: str) -> str:
+        return str(group.get("name") or group_path.rsplit("/", 1)[-1])
+
+    def _identity_sync_policy_rows(
+        self, *, groups: list[dict[str, object]], is_super: bool,
+        organization_paths: set[str],
+    ) -> list[dict[str, object]]:
+        by_path = {
+            str(group.get("path") or ""): group
+            for group in groups if isinstance(group, dict)
+        }
+        is_public = bool(getattr(self.state, "public_server", False))
+        if is_public:
+            if not is_super:
+                return []
+            organizations: dict[str, dict[str, object]] = {}
+            for peer in self.state.federation_registry.servers(include_offline=True):
+                if bool(peer.get("public_server", peer.get("role") == "main")):
+                    continue
+                server_id = str(peer.get("server_id") or "")
+                for organization_id in peer.get("managed_organizations") or ():
+                    identifier = str(organization_id or "").strip()
+                    if not identifier:
+                        continue
+                    path = organization_group_path(identifier)
+                    organization = by_path.get(path, {})
+                    organizations[path] = {
+                        "group_path": path,
+                        "organization_id": identifier,
+                        "name": self._group_display_name(organization, identifier),
+                        "server_id": server_id,
+                        "server_online": bool(peer.get("online")),
+                        "sync_allowed": group_sync_value(
+                            organization, DESTINATION_ALLOWED_ATTRIBUTE,
+                        ),
+                        "configured": bool(organization),
+                    }
+            return sorted(organizations.values(), key=lambda row: str(row["name"]).casefold())
+
+        local_source_paths = self._local_source_organization_paths()
+        if is_super:
+            selected_paths = local_source_paths
+        else:
+            selected_paths = organization_paths & local_source_paths
+        rows = []
+        for path in sorted(selected_paths):
+            group = by_path.get(path)
+            if not isinstance(group, dict):
+                continue
+            rows.append({
+                "group_path": path,
+                "name": self._group_display_name(group, path),
+                "sync_enabled": group_sync_value(group, SOURCE_ENABLED_ATTRIBUTE),
+                "configured": True,
+            })
+        return rows
+
+    def _admin_federation_settings(self) -> None:
+        session, is_super, organization_paths = self._identity_sync_admin_context()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return
+        is_public = bool(getattr(self.state, "public_server", False))
+        local_source_paths = (
+            set() if is_public else self._local_source_organization_paths()
+        )
+        if not is_super and (
+            is_public or not (organization_paths & local_source_paths)
+        ):
+            json_response(self, {
+                "success": False,
+                "error": "Keycloak federation administration permission required",
+            }, 403)
+            return
+        try:
+            adapter = manager_keycloak_admin_adapter()
+            groups = adapter.group_representations()
+            config = self.state.federation_config(public=True)
+            config_status = self.state.federation_config_status()
+        except Exception as exc:
+            json_response(self, {
+                "success": False,
+                "code": "keycloak_federation_admin_unavailable",
+                "error": type(exc).__name__,
+            }, 503)
+            return
+        rows = self._identity_sync_policy_rows(
+            groups=groups,
+            is_super=is_super,
+            organization_paths=organization_paths,
+        )
+        json_response(self, {
+            "success": True,
+            "server": {
+                "server_id": self.state.server_id,
+                "public_server": is_public,
+                "role": self.state.server_role,
+            },
+            "connection": {
+                "bootstrap_url": str(config.get("bootstrap_url") or ""),
+                "enabled": bool(config_status.get("enabled")),
+                "active": bool(config_status.get("active")),
+                "registration_token_configured": bool(
+                    config.get("registration_token_configured")
+                ),
+            },
+            "policy_mode": "destination_allow" if is_public else "source_opt_in",
+            "organizations": rows,
+            # Until the dedicated Keycloak identity-event stream is deployed,
+            # never imply that a saved policy means the directory is syncing.
+            "identity_sync_transport": "not_connected",
+            "can_manage_all": is_super,
+            "can_edit_connection": (
+                not is_public
+                and (is_super or bool(organization_paths & local_source_paths))
+            ),
+        }, headers={"Cache-Control": "private, no-store"})
+
+    def _update_admin_federation_settings(self) -> None:
+        session, is_super, organization_paths = self._identity_sync_admin_context()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return
+        is_public = bool(getattr(self.state, "public_server", False))
+        local_source_paths = (
+            set() if is_public else self._local_source_organization_paths()
+        )
+        if not is_super and (
+            is_public or not (organization_paths & local_source_paths)
+        ):
+            json_response(self, {
+                "success": False,
+                "error": "Keycloak federation administration permission required",
+            }, 403)
+            return
+        try:
+            payload = self._json_body(16 * 1024)
+            if set(payload) == {"bootstrap_url"}:
+                if is_public:
+                    raise PermissionError("public Manager has no upstream bootstrap address")
+                value = self.state.update_federation_config({
+                    "bootstrap_url": payload.get("bootstrap_url"),
+                })
+                json_response(self, {
+                    "success": True,
+                    "connection": {
+                        "bootstrap_url": value["config"].get("bootstrap_url", ""),
+                        "enabled": bool(value["status"].get("enabled")),
+                        "active": bool(value["status"].get("active")),
+                    },
+                })
+                return
+
+            expected_field = "allowed" if is_public else "enabled"
+            if set(payload) != {"group_path", expected_field}:
+                raise ValueError("request must update one organization sync policy")
+            group_path = str(payload.get("group_path") or "").strip()
+            enabled = payload.get(expected_field)
+            if type(enabled) is not bool:
+                raise ValueError(f"{expected_field} must be a boolean")
+            adapter = manager_keycloak_admin_adapter()
+            groups = adapter.group_representations()
+            available_paths = set(organization_group_paths(groups))
+            if not is_public:
+                available_paths &= local_source_paths
+            if is_public and is_super:
+                available_paths = {
+                    organization_group_path(str(organization_id))
+                    for peer in self.state.federation_registry.servers(include_offline=True)
+                    if not bool(peer.get("public_server", peer.get("role") == "main"))
+                    for organization_id in peer.get("managed_organizations") or ()
+                    if str(organization_id or "").strip()
+                }
+            elif not is_super:
+                available_paths &= organization_paths
+            if group_path not in available_paths:
+                raise PermissionError("organization is outside the caller's Keycloak scope")
+            attribute = (
+                DESTINATION_ALLOWED_ATTRIBUTE
+                if is_public else SOURCE_ENABLED_ATTRIBUTE
+            )
+            if not enabled and not is_public:
+                from server.identity.user_session import oidc_settings
+
+                assert_source_sync_can_be_disabled(
+                    adapter,
+                    group_path=group_path,
+                    roles_client_id=oidc_settings()["roles_client_id"],
+                )
+            updated = set_group_sync_value(
+                adapter,
+                group_path=group_path,
+                attribute=attribute,
+                enabled=enabled,
+            )
+            json_response(self, {
+                "success": True,
+                "group_path": group_path,
+                expected_field: group_sync_value(updated, attribute),
+            })
+        except IdentitySyncTransitionError as exc:
+            json_response(self, {
+                "success": False,
+                "code": "identity_sync_admin_handoff_required",
+                "error": str(exc),
+            }, 409)
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+        except (TypeError, ValueError, OSError, LookupError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+        except Exception as exc:
+            json_response(self, {
+                "success": False,
+                "code": "keycloak_federation_admin_unavailable",
+                "error": type(exc).__name__,
+            }, 503)
+
     def _federation_servers(self) -> None:
         visitor = self._visitor_mode()
         if visitor is not None:
@@ -48,6 +310,16 @@ class FederationAdminRoutesMixin:
 
     def _has_super_admin_session(self) -> bool:
         session = self._session()
+        if session:
+            from server.identity.auth_mode import keycloak_enabled
+            if keycloak_enabled():
+                roles = set(session.get("keycloak_roles", ()) or ())
+                capabilities = set(session.get("admin_capabilities", ()) or ())
+                return bool(
+                    self._has_secure_ui_transport()
+                    and ({"admin_console:manage"} <= roles
+                         or {"admin_console:manage"} <= capabilities)
+                )
         return bool(
             self._has_secure_ui_transport()
             and session

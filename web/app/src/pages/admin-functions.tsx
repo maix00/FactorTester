@@ -4,6 +4,7 @@ import { ExportOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth.tsx";
 import { DeviceSettings } from "../components/device-settings.tsx";
+import { AdminFederationSettings } from "../components/admin-federation-settings.tsx";
 import { FunctionPage } from "../components/function-page.tsx";
 import { SettingsSection } from "../components/settings-section.tsx";
 import { request } from "../configuration/api.ts";
@@ -12,6 +13,7 @@ type Directory = {
   identity_provider?: string;
   managed_externally?: boolean;
   message?: string;
+  admin_scope?: "realm" | "organization";
   admin_console_url?: string;
 };
 
@@ -35,7 +37,13 @@ export function AdminFunctionsPage(): React.ReactElement {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
-  const isAdmin = session?.admin_capabilities?.includes("admin_console:manage") === true;
+  const isSuperAdmin = session?.admin_capabilities?.includes("admin_console:manage") === true;
+  const isFederationAdmin = session?.admin_capabilities?.includes("federation:manage") === true;
+  const isAdmin = isSuperAdmin || isFederationAdmin;
+
+  const visibleTabs = useMemo(() => isSuperAdmin ? [
+    "organizations", "users", "devices", "mihomo", "federation", "controlDatabase", "manager",
+  ] : isFederationAdmin ? ["organizations", "users", "federation"] : [], [isFederationAdmin, isSuperAdmin]);
 
   useEffect(() => {
     if (!isAdmin || (tab !== "organizations" && tab !== "users")) return;
@@ -48,6 +56,10 @@ export function AdminFunctionsPage(): React.ReactElement {
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [isAdmin, revision, tab]);
+
+  useEffect(() => {
+    if (visibleTabs.length && !visibleTabs.includes(tab)) setTab(visibleTabs[0]);
+  }, [tab, visibleTabs]);
 
   const adminURL = useMemo(() => safeAdminURL(directory?.admin_console_url), [directory?.admin_console_url]);
 
@@ -69,6 +81,9 @@ export function AdminFunctionsPage(): React.ReactElement {
       <Alert type="info" showIcon
         message={t(isOrganizations ? "adminFunctions.organizationNotice" : "adminFunctions.userNotice")}
         description={t(isOrganizations ? "adminFunctions.organizationHint" : "adminFunctions.userHint")} />
+      {!isSuperAdmin ? <Alert className="tr-admin-scope-notice" type="warning" showIcon
+        message={t("adminFunctions.scopedKeycloakNotice")}
+        description={t("adminFunctions.keycloakScopedAdministrationHint")} /> : null}
       <Card className="tr-admin-provider" bordered>
         <div className="tr-admin-provider-mark"><SafetyCertificateOutlined /></div>
         <div className="tr-admin-provider-copy">
@@ -80,7 +95,8 @@ export function AdminFunctionsPage(): React.ReactElement {
         </div>
         <Button type="primary" icon={<ExportOutlined />} href={adminURL || undefined}
           target="_blank" rel="noopener noreferrer" disabled={!adminURL}>
-          {t(isOrganizations ? "adminFunctions.manageOrganizations" : "adminFunctions.manageUsers")}
+          {t(!isSuperAdmin ? "adminFunctions.manageOrganizationMembers"
+            : isOrganizations ? "adminFunctions.manageOrganizations" : "adminFunctions.manageUsers")}
         </Button>
       </Card>
       <Descriptions size="small" column={{ xs: 1, sm: 2 }} items={[
@@ -91,15 +107,16 @@ export function AdminFunctionsPage(): React.ReactElement {
     </div>;
   };
 
-  const tabItems = [
+  const allTabs = [
     { key: "organizations", label: t("adminFunctions.organizations"), children: tab === "organizations" ? identityContent("organizations") : null },
     { key: "users", label: t("adminFunctions.users"), children: tab === "users" ? identityContent("users") : null },
     { key: "devices", label: t("adminFunctions.devices"), children: tab === "devices" ? <DeviceSettings scope="admin" /> : null },
     { key: "mihomo", label: "Mihomo", children: tab === "mihomo" ? <SettingsSection section="mihomo" adminSurface /> : null },
-    { key: "federation", label: t("adminFunctions.federation"), children: tab === "federation" ? <SettingsSection section="federation" adminSurface /> : null },
+    { key: "federation", label: t("adminFunctions.federation"), children: tab === "federation" ? <AdminFederationSettings /> : null },
     { key: "controlDatabase", label: t("adminFunctions.controlDatabase"), children: tab === "controlDatabase" ? <SettingsSection section="controlDatabase" adminSurface /> : null },
     { key: "manager", label: t("adminFunctions.runtime"), children: tab === "manager" ? <SettingsSection section="manager" adminSurface /> : null },
   ];
+  const tabItems = allTabs.filter(item => visibleTabs.includes(item.key));
 
   return <FunctionPage title={t("adminFunctions.title")}>
     <div className="tr-admin-tab">
