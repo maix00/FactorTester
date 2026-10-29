@@ -6,6 +6,10 @@ x-node: &node
   environment: &environment
     TR_MANAGER_ENDPOINT: ${TR_MANAGER_ENDPOINT:?set owning Manager control endpoint}
     TR_MANAGER_ID: ${TR_MANAGER_ID:?set owning Manager identity}
+    # The shared Arrow cache is scoped to its Manager authority plus storage
+    # domain. Keep this equal to the colocated Manager's server identity; never
+    # fall back to each container's hostname.
+    FACTORTESTER_SERVER_ID: ${TR_MANAGER_ID:?set owning Manager identity}
     TR_EXECUTION_NODE_ID: ${TR_EXECUTION_NODE_ID:?set stable execution node identity}
     TR_NODE_DESCRIPTOR_FILE: /config/node.json
     TR_NODE_STATE_DIR: /node-state

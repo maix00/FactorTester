@@ -12,7 +12,13 @@ independent registrations/worker instances; connect independent brokers through
 RabbitMQ Federation/Shovel only where routing requires it. HTTP discovery and
 market reads do not go through RabbitMQ. No custom message forwarder is added.
 
-Set `TR_MANAGER_ID`, stable `TR_EXECUTION_NODE_ID`, deployment descriptor,
+Set `TR_MANAGER_ID` to the owning Manager's stable identity, and set a distinct
+`TR_EXECUTION_NODE_ID` for each installed node. The Compose project maps
+`TR_MANAGER_ID` to the legacy cache-scope variable `FACTORTESTER_SERVER_ID` so
+the Manager and colocated worker use the same shared-cache authority; it must
+never be inferred from the worker container hostname. Point `TR_SHARED_CACHE_ROOT`
+at the same host directory the Manager mounts as `FACTORTESTER_STATE_ROOT/shared-columnar`.
+Also configure the deployment descriptor,
 Keycloak issuer/client/secret and explicit audience. Manager needs execution
 introspection credentials plus scoped federation and market clients. Tokens
 carry `tr_node_id` or `tr_manager_id`; delegated Manager clients must have an
