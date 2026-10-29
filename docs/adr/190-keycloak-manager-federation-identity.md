@@ -12,6 +12,17 @@
 
 ## 决策
 
+### Keycloak 数据库存储
+
+1. Keycloak 使用现有公网 PostgreSQL 服务，单独建立 `traderesearch_keycloak` 数据库和专用最小权限角色；不复用 `factortester_control` 数据库、表、账号或密码。
+2. 现有公网部署定义使用 PostgreSQL 15.18，属于 Keycloak 官方支持的 PostgreSQL 15 系列；只读账户目录读取也验证了 Manager 当前能访问其控制库。复用该 PostgreSQL 服务可避免再运行、备份和监控第二套数据库；Keycloak 的用户/会话查询不会进入回测逐 Bar 热路径。
+3. 当前 PostgreSQL `pg_hba.conf` 仅允许 Manager 固定容器地址访问控制库，并默认拒绝其他连接。因此必须为 Keycloak 容器配置独立固定内网地址、独立 SCRAM 凭据和只允许 `traderesearch_keycloak` 数据库的 TLS 规则，不能放宽为整个 Docker 网段或公网访问。
+4. Keycloak 主机名与 HTTPS 证书独立于 PostgreSQL 选型。公网和浏览器必须使用稳定、证书可信的 HTTPS issuer；不得把数据库 WireGuard 地址、容器地址或自签名测试端点当作 issuer。
+
+部署时让 Keycloak 容器加入公网 Compose 的私有数据库网络，使用固定专属地址；公网 PostgreSQL 当前 HBA 只放行 Manager 地址及受限 WireGuard 地址，并默认拒绝其他连接，因此必须用精确的 Keycloak 地址、数据库和角色规则扩展访问，不能开放数据库公网端口。使用独立凭据文件、限定连接池，并给 Keycloak 进程配置资源上限，避免登录高峰挤占回测资源。
+
+部署前先对现有 PostgreSQL 做校验备份，再创建专用数据库和角色；回退时仅移除该 Keycloak 数据库、角色及定向 HBA 规则，不影响 `factortester_control`。官方支持矩阵见 [Keycloak 数据库配置](https://www.keycloak.org/server/db) 与 [Keycloak 支持的生产配置](https://www.keycloak.org/server/supported-configurations)。
+
 ### 身份权威与稳定键
 
 1. 一个相互信任的 Manager 联邦域使用一个 canonical Keycloak issuer 与 realm。联邦域内各 Manager 验证同一组签名令牌，并以 `(iss, sub)` 作为主体身份。
