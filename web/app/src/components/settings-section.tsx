@@ -7,6 +7,7 @@ import { DeviceSettings } from "./device-settings.tsx";
 import { AccountActions } from "./account-actions.tsx";
 import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
+import { QuotaSummary } from "./quota-summary.tsx";
 import { useAuth } from "../auth.tsx";
 
 import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
@@ -72,7 +73,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
             </div>
           ) : section === "profiles" ? <ProfileSettings/> : section === "docs" ? <DocsSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
-              {sectionData ? <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
+              {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>
           ) : section === "account" ? (
             <div className="tr-settings-card">
