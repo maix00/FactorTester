@@ -49,7 +49,7 @@ export function ResearchPage(): React.ReactElement {
     {selected ? <DetailsPanel title={selected.title || id(selected)} onClose={() => { setSelected(null); setEditor(false); }}>
       {tab === "reports" ? <><ReportEditor publicationID={id(selected)} /><ReportMarkdown key={id(selected)} publicationID={id(selected)} /></>
         : editingResearch ? <ResearchEdit research={selected as Row} onCancel={() => setEditingResearch(false)} onArchived={() => { setSelected(null); setEditingResearch(false); setRevision((value) => value + 1); }} onSaved={(value) => { setSelected({ ...selected, ...value }); setDetail(value); setEditingResearch(false); setRevision((revision) => revision + 1); }} />
-        : editor ? <iframe className="tr-artifact-frame" title={selected.title || id(selected)} src={`/researches/${encodeURIComponent(id(selected))}?presentation=embedded`} /> : <><ResearchSummary value={detail as Row | null} /><div className="tr-inline-actions"><Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button><Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></div></>}
+        : editor ? <><Button onClick={() => setEditor(false)}>{t("research.backToSummary")}</Button><iframe className="tr-artifact-frame" title={selected.title || id(selected)} src={`/researches/${encodeURIComponent(id(selected))}?presentation=embedded`} /></> : <><ResearchSummary value={detail as Row | null} /><div className="tr-inline-actions"><Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button><Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></div></>}
     </DetailsPanel> : null}
   </FunctionPage>;
 }
