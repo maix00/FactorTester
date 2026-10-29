@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentAssistantSetupStep, agentProfileLabel, agentRuntimeAvailability, isUnboundAgentRuntimeError, selfAgentProfile } from "./agent-assistant-model.ts";
+import { agentAssistantSetupStep, agentProfileLabel, agentRuntimeAvailability, isAgentAssistantPermissionDenied, isUnboundAgentRuntimeError, selfAgentProfile } from "./agent-assistant-model.ts";
 
 test("self profile resolution requires an explicitly marked self profile", () => {
   assert.equal(selfAgentProfile(null), null);
@@ -34,4 +34,11 @@ test("unbound runtime errors are recognized without classifying unrelated failur
   assert.equal(isUnboundAgentRuntimeError("Profile is not bound to a server runtime"), true);
   assert.equal(isUnboundAgentRuntimeError("Profile runtime is not configured"), true);
   assert.equal(isUnboundAgentRuntimeError("Model provider is unavailable"), false);
+});
+
+test("assistant permission failures are recognized from Manager API errors", () => {
+  assert.equal(isAgentAssistantPermissionDenied({ status: 403 }), true);
+  assert.equal(isAgentAssistantPermissionDenied({ code: "permission_denied" }), true);
+  assert.equal(isAgentAssistantPermissionDenied({ status: 503, code: "permission_store_unavailable" }), false);
+  assert.equal(isAgentAssistantPermissionDenied(new Error("forbidden")), false);
 });

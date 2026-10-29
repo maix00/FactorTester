@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+from server.manager.http import agent_routes
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_provider_health import AgentProviderHealth
@@ -600,7 +601,15 @@ def _route_payload(handler):
     return json.loads(handler.wfile.getvalue().decode("utf-8"))
 
 
-def test_agent_routes_require_account_session_and_never_return_provider_token(tmp_path):
+def test_agent_routes_require_account_session_and_never_return_provider_token(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        agent_routes,
+        "can_use_agent_assistant",
+        lambda username, role: username == PRINCIPAL and role == "user",
+    )
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "agent-provider.key",
@@ -675,7 +684,64 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(tm
     assert '"token":' not in json.dumps(duplicate_response)
 
 
-def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path):
+def test_agent_routes_deny_all_agent_operations_without_assistant_permission(
+    tmp_path,
+    monkeypatch,
+):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    monkeypatch.setattr(
+        agent_routes,
+        "can_use_agent_assistant",
+        lambda *_args: False,
+    )
+    payload = {
+        "label": "provider",
+        "runtime_kind": "server",
+        "protocol": "openai_responses",
+        "base_url": "https://api.example.test/v1",
+        "default_model": "model",
+        "token": "must-not-be-saved",
+    }
+    save = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+        payload=payload,
+    )
+
+    assert save._post_agent_routes(urlparse("/api/client/agent-models")) is True
+    assert save.response_status == 403
+    assert _route_payload(save)["code"] == "permission_denied"
+    assert service.providers(PRINCIPAL) == []
+
+    claim = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+        payload={"profile_id": PROFILE_ID, "provider_id": "provider"},
+    )
+    assert claim._post_agent_routes(urlparse("/api/client/profile-claims")) is True
+    assert claim.response_status == 403
+    assert _route_payload(claim)["code"] == "permission_denied"
+
+    runtime = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+    )
+    assert runtime._get_agent_routes(urlparse("/api/client/agent-runtime")) is True
+    assert runtime.response_status == 403
+    assert _route_payload(runtime)["code"] == "permission_denied"
+
+
+def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        agent_routes,
+        "can_use_agent_assistant",
+        lambda username, role: username == PRINCIPAL and role == "user",
+    )
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "agent-provider.key",
@@ -710,6 +776,11 @@ def test_agent_provider_listing_never_contacts_upstream_providers(
     tmp_path,
     monkeypatch,
 ):
+    monkeypatch.setattr(
+        agent_routes,
+        "can_use_agent_assistant",
+        lambda username, role: username == PRINCIPAL and role == "user",
+    )
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "agent-provider.key",

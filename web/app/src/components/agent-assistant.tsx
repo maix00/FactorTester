@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { useCompactLayout } from "../configuration/layout.ts";
 import { loadScript } from "../assets.ts";
-import { agentAssistantSetupStep, agentProfileLabel, isUnboundAgentRuntimeError, selfAgentProfile, type AgentProfile } from "../agent-assistant-model.ts";
+import { agentAssistantSetupStep, agentProfileLabel, isAgentAssistantPermissionDenied, isUnboundAgentRuntimeError, selfAgentProfile, type AgentProfile } from "../agent-assistant-model.ts";
 import { AgentModelSetupModal } from "./agent-model-setup-modal.tsx";
 
 type LegacyChatRoot = HTMLElement & { __ftBeforeTabSave?: () => void };
@@ -40,7 +40,7 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [setupRequired, setSetupRequired] = useState<"unbound" | "server-required" | "claim" | "" >("");
+  const [setupRequired, setSetupRequired] = useState<"unbound" | "server-required" | "claim" | "forbidden" | "" >("");
   const [providers, setProviders] = useState<AgentModelProvider[]>([]);
   const [runtimeCapabilities, setRuntimeCapabilities] = useState<AgentRuntimeCapability[]>([]);
   const [providerID, setProviderID] = useState("");
@@ -67,7 +67,7 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
     rootRef.current = null;
   }, []);
 
-  const loadProviders = useCallback(async (preferredProviderID = ""): Promise<void> => {
+  const loadProviders = useCallback(async (preferredProviderID = ""): Promise<boolean> => {
     setSetupError("");
     try {
       const value = await request("/api/client/agent-models?runtime_kind=server");
@@ -76,11 +76,18 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
       setProviders(nextProviders);
       setProviderID((current) => [preferredProviderID, current].find((candidate) =>
         candidate && nextProviders.some((item) => item.provider_id === candidate)) || nextProviders[0]?.provider_id || "");
+      return true;
     } catch (cause) {
       setProviders([]);
       setRuntimeCapabilities([]);
       setProviderID("");
-      setSetupError(cause instanceof Error ? cause.message : String(cause));
+      if (isAgentAssistantPermissionDenied(cause)) {
+        setSetupRequired("forbidden");
+        setSetupError("");
+      } else {
+        setSetupError(cause instanceof Error ? cause.message : String(cause));
+      }
+      return false;
     }
   }, []);
 
@@ -110,10 +117,15 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
         body: JSON.stringify({ profile_id: current.profile_id, runtime_kind: "server", executor_id: "" }),
       });
       const updated = await refreshSelfProfile();
-      await loadProviders();
+      if (!await loadProviders()) return;
       continueAfterSetup(updated.active_claim ? "" : "claim");
     } catch (cause) {
-      setSetupError(cause instanceof Error ? cause.message : String(cause));
+      if (isAgentAssistantPermissionDenied(cause)) {
+        setSetupRequired("forbidden");
+        setSetupError("");
+      } else {
+        setSetupError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
       setSetupBusy(false);
     }
@@ -132,7 +144,12 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
       await refreshSelfProfile();
       continueAfterSetup("");
     } catch (cause) {
-      setSetupError(cause instanceof Error ? cause.message : String(cause));
+      if (isAgentAssistantPermissionDenied(cause)) {
+        setSetupRequired("forbidden");
+        setSetupError("");
+      } else {
+        setSetupError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
       setSetupBusy(false);
     }
@@ -210,8 +227,14 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
       setProfile(self);
     })().catch((cause: unknown) => {
       const message = cause instanceof Error ? cause.message : String(cause);
-      if (aliveRef.current && isUnboundAgentRuntimeError(message)) setSetupRequired("unbound");
-      else if (aliveRef.current) setError(message);
+      if (aliveRef.current && isAgentAssistantPermissionDenied(cause)) {
+        setSetupRequired("forbidden");
+        setError("");
+      } else if (aliveRef.current && isUnboundAgentRuntimeError(message)) {
+        setSetupRequired("unbound");
+      } else if (aliveRef.current) {
+        setError(message);
+      }
       pendingRef.current = null;
     }).finally(() => {
       if (aliveRef.current) setLoading(false);
@@ -240,6 +263,9 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
   const retryLoad = (): void => { pendingRef.current = null; setRetry((value) => value + 1); };
   const width = compact ? "100vw" : 560;
   const content = <>
+    {setupRequired === "forbidden" ? <div className="tr-agent-assistant-setup">
+      <Alert type="warning" showIcon message={t("assistant.permissionTitle")} description={t("assistant.permissionHint")} />
+    </div> : null}
     {setupRequired === "server-required" ? <div className="tr-agent-assistant-setup">
       <Alert type="info" showIcon message={t("assistant.clientRuntimeTitle")} description={t("assistant.clientRuntimeHint")} />
       {profile && !profile.active_claim ? <Button loading={setupBusy} onClick={() => void bindServerRuntime()}>{t("assistant.switchToServerRuntime")}</Button> : null}

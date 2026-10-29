@@ -32,6 +32,12 @@ export function isUnboundAgentRuntimeError(message: string): boolean {
   return normalized.includes("not bound") || normalized.includes("not configured");
 }
 
+export function isAgentAssistantPermissionDenied(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { status?: unknown; code?: unknown };
+  return value.status === 403 || value.code === "permission_denied";
+}
+
 export function selfAgentProfile(value: unknown): AgentProfile | null {
   if (!Array.isArray(value)) return null;
   const profile = value.find((item) => item && typeof item === "object" &&

@@ -7,7 +7,7 @@ import { SettingsSection } from "./settings-section.tsx";
 import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
 export function SettingsOverlay({open,onClose,onResetLayout}:{open:boolean;onClose:()=>void;onResetLayout:()=>void}):React.ReactElement{
  const {t}=useTranslation(),{session}=useAuth();const [section,setSection]=useState<SettingsSectionID>("account");
- const sections=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin",canManageAgentPermissions:session?.admin_capabilities?.includes("admin_console:manage")});
+ const sections=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin",canManagePermissions:session?.admin_capabilities?.includes("admin_console:manage")});
  const current=sections.find(item=>item.id===section)||sections[0];
  return <Modal open={open} onCancel={onClose} footer={null} centered width={820} className="tr-settings-overlay" destroyOnHidden title={t("settingsPanel.title")}>
  <div className="tr-settings-hub"><nav className="tr-settings-nav" aria-label={t("settingsPanel.title")}>

@@ -22,7 +22,7 @@ type AuditEntry = {
   changed_at: number;
 };
 
-export function AgentPermissionsSettings(): React.ReactElement {
+export function PermissionsSettings(): React.ReactElement {
   const { t, i18n } = useTranslation();
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
@@ -115,9 +115,10 @@ export function AgentPermissionsSettings(): React.ReactElement {
   ];
 
   return <div className="tr-settings-card tr-agent-permission-settings">
-    <Typography.Paragraph type="secondary">{t("agentPermissions.hint")}</Typography.Paragraph>
+    <Typography.Paragraph type="secondary">{t("permissions.overview")}</Typography.Paragraph>
     {error ? <Alert type="error" showIcon message={error} className="tr-settings-alert" /> : null}
     {notice ? <Alert type="success" showIcon message={notice} className="tr-settings-alert" /> : null}
+    <Typography.Paragraph type="secondary">{t("agentPermissions.hint")}</Typography.Paragraph>
     <div className="tr-agent-permission-form">
       <label>
         <span>{t("agentPermissions.subject")}</span>
@@ -142,8 +143,8 @@ export function AgentPermissionsSettings(): React.ReactElement {
           ? t("agentPermissions.remove") : t("agentPermissions.save")}
       </Button>
     </div>
-    <section className="tr-agent-permission-list" aria-label={t("agentPermissions.title")}>
-      <h3>{t("agentPermissions.title")}</h3>
+    <section className="tr-agent-permission-list" aria-label={t("permissions.assistantUse")}>
+      <h3>{t("permissions.assistantUse")}</h3>
       {loading ? <Spin /> : permissions.length ? <Table<Permission>
         size="small" rowKey={item => `${item.subject}:${item.resource_ref}:${item.scope}`} columns={permissionColumns}
         dataSource={permissions} pagination={false} scroll={{ x: true }} /> : <Empty description={t("agentPermissions.empty")} />}

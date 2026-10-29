@@ -4,7 +4,7 @@ export const SETTINGS_SECTIONS = [
   { id: "federation", icon: "workspace" },
   { id: "controlDatabase", icon: "runs" },
   { id: "devices", icon: "trading" },
-  { id: "agentAccess", icon: "account" },
+  { id: "permissions", icon: "account" },
   { id: "quota", icon: "research" },
   { id: "workspace", icon: "workspace" },
   { id: "language", icon: "research" },
@@ -19,10 +19,10 @@ export type SettingsSectionID=typeof SETTINGS_SECTIONS[number]["id"];
 export function visibleSettingsSections(access: {
   manager: boolean;
   superAdmin: boolean;
-  canManageAgentPermissions?: boolean;
+  canManagePermissions?: boolean;
 }) {
   return SETTINGS_SECTIONS.filter(item =>
     (!["manager", "mihomo"].includes(item.id) || access.manager) &&
     (!["federation", "controlDatabase"].includes(item.id) || access.superAdmin) &&
-    (item.id !== "agentAccess" || access.superAdmin || access.canManageAgentPermissions === true));
+    (item.id !== "permissions" || access.superAdmin || access.canManagePermissions === true));
 }
