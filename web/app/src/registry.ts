@@ -8,6 +8,7 @@ export interface PageDefinition {
   mobileTab?: string;
   icon?: string;
   sidebarVisible?: boolean;
+  requiredAdminCapability?: string;
 }
 
 const pages = new Map<string, PageDefinition>();
@@ -36,6 +37,15 @@ export function pagesForScope(scope: "desktop" | "mobile"): PageDefinition[] {
   );
 }
 
+export function pagesForAdminCapabilities(
+  scope: "desktop" | "mobile",
+  capabilities: readonly string[] = [],
+): PageDefinition[] {
+  return pagesForScope(scope).filter(
+    (page) => !page.requiredAdminCapability || capabilities.includes(page.requiredAdminCapability),
+  );
+}
+
 export const BUILTIN_PAGES: PageDefinition[] = [
   { id: "research", route: "/research?section=researches", title: "研究", scope: "both", mobileTab: "research", icon: "research" },
   { id: "configuration", route: "/backtest?view=configuration", title: "测试", scope: "both", mobileTab: "tests", icon: "settings" },
@@ -44,6 +54,7 @@ export const BUILTIN_PAGES: PageDefinition[] = [
   { id: "products", route: "/products", title: "产品库", scope: "both", icon: "catalog" },
   { id: "factors", route: "/factors", title: "因子库", scope: "both", icon: "factor" },
   { id: "strategies", route: "/strategies?scope=public", title: "策略库", scope: "both", icon: "strategy" },
+  { id: "admin", route: "/admin", title: "管理员功能", scope: "both", icon: "account", requiredAdminCapability: "admin_console:manage" },
   { id: "more", route: "/app?view=more", title: "更多功能", scope: "mobile", mobileTab: "more", icon: "workspace", sidebarVisible: false },
   { id: "settings", route: "/settings/account", title: "设置", scope: "both", icon: "settings", sidebarVisible: false },
   { id: "source-detail", route: "/products/sources/detail", title: "数据源族", scope: "both", icon: "catalog", sidebarVisible: false },

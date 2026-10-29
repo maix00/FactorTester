@@ -6,17 +6,17 @@ import { useAuth } from "../auth.tsx";
 import { PageIcon } from "../icon.tsx";
 
 export function AccountActions(): React.ReactElement {
-  const {t}=useTranslation(),{session,openAuth,logout}=useAuth();
+  const {t}=useTranslation(),{session,openAuth,logout,registrationEnabled}=useAuth();
   return <div className="tr-account-actions" aria-label={t("auth.account")}>
     <Button onClick={()=>openAuth("login")}>{t("auth.signIn")}</Button>
-    <Button onClick={()=>openAuth("register")}>{t("auth.register")}</Button>
+    {registrationEnabled?<Button onClick={()=>openAuth("register")}>{t("auth.register")}</Button>:null}
     {session?<Button onClick={()=>void logout()}>{t("auth.signOut")}</Button>:null}
   </div>;
 }
 export function AccountMenu({collapsed=false}:{collapsed?:boolean}):React.ReactElement {
   const {t}=useTranslation(),{session,openAuth,logout,registrationEnabled}=useAuth();
   const items=[{key:"login",label:t("auth.signIn")},
-    {key:"register",label:registrationEnabled?t("auth.register"):t("auth.registrationClosed")},
+    ...(registrationEnabled?[{key:"register",label:t("auth.register")}]:[]),
     ...(session?[{key:"logout",label:t("auth.signOut")}]:[])];
   return <Dropdown trigger={["click"]} menu={{items,onClick:({key})=>key==="logout"?void logout():openAuth(key as "login"|"register")}}>
     <Tooltip title={collapsed?t("auth.account"):undefined} placement="right"><button type="button" className="tr-account-menu" aria-label={t("auth.account")}>

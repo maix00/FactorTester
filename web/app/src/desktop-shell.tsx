@@ -7,7 +7,7 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview-react";
-import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.ts";
+import { BUILTIN_PAGES, getPage, pagesForAdminCapabilities, registerPage } from "./registry.ts";
 import { PageIcon } from "./icon.tsx";
 import { PageInstanceProvider, newPageInstanceId, type PageArguments } from "./page-instance.ts";
 import { PageSurface } from "./surface.tsx";
@@ -84,7 +84,7 @@ export function DesktopShell(): React.ReactElement {
   const {session}=useAuth();
   const compact=useCompactLayout();
   const layoutKey=workspaceLayoutKey(session?.username||"anonymous");
-  const pages = pagesForScope("desktop").filter((page) => page.sidebarVisible !== false);
+  const pages = pagesForAdminCapabilities("desktop", session?.admin_capabilities || []).filter((page) => page.sidebarVisible !== false);
   const label = (page: { id: string; title: string }): string => t(`nav.${page.id}`, { defaultValue: page.title });
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [active, setActive] = useState(pages[0]?.id ?? "research");

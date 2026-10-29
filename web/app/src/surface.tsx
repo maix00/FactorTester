@@ -10,6 +10,7 @@ import { ResearchPage } from "./pages/research.tsx";
 import { TradingPage } from "./pages/trading.tsx";
 import { WorkspacePage } from "./pages/workspace.tsx";
 import { TestConfigurationPage } from "./pages/test-configuration.tsx";
+import { AdminFunctionsPage } from "./pages/admin-functions.tsx";
 
 
 export function PageSurface({ pageId }: { pageId: string }): React.ReactElement {
@@ -24,5 +25,6 @@ export function PageSurface({ pageId }: { pageId: string }): React.ReactElement 
   if (pageId === "research") return <ResearchPage />;
   if (pageId === "trading") return <TradingPage />;
   if (pageId === "configuration") return <TestConfigurationPage />;
+  if (pageId === "admin") return <AdminFunctionsPage />;
   return <PageFrame pageId={pageId} />;
 }

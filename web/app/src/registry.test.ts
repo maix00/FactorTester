@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.ts";
+import { BUILTIN_PAGES, getPage, pagesForAdminCapabilities, pagesForScope, registerPage } from "./registry.ts";
 
 test("builtin pages preserve desktop/mobile scopes", () => {
   for (const page of BUILTIN_PAGES) registerPage(page);
@@ -13,6 +13,13 @@ test("builtin pages preserve desktop/mobile scopes", () => {
 
 test("duplicate page ids are rejected", () => {
   assert.throws(() => registerPage(BUILTIN_PAGES[0]), /duplicate page id/);
+});
+
+test("admin-only pages are hidden until the matching Keycloak capability is present", () => {
+  assert.ok(!pagesForAdminCapabilities("desktop").some((page) => page.id === "admin"));
+  assert.ok(!pagesForAdminCapabilities("mobile", ["admin_console:read"]).some((page) => page.id === "admin"));
+  assert.ok(pagesForAdminCapabilities("desktop", ["admin_console:manage"]).some((page) => page.id === "admin"));
+  assert.ok(pagesForAdminCapabilities("mobile", ["admin_console:manage"]).some((page) => page.id === "admin"));
 });
 
 test("every registered page has a title, icon and route", () => {

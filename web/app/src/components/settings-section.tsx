@@ -12,13 +12,15 @@ import { ServerSummary } from "./server-summary.tsx";
 import { request } from "../configuration/api.ts";
 import { useAuth } from "../auth.tsx";
 
-import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
+import { ADMIN_SETTINGS_SECTIONS, visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
 
-type SettingsSectionProps={section:SettingsSectionID;onResetLayout?:()=>void};
+type SettingsSectionProps={section:SettingsSectionID;onResetLayout?:()=>void;adminSurface?:boolean};
 export function SettingsSection(props:SettingsSectionProps):React.ReactElement {
  const {session}=useAuth(),{t}=useTranslation();
- const allowed=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"});
- if(!allowed.some(item=>item.id===props.section))return <Alert type="info" message={t("settingsPanel.permissionRequired")} />;
+ const isAdminSection=ADMIN_SETTINGS_SECTIONS.includes(props.section as typeof ADMIN_SETTINGS_SECTIONS[number]);
+ const hasAdminCapability=session?.admin_capabilities?.includes("admin_console:manage")===true;
+ const allowed=props.adminSurface ? isAdminSection&&hasAdminCapability : visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:hasAdminCapability}).some(item=>item.id===props.section);
+ if(!allowed)return <Alert type="info" message={t("settingsPanel.permissionRequired")} />;
  return <SettingsSectionContent {...props}/>;
 }
 function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):React.ReactElement{

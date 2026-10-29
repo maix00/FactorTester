@@ -15,11 +15,12 @@ export const SETTINGS_SECTIONS = [
 ] as const;
 
 export type SettingsSectionID=typeof SETTINGS_SECTIONS[number]["id"];
+export const ADMIN_SETTINGS_SECTIONS = ["federation", "controlDatabase", "manager", "mihomo"] as const satisfies readonly SettingsSectionID[];
+
 export function visibleSettingsSections(access: {
   manager: boolean;
   superAdmin: boolean;
 }) {
-  return SETTINGS_SECTIONS.filter(item =>
-    (!["manager", "mihomo"].includes(item.id) || access.manager) &&
-    (!["federation", "controlDatabase"].includes(item.id) || access.superAdmin));
+  void access;
+  return SETTINGS_SECTIONS.filter(item => !ADMIN_SETTINGS_SECTIONS.includes(item.id as typeof ADMIN_SETTINGS_SECTIONS[number]));
 }
