@@ -12,6 +12,7 @@ import { PropertyGroups } from "../components/property-groups.tsx";
 import { ResearchCreate } from "../components/research-create.tsx";
 import { useAuth } from "../auth.tsx";
 import { ReportEditor } from "../components/report-editor.tsx";
+import { ReportMarkdown } from "../components/report-markdown.tsx";
 import { ResearchEdit } from "../components/research-edit.tsx";
 type Row = Record<string, any>;
 export function ResearchPage(): React.ReactElement {
@@ -21,7 +22,7 @@ export function ResearchPage(): React.ReactElement {
   const [tab, setTab] = useState("researches"), [rows, setRows] = useState<Row[]>([]), [query, setQuery] = useState("");
   const [page, setPage] = useState(1), [size, setSize] = useState(20), [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
-  const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<unknown>(null), [editor, setEditor] = useState(false), [markdown, setMarkdown] = useState("");
+  const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<unknown>(null), [editor, setEditor] = useState(false);
   const [editingResearch, setEditingResearch] = useState(false);
   const id = (row: Row): string => row.research_id || row.publication_id || row.report_id;
   useEffect(() => {
@@ -30,10 +31,8 @@ export function ResearchPage(): React.ReactElement {
     return () => controller.abort();
   }, [tab, revision]);
   useEffect(() => {
-    const controller = new AbortController(); setDetail(null); setMarkdown(""); setEditingResearch(false); if (!selected) return;
-    if (tab === "reports") {
-      void fetch(`/api/research-reports/${encodeURIComponent(id(selected))}/agent.md`, { credentials: "same-origin", signal: controller.signal }).then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.text(); }).then((value) => { if (!controller.signal.aborted) setMarkdown(value); }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
-    } else void request(`/api/research/${encodeURIComponent(id(selected))}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data.research || data); }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
+    const controller = new AbortController(); setDetail(null); setEditingResearch(false); if (!selected) return;
+    if (tab !== "reports") void request(`/api/research/${encodeURIComponent(id(selected))}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data.research || data); }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
     return () => controller.abort();
   }, [selected, tab]);
   const filtered = useMemo(() => rows.filter((row) => !query || `${row.title || ""} ${row.owner_ref || row.owner || ""}`.toLowerCase().includes(query.toLowerCase())), [rows, query]);
@@ -48,7 +47,7 @@ export function ResearchPage(): React.ReactElement {
     ]} />
     {creating ? <ResearchCreate onClose={() => setCreating(false)} onCreated={(value) => { setCreating(false); setSelected(value); setEditor(false); setRevision(revision => revision + 1); }} /> : null}
     {selected ? <DetailsPanel title={selected.title || id(selected)} onClose={() => { setSelected(null); setEditor(false); }}>
-      {tab === "reports" ? <><ReportEditor publicationID={id(selected)} />{markdown ? <details className="tr-report-markdown"><summary>{t("report.markdown")}</summary><pre className="tr-job-detail">{markdown}</pre></details> : null}</>
+      {tab === "reports" ? <><ReportEditor publicationID={id(selected)} /><ReportMarkdown key={id(selected)} publicationID={id(selected)} /></>
         : editingResearch ? <ResearchEdit research={selected as Row} onCancel={() => setEditingResearch(false)} onArchived={() => { setSelected(null); setEditingResearch(false); setRevision((value) => value + 1); }} onSaved={(value) => { setSelected({ ...selected, ...value }); setDetail(value); setEditingResearch(false); setRevision((revision) => revision + 1); }} />
         : editor ? <iframe className="tr-artifact-frame" title={selected.title || id(selected)} src={`/researches/${encodeURIComponent(id(selected))}?presentation=embedded`} /> : <><ResearchSummary value={detail as Row | null} /><div className="tr-inline-actions"><Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button><Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></div></>}
     </DetailsPanel> : null}
