@@ -7,6 +7,7 @@ import { PageSurface } from "./surface.tsx";
 import { MobileSettingDetail, MobileSettingsPage, type MobileSettingSection } from "./pages/mobile-settings.tsx";
 import { PageErrorBoundary } from "./error-boundary.tsx";
 import { MobileNotificationHost } from "./notifications/mobile-host.tsx";
+import { AgentAssistant } from "./components/agent-assistant.tsx";
 import { AppTheme } from "./components/app-theme.tsx";
 import { PageInstanceProvider, newPageInstanceId, type PageArguments } from "./page-instance.ts";
 
@@ -43,7 +44,7 @@ export function MobileShell(): React.ReactElement {
     setEntries((items) => [...items, item]); setRoute(item.id);
   };
   const back = (): void => history.back();
-  return <AppTheme><IonApp><MobileNotificationHost /><div className="tr-mobile-shell" data-nested={!current.root}>
+  return <AppTheme><IonApp><MobileNotificationHost /><AgentAssistant /><div className="tr-mobile-shell" data-nested={!current.root}>
     {entries.map((entry) => <div className="tr-mobile-instance" hidden={entry.id !== active} key={entry.id}>
       <PageInstanceProvider value={{ ...entry, mobile: true, active: entry.id === active, open, back }}>
         <PageErrorBoundary label={entry.pageId}>

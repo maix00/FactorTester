@@ -24,7 +24,7 @@
 | A10 | 公共通知、去重、关闭、自动消除 | app/runtime.js（createNoticeQueue） | 原生 | 复用 React 通知队列 |
 | A11 | 公共表格、分页、下拉筛选、overlay | core/shared-ui.js | 原生 | 桌面与移动详情复用同一 Modal（含焦点边界），移动全屏保留历史返回；各领域仍需逐一替换调用点 |
 | A12 | 页面 Agent 结构文档/导出/校验/导入 | profile/page-assistance.js | 缺失 | 不把普通 JSON 编辑器算成已迁移 |
-| A13 | 智能体侧栏、会话、流、生命周期 | profile/page-agent-*.js, chatkit-*.js | 缺失 | 保留服务端会话权威 |
+| A13 | 智能体侧栏、会话、流、生命周期 | profile/page-agent-*.js, chatkit-*.js | 嵌入 | `/app` 桌面/移动壳已提供助手入口与响应式 Drawer，复用既有 `profile-agent-chat` 模块、服务端会话和流；明确检查 self Profile 的服务器运行时绑定。完整 Profile 选择、配置/认领、会话历史管理及 ChatKit React 原生化仍未迁移；未绑定时引导到现有 Profile 管理页，不尝试启动 Agent。 |
 | A14 | 主页模块入口 | app/coordinator.js | 缺失 | 新版默认研究/测试，需核定替代路径 |
 | A15 | WebMCP 页面工具 | app/webmcp.js | 缺失 | 不能只迁移视觉控件 |
 

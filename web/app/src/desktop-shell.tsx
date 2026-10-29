@@ -21,6 +21,7 @@ import { AccountMenu } from "./components/account-actions.tsx";
 import { SettingsOverlay } from "./components/settings-overlay.tsx";
 import { PageErrorBoundary } from "./error-boundary.tsx";
 import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
+import { AgentAssistant } from "./components/agent-assistant.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
@@ -151,6 +152,7 @@ export function DesktopShell(): React.ReactElement {
   return (
     <AppTheme>
     <DesktopNotificationHost />
+    <AgentAssistant />
     <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
     <div className={`tr-app-shell${effectiveCollapsed ? " is-collapsed" : ""}${compact ? " is-compact" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label={t("mainNavigation")}>

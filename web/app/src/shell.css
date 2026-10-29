@@ -338,6 +338,28 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-mobile-page-back button { display: flex; align-items: center; gap: 6px; padding: 3px 0; border: 0; color: var(--accent); background: transparent; font: inherit; }
 .tr-mobile-shell[data-nested="true"] { padding-bottom: 0; }
 
+.tr-agent-assistant-launcher { position: fixed; z-index: 900; right: 24px; bottom: 24px; display: inline-flex; align-items: center; border-radius: 999px; box-shadow: 0 6px 20px #1677ff33; }
+.tr-agent-assistant-launcher .anticon { font-size: 16px; }
+.tr-agent-assistant-drawer .ant-drawer-body { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden; }
+.tr-agent-assistant-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.tr-agent-assistant-title strong { font-size: 16px; }
+.tr-agent-assistant-title span { overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.tr-agent-assistant-error { flex: 0 0 auto; padding: 16px; }
+.tr-agent-assistant-setup-actions { display: flex; justify-content: flex-start; margin-top: 10px; }
+.tr-agent-assistant-loading { display: flex; flex: 1; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.tr-agent-assistant-mount { flex: 1; min-height: 0; overflow: hidden; }
+.tr-agent-assistant-mount:empty { display: none; }
+.tr-agent-assistant-mount > .profile-agent-chat-conversation-only,
+.tr-agent-assistant-mount .profile-chatkit-host,
+.tr-agent-assistant-mount .profile-chatkit-stage,
+.tr-agent-assistant-mount xpertai-chatkit { width: 100%; height: 100%; min-height: 0; }
+.tr-agent-assistant-mount .profile-chatkit-host { margin-top: 0; }
+.tr-agent-assistant-mount xpertai-chatkit { display: block; }
+@media (max-width: 760px) {
+  .tr-agent-assistant-launcher { right: 14px; bottom: calc(78px + env(safe-area-inset-bottom, 0px)); min-height: 42px; }
+  .tr-agent-assistant-drawer .ant-drawer-content-wrapper { max-width: 100vw; }
+}
+
 .tr-function-page { min-height:100%; background:#f7f8fb; color:#263247; }
 .tr-function-header { min-height:88px; padding:24px 32px; background:#fff; border-bottom:1px solid #e8ecf2; display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .tr-function-header h1 { margin:0; font-size:24px; font-weight:650; }
