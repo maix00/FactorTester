@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { deleteJobOutputs, jobCleanupPreview } from "../quota-cleanup.ts";
 import { notify } from "../notifications/core.ts";
-import type { QuotaServer } from "../quota-model.ts";
+import { formatQuotaBytes, type QuotaServer } from "../quota-model.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { TRDataTable } from "./data-table.tsx";
 
@@ -57,8 +57,8 @@ export function QuotaJobs({ group, servers, onClose, onRefresh }: { group: strin
   return <DetailsPanel title={t("quota.jobDetails")} onClose={onClose}>
     {error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} /> : null}
     <TRDataTable rows={rows} rowKey={row => JSON.stringify([row.server, row.job_id])} loading={loading} pagination={{ page: 1, pageSize: Math.max(20, rows.length), total: rows.length, hideOnSinglePage: true, onChange: () => undefined }} columns={[
-      { title: t("quota.job"), dataIndex: "job_id" }, { title: t("quota.server"), dataIndex: "server" }, { title: t("quota.usage"), render: (_, row) => typeof row.bytes === "number" ? `${row.bytes} B` : "—" }, { title: t("jobs.status"), dataIndex: "job_status" },
-      { title: t("quota.action"), render: (_, row) => preview?.job.server === row.server && preview.job.job_id === row.job_id ? <Popconfirm open title={t("quota.confirmCleanup")} description={t("quota.confirmDetails", { count: preview.value.artifact_count, bytes: `${preview.value.bytes} B` })} onConfirm={() => void remove()} onCancel={() => setPreview(null)} okText={t("quota.delete")} cancelText={t("configuration.cancel")}><Button danger>{t("quota.deleteJob")}</Button></Popconfirm> : <Button danger disabled={loading || !["succeeded", "failed", "cancelled"].includes(String(row.job_status))} onClick={() => void prepare(row)}>{t("quota.deleteJob")}</Button> },
+      { title: t("quota.job"), dataIndex: "job_id" }, { title: t("quota.server"), dataIndex: "server" }, { title: t("quota.usage"), render: (_, row) => typeof row.bytes === "number" ? formatQuotaBytes(row.bytes) : "—" }, { title: t("jobs.status"), dataIndex: "job_status" },
+      { title: t("quota.action"), render: (_, row) => preview?.job.server === row.server && preview.job.job_id === row.job_id ? <Popconfirm open title={t("quota.confirmJob")} description={t("quota.confirmJobDetails", { count: preview.value.artifact_count, bytes: formatQuotaBytes(preview.value.bytes) })} onConfirm={() => void remove()} onCancel={() => setPreview(null)} okText={t("quota.delete")} cancelText={t("configuration.cancel")}><Button danger disabled={loading}>{t("quota.deleteJob")}</Button></Popconfirm> : <Button danger disabled={loading || !["succeeded", "failed", "cancelled"].includes(String(row.job_status))} onClick={() => void prepare(row)}>{t("quota.deleteJob")}</Button> },
     ]} />
     {hasMore ? <Button disabled={loading} onClick={() => void load()}>{t("quota.loadMore")}</Button> : null}
   </DetailsPanel>;
