@@ -8,6 +8,7 @@ import { AccountActions } from "./account-actions.tsx";
 import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
 import { QuotaSummary } from "./quota-summary.tsx";
+import { ServerSummary } from "./server-summary.tsx";
 import { request } from "../configuration/api.ts";
 import { useAuth } from "../auth.tsx";
 
@@ -69,7 +70,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
             </div>
           ) : section === "server" ? (
             <div className="tr-settings-card">
-              {serverInfo ? <ResultView value={serverInfo} /> : <Spin tip={t("loading")}/>}
+              {serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
             </div>
           ) : section === "profiles" ? <ProfileSettings/> : section === "docs" ? <DocsSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
