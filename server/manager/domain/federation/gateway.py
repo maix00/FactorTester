@@ -119,6 +119,7 @@ class FederatedGateway:
         *,
         requester_server_id: str,
         principal: str,
+        delegated_user_token: str,
         scope: str,
         page: int = 1,
         limit: int = 100,
@@ -138,9 +139,13 @@ class FederatedGateway:
         """
         if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
+        delegated_user_token = str(delegated_user_token or "").strip()
+        if not delegated_user_token or len(delegated_user_token) > 32_768:
+            raise ValueError("verified user session is required for federated job queries")
         payload = {
             "requester_server_id": str(requester_server_id),
             "principal": str(principal),
+            "delegated_user_token": delegated_user_token,
             "scope": str(scope),
             "page": max(1, int(page)),
             "limit": max(1, min(100, int(limit))),

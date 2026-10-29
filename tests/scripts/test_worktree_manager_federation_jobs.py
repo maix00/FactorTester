@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from server.manager import runtime as manager
@@ -63,6 +64,7 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
     state.federation_gateway = gateway
     payload = state.aggregate_cross_server_jobs(
         principal="alice", source_scope="mine", limit=20,
+        delegated_user_token="verified-alice-token",
     )
 
     assert payload["sync_mode"] == "on_demand"
@@ -82,6 +84,7 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
 
     cached = state.aggregate_cross_server_jobs(
         principal="alice", source_scope="mine", limit=20,
+        delegated_user_token="verified-alice-token",
     )
     assert cached["sync_mode"] == "cache"
     assert gateway.calls[0]["limit"] == 20
@@ -131,6 +134,7 @@ def test_cross_server_jobs_query_local_and_peer_sources_concurrently(
     state.federation_gateway = Gateway()
     payload = state.aggregate_cross_server_jobs(
         principal="alice", source_scope="mine", limit=20,
+        delegated_user_token="verified-alice-token",
     )
 
     assert [item["job_id"] for item in payload["jobs"]] == [
@@ -172,6 +176,7 @@ def test_cross_server_visible_object_jobs_forward_stable_filter(
     state.aggregate_cross_server_jobs(
         principal="alice",
         source_scope="visible",
+        delegated_user_token="verified-alice-token",
         limit=20,
         object_kind="family",
         object_owner_ref="principal:alice",
@@ -190,6 +195,7 @@ def test_cross_server_visible_object_jobs_forward_stable_filter(
     }
     assert observed["remote"] == {
         "requester_server_id": "local-feat", "principal": "alice",
+        "delegated_user_token": "verified-alice-token",
         "scope": "visible", "page": 1, "limit": 20, "username": "",
         **expected,
     }
@@ -211,6 +217,19 @@ def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monke
         return {"jobs": [{"job_id": "remote-job", "port": 8000}], "total": 1}
 
     monkeypatch.setattr(state, "aggregate_account_jobs", local_jobs)
+    monkeypatch.setattr(state, "session", lambda token: {
+        "username": "alice", "keycloak_roles": (),
+        "keycloak_groups": (
+            "/traderesearch/admin-scopes/organizations/org-1/organization-admins",
+        ),
+    } if token == "verified-alice-token" else None)
+    from server.identity import keycloak_directory
+
+    monkeypatch.setattr(
+        keycloak_directory,
+        "managed_users_for_claims",
+        lambda **_kwargs: [{"username": "bob"}],
+    )
     server = manager.ThreadingHTTPServer(
         ("127.0.0.1", 0),
         peer_control_handler(state),
@@ -218,25 +237,36 @@ def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monke
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base_url = f"http://127.0.0.1:{server.server_address[1]}"
-    try:
+
+    def query(*, principal="alice", scope="mine", username=""):
+        payload = {
+            "requester_server_id": "local-feat",
+            "principal": principal,
+            "delegated_user_token": "verified-alice-token",
+            "scope": scope,
+            "page": 1,
+            "limit": 20,
+        }
+        if username:
+            payload["username"] = username
         request = Request(
             f"{base_url}/api/federation/jobs/query",
-            data=json.dumps({
-                "requester_server_id": "local-feat",
-                "principal": "alice",
-                "scope": "mine",
-                "page": 1,
-                "limit": 20,
-            }).encode(),
+            data=json.dumps(payload).encode(),
             headers={
                 "Authorization": "Bearer proxy-token",
                 "Content-Type": "application/json",
             },
             method="POST",
         )
-        with urlopen(request) as response:
-            value = json.loads(response.read())
-        assert response.status == 200
+        try:
+            with urlopen(request) as response:
+                return response.status, json.loads(response.read())
+        except HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    try:
+        status, value = query()
+        assert status == 200
         assert value["source_server_id"] == "remote-main"
         assert calls == [{
             "principal": "alice",
@@ -245,6 +275,17 @@ def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monke
             "limit": 20,
             "_allow_federation": False,
         }]
+
+        status, forged = query(principal="mallory")
+        assert status == 403
+        assert "does not match" in forged["error"]
+
+        status, unrelated = query(
+            scope="subordinates", username="charlie",
+        )
+        assert status == 403
+        assert "outside the Keycloak managed hierarchy" in unrelated["error"]
+        assert len(calls) == 1
     finally:
         server.shutdown()
         server.server_close()
@@ -289,6 +330,7 @@ def test_cross_server_subordinate_jobs_forward_user_and_global_page(
             assert kwargs == {
                 "requester_server_id": "local-feat",
                 "principal": "alice",
+                "delegated_user_token": "verified-alice-token",
                 "scope": "subordinates",
                 "page": 1,
                 "limit": 40,
@@ -309,6 +351,7 @@ def test_cross_server_subordinate_jobs_forward_user_and_global_page(
         principal="alice",
         source_scope="subordinates",
         username="bob",
+        delegated_user_token="verified-alice-token",
         page=2,
         limit=20,
     )
