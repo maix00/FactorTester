@@ -4,6 +4,14 @@ export type QuotaServer = { id: string; data: QuotaRecord; snapshot: boolean; ob
 export type QuotaCategory = { group: string; bytes: number; billedBytes: number; count: number; lastObserved: unknown[] };
 export type CleanupTarget = { server: QuotaServer; preview: QuotaRecord };
 export type CleanupPlan = { live: CleanupTarget[]; offline: QuotaServer[]; count: number; bytes: number };
+export type QuotaServerSummary = {
+  id: string;
+  status: "current" | "last_observed" | "unavailable";
+  bytes: number;
+  count: number;
+  observedAt?: unknown;
+  pendingDeletions: number;
+};
 
 const amount = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 export function formatQuotaBytes(value: number): string {
@@ -12,6 +20,65 @@ export function formatQuotaBytes(value: number): string {
   return `${(value / (1024 ** power)).toFixed(2)} ${["KiB", "MiB", "GiB", "TiB"][power - 1]}`;
 }
 const time = (value: unknown): number => typeof value === "number" ? value * 1000 : typeof value === "string" ? Date.parse(value) || 0 : 0;
+function latestProfileInventories(profile: QuotaRecord | null): Map<string, QuotaRecord> {
+  const inventories = new Map<string, QuotaRecord>();
+  for (const row of [...(profile?.profile_snapshots || []), ...(profile?.cross_server?.servers || [])]) {
+    const id = String(row.storage_server_id || "");
+    if (!id || !row.inventory) continue;
+    const previous = inventories.get(id);
+    if (!previous || time(row.inventory.observed_at) >= time(previous.inventory.observed_at)) inventories.set(id, row);
+  }
+  return inventories;
+}
+
+/** One row per storage node; live job reads supersede snapshots for that node. */
+export function summarizeQuotaServers(servers: QuotaServer[], profile: QuotaRecord | null, pending: QuotaRecord[]): QuotaServerSummary[] {
+  const rows = new Map<string, QuotaServerSummary>();
+  for (const server of servers) {
+    const data = server.data;
+    const outputBytes = amount(data.output_bytes ?? data.output_artifact_bytes);
+    const inputBytes = amount(data.input_bytes ?? data.input_artifact_bytes);
+    const outputCount = amount(data.output_count ?? data.output_artifact_count);
+    const inputCount = amount(data.input_count ?? data.input_artifact_count);
+    rows.set(server.id, {
+      id: server.id,
+      status: server.snapshot ? (server.queueAllowed === false ? "unavailable" : "last_observed") : "current",
+      bytes: amount(data.artifact_bytes) || outputBytes + inputBytes,
+      count: amount(data.artifact_count) || outputCount + inputCount,
+      observedAt: server.observedAt ?? data.observed_at,
+      pendingDeletions: 0,
+    });
+  }
+  for (const [id, row] of latestProfileInventories(profile)) {
+    const current = rows.get(id);
+    const categories = Object.values(row.inventory.categories || {}) as QuotaRecord[];
+    const profileBytes = categories.reduce((sum, item) => sum + amount(item.bytes), 0);
+    const profileCount = categories.reduce((sum, item) => sum + amount(item.file_count), 0);
+    if (current) {
+      current.bytes += profileBytes;
+      current.count += profileCount;
+      if (!current.observedAt || time(row.inventory.observed_at) > time(current.observedAt)) current.observedAt = row.inventory.observed_at;
+      if (current.status !== "current" && row.status === "current") current.status = "current";
+    } else {
+      rows.set(id, {
+        id,
+        status: row.status === "current" ? "current" : "last_observed",
+        bytes: profileBytes,
+        count: profileCount,
+        observedAt: row.inventory.observed_at,
+        pendingDeletions: 0,
+      });
+    }
+  }
+  for (const item of pending) {
+    if (!["pending", "executing"].includes(String(item.status))) continue;
+    const id = String(item.server_id || "");
+    const row = rows.get(id);
+    if (row) row.pendingDeletions += 1;
+  }
+  return [...rows.values()].sort((a, b) => b.bytes - a.bytes || a.id.localeCompare(b.id));
+}
+
 export function isOfflineFailure(reason: unknown): boolean {
   return reason instanceof TypeError || (typeof reason === "object" && reason !== null && [502, 503, 504].includes((reason as { status?: number }).status || 0));
 }
@@ -68,14 +135,7 @@ export function aggregateQuota(servers: QuotaServer[], profile: QuotaRecord | nu
     const row = profile?.protected_metadata?.[key];
     if (row) add(group, row.bytes, row.item_count);
   }
-  const inventories = new Map<string, QuotaRecord>();
-  for (const row of [...(profile?.profile_snapshots || []), ...(profile?.cross_server?.servers || [])]) {
-    const id = String(row.storage_server_id || "");
-    if (!id || !row.inventory) continue;
-    const previous = inventories.get(id);
-    if (!previous || time(row.inventory.observed_at) >= time(previous.inventory.observed_at)) inventories.set(id, row);
-  }
-  for (const row of inventories.values()) {
+  for (const row of latestProfileInventories(profile).values()) {
     for (const [key, value] of Object.entries(row.inventory.categories || {})) {
       const item = value as QuotaRecord;
       add(`profile:${key}`, item.bytes, item.file_count, row.status === "current" ? null : row.inventory.observed_at);

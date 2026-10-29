@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Collapse, Popconfirm, Progress, Spin } from "antd";
+import { Alert, Button, Collapse, Popconfirm, Progress, Spin, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
-import { aggregateQuota, cleanupPlan, formatQuotaBytes as bytes, isOfflineFailure, type CleanupPlan, type QuotaRecord, type QuotaServer } from "../quota-model.ts";
+import { aggregateQuota, cleanupPlan, formatQuotaBytes as bytes, isOfflineFailure, summarizeQuotaServers, type CleanupPlan, type QuotaRecord, type QuotaServer } from "../quota-model.ts";
 import { executeCleanup } from "../quota-cleanup.ts";
 import { notify } from "../notifications/core.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { QuotaJobs } from "./quota-jobs.tsx";
 import { TRDataTable } from "./data-table.tsx";
 import { ResultView } from "./result-view.tsx";
+import { formatDate } from "../format.ts";
 
 type Inventory = { profile: QuotaRecord; pending: QuotaRecord[]; servers: QuotaServer[]; partial: boolean; ready: boolean };
 export function QuotaSummary({ data, onRefresh }: { data: Record<string, any>; onRefresh: () => void }): React.ReactElement {
@@ -63,6 +64,7 @@ export function QuotaSummary({ data, onRefresh }: { data: Record<string, any>; o
     return () => controller.abort();
   }, [data, revision, t]);
   const rows = useMemo(() => inventory ? aggregateQuota(inventory.servers, inventory.profile, inventory.pending) : [], [inventory]);
+  const serverRows = useMemo(() => inventory ? summarizeQuotaServers(inventory.servers, inventory.profile, inventory.pending) : [], [inventory]);
   const measured = rows.reduce((sum, row) => sum + row.billedBytes, 0);
   const physical = rows.reduce((sum, row) => sum + row.bytes, 0);
   const limit = typeof data.quota_bytes === "number" && data.quota_bytes > 0 ? data.quota_bytes : null;
@@ -96,6 +98,14 @@ export function QuotaSummary({ data, onRefresh }: { data: Record<string, any>; o
       {percent !== null ? <Progress percent={Math.min(percent, 100)} status={percent > 100 ? "exception" : "normal"} format={() => `${percent.toFixed(1)}%`} /> : null}
       {physical > measured ? <p>{t("quota.pendingPhysical", { bytes: bytes(physical - measured) })}</p> : null}
       <div className="tr-inline-actions">{confirmCleanup(cleanupPlan(inventory.servers, inventory.pending), "", "quota.autoDelete")}<Button onClick={() => setHistoryOpen(true)} disabled={!historyRows.length}>{t("quota.offlineDetails")}</Button><Button onClick={onRefresh} disabled={busy}>{t("configuration.reload")}</Button></div>
+      <h4 className="tr-quota-subheading">{t("quota.servers")}</h4>
+      <TRDataTable rows={serverRows} rowKey="id" pagination={{ page: 1, pageSize: Math.max(20, serverRows.length), total: serverRows.length, hideOnSinglePage: true, onChange: () => undefined }} columns={[
+        { key: "server", title: t("quota.server"), dataIndex: "id", width: 126, ellipsis: true },
+        { key: "status", title: t("quota.serverState"), width: 150, render: (_, row) => <div className="tr-quota-server-state"><Tag color={row.status === "current" ? "green" : row.status === "last_observed" ? "gold" : "default"}>{t(`quota.serverStates.${row.status}`)}</Tag><span>{row.observedAt ? formatDate(row.observedAt as string | number, { dateStyle: "medium", timeStyle: "short" }) : "—"}</span></div> },
+        { key: "usage", title: t("quota.usageAndCount"), width: 112, render: (_, row) => <span className="tr-quota-server-usage">{bytes(row.bytes)}<small>{t("quota.countWithValue", { count: row.count })}</small></span> },
+        { key: "pending", title: t("quota.pendingDeletions"), width: 88, render: (_, row) => row.pendingDeletions ? t("quota.pendingDeletionCount", { count: row.pendingDeletions }) : "—" },
+      ]} />
+      <h4 className="tr-quota-subheading">{t("quota.categories")}</h4>
       <TRDataTable rows={rows} rowKey="group" pagination={{ page, pageSize: size, total: rows.length, hideOnSinglePage: true, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
         { key: "category", title: t("quota.category"), render: (_, row) => t(`quota.groups.${row.group}`, { defaultValue: row.group, nsSeparator: false }) },
         { key: "usage", title: t("quota.usage"), render: (_, row) => row.bytes === row.billedBytes ? bytes(row.bytes) : `${bytes(row.billedBytes)} / ${bytes(row.bytes)}` },

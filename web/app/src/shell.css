@@ -181,9 +181,8 @@ body { margin: 0; }
 .tr-settings-value { color: var(--muted); font-size: 12px; }
 .tr-settings-migrating p { margin: 0; color: var(--muted); font-size: 12px; }
 @media (max-width: 620px) {
-  .tr-settings-hub { grid-template-columns: 1fr; }
-  .tr-settings-nav { flex-direction: row; overflow-x: auto; }
-  .tr-settings-nav button span { display: none; }
+  .tr-settings-hub { grid-template-columns: 148px minmax(0, 1fr); gap: 10px; }
+  .tr-settings-nav button { padding: 8px 7px; font-size: 12px; }
 }
 .dv-inactive-tab .tr-dock-close { visibility: hidden; }
 .dv-inactive-tab:hover .tr-dock-close { visibility: visible; }
@@ -300,6 +299,13 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-catalog-reference { display: grid; gap: 8px; grid-column: 1 / -1; }
 .tr-catalog-reference select, .tr-catalog-reference input { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
 .tr-report-editor { padding: 16px; overflow: auto; height: 100%; }
+.tr-report-source-picker { display: grid; gap: 6px; max-width: 520px; margin: 0 16px 14px; color: var(--muted); font-size: 12px; }
+.tr-report-source-picker .ant-select { width: 100%; }
+.tr-quota-subheading { margin: 18px 0 8px; color: var(--text); font-size: 14px; font-weight: 600; }
+.tr-quota-server-state { display: grid; justify-items: start; gap: 2px; min-width: 0; }
+.tr-quota-server-state .ant-tag { margin: 0; line-height: 18px; }
+.tr-quota-server-state > span, .tr-quota-server-usage small { color: var(--muted); font-size: 11px; line-height: 16px; white-space: nowrap; }
+.tr-quota-server-usage { display: grid; justify-items: start; gap: 1px; }
 .tr-report-add { display: grid; gap: 6px; max-width: 680px; margin-bottom: 16px; }
 .tr-report-add input, .tr-report-add textarea { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
 .tr-report-add textarea { min-height: 74px; resize: vertical; }
@@ -642,7 +648,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-technical-document pre { overflow:auto; max-width:100%; padding:12px; border-radius:8px; background:var(--workspace); font-size:12px; }
 .tr-technical-document table { display:block; max-width:100%; overflow:auto; border-collapse:collapse; }
 .tr-technical-document th,.tr-technical-document td { padding:8px 12px; border:1px solid var(--line); text-align:left; }
-.tr-settings-section-picker { width:100%; }
 .tr-technical-document th { white-space:nowrap; }
 .tr-technical-document th,.tr-technical-document td { min-width:100px; }
 .tr-technical-document td:not(:first-child) { min-width:180px; }
