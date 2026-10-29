@@ -53,7 +53,7 @@ export function CategoryEditor({ category, onSaved, onDeleted, onCancel }: {
     } finally { setBusy(false); setConfirming(false); }
   };
   const content = <div className="tr-library-create">
-    {!mobile ? <div className="tr-inline-editor-heading"><h2>{t(editing ? "category.edit" : "category.create")}</h2><Button type="text" onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
+    {(!mobile || editing) ? <div className="tr-inline-editor-heading">{editing ? <h2>{t("category.edit")}</h2> : null}<Button onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       <Form.Item label={t("category.name")}><Input aria-label={t("category.name")} value={name} onChange={(event) => setName(event.target.value)} /></Form.Item>
@@ -62,5 +62,5 @@ export function CategoryEditor({ category, onSaved, onDeleted, onCancel }: {
       <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button>{editing && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("category.delete")}</Button> : null}</div>
     </Form>
   </div>;
-  return mobile ? <DetailsPanel title={t(editing ? "category.edit" : "category.create")} onClose={onCancel}>{content}</DetailsPanel> : content;
+  return mobile && !editing ? <DetailsPanel title={t("category.create")} onClose={onCancel}>{content}</DetailsPanel> : content;
 }

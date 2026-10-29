@@ -87,8 +87,8 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
           { title: t("sources.provider"), dataIndex: "provider_kind" },
           { title: t("sources.frequencies"), key: "frequencies", render: (_: unknown, row: Row) => row.availability?.frequency_names?.join(" · ") || "—" },
           { title: t("sources.products"), key: "products", render: (_: unknown, row: Row) => row.availability?.product_count ?? "—" },
-        ] : [{ title: t("market.exchange"), dataIndex: "exchange", responsive: ["md"] as "md"[] }]),
-        ...(tab === "sources" ? [] : [{ title: t("market.description"), dataIndex: "desc", responsive: ["md"] as "md"[] }]),
+        ] : tab === "products" ? [{ title: t("market.exchange"), dataIndex: "exchange", responsive: ["md"] as "md"[] }] : []),
+        ...(tab === "products" ? [{ title: t("market.description"), dataIndex: "desc", responsive: ["md"] as "md"[] }] : []),
       ] : [
       { title: t("library.version"), key: "version", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => <span className="tr-version-ref" title={row.current_revision?.revision_ref || row.revision_ref || row.ref}>{row.version || row.current_revision?.revision_ref || row.revision_ref || row.ref || "—"}</span> },
       { title: t("library.owner"), key: "owner", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => owner(row) },
