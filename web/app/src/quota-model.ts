@@ -12,6 +12,9 @@ export function formatQuotaBytes(value: number): string {
   return `${(value / (1024 ** power)).toFixed(2)} ${["KiB", "MiB", "GiB", "TiB"][power - 1]}`;
 }
 const time = (value: unknown): number => typeof value === "number" ? value * 1000 : typeof value === "string" ? Date.parse(value) || 0 : 0;
+export function isOfflineFailure(reason: unknown): boolean {
+  return reason instanceof TypeError || (typeof reason === "object" && reason !== null && [502, 503, 504].includes((reason as { status?: number }).status || 0));
+}
 
 /** Only use a complete server preview; the server verifies its token at execution. */
 export function cleanupPlan(servers: QuotaServer[], pending: QuotaRecord[], group = ""): CleanupPlan {

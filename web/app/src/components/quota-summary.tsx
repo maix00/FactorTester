@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Collapse, Popconfirm, Progress, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
-import { aggregateQuota, cleanupPlan, formatQuotaBytes as bytes, type CleanupPlan, type QuotaRecord, type QuotaServer } from "../quota-model.ts";
+import { aggregateQuota, cleanupPlan, formatQuotaBytes as bytes, isOfflineFailure, type CleanupPlan, type QuotaRecord, type QuotaServer } from "../quota-model.ts";
 import { executeCleanup } from "../quota-cleanup.ts";
 import { notify } from "../notifications/core.ts";
 import { DetailsPanel } from "./details-panel.tsx";
@@ -51,9 +51,9 @@ export function QuotaSummary({ data, onRefresh }: { data: Record<string, any>; o
         if (result.status === "fulfilled" && result.value.storage_server_id === server.id) servers.set(server.id, { id: server.id, data: result.value, snapshot: false });
         else {
           partial = true;
-          // Authorization failures and identity mismatches do not prove a server is offline.
-          const status = result.status === "rejected" ? result.reason?.status : null;
-          if (result.status === "fulfilled" || status === 401 || status === 403) servers.set(server.id, { ...server, queueAllowed: false });
+          // Only a transport failure or an unavailable gateway indicates an offline target.
+          const unavailable = result.status === "rejected" && isOfflineFailure(result.reason);
+          if (!unavailable) servers.set(server.id, { ...server, queueAllowed: false });
         }
       });
       const profile = liveProfile.status === "fulfilled" ? liveProfile.value : snapshot;
