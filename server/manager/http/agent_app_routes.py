@@ -17,11 +17,8 @@ from server.manager.services.agent_app_server import (
 from server.manager.services.provider_thread_chatkit import provider_item
 from server.manager.storage.profile_runtime_store import ProfileRuntimeError
 from server.permissions.agent_assistant import (
-    ACTION as AGENT_PERMISSION_ACTION,
-    RESOURCE_TYPE as AGENT_PERMISSION_RESOURCE,
     can_use_agent_assistant,
 )
-from server.permissions.entries import PermissionEntry, PermissionStore
 
 _SENSITIVE_EVENT_KEYS = frozenset({
     "api_key",
@@ -94,71 +91,11 @@ class AgentAppServerRoutesMixin:
             raise AgentAppServerError("Profile Agent supervisor is unavailable")
         return service
 
-    def _agent_permission_admin(self) -> dict[str, object] | None:
-        session = self._agent_session()
-        if session is None:
-            raise AgentAppServerError("login required", code="permission_denied")
-        if str(session.get("role") or "") == "super_admin":
-            return session
-        from server.manager.http.core_get_routes import _admin_capabilities
-
-        if "admin_console:manage" not in _admin_capabilities(
-            str(session.get("username") or ""),
-            str(session.get("role") or ""),
-        ):
-            raise AgentAppServerError(
-                "Agent permission administration requires admin_console:manage",
-                code="permission_denied",
-            )
-        return session
-
-    @staticmethod
-    def _agent_permission_store() -> PermissionStore:
-        path = (
-            os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "")
-            or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
-        )
-        if not path:
-            raise AgentAppServerError(
-                "Permission store is not configured",
-                code="permission_store_unavailable",
-            )
-        return PermissionStore(path)
-
     def _get_agent_permission_routes(self, parsed) -> bool:
         if parsed.path != "/api/admin/agent-permissions":
             return False
-        try:
-            session = self._agent_permission_admin()
-            if session is None:
-                return True
-            store = self._agent_permission_store()
-            entries = [
-                {
-                    "subject": item.subject,
-                    "resource_ref": item.resource_ref,
-                    "scope": item.scope,
-                    "effect": item.effect,
-                    "created_by": item.created_by,
-                    "reason": item.reason,
-                }
-                for item in store.list_for_resource(
-                    resource_type=AGENT_PERMISSION_RESOURCE,
-                    action=AGENT_PERMISSION_ACTION,
-                )
-                if item.resource_ref == "global" and item.scope == "explicit"
-            ]
-            json_response(self, {
-                "success": True,
-                "permissions": entries,
-                "audit": store.audit_for_resource(
-                    resource_type=AGENT_PERMISSION_RESOURCE,
-                    action=AGENT_PERMISSION_ACTION,
-                    limit=50,
-                ),
-            })
-        except (AgentAppServerError, sqlite3.Error, OSError, ValueError) as exc:
-            self._agent_app_error(exc)
+        json_response(self, {"success": False, "code": "keycloak_managed_permissions",
+                             "error": "Manage permissions in Keycloak"}, 410)
         return True
 
     def _agent_app_profile(self, profile_id: str) -> tuple[str, str]:
@@ -386,54 +323,7 @@ class AgentAppServerRoutesMixin:
 
     def _post_agent_app_routes(self, parsed) -> bool:
         if parsed.path == "/api/admin/agent-permissions":
-            try:
-                session = self._agent_permission_admin()
-                if session is None:
-                    return True
-                payload = self._json_body(16 * 1024)
-                subject = str(payload.get("subject") or "").strip()
-                effect = str(payload.get("effect") or "").strip().lower()
-                reason = str(payload.get("reason") or "").strip()
-                if not re.fullmatch(r"(?:user|group|org):[^\x00-\x20]{1,300}", subject):
-                    raise ValueError("subject must be user:<id>, group:<path>, or org:<id>")
-                if effect not in {"allow", "deny", "remove"}:
-                    raise ValueError("effect must be allow, deny, or remove")
-                if not reason or len(reason) > 500:
-                    raise ValueError("audit reason is required and must be at most 500 characters")
-                actor = str(session.get("username") or "")
-                store = self._agent_permission_store()
-                if effect == "remove":
-                    removed = store.remove_entry(
-                        subject=subject,
-                        resource_type=AGENT_PERMISSION_RESOURCE,
-                        resource_ref="global",
-                        action=AGENT_PERMISSION_ACTION,
-                        scope="explicit",
-                        actor=actor,
-                        reason=reason,
-                    )
-                    json_response(self, {"success": True, "removed": removed})
-                else:
-                    entry = PermissionEntry(
-                        subject=subject,
-                        resource_type=AGENT_PERMISSION_RESOURCE,
-                        resource_ref="global",
-                        action=AGENT_PERMISSION_ACTION,
-                        scope="explicit",
-                        effect=effect,
-                        created_by=actor,
-                        reason=reason,
-                    )
-                    store.set_entry(entry)
-                    json_response(self, {"success": True, "permission": {
-                        "subject": entry.subject,
-                        "effect": entry.effect,
-                        "created_by": entry.created_by,
-                        "reason": entry.reason,
-                    }})
-            except (AgentAppServerError, sqlite3.Error, OSError, TypeError, ValueError) as exc:
-                self._agent_app_error(exc)
-            return True
+            return self._get_agent_permission_routes(parsed)
         if parsed.path not in {
             "/api/client/profile-agent/start",
             "/api/client/profile-agent/stop",

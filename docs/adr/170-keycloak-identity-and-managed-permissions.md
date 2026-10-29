@@ -2,7 +2,16 @@
 
 ## 状态
 
-已接受评估方向（2026-10-25），尚未迁移。
+2026-10-29 更新：Keycloak 是所有授权决策的权威；迁移进行中。
+
+原 PermissionEntry/SQLite 方案被以下决策替代。保留后文仅用于识别待迁移的历史规则，不作为新实现规范。
+
+- 平台功能通过 Keycloak client roles 管理。对象权限通过 Keycloak Authorization Services 的 resource/scope/policy 管理。
+- 用户、组、管理员、owner 和层级权限均由 Keycloak 策略表达；平台不得以本地角色或 owner 相等绕过决策。
+- Manager 验证 Keycloak 会话，API 执行其授权决策；客户端展示不能替代 API 检查。
+- 旧规则先只读盘点，逐对象映射、比较允许/拒绝集合与组继承，保留审核与回退材料；替代验收通过后移除旧存储。
+- 不允许长期双写或在 Keycloak 不可用时回退到旧存储。缓存须有容量和有效期上限，并披露撤销延迟。
+- 当前已接入 Bearer introspection 和助手 client role 检查；网页登录、对象策略、旧授权迁移、桌面助手和完整端到端验收仍未完成。
 
 ## 决策
 
