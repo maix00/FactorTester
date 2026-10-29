@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateQuota, cleanupPlan } from "./quota-model.ts";
+import { aggregateQuota, cleanupPlan, isOfflineFailure } from "./quota-model.ts";
 
 test("combines distinct servers and latest profile observations without counting snapshots twice", () => {
   const rows = aggregateQuota([
@@ -37,4 +37,12 @@ test("cleanup targets require an intact preview or observed offline inventory", 
   assert.equal(cleanupPlan([live, offline], [{ server_id: "offline", status: "pending" }]).offline.length, 0);
   assert.equal(cleanupPlan([{ ...offline, observedAt: undefined }], []).offline.length, 0);
   assert.equal(cleanupPlan([{ ...offline, queueAllowed: false }], []).offline.length, 0);
+});
+
+test("ordinary errors and authorization failures cannot schedule offline cleanup", () => {
+  assert.equal(isOfflineFailure(new TypeError("network")), true);
+  assert.equal(isOfflineFailure({ status: 503 }), true);
+  assert.equal(isOfflineFailure({ status: 403 }), false);
+  assert.equal(isOfflineFailure({ status: 500 }), false);
+  assert.equal(isOfflineFailure(new Error("invalid response")), false);
 });
