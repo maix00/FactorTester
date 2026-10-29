@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Button, Form, Input } from "antd";
+import { Alert, Button, Form, Input, Select } from "antd";
 import { ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
@@ -15,6 +15,7 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
   const [projection, setProjection] = useState<Projection | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [chapterChoice, setChapterChoice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [needsReview, setNeedsReview] = useState(false);
@@ -39,7 +40,7 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
       setLoadError(""); return true;
     }).catch((error: Error) => { if (!signal?.aborted && revision === loadRevision.current && activePublication.current === publicationID) { setLoadError(error.message); notify({ code: "report.load", type: "error", message: t("loadFailed"), description: error.message }); } return false; });
   };
-  useEffect(() => { const controller = new AbortController(); setDocument(null); setLoadError(""); setNeedsReview(false); setProjection(null); setAttachments([]); setSelected([]); setTitle(""); setBody(""); setBusy(false); operationPending.current = false; operationRequest.current = null; void load(controller.signal); return () => { controller.abort(); operationRequest.current?.abort(); ++loadRevision.current; }; }, [publicationID]);
+  useEffect(() => { const controller = new AbortController(); setDocument(null); setLoadError(""); setNeedsReview(false); setProjection(null); setAttachments([]); setSelected([]); setTitle(""); setBody(""); setChapterChoice(""); setBusy(false); operationPending.current = false; operationRequest.current = null; void load(controller.signal); return () => { controller.abort(); operationRequest.current?.abort(); ++loadRevision.current; }; }, [publicationID]);
 
   const apply = async (operation: Record<string, unknown>): Promise<boolean> => {
     if (!document?._rev || loadError || needsReview || operationPending.current) return false;
@@ -59,7 +60,8 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
   };
 
   const chapters = projection?.chapters ?? [];
-  const firstChapter = chapters[0]?.chapter_id ?? chapters[0]?.component_id ?? "";
+  const chapterOptions = chapters.map(chapter => ({ value: String(chapter.chapter_id ?? chapter.component_id ?? ""), label: chapter.title || String(chapter.chapter_id ?? chapter.component_id ?? "") })).filter(item => item.value);
+  const targetChapter = chapterChoice ? (chapterOptions.some(item => item.value === chapterChoice) ? chapterChoice : "") : chapterOptions[0]?.value || "";
   const batchDelete = (): void => {
     const operations = chapters.flatMap((chapter) => {
       const chapterID = String(chapter.chapter_id ?? chapter.component_id ?? "");
@@ -77,10 +79,11 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
       {loadError ? <Alert type="error" showIcon message={t("report.reloadRequired")} description={loadError} action={<Button onClick={() => void load()}>{t("retry")}</Button>} /> : null}
       {needsReview && !loadError ? <Alert type="warning" showIcon message={t("report.reviewAfterReload")} action={<Button onClick={() => setNeedsReview(false)}>{t("report.reviewed")}</Button>} /> : null}
       <Form layout="vertical" className="tr-report-add">
+        <Form.Item label={t("report.targetChapter")}><Select aria-label={t("report.targetChapter")} disabled={busy || !!loadError || needsReview || !chapterOptions.length} value={targetChapter || undefined} options={chapterOptions} onChange={setChapterChoice} /></Form.Item>
         <Form.Item label={t("report.paragraphTitle")}><Input aria-label={t("report.paragraphTitle")} disabled={busy || !!loadError || needsReview} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("report.paragraphTitle")} /></Form.Item>
         <Form.Item label={t("report.paragraphBody")}><Input.TextArea aria-label={t("report.paragraphBody")} disabled={busy || !!loadError || needsReview} autoSize={{ minRows: 4, maxRows: 12 }} value={body} onChange={(event) => setBody(event.target.value)} placeholder={t("report.paragraphBody")} /></Form.Item>
-        <Button aria-label={t("report.addParagraph")} type="primary" loading={busy} disabled={busy || !!loadError || needsReview || !firstChapter || !body.trim()} onClick={() => {
-          void apply({ op: "insert_component", chapter_id: firstChapter, component: { kind: "paragraph", title, body } }).then(saved => { if (saved) { setTitle(""); setBody(""); } });
+        <Button aria-label={t("report.addParagraph")} type="primary" loading={busy} disabled={busy || !!loadError || needsReview || !targetChapter || !body.trim()} onClick={() => {
+          void apply({ op: "insert_component", chapter_id: targetChapter, component: { kind: "paragraph", title, body } }).then(saved => { if (saved) { setTitle(""); setBody(""); } });
         }}>{t("report.addParagraph")}</Button>
       </Form>
       {selected.length ? <Button danger disabled={busy || !!loadError || needsReview} onClick={batchDelete}>{t("report.removeSelected", { count: selected.length })}</Button> : null}
