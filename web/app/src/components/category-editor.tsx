@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Alert, Button, Form, Input } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
-import { DetailsPanel } from "./details-panel.tsx";
+import { DetailsCancelButton, DetailsPanel } from "./details-panel.tsx";
 import { useCompactLayout } from "../configuration/layout.ts";
 
 type Category = Record<string, any>;
@@ -59,7 +59,7 @@ export function CategoryEditor({ category, onSaved, onDeleted, onCancel }: {
       <Form.Item label={t("category.name")}><Input aria-label={t("category.name")} value={name} onChange={(event) => setName(event.target.value)} /></Form.Item>
       {pathsEditable ? <Form.Item label={t("category.paths")} help={t("category.pathsHint")}><Input.TextArea aria-label={t("category.paths")} className="tr-source-input" autoSize={{ minRows: 6 }} value={paths} onChange={(event) => setPaths(event.target.value)} /></Form.Item> : <Alert type="info" showIcon message={t("category.pathsComplex")} />}
       {confirming ? <Alert type="warning" showIcon message={t("category.deleteTitle")} description={t("category.deleteHint")} action={<div className="tr-inline-actions"><Button danger loading={busy} onClick={() => void remove()}>{t("category.deleteConfirm")}</Button><Button onClick={() => setConfirming(false)}>{t("configuration.cancel")}</Button></div>} /> : null}
-      <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button><Button disabled={busy} onClick={onCancel}>{t("configuration.cancel")}</Button>{editing && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("category.delete")}</Button> : null}</div>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button><DetailsCancelButton disabled={busy} closePanel={mobile && !editing} onCancel={onCancel}/>{editing && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("category.delete")}</Button> : null}</div>
     </Form>
   </div>;
   return mobile && !editing ? <DetailsPanel title={t("category.create")} onClose={onCancel}>{content}</DetailsPanel> : content;

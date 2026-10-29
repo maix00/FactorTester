@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Alert, Button, Form, Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
-import { DetailsPanel } from "./details-panel.tsx";
+import { DetailsCancelButton, DetailsPanel } from "./details-panel.tsx";
 import { useCompactLayout } from "../configuration/layout.ts";
 
 type Group = Record<string, any>;
@@ -77,7 +77,7 @@ export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
       </Form.Item>
       {categoryError ? <Alert type="error" showIcon message={t("productGroup.categoriesLoadFailed")} description={categoryError} action={<Button onClick={() => setCategoryRevision((value) => value + 1)}>{t("retry")}</Button>} /> : null}
       {confirming ? <Alert type="warning" showIcon message={t("productGroup.deleteTitle")} description={t("productGroup.deleteHint")} action={<div className="tr-inline-actions"><Button danger loading={busy} onClick={() => void remove()}>{t("productGroup.deleteConfirm")}</Button><Button onClick={() => setConfirming(false)}>{t("configuration.cancel")}</Button></div>} /> : null}
-      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={categoryLoading || !!categoryError} onClick={() => void save()}>{t("configuration.save")}</Button><Button disabled={busy} onClick={onCancel}>{t("configuration.cancel")}</Button>{groupRef && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("productGroup.delete")}</Button> : null}</div>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={categoryLoading || !!categoryError} onClick={() => void save()}>{t("configuration.save")}</Button><DetailsCancelButton disabled={busy} closePanel={mobile && !groupRef} onCancel={onCancel}/>{groupRef && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("productGroup.delete")}</Button> : null}</div>
     </Form>
   </div>;
   return mobile && !groupRef ? <DetailsPanel title={t("productGroup.create")} onClose={onCancel}>{content}</DetailsPanel> : content;
