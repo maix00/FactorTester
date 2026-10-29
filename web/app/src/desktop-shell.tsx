@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Dropdown, Tooltip } from "antd";
 import { MoreOutlined } from "@ant-design/icons";
 import {
@@ -41,13 +41,26 @@ function Panel(props: IDockviewPanelProps<{ pageId: string; args?: PageArguments
   );
 }
 
+function AgentAssistantPanel(props: IDockviewPanelProps<{ pageId: string }>): React.ReactElement {
+  const [visible, setVisible] = useState(props.api.isVisible);
+  useEffect(() => {
+    const subscription = props.api.onDidVisibilityChange((event) => setVisible(event.isVisible));
+    return () => subscription.dispose();
+  }, [props.api]);
+  return <div className="tr-dock-assistant-layer" aria-hidden={!visible} inert={!visible}>
+    <AgentAssistant open={visible} presentation="panel" />
+  </div>;
+}
+
 function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number }>): React.ReactElement {
   const page = getPage(props.params.pageId);
   const { t } = useTranslation();
-  const title = page ? t(`nav.${page.id}`, { defaultValue: page.title }) : (props.api.title ?? props.params.pageId);
+  const isAssistant = props.params.pageId === "agent-assistant";
+  const title = page ? t(`nav.${page.id}`, { defaultValue: page.title }) : isAssistant ? t("assistant.title") : (props.api.title ?? props.params.pageId);
+  const icon = page?.icon ?? (isAssistant ? "assistant" : undefined);
   return (
     <span className="tr-dock-tab" title={title}>
-      <PageIcon name={page?.icon} />
+      <PageIcon name={icon} />
       <span className="tr-dock-tab-title" title={title}>{title}{(props.params.ordinal || 1) > 1 ? ` ${props.params.ordinal}` : ""}</span>
       <Dropdown trigger={["click"]} menu={{ items: [
         { key: "right", label: t("panelLayout.right") }, { key: "bottom", label: t("panelLayout.below") },
@@ -63,6 +76,7 @@ function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number
 
 const components = { page: Panel };
 const tabComponents = { page: Tab };
+const dockComponents = { ...components, agentAssistant: AgentAssistantPanel };
 type DockviewApi = DockviewReadyEvent["api"];
 
 export function DesktopShell(): React.ReactElement {
@@ -77,7 +91,7 @@ export function DesktopShell(): React.ReactElement {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
   const effectiveCollapsed=collapsed || compact;
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantRequested, setAssistantRequested] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
     return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
@@ -120,6 +134,36 @@ export function DesktopShell(): React.ReactElement {
     }
   };
 
+  const openAssistant = useCallback((): void => {
+    if (!api) {
+      setAssistantRequested(true);
+      return;
+    }
+    const existing = api.getPanel("agent-assistant");
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const reference = api.activePanel ?? api.panels[0];
+    api.addPanel({
+      id: "agent-assistant",
+      component: "agentAssistant",
+      tabComponent: "page",
+      title: t("assistant.title"),
+      params: { pageId: "agent-assistant" },
+      renderer: "always",
+      initialWidth: 440,
+      minimumWidth: 320,
+      ...(reference ? { position: { direction: "right" as const, referencePanel: reference } } : {}),
+    });
+  }, [api, t]);
+
+  useEffect(() => {
+    if (!api || !assistantRequested) return;
+    setAssistantRequested(false);
+    openAssistant();
+  }, [api, assistantRequested, openAssistant]);
+
   const onReady = (event: DockviewReadyEvent): void => {
     setApi(event.api);
     let restored = false;
@@ -130,6 +174,7 @@ export function DesktopShell(): React.ReactElement {
         for (const panel of [...event.api.panels]) {
           if (panel.params?.pageId === "account") panel.api.close();
           else if (panel.params?.pageId === "catalog") panel.api.updateParameters({ pageId: "products" });
+          else if (panel.params?.pageId === "agent-assistant") panel.api.setTitle(t("assistant.title"));
         }
         restored = event.api.panels.length > 0;
       }
@@ -153,7 +198,6 @@ export function DesktopShell(): React.ReactElement {
   return (
     <AppTheme>
     <DesktopNotificationHost />
-    <AgentAssistant open={assistantOpen} onOpenChange={setAssistantOpen} />
     <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
     <div className={`tr-app-shell${effectiveCollapsed ? " is-collapsed" : ""}${compact ? " is-compact" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label={t("mainNavigation")}>
@@ -188,7 +232,7 @@ export function DesktopShell(): React.ReactElement {
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
-        <Tooltip title={effectiveCollapsed ? t("assistant.title") : undefined} placement="right"><button type="button" aria-label={t("assistant.open")} className="tr-nav-item" onClick={() => setAssistantOpen(true)}>
+        <Tooltip title={effectiveCollapsed ? t("assistant.title") : undefined} placement="right"><button type="button" aria-label={t("assistant.open")} className={`tr-nav-item${active === "agent-assistant" ? " is-active" : ""}`} onClick={openAssistant}>
           <PageIcon name="assistant" />
           <span className="tr-nav-label">{t("assistant.title")}</span>
         </button></Tooltip>
@@ -200,7 +244,7 @@ export function DesktopShell(): React.ReactElement {
       </aside>
       <main className="tr-main">
         <section className="tr-workspace dockview-theme-light">
-          <DockviewReact className="dockview-theme-light" components={components} tabComponents={tabComponents} onReady={onReady} />
+          <DockviewReact className="dockview-theme-light" components={dockComponents} tabComponents={tabComponents} onReady={onReady} />
         </section>
       </main>
     </div>

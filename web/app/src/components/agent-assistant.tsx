@@ -15,7 +15,13 @@ type LegacyWindow = Window & {
   FTAgentChat?: { render: (context: Record<string, unknown>, profile: AgentProfile, options: Record<string, unknown>) => Promise<LegacyChatRoot> };
 };
 
-export function AgentAssistant({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }): React.ReactElement {
+type AgentAssistantProps = {
+  open: boolean;
+  onOpenChange?: (open: boolean) => void;
+  presentation?: "drawer" | "panel";
+};
+
+export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: AgentAssistantProps): React.ReactElement {
   const { t, i18n } = useTranslation();
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -131,6 +137,16 @@ export function AgentAssistant({ open, onOpenChange }: { open: boolean; onOpenCh
 
   const retryLoad = (): void => { pendingRef.current = null; setRetry((value) => value + 1); };
   const width = compact ? "100vw" : 560;
+  const content = <>
+    {setupRequired ? <div className="tr-agent-assistant-error"><Alert type="warning" showIcon message={t(setupRequired === "unbound" ? "assistant.runtimeUnbound" : "assistant.serverRuntimeRequired")} description={t("assistant.runtimeSetupHint")} /><div className="tr-agent-assistant-setup-actions"><Button size="small" onClick={() => window.location.assign("/research?section=profiles")}>{t("assistant.openProfileSettings")}</Button></div></div> : null}
+    {error ? <div className="tr-agent-assistant-error"><Alert type="error" showIcon message={t("assistant.loadFailed")} description={error} action={<Button size="small" icon={<ReloadOutlined />} onClick={retryLoad}>{t("assistant.retry")}</Button>} /></div> : null}
+    {!rootRef.current && !error && !setupRequired ? <div className="tr-agent-assistant-loading" role="status"><Spin size="small" />{loading ? t("assistant.loading") : t("assistant.openHint")}</div> : null}
+    <div className="tr-agent-assistant-mount" ref={mountRef} />
+  </>;
+
+  if (presentation === "panel") {
+    return <section className="tr-agent-assistant-panel" aria-label={t("assistant.title")}>{content}</section>;
+  }
 
   return <>
     <Drawer
@@ -139,13 +155,10 @@ export function AgentAssistant({ open, onOpenChange }: { open: boolean; onOpenCh
       placement="right"
       width={width}
       open={open}
-      onClose={() => onOpenChange(false)}
+      onClose={() => onOpenChange?.(false)}
       destroyOnHidden={false}
     >
-      {setupRequired ? <div className="tr-agent-assistant-error"><Alert type="warning" showIcon message={t(setupRequired === "unbound" ? "assistant.runtimeUnbound" : "assistant.serverRuntimeRequired")} description={t("assistant.runtimeSetupHint")} /><div className="tr-agent-assistant-setup-actions"><Button size="small" onClick={() => window.location.assign("/research?section=profiles")}>{t("assistant.openProfileSettings")}</Button></div></div> : null}
-      {error ? <div className="tr-agent-assistant-error"><Alert type="error" showIcon message={t("assistant.loadFailed")} description={error} action={<Button size="small" icon={<ReloadOutlined />} onClick={retryLoad}>{t("assistant.retry")}</Button>} /></div> : null}
-      {!rootRef.current && !error && !setupRequired ? <div className="tr-agent-assistant-loading" role="status"><Spin size="small" />{loading ? t("assistant.loading") : t("assistant.openHint")}</div> : null}
-      <div className="tr-agent-assistant-mount" ref={mountRef} />
+      {content}
     </Drawer>
   </>;
 }
