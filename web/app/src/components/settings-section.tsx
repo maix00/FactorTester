@@ -74,7 +74,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
             </div>
           ) : section === "profiles" ? <ProfileSettings/> : section === "docs" ? <DocsSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
-              {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
+              {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} onRefresh={() => setReload(value => value + 1)} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>
           ) : section === "account" ? (
             <div className="tr-settings-card">
