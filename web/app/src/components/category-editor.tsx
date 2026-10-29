@@ -53,13 +53,13 @@ export function CategoryEditor({ category, onSaved, onDeleted, onCancel }: {
     } finally { setBusy(false); setConfirming(false); }
   };
   const content = <div className="tr-library-create">
-    {(!mobile || editing) ? <div className="tr-inline-editor-heading">{editing ? <h2>{t("category.edit")}</h2> : null}<Button onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
+    {editing ? <div className="tr-inline-editor-heading"><h2>{t("category.edit")}</h2></div> : null}
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       <Form.Item label={t("category.name")}><Input aria-label={t("category.name")} value={name} onChange={(event) => setName(event.target.value)} /></Form.Item>
       {pathsEditable ? <Form.Item label={t("category.paths")} help={t("category.pathsHint")}><Input.TextArea aria-label={t("category.paths")} className="tr-source-input" autoSize={{ minRows: 6 }} value={paths} onChange={(event) => setPaths(event.target.value)} /></Form.Item> : <Alert type="info" showIcon message={t("category.pathsComplex")} />}
       {confirming ? <Alert type="warning" showIcon message={t("category.deleteTitle")} description={t("category.deleteHint")} action={<div className="tr-inline-actions"><Button danger loading={busy} onClick={() => void remove()}>{t("category.deleteConfirm")}</Button><Button onClick={() => setConfirming(false)}>{t("configuration.cancel")}</Button></div>} /> : null}
-      <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button>{editing && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("category.delete")}</Button> : null}</div>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button><Button disabled={busy} onClick={onCancel}>{t("configuration.cancel")}</Button>{editing && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("category.delete")}</Button> : null}</div>
     </Form>
   </div>;
   return mobile && !editing ? <DetailsPanel title={t("category.create")} onClose={onCancel}>{content}</DetailsPanel> : content;

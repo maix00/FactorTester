@@ -651,7 +651,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 /* Shared editor layout for catalog and research forms. */
 .tr-library-create { max-width:720px; }
 .tr-inline-editor-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px; }
-.tr-inline-editor-heading > button:only-child { margin-left:auto; }
 .tr-inline-editor-heading h2 { margin:0; font-size:18px; line-height:1.4; }
 .tr-inline-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:16px; }
 .tr-library-create .ant-alert { margin-bottom:16px; }

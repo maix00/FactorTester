@@ -65,7 +65,7 @@ export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
     } finally { setBusy(false); }
   };
   const content = <div className="tr-library-create">
-    {(!mobile || groupRef) ? <div className="tr-inline-editor-heading">{groupRef ? <h2>{t("productGroup.edit")}</h2> : null}<Button onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
+    {groupRef ? <div className="tr-inline-editor-heading"><h2>{t("productGroup.edit")}</h2></div> : null}
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       <Form.Item label={t("productGroup.name")}><Input aria-label={t("productGroup.name")} value={name} onChange={(event) => setName(event.target.value)} /></Form.Item>
@@ -77,7 +77,7 @@ export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
       </Form.Item>
       {categoryError ? <Alert type="error" showIcon message={t("productGroup.categoriesLoadFailed")} description={categoryError} action={<Button onClick={() => setCategoryRevision((value) => value + 1)}>{t("retry")}</Button>} /> : null}
       {confirming ? <Alert type="warning" showIcon message={t("productGroup.deleteTitle")} description={t("productGroup.deleteHint")} action={<div className="tr-inline-actions"><Button danger loading={busy} onClick={() => void remove()}>{t("productGroup.deleteConfirm")}</Button><Button onClick={() => setConfirming(false)}>{t("configuration.cancel")}</Button></div>} /> : null}
-      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={categoryLoading || !!categoryError} onClick={() => void save()}>{t("configuration.save")}</Button>{groupRef && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("productGroup.delete")}</Button> : null}</div>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={categoryLoading || !!categoryError} onClick={() => void save()}>{t("configuration.save")}</Button><Button disabled={busy} onClick={onCancel}>{t("configuration.cancel")}</Button>{groupRef && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("productGroup.delete")}</Button> : null}</div>
     </Form>
   </div>;
   return mobile && !groupRef ? <DetailsPanel title={t("productGroup.create")} onClose={onCancel}>{content}</DetailsPanel> : content;
