@@ -9,7 +9,7 @@ export type MobileSettingSection = SettingsSectionID;
 
 export function MobileSettingsPage({ onOpen }: { onOpen: (section: MobileSettingSection) => void }): React.ReactElement {
   const { t } = useTranslation();
-  const {session}=useAuth();const sections=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"}).filter(item=>item.id!=="workspace");
+  const {session}=useAuth();const sections=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin",canManageAgentPermissions:session?.admin_capabilities?.includes("admin_console:manage")}).filter(item=>item.id!=="workspace");
   return (
     <section className="tr-mobile-workspace">
       <header>

@@ -9,6 +9,7 @@ import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
 import { QuotaSummary } from "./quota-summary.tsx";
 import { ServerSummary } from "./server-summary.tsx";
+import { AgentPermissionsSettings } from "./agent-permissions-settings.tsx";
 import { request } from "../configuration/api.ts";
 import { useAuth } from "../auth.tsx";
 
@@ -17,7 +18,7 @@ import { visibleSettingsSections, type SettingsSectionID } from "../settings-mod
 type SettingsSectionProps={section:SettingsSectionID;onResetLayout?:()=>void};
 export function SettingsSection(props:SettingsSectionProps):React.ReactElement {
  const {session}=useAuth(),{t}=useTranslation();
- const allowed=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"});
+ const allowed=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin",canManageAgentPermissions:session?.admin_capabilities?.includes("admin_console:manage")});
  if(!allowed.some(item=>item.id===props.section))return <Alert type="info" message={t("settingsPanel.permissionRequired")} />;
  return <SettingsSectionContent {...props}/>;
 }
@@ -72,7 +73,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
             <div className="tr-settings-card">
               {serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
             </div>
-          ) : section === "profiles" ? <ProfileSettings/> : section === "docs" ? <DocsSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "mihomo"].includes(section) ? (
+          ) : section === "profiles" ? <ProfileSettings/> : section === "docs" ? <DocsSettings/> : section === "devices" ? <DeviceSettings /> : section === "agentAccess" ? <AgentPermissionsSettings/> : ["controlDatabase", "federation", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
               {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} onRefresh={() => setReload(value => value + 1)} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>

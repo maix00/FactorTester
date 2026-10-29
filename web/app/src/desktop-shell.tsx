@@ -77,6 +77,7 @@ export function DesktopShell(): React.ReactElement {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
   const effectiveCollapsed=collapsed || compact;
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
     return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
@@ -152,7 +153,7 @@ export function DesktopShell(): React.ReactElement {
   return (
     <AppTheme>
     <DesktopNotificationHost />
-    <AgentAssistant />
+    <AgentAssistant open={assistantOpen} onOpenChange={setAssistantOpen} />
     <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
     <div className={`tr-app-shell${effectiveCollapsed ? " is-collapsed" : ""}${compact ? " is-compact" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label={t("mainNavigation")}>
@@ -187,6 +188,10 @@ export function DesktopShell(): React.ReactElement {
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
+        <Tooltip title={effectiveCollapsed ? t("assistant.title") : undefined} placement="right"><button type="button" aria-label={t("assistant.open")} className="tr-nav-item" onClick={() => setAssistantOpen(true)}>
+          <PageIcon name="assistant" />
+          <span className="tr-nav-label">{t("assistant.title")}</span>
+        </button></Tooltip>
         <AccountMenu collapsed={effectiveCollapsed}/>
         <Tooltip title={effectiveCollapsed ? t("settings") : undefined} placement="right"><button type="button" aria-label={t("settings")} className="tr-account-button" onClick={() => setSettingsOpen(true)}>
           <PageIcon name="settings" />

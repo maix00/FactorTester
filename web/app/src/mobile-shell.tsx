@@ -10,6 +10,7 @@ import { MobileNotificationHost } from "./notifications/mobile-host.tsx";
 import { AgentAssistant } from "./components/agent-assistant.tsx";
 import { AppTheme } from "./components/app-theme.tsx";
 import { PageInstanceProvider, newPageInstanceId, type PageArguments } from "./page-instance.ts";
+import { WorkspacePage } from "./pages/workspace.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 const tabs = pagesForScope("mobile").filter((page) => page.mobileTab);
@@ -20,6 +21,7 @@ export function MobileShell(): React.ReactElement {
   const [entries, setEntries] = useState<Entry[]>(() => tabs.map((page) => ({ id: newPageInstanceId(page.id), pageId: page.id, args: {}, root: true })));
   const [active, setActive] = useState(entries[0].id);
   const [setting, setSetting] = useState<MobileSettingSection | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const refs = useRef(entries); refs.current = entries;
   const current = entries.find((item) => item.id === active) || entries[0];
   useEffect(() => {
@@ -44,13 +46,14 @@ export function MobileShell(): React.ReactElement {
     setEntries((items) => [...items, item]); setRoute(item.id);
   };
   const back = (): void => history.back();
-  return <AppTheme><IonApp><MobileNotificationHost /><AgentAssistant /><div className="tr-mobile-shell" data-nested={!current.root}>
+  return <AppTheme><IonApp><MobileNotificationHost /><AgentAssistant open={assistantOpen} onOpenChange={setAssistantOpen} /><div className="tr-mobile-shell" data-nested={!current.root}>
     {entries.map((entry) => <div className="tr-mobile-instance" hidden={entry.id !== active} key={entry.id}>
       <PageInstanceProvider value={{ ...entry, mobile: true, active: entry.id === active, open, back }}>
         <PageErrorBoundary label={entry.pageId}>
           {!entry.root && !(entry.pageId === "settings" && setting && entry.id === active) ? <div className="tr-mobile-page-back"><button type="button" onClick={back}><PageIcon name="back" />{t("back")}</button></div> : null}
           {entry.pageId === "settings" ? setting && entry.id === active ? <MobileSettingDetail section={setting} onBack={back} /> :
-            <MobileSettingsPage onOpen={(section) => { setSetting(section); history.pushState({ ...history.state, trSettings: section }, "", location.href); }} /> : <PageSurface pageId={entry.pageId} />}
+            <MobileSettingsPage onOpen={(section) => { setSetting(section); history.pushState({ ...history.state, trSettings: section }, "", location.href); }} /> :
+            entry.pageId === "more" ? <WorkspacePage onOpenAssistant={() => setAssistantOpen(true)} /> : <PageSurface pageId={entry.pageId} />}
         </PageErrorBoundary>
       </PageInstanceProvider>
     </div>)}

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Drawer, Spin, Tooltip } from "antd";
-import { CommentOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Drawer, Spin } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { useCompactLayout } from "../configuration/layout.ts";
@@ -15,9 +15,8 @@ type LegacyWindow = Window & {
   FTAgentChat?: { render: (context: Record<string, unknown>, profile: AgentProfile, options: Record<string, unknown>) => Promise<LegacyChatRoot> };
 };
 
-export function AgentAssistant(): React.ReactElement {
+export function AgentAssistant({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }): React.ReactElement {
   const { t, i18n } = useTranslation();
-  const [open, setOpen] = useState(false);
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -134,18 +133,13 @@ export function AgentAssistant(): React.ReactElement {
   const width = compact ? "100vw" : 560;
 
   return <>
-    <Tooltip title={t("assistant.title")} placement="left">
-      <Button className="tr-agent-assistant-launcher" type="primary" icon={<CommentOutlined />} onClick={() => setOpen(true)} aria-label={t("assistant.open")}>
-        <span>{t("assistant.title")}</span>
-      </Button>
-    </Tooltip>
     <Drawer
       className="tr-agent-assistant-drawer"
       title={<div className="tr-agent-assistant-title"><strong>{t("assistant.title")}</strong>{profile ? <span>{agentProfileLabel(profile)}</span> : null}</div>}
       placement="right"
       width={width}
       open={open}
-      onClose={() => setOpen(false)}
+      onClose={() => onOpenChange(false)}
       destroyOnHidden={false}
     >
       {setupRequired ? <div className="tr-agent-assistant-error"><Alert type="warning" showIcon message={t(setupRequired === "unbound" ? "assistant.runtimeUnbound" : "assistant.serverRuntimeRequired")} description={t("assistant.runtimeSetupHint")} /><div className="tr-agent-assistant-setup-actions"><Button size="small" onClick={() => window.location.assign("/research?section=profiles")}>{t("assistant.openProfileSettings")}</Button></div></div> : null}

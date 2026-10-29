@@ -11,6 +11,7 @@ export type AuthSession = {
   alias?: string;
   role?: string;
   capabilities?: Record<string, boolean>;
+  admin_capabilities?: string[];
   visitor_login?: boolean;
 } | null;
 

@@ -11,3 +11,7 @@ test("Manager capability does not imply super administrator operations", () => {
   assert.equal(ids.includes("manager"),true);assert.equal(ids.includes("controlDatabase"),false);
   assert.deepEqual(visibleSettingsSections({manager:true,superAdmin:true}),SETTINGS_SECTIONS);
 });
+test("Agent permission administration requires the explicit Manager permission", () => {
+  assert.equal(visibleSettingsSections({manager:true,superAdmin:false}).some(item=>item.id==="agentAccess"),false);
+  assert.equal(visibleSettingsSections({manager:true,superAdmin:false,canManageAgentPermissions:true}).some(item=>item.id==="agentAccess"),true);
+});
