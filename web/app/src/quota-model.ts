@@ -6,6 +6,11 @@ export type CleanupTarget = { server: QuotaServer; preview: QuotaRecord };
 export type CleanupPlan = { live: CleanupTarget[]; offline: QuotaServer[]; count: number; bytes: number };
 
 const amount = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+export function formatQuotaBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  const power = Math.min(Math.floor(Math.log(value) / Math.log(1024)), 4);
+  return `${(value / (1024 ** power)).toFixed(2)} ${["KiB", "MiB", "GiB", "TiB"][power - 1]}`;
+}
 const time = (value: unknown): number => typeof value === "number" ? value * 1000 : typeof value === "string" ? Date.parse(value) || 0 : 0;
 
 /** Only use a complete server preview; the server verifies its token at execution. */

@@ -2,19 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Collapse, Popconfirm, Progress, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
-import { aggregateQuota, cleanupPlan, type CleanupPlan, type QuotaRecord, type QuotaServer } from "../quota-model.ts";
+import { aggregateQuota, cleanupPlan, formatQuotaBytes as bytes, type CleanupPlan, type QuotaRecord, type QuotaServer } from "../quota-model.ts";
 import { executeCleanup } from "../quota-cleanup.ts";
 import { notify } from "../notifications/core.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { QuotaJobs } from "./quota-jobs.tsx";
 import { TRDataTable } from "./data-table.tsx";
 import { ResultView } from "./result-view.tsx";
-
-function bytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  const power = Math.min(Math.floor(Math.log(value) / Math.log(1024)), 4);
-  return `${(value / (1024 ** power)).toFixed(2)} ${["KiB", "MiB", "GiB", "TiB"][power - 1]}`;
-}
 
 type Inventory = { profile: QuotaRecord; pending: QuotaRecord[]; servers: QuotaServer[]; partial: boolean; ready: boolean };
 export function QuotaSummary({ data, onRefresh }: { data: Record<string, any>; onRefresh: () => void }): React.ReactElement {
