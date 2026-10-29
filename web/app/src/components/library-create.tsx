@@ -47,7 +47,7 @@ export function LibraryCreate({ kind, onCreated, onCancel, strategy }: { strateg
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
   };
-  const content = <div className="tr-library-create">{(!mobile || strategy) ? <div className="tr-inline-editor-heading">{strategy ? <h2>{t("strategyDetail.edit")}</h2> : null}<Button onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
+  const content = <div className="tr-library-create">{strategy ? <div className="tr-inline-editor-heading"><h2>{t("strategyDetail.edit")}</h2></div> : null}
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       {kind === "factor" ? <><Form.Item label={t("editor.newFamily")}><Switch checked={newFamily} disabled={!!createdFamily} onChange={setNewFamily} /></Form.Item>
@@ -57,7 +57,7 @@ export function LibraryCreate({ kind, onCreated, onCancel, strategy }: { strateg
         <Form.Item label={t("editor.source")}><Input.TextArea aria-label={t("editor.source")} className="tr-source-input" autoSize={{ minRows: 10 }} value={source} disabled={!!createdFamily} onChange={(event) => setSource(event.target.value)} /></Form.Item></> : null}
       {kind === "strategy" ? <><Form.Item label={t("library.description")}><Input.TextArea aria-label={t("library.description")} value={description} onChange={(event) => setDescription(event.target.value)} /></Form.Item><Form.Item label={t("library.visibility")}><Select aria-label={t("library.visibility")} value={visibility} onChange={setVisibility} options={["private", "shared", "public"].map((value) => ({ value, label: t(`strategyDetail.visibility.${value}`) }))} /></Form.Item></> : null}
       <Form.Item label={t(kind === "strategy" ? "editor.requirements" : "editor.parameters")}><Input.TextArea aria-label={t("editor.parameters")} className="tr-source-input" autoSize={{ minRows: 5 }} value={params} onChange={(event) => setParams(event.target.value)} /></Form.Item>
-      <Button type="primary" loading={busy} disabled={kind === "strategy" ? !name || !source : newFamily ? !name || !source : !family} onClick={() => void save()}>{t("configuration.save")}</Button>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={kind === "strategy" ? !name || !source : newFamily ? !name || !source : !family} onClick={() => void save()}>{t("configuration.save")}</Button><Button disabled={busy} onClick={onCancel}>{t("configuration.cancel")}</Button></div>
     </Form>
   </div>;
   return mobile && !strategy ? <DetailsPanel title={t(kind === "factor" ? "editor.newFactor" : "editor.newStrategy")} onClose={onCancel}>{content}</DetailsPanel> : content;

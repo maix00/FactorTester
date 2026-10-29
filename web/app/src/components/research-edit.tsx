@@ -36,13 +36,13 @@ export function ResearchEdit({ research, onSaved, onArchived, onCancel }: {
     finally { setBusy(false); setConfirming(false); }
   };
   const content = <div className="tr-library-create">
-    <div className="tr-inline-editor-heading"><h2>{t("research.edit")}</h2><Button onClick={onCancel}>{t("configuration.cancel")}</Button></div>
+    <div className="tr-inline-editor-heading"><h2>{t("research.edit")}</h2></div>
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       <Form.Item label={t("editor.name")}><Input aria-label={t("editor.name")} value={title} onChange={(event) => setTitle(event.target.value)} /></Form.Item>
       <Form.Item label={t("library.description")}><Input.TextArea aria-label={t("library.description")} autoSize={{ minRows: 4 }} value={description} onChange={(event) => setDescription(event.target.value)} /></Form.Item>
       {confirming ? <Alert type="warning" showIcon message={t("research.archiveTitle")} description={t("research.archiveHint")} action={<div className="tr-inline-actions"><Button danger loading={busy} onClick={() => void archive()}>{t("research.archiveConfirm")}</Button><Button onClick={() => setConfirming(false)}>{t("configuration.cancel")}</Button></div>} /> : null}
-      <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button>{!confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("research.archive")}</Button> : null}</div>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button><Button disabled={busy} onClick={onCancel}>{t("configuration.cancel")}</Button>{!confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("research.archive")}</Button> : null}</div>
     </Form>
   </div>;
   return content;
