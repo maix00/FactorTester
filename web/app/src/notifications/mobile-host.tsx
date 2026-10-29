@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   IonBadge, IonButton, IonButtons, IonContent, IonHeader, IonItem, IonLabel,
   IonList, IonModal, IonTitle, IonToast, IonToolbar,
@@ -8,8 +8,17 @@ import { bindNotificationSink, type ActiveNotice } from "./core.ts";
 
 type Entry = ActiveNotice & { id: number; read: boolean; at: number };
 type Queued = { notice: ActiveNotice; done: () => void; id: number };
+type MobileNotificationCenter = { openCenter: () => void; unread: number };
 
-export function MobileNotificationHost(): React.ReactElement {
+const MobileNotificationContext = createContext<MobileNotificationCenter | null>(null);
+
+export function useMobileNotificationCenter(): MobileNotificationCenter {
+  const value = useContext(MobileNotificationContext);
+  if (!value) throw new Error("useMobileNotificationCenter must be used within MobileNotificationHost");
+  return value;
+}
+
+export function MobileNotificationHost({ children }: { children: React.ReactNode }): React.ReactElement {
   const { t } = useTranslation();
   const [items, setItems] = useState<Entry[]>(() => {
     try {
@@ -24,6 +33,11 @@ export function MobileNotificationHost(): React.ReactElement {
   const unread = items.filter((item) => !item.read).length;
   useEffect(() => { localStorage.setItem("tr.notifications", JSON.stringify(items)); }, [items]);
   const current = queue[0];
+  const openCenter = useCallback((): void => {
+    setOpen(true);
+    setItems((existing) => existing.map((item) => ({ ...item, read: true })));
+  }, []);
+  const contextValue = useMemo(() => ({ openCenter, unread }), [openCenter, unread]);
 
   useEffect(() => {
     let nextId = 1;
@@ -47,7 +61,8 @@ export function MobileNotificationHost(): React.ReactElement {
   };
 
   return (
-    <>
+    <MobileNotificationContext.Provider value={contextValue}>
+      {children}
       <IonToast
         key={current?.id ?? "none"}
         isOpen={Boolean(current)}
@@ -57,12 +72,6 @@ export function MobileNotificationHost(): React.ReactElement {
         position="top"
         onDidDismiss={dismiss}
       />
-      {!open ? (
-        <button type="button" className="tr-mobile-bell" aria-label={t("notifications.bell")} onClick={() => { setOpen(true); setItems((existing) => existing.map((item) => ({ ...item, read: true }))); }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg>
-          {unread > 0 ? <IonBadge color="danger">{unread > 99 ? "99+" : unread}</IonBadge> : null}
-        </button>
-      ) : null}
       <IonModal isOpen={open} onDidDismiss={() => setOpen(false)}>
         <IonHeader>
           <IonToolbar>
@@ -87,6 +96,6 @@ export function MobileNotificationHost(): React.ReactElement {
           </IonList>
         </IonContent>
       </IonModal>
-    </>
+    </MobileNotificationContext.Provider>
   );
 }

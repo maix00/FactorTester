@@ -204,20 +204,11 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-mobile-settings-card b { display: block; font-size: 13px; }
 .tr-mobile-settings-card small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; max-width: 230px; }
 .tr-mobile-page { display: flex; flex-direction: column; min-height: 100vh; background: var(--bg); }
-.tr-mobile-page-header { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 8px; min-height: 52px; padding: env(safe-area-inset-top, 0px) 10px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, transparent); backdrop-filter: blur(12px); }
-.tr-mobile-page-header strong { font-size: 16px; }
-.tr-mobile-back { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; color: var(--text); background: transparent; }
-.tr-mobile-back:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-.tr-mobile-page-body { flex: 1; min-height: 0; }
-.tr-mobile-page-body .tr-page-frame { height: calc(100vh - 52px); min-height: 0; }
 .tr-mobile-settings-detail { min-height: 100vh; background: var(--bg); }
 .tr-mobile-settings-body { padding: 16px; }
 .tr-mobile-settings-stack { display: grid; gap: 14px; }
 .tr-mobile-settings-stack small { display: block; margin-top: 2px; color: var(--muted); }
 .tr-workspace .dv-tab { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
-.tr-mobile-bell { position: fixed; z-index: 900; top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px; width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--text); background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 4px 14px #00000014; backdrop-filter: blur(10px); }
-.tr-mobile-bell svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.tr-mobile-bell ion-badge { position: absolute; top: -5px; right: -5px; font-size: 9px; }
 .tr-page-error { display: grid; place-content: center; gap: 8px; height: 100%; padding: 24px; color: var(--text); background: var(--bg); text-align: center; }
 .tr-page-error button { justify-self: center; padding: 6px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
 .tr-account-page { max-width: 720px; padding: 32px 36px; }
@@ -334,8 +325,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 
 .tr-module-nav .tr-icon, .tr-account-button .tr-icon { width: 18px; height: 18px; flex-basis: 18px; font-size: 18px; }
 .tr-mobile-instance[hidden] { display: none; }
-.tr-mobile-page-back { padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.tr-mobile-page-back button { display: flex; align-items: center; gap: 6px; padding: 3px 0; border: 0; color: var(--accent); background: transparent; font: inherit; }
 .tr-mobile-shell[data-nested="true"] { padding-bottom: 0; }
 
 .tr-agent-assistant-drawer .ant-drawer-body { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden; }
@@ -357,6 +346,30 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 @media (max-width: 760px) {
   .tr-agent-assistant-drawer .ant-drawer-content-wrapper { max-width: 100vw; }
 }
+
+/* The mobile workspace has one shared, persistent action bar above each page. */
+.tr-mobile-shell.ion-page { min-height: 0; padding: 0; overflow: hidden; color: var(--text); background: var(--bg); }
+.tr-mobile-header { z-index: 20; border-bottom: 1px solid var(--line); box-shadow: none; }
+.tr-mobile-header ion-toolbar { --background: var(--panel); --border-width: 0; --min-height: 56px; --padding-start: 8px; --padding-end: 8px; }
+.tr-mobile-header ion-title { padding-inline: 8px; color: var(--text); font-size: 16px; font-weight: 650; text-align: start; }
+.tr-mobile-header ion-buttons { gap: 2px; }
+.tr-mobile-header .tr-mobile-header-action { position: relative; min-width: 40px; min-height: 40px; margin: 0; --color: var(--text); --padding-start: 8px; --padding-end: 8px; --border-radius: 10px; }
+.tr-mobile-header .tr-mobile-header-action:hover { --background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.tr-mobile-header .tr-mobile-header-action > .tr-icon,
+.tr-mobile-header .tr-mobile-header-icon > .tr-icon { width: 20px; height: 20px; flex: 0 0 20px; color: inherit; }
+.tr-mobile-header-icon { position: relative; display: inline-grid; place-items: center; width: 24px; height: 24px; }
+.tr-mobile-header-icon ion-badge { position: absolute; top: -7px; right: -10px; min-width: 16px; padding: 2px 4px; border: 2px solid var(--panel); border-radius: 999px; font-size: 9px; line-height: 12px; }
+.tr-mobile-content { --background: var(--bg); --padding-start: 0; --padding-end: 0; --padding-top: 0; --padding-bottom: 0; flex: 1; min-height: 0; }
+.tr-mobile-content[data-root="true"] { --padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+.tr-mobile-tabs { position: absolute; right: 0; bottom: 0; left: 0; z-index: 15; padding-bottom: env(safe-area-inset-bottom, 0px); }
+.tr-mobile-shell[data-nested="true"] .tr-mobile-tabs { display: none; }
+.tr-mobile-content .tr-function-header h1,
+.tr-mobile-content .tr-mobile-workspace header h1 { display: none; }
+.tr-mobile-content .tr-function-header { min-height: 48px; padding: 8px 14px 4px; border-bottom: 0; }
+.tr-mobile-content .tr-function-actions { justify-content: flex-end; }
+.tr-mobile-content .tr-function-body { padding: 10px 14px 18px; }
+.tr-mobile-workspace-header { justify-content: flex-end; margin-bottom: 12px; }
+.tr-mobile-settings-detail { min-height: 0; }
 
 .tr-function-page { min-height:100%; background:#f7f8fb; color:#263247; }
 .tr-function-header { min-height:88px; padding:24px 32px; background:#fff; border-bottom:1px solid #e8ecf2; display:flex; align-items:center; justify-content:space-between; gap:16px; }

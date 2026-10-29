@@ -16,7 +16,7 @@ function recentIds(): string[] {
   }
 }
 
-export function WorkspacePage({ onOpen, onOpenAssistant }: { onOpen?: (id: string) => void; onOpenAssistant?: () => void }): React.ReactElement {
+export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): React.ReactElement {
   const { t } = useTranslation();
   const instance = usePageInstance();
   const recent = recentIds();
@@ -30,17 +30,9 @@ export function WorkspacePage({ onOpen, onOpenAssistant }: { onOpen?: (id: strin
   return (
     <section className="tr-mobile-workspace">
       <header className="tr-mobile-workspace-header">
-        <div>
-          <h1>{t("nav.more")}</h1>
-        </div>
         <AccountMenu/>
       </header>
       <div className="tr-mobile-open-list">
-        {onOpenAssistant ? <button type="button" className="tr-mobile-open-row" onClick={onOpenAssistant}>
-          <span className="tr-mobile-open-icon"><PageIcon name="assistant" /></span>
-          <span>{t("assistant.title")}</span>
-          <span aria-hidden="true">›</span>
-        </button> : null}
         {pages.map((page) => (
           <button key={page.id} type="button" className="tr-mobile-open-row" onClick={() => onOpen ? onOpen(page.id) : instance.open(page.id)}>
             <span className="tr-mobile-open-icon"><PageIcon name={page.icon} /></span>
