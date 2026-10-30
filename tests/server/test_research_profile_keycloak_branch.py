@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -64,3 +66,184 @@ def test_branch_profile_authorization_outage_is_not_converted_to_grant_or_denial
         catalog.reserve_report_branch("report", actor="alice", profile_ref="self", branch_id="main")
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT COUNT(*) FROM research_catalog_branches").fetchone()[0] == 0
+
+
+def test_membership_read_and_authoring_follow_keycloak_not_local_role_or_status(tmp_path):
+    path = tmp_path / "research.sqlite"
+    legacy = ResearchCatalog(path)
+    research_id = legacy.create_research(owner_ref="alice", title="Research")["research_id"]
+    legacy.register_report(research_id, actor="alice", report_id="report", profile_ref="self")
+    legacy.add_membership(research_id, actor="alice", principal_ref="bob", profile_ref="work", role="editor")
+    uri = keycloak_resource_uri("research_profile", profile_resource_ref(research_id, "bob-id", "work"))
+    permissions = {(uri, scope) for scope in ("read", "use", "write")}
+    requests = []
+    def authorize(_token, *, permissions: list):
+        requests.append(permissions)
+        return {(resource, scope): (resource, scope) in allowed for resource, _name, scope in permissions}
+    allowed = set(permissions)
+    auth = KeycloakResearchAuthorization(authorize_many=authorize)
+    catalog = ResearchCatalog(path, profile_authorizer=auth)
+    bob = {"username": "bob", "keycloak_subject": "bob-subject", "tr_identity_id": "bob-id",
+           "keycloak_issuer": "https://identity.example/realms/trade"}
+    record = {"report_id": "report", "owner_ref": "alice"}
+    with identity_request():
+        bind_verified_identity("bob-token", bob)
+        assert [item["research_id"] for item in catalog.list_researches(viewer="bob")] == [research_id]
+        assert len(requests) == 1  # batched by request, not one call per Research
+        assert catalog.get_research_summary(research_id, viewer="bob")["access"]["can_download"]
+        assert catalog.can_read_authoring_publication(record, "bob")
+        allowed.clear()
+        assert catalog.list_researches(viewer="bob") == []
+        assert not catalog.can_read_authoring_publication(record, "bob")
+        # Even a locally revoked association cannot grant access. Keycloak
+        # decides independently if a subsequent policy change grants it.
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE research_catalog_memberships SET status='revoked', role='viewer' WHERE principal_ref='bob'")
+        allowed.update(permissions)
+        assert len(catalog.list_researches(viewer="bob")) == 1
+        assert catalog.can_read_authoring_publication(record, "bob")
+        workspace = catalog.create_workspace(research_id, actor="bob", principal_ref="bob", profile_ref="work")
+        assert workspace["principal_ref"] == "bob"
+        allowed.remove((uri, "write"))
+        with pytest.raises(PermissionError, match="workspace"):
+            catalog.create_workspace(research_id, actor="bob", principal_ref="bob", profile_ref="work")
+
+
+def _configured_member_catalog(tmp_path):
+    path = tmp_path / "research.sqlite"
+    legacy = ResearchCatalog(path)
+    research_id = legacy.create_research(owner_ref="alice", title="Research")["research_id"]
+    legacy.register_report(research_id, actor="alice", report_id="report", profile_ref="self")
+    legacy.add_membership(research_id, actor="alice", principal_ref="bob", profile_ref="work", role="editor")
+    legacy.create_workspace(research_id, actor="alice", principal_ref="bob", profile_ref="work")
+    uri = keycloak_resource_uri("research_profile", profile_resource_ref(research_id, "bob-id", "work"))
+    allowed = {(uri, scope) for scope in ("read", "use", "write")}
+    auth = KeycloakResearchAuthorization(authorize_many=lambda _t, *, permissions: {
+        (resource, scope): (resource, scope) in allowed for resource, _name, scope in permissions
+    })
+    class Grants:
+        fail_after_update = False
+        manager_allowed = True
+        def require_membership_manager(self, *, actor, research_id):
+            if actor != "alice" or not self.manager_allowed:
+                raise PermissionError("Keycloak sharing denied")
+        def set_profile_membership(self, *, role, status, **_kwargs):
+            allowed.clear()
+            if status == "active":
+                allowed.update((uri, scope) for scope in ("read", "use"))
+                if role != "viewer":
+                    allowed.add((uri, "write"))
+            if self.fail_after_update:
+                raise AuthorizationUnavailable("response lost after policy update")
+    grants = Grants()
+    catalog = ResearchCatalog(path, profile_authorizer=auth, profile_grant_manager=grants,
+        profile_identity_resolver=lambda username: {"identity_id": "bob-id", "subject": "bob-subject"}
+        if username == "bob" else None)
+    return catalog, research_id, uri, allowed, grants
+
+
+def test_denied_manager_cannot_create_a_pending_record(tmp_path):
+    catalog, research_id, _uri, _allowed, grants = _configured_member_catalog(tmp_path)
+    grants.manager_allowed = False
+    with pytest.raises(PermissionError, match="sharing denied"):
+        catalog.remove_membership(research_id, actor="alice", profile_ref="work", principal_ref="bob")
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_profile_policy_pending").fetchone()[0] == 0
+
+
+def test_member_policy_failure_stays_denied_and_same_request_recovers_idempotently(tmp_path):
+    catalog, research_id, _uri, _allowed, grants = _configured_member_catalog(tmp_path)
+    bob = {"username": "bob", "keycloak_subject": "bob-subject", "tr_identity_id": "bob-id",
+           "keycloak_issuer": "https://identity.example/realms/trade"}
+    grants.fail_after_update = True
+    with pytest.raises(AuthorizationUnavailable):
+        catalog.remove_membership(research_id, actor="alice", profile_ref="work", principal_ref="bob")
+    with identity_request():
+        bind_verified_identity("bob-token", bob)
+        assert catalog.list_researches(viewer="bob") == []
+        with pytest.raises(PermissionError, match="pending"):
+            catalog.reserve_report_branch("report", actor="bob", profile_ref="work", branch_id="blocked")
+    with pytest.raises(RuntimeError, match="another Profile"):
+        catalog.add_membership(research_id, actor="alice", principal_ref="bob", profile_ref="work", role="viewer")
+    grants.fail_after_update = False
+    assert catalog.remove_membership(research_id, actor="alice", profile_ref="work", principal_ref="bob")["status"] == "revoked"
+    assert catalog.remove_membership(research_id, actor="alice", profile_ref="work", principal_ref="bob")["status"] == "revoked"
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_profile_policy_pending").fetchone()[0] == 0
+        assert db.execute("SELECT status FROM research_catalog_workspaces WHERE principal_ref='bob'").fetchone()[0] == "archived"
+
+
+def test_member_changes_serialize_without_holding_sqlite_during_network_io(tmp_path):
+    catalog, research_id, _uri, allowed, grants = _configured_member_catalog(tmp_path)
+    entered, release, calls = threading.Event(), threading.Event(), []
+    original = grants.set_profile_membership
+    def delayed(*, role, status, **kwargs):
+        calls.append(role)
+        with sqlite3.connect(catalog.db_path, timeout=0.1) as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.rollback()
+        if role == "contributor":
+            entered.set()
+            assert release.wait(timeout=5)
+        return original(role=role, status=status, **kwargs)
+    grants.set_profile_membership = delayed
+    def change(role):
+        return catalog.add_membership(research_id, actor="alice", principal_ref="bob", profile_ref="work", role=role)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(change, "contributor")
+        assert entered.wait(timeout=5)
+        second = pool.submit(change, "viewer")
+        assert calls == ["contributor"]
+        release.set()
+        assert first.result(timeout=5)["role"] == "contributor"
+        assert second.result(timeout=5)["role"] == "viewer"
+    assert calls == ["contributor", "viewer"]
+    assert {scope for _uri, scope in allowed} == {"read", "use"}
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT role FROM research_catalog_memberships WHERE principal_ref='bob'").fetchone()[0] == "viewer"
+        assert db.execute("SELECT COUNT(*) FROM research_profile_policy_pending").fetchone()[0] == 0
+
+
+def test_branch_rejects_keycloak_decision_if_membership_changed_before_sqlite_write(tmp_path):
+    catalog, research_id, _uri, _allowed, _grants = _configured_member_catalog(tmp_path)
+    class ChangedDuringAuthorization:
+        def may_write_profile(self, **_kwargs):
+            with sqlite3.connect(catalog.db_path) as db:
+                db.execute("""INSERT INTO research_profile_policy_versions VALUES (?, 'bob', 'work', 1)
+                    ON CONFLICT(research_id,principal_ref,profile_ref) DO UPDATE SET revision=revision+1""", (research_id,))
+            return True
+    catalog._profile_authorizer = ChangedDuringAuthorization()
+    with pytest.raises(PermissionError, match="changed; retry"):
+        catalog.reserve_report_branch("report", actor="bob", profile_ref="work", branch_id="stale")
+
+
+def test_list_rejects_a_membership_decision_if_policy_changes_during_keycloak_request(tmp_path):
+    catalog, research_id, _uri, _allowed, _grants = _configured_member_catalog(tmp_path)
+    class ChangedDuringAuthorization:
+        def profile_membership_access_many(self, *, profiles, **_kwargs):
+            with sqlite3.connect(catalog.db_path) as db:
+                db.execute("""INSERT INTO research_profile_policy_versions VALUES (?, 'bob', 'work', 1)
+                    ON CONFLICT(research_id,principal_ref,profile_ref) DO UPDATE SET revision=revision+1""", (research_id,))
+            return {pair: {"can_view": True, "can_download": True} for pair in profiles}
+    catalog._profile_authorizer = ChangedDuringAuthorization()
+    assert catalog.list_researches(viewer="bob") == []
+
+
+def test_report_registration_checks_owners_exact_keycloak_profile(tmp_path):
+    path = tmp_path / "research.sqlite"
+    legacy = ResearchCatalog(path)
+    research_id = legacy.create_research(owner_ref="alice", title="Research")["research_id"]
+    uri = keycloak_resource_uri("research_profile", profile_resource_ref(research_id, "alice-id", "self"))
+    allowed = {(uri, "write")}
+    auth = KeycloakResearchAuthorization(authorize_many=lambda _t, *, permissions: {
+        (resource, scope): (resource, scope) in allowed for resource, _name, scope in permissions
+    })
+    catalog = ResearchCatalog(path, profile_authorizer=auth)
+    alice = {"username": "alice", "keycloak_subject": "alice-subject", "tr_identity_id": "alice-id",
+             "keycloak_issuer": "https://identity.example/realms/trade"}
+    with identity_request():
+        bind_verified_identity("alice-token", alice)
+        assert catalog.register_report(research_id, actor="alice", report_id="a", profile_ref="self")["report_id"] == "a"
+        allowed.clear()
+        with pytest.raises(PermissionError, match="Profile write"):
+            catalog.register_report(research_id, actor="alice", report_id="b", profile_ref="self")

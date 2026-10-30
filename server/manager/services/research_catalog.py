@@ -36,15 +36,38 @@ class ResearchCatalog(ResearchBranchesMixin):
         *,
         account_provider: Callable[[], list[dict[str, Any]]] | None = None,
         profile_authorizer=None,
+        profile_grant_manager=None,
+        profile_identity_resolver=None,
     ) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
         self._account_provider = account_provider
         # A runtime may supply this only after the Profile migration proof has
         # passed. Until then legacy Profile semantics remain the authority.
         self._profile_authorizer = profile_authorizer
+        self._profile_grant_manager = profile_grant_manager
+        self._profile_identity_resolver = profile_identity_resolver
         self._synchronizer = None
         self._schedule_refresh = None
         self.ensure_schema()
+        if self._profile_authorizer is not None:
+            self._ensure_profile_policy_journal()
+
+    def _ensure_profile_policy_journal(self) -> None:
+        """Record unfinished cross-system writes, never permission grants."""
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute("""CREATE TABLE IF NOT EXISTS research_profile_policy_pending (
+                research_id TEXT NOT NULL, principal_ref TEXT NOT NULL, profile_ref TEXT NOT NULL,
+                actor_ref TEXT NOT NULL, identity_id TEXT NOT NULL, subject TEXT NOT NULL,
+                operation TEXT NOT NULL, desired_role TEXT NOT NULL, desired_status TEXT NOT NULL,
+                expected_exists INTEGER NOT NULL, expected_role TEXT NOT NULL, expected_status TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY(research_id, principal_ref, profile_ref)
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS research_profile_policy_versions (
+                research_id TEXT NOT NULL, principal_ref TEXT NOT NULL, profile_ref TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                PRIMARY KEY(research_id, principal_ref, profile_ref)
+            )""")
 
     def set_synchronizer(self, synchronizer, schedule_refresh=None) -> None:
         if synchronizer.local.path.resolve() != self.db_path:
@@ -408,6 +431,8 @@ class ResearchCatalog(ResearchBranchesMixin):
                     ORDER BY research.updated_at DESC, research.research_id""",
                 (viewer_ref, viewer_ref),
             ).fetchall()
+            profile_pairs = self._profile_pairs(conn, viewer_ref)
+        profile_access = self._profile_membership_access(viewer_ref, profile_pairs)
         result = []
         for row in rows:
             if not include_archived and row["status"] == "archived":
@@ -426,6 +451,7 @@ class ResearchCatalog(ResearchBranchesMixin):
                 authorized_users_json=row["authorized_users_json"],
                 viewer=viewer_ref,
                 membership=membership,
+                profile_access=profile_access.get(str(row["research_id"]), {}),
             )
             if not access["can_view"]:
                 continue
@@ -552,6 +578,16 @@ class ResearchCatalog(ResearchBranchesMixin):
         if not viewer or not self.can_read_publication(record, viewer):
             return False
         row = self._report_row(str(record["report_id"]))
+        if self._profile_authorizer is not None:
+            with connect_sqlite(self.db_path, readonly=True) as conn:
+                profiles = self._profile_pairs(conn, viewer, research_id=str(row["research_id"]))
+            allowed = self._profile_authorizer.may_write_any_profile(
+                research_id=str(row["research_id"]), viewer=viewer,
+                profile_refs=[profile for _research, profile in profiles],
+            )
+            with connect_sqlite(self.db_path, readonly=True) as conn:
+                unchanged = self._profile_pairs(conn, viewer, research_id=str(row["research_id"])) == profiles
+            return bool(allowed and unchanged)
         if str(row["owner_ref"]) == viewer:
             return True
         with connect_sqlite(self.db_path, readonly=True) as conn:
@@ -711,6 +747,9 @@ class ResearchCatalog(ResearchBranchesMixin):
                     (viewer_ref,),
                 ).fetchall()
             } if viewer_ref else {}
+            profile_pairs = self._profile_pairs(conn, viewer_ref)
+
+        profile_access = self._profile_membership_access(viewer_ref, profile_pairs)
 
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -732,6 +771,7 @@ class ResearchCatalog(ResearchBranchesMixin):
                 authorized_users_json=row["research_authorized_users_json"],
                 viewer=viewer_ref,
                 membership=memberships.get(str(row["research_id"])),
+                profile_access=profile_access.get(str(row["research_id"]), {}),
             )
             report_access = self._report_access(
                 row, viewer_ref, research_access=research_access,
@@ -858,6 +898,113 @@ class ResearchCatalog(ResearchBranchesMixin):
             ).fetchone()
         return self._research_value(updated, viewer=actor)
 
+    @staticmethod
+    def _profile_policy_pending(conn, research_id: str, principal: str, profile: str):
+        return conn.execute("""SELECT * FROM research_profile_policy_pending
+            WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+            (research_id, principal, profile)).fetchone()
+
+    @staticmethod
+    def _profile_policy_version(conn, research_id: str, principal: str, profile: str) -> int:
+        row = conn.execute("""SELECT revision FROM research_profile_policy_versions
+            WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+            (research_id, principal, profile)).fetchone()
+        return int(row["revision"]) if row else 0
+
+    @staticmethod
+    def _advance_profile_policy_version(conn, research_id: str, principal: str, profile: str) -> None:
+        conn.execute("""INSERT INTO research_profile_policy_versions
+            (research_id, principal_ref, profile_ref, revision) VALUES (?, ?, ?, 1)
+            ON CONFLICT(research_id, principal_ref, profile_ref) DO UPDATE SET revision=revision+1""",
+            (research_id, principal, profile))
+
+    def _change_profile_membership(self, *, research_id: str, actor: str, principal: str,
+                                   profile: str, role: str, status: str, operation: str) -> dict[str, Any]:
+        # Membership changes are rare. One process-safe lock per catalog
+        # serializes the remote policy mutation without holding SQLite's
+        # write lock during network I/O. The pending row makes readers fail
+        # closed; the OS releases the lock if a Manager process exits.
+        from tools.cli.release.research_reporting.generation import report_workspace_lock
+
+        with report_workspace_lock(self.db_path.parent / ".research-profile-policy"):
+            return self._change_profile_membership_locked(
+                research_id=research_id, actor=actor, principal=principal,
+                profile=profile, role=role, status=status, operation=operation,
+            )
+
+    def _change_profile_membership_locked(self, *, research_id: str, actor: str, principal: str,
+                                          profile: str, role: str, status: str, operation: str) -> dict[str, Any]:
+        """Fail closed while one KC policy and its metadata projection converge.
+
+        The durable row serializes updates for this exact Profile. Its only
+        authorization effect is denial during recovery; Keycloak is the sole
+        source of grants. Retrying the same request is idempotent, and a
+        different concurrent request cannot replace an unfinished operation.
+        """
+        if self._profile_grant_manager is None or not callable(self._profile_identity_resolver):
+            raise RuntimeError("Keycloak Profile membership updates are not configured")
+        self._profile_grant_manager.require_membership_manager(actor=actor, research_id=research_id)
+        identity = self._profile_identity_resolver(principal)
+        stable = str(identity.get("identity_id") or "").strip() if isinstance(identity, dict) else ""
+        subject = str(identity.get("subject") or "").strip() if isinstance(identity, dict) else ""
+        if not stable or not subject:
+            raise LookupError("Research Profile Keycloak identity is unavailable")
+        desired = (actor, stable, subject, operation, role, status)
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            pending = self._profile_policy_pending(conn, research_id, principal, profile)
+            if pending is None:
+                previous = conn.execute("""SELECT role, status FROM research_catalog_memberships
+                    WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                    (research_id, principal, profile)).fetchone()
+                if operation == "remove" and (previous is None or previous["role"] != role):
+                    raise RuntimeError("Profile membership changed; retry removal")
+                conn.execute("""INSERT INTO research_profile_policy_pending
+                    (research_id, principal_ref, profile_ref, actor_ref, identity_id, subject,
+                     operation, desired_role, desired_status, expected_exists, expected_role, expected_status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (research_id, principal, profile, *desired, int(previous is not None),
+                     str(previous["role"]) if previous is not None else "",
+                     str(previous["status"]) if previous is not None else "", time.time()))
+                self._advance_profile_policy_version(conn, research_id, principal, profile)
+            elif tuple(pending[key] for key in (
+                    "actor_ref", "identity_id", "subject", "operation", "desired_role", "desired_status")) != desired:
+                raise RuntimeError("another Profile authorization update is pending")
+        # No database write lock is held across Keycloak network calls. Any
+        # failure leaves the pending row in place and the Profile denied.
+        self._profile_grant_manager.set_profile_membership(
+            actor=actor, research_id=research_id, identity_id=stable, subject=subject,
+            profile_ref=profile, role=role, status=status,
+        )
+        now = time.time()
+        with self._write(research_id) as conn:
+            pending = self._profile_policy_pending(conn, research_id, principal, profile)
+            if pending is None or tuple(pending[key] for key in (
+                    "actor_ref", "identity_id", "subject", "operation", "desired_role", "desired_status")) != desired:
+                raise RuntimeError("Profile authorization recovery record changed")
+            previous = conn.execute("""SELECT role, status FROM research_catalog_memberships
+                WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                (research_id, principal, profile)).fetchone()
+            actual = (int(previous is not None), str(previous["role"]) if previous else "",
+                      str(previous["status"]) if previous else "")
+            expected = (pending["expected_exists"], pending["expected_role"], pending["expected_status"])
+            if actual != expected:
+                raise RuntimeError("Profile membership changed during authorization update")
+            self._upsert_membership(conn, research_id=research_id, principal_ref=principal,
+                                    profile_ref=profile, role=role, status=status,
+                                    invited_by=actor, now=now)
+            if operation == "remove":
+                conn.execute("""UPDATE research_catalog_workspaces SET status='archived', updated_at=?
+                    WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active'""",
+                    (now, research_id, principal, profile))
+            conn.execute("""DELETE FROM research_profile_policy_pending
+                WHERE research_id=? AND principal_ref=? AND profile_ref=?""", (research_id, principal, profile))
+            self._advance_profile_policy_version(conn, research_id, principal, profile)
+            updated = conn.execute("""SELECT * FROM research_catalog_memberships
+                WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                (research_id, principal, profile)).fetchone()
+        return self._membership_value(updated)
+
     def add_membership(
         self,
         research_id: str,
@@ -875,6 +1022,11 @@ class ResearchCatalog(ResearchBranchesMixin):
         profile = _profile(profile_ref)
         clean_role = _choice(role, MEMBER_ROLES, "member role")
         clean_status = _choice(status, MEMBER_STATUSES, "member status")
+        if self._profile_authorizer is not None:
+            return self._change_profile_membership(
+                research_id=research_id, actor=_principal(actor), principal=principal,
+                profile=profile, role=clean_role, status=clean_status, operation="set",
+            )
         now = time.time()
         with self._write(research_id) as conn:
             self._upsert_membership(
@@ -903,6 +1055,25 @@ class ResearchCatalog(ResearchBranchesMixin):
             raise PermissionError("research membership management is not authorized")
         profile = _profile(profile_ref)
         principal = _principal(principal_ref) if principal_ref else None
+        if self._profile_authorizer is not None:
+            with connect_sqlite(self.db_path, readonly=True) as conn:
+                candidates = conn.execute(
+                    "SELECT * FROM research_catalog_memberships WHERE research_id=? AND profile_ref=?",
+                    (research_id, profile),
+                ).fetchall()
+            if principal is None:
+                if len(candidates) > 1:
+                    raise ValueError("principal_ref is required for an ambiguous Profile")
+                principal = str(candidates[0]["principal_ref"]) if candidates else None
+            value = next((item for item in candidates if item["principal_ref"] == principal), None)
+            if value is None:
+                raise KeyError("research member not found")
+            if profile == "self" and principal == row["owner_ref"]:
+                raise PermissionError("the Research owner's self Profile is a required member")
+            return self._change_profile_membership(
+                research_id=research_id, actor=_principal(actor), principal=principal,
+                profile=profile, role=str(value["role"]), status="revoked", operation="remove",
+            )
         now = time.time()
         with self._write(research_id) as conn:
             candidates = conn.execute(
@@ -947,16 +1118,27 @@ class ResearchCatalog(ResearchBranchesMixin):
         row = self._research_row(research_id)
         principal = _principal(principal_ref)
         profile = _profile(profile_ref)
+        profile_version = None
+        if self._profile_authorizer is not None:
+            with connect_sqlite(self.db_path, readonly=True) as conn:
+                if self._profile_policy_pending(conn, research_id, principal, profile):
+                    raise PermissionError("Profile authorization update is pending")
+                profile_version = self._profile_policy_version(conn, research_id, principal, profile)
         access = self._research_access(row, actor)
         if not access["can_manage"]:
-            with connect_sqlite(self.db_path, readonly=True) as conn:
-                member = conn.execute(
-                    """SELECT role FROM research_catalog_memberships
-                       WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active'""",
-                    (research_id, principal, profile),
-                ).fetchone()
-            if (not access["can_view"] or principal != actor or member is None
-                    or member["role"] not in {"owner", "editor", "contributor"}):
+            if self._profile_authorizer is not None:
+                can_write = principal == actor and self._profile_authorizer.may_write_profile(
+                    research_id=research_id, viewer=actor, profile_ref=profile,
+                )
+            else:
+                with connect_sqlite(self.db_path, readonly=True) as conn:
+                    member = conn.execute(
+                        """SELECT role FROM research_catalog_memberships
+                           WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active'""",
+                        (research_id, principal, profile),
+                    ).fetchone()
+                can_write = member is not None and member["role"] in {"owner", "editor", "contributor"}
+            if not access["can_view"] or principal != actor or not can_write:
                 raise PermissionError("research workspace management is not authorized")
         clean_title = _text(
             title or profile, "title", maximum=256, allow_empty=False,
@@ -964,12 +1146,18 @@ class ResearchCatalog(ResearchBranchesMixin):
         workspace_id = "research-workspace:v1:" + secrets.token_urlsafe(18)
         now = time.time()
         with self._write(research_id) as conn:
+            if self._profile_authorizer is not None and self._profile_policy_pending(conn, research_id, principal, profile):
+                raise PermissionError("Profile authorization update is pending")
+            if (self._profile_authorizer is not None
+                    and self._profile_policy_version(conn, research_id, principal, profile) != profile_version):
+                raise PermissionError("Profile authorization changed; retry")
             membership = conn.execute(
                 """SELECT status FROM research_catalog_memberships
                    WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
                 (research_id, principal, profile),
             ).fetchone()
-            if membership is None or str(membership["status"]) != "active":
+            if (membership is None or (self._profile_authorizer is None
+                                      and str(membership["status"]) != "active")):
                 raise ValueError("profile must be an active research member")
             existing = conn.execute(
                 """SELECT * FROM research_catalog_workspaces
@@ -1031,6 +1219,26 @@ class ResearchCatalog(ResearchBranchesMixin):
         users = _authorized_users(authorized_users, str(row["owner_ref"]))
         clean_profile = _optional_profile(profile_ref)
         clean_workspace = str(workspace_id or "").strip()
+        checked_profile = clean_profile
+        checked_version = None
+        if self._profile_authorizer is not None:
+            with connect_sqlite(self.db_path, readonly=True) as conn:
+                if clean_workspace:
+                    workspace_hint = conn.execute(
+                        "SELECT profile_ref FROM research_catalog_workspaces WHERE workspace_id=?",
+                        (clean_workspace,),
+                    ).fetchone()
+                    if workspace_hint is not None and not checked_profile:
+                        checked_profile = _optional_profile(workspace_hint["profile_ref"])
+                if checked_profile:
+                    owner = str(row["owner_ref"])
+                    if self._profile_policy_pending(conn, research_id, owner, checked_profile):
+                        raise PermissionError("Profile authorization update is pending")
+                    checked_version = self._profile_policy_version(conn, research_id, owner, checked_profile)
+            if checked_profile and (str(actor) != str(row["owner_ref"])
+                    or not self._profile_authorizer.may_write_profile(
+                        research_id=research_id, viewer=actor, profile_ref=checked_profile)):
+                raise PermissionError("report Profile write is not authorized")
         now = time.time()
         with self._write(research_id) as conn:
             if clean_workspace:
@@ -1053,13 +1261,20 @@ class ResearchCatalog(ResearchBranchesMixin):
                     raise ValueError("report profile does not match research workspace")
                 clean_profile = workspace_profile
             if clean_profile:
-                membership = conn.execute(
-                    """SELECT status FROM research_catalog_memberships
-                        WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
-                    (research_id, str(row["owner_ref"]), clean_profile),
-                ).fetchone()
-                if membership is None or str(membership["status"]) != "active":
-                    raise ValueError("report profile must be an active research member")
+                if self._profile_authorizer is not None:
+                    owner = str(row["owner_ref"])
+                    if (clean_profile != checked_profile
+                            or self._profile_policy_pending(conn, research_id, owner, clean_profile)
+                            or self._profile_policy_version(conn, research_id, owner, clean_profile) != checked_version):
+                        raise PermissionError("Profile authorization changed; retry")
+                else:
+                    membership = conn.execute(
+                        """SELECT status FROM research_catalog_memberships
+                            WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                        (research_id, str(row["owner_ref"]), clean_profile),
+                    ).fetchone()
+                    if membership is None or str(membership["status"]) != "active":
+                        raise ValueError("report profile must be an active research member")
             existing = conn.execute(
                 "SELECT * FROM research_catalog_reports WHERE report_id=?",
                 (report,),
@@ -1776,6 +1991,42 @@ class ResearchCatalog(ResearchBranchesMixin):
             raise KeyError("report not found")
         return row
 
+    def _profile_pairs(self, conn, viewer: str, *, research_id: str = "") -> dict[tuple[str, str], int]:
+        if self._profile_authorizer is None or not viewer:
+            return {}
+        sql = """SELECT m.research_id, m.profile_ref, COALESCE(v.revision, 0) AS policy_version
+                 FROM research_catalog_memberships m
+                 LEFT JOIN research_profile_policy_versions v
+                   ON v.research_id=m.research_id AND v.principal_ref=m.principal_ref AND v.profile_ref=m.profile_ref
+                 WHERE m.principal_ref=? AND NOT EXISTS (
+                   SELECT 1 FROM research_profile_policy_pending p
+                    WHERE p.research_id=m.research_id AND p.principal_ref=m.principal_ref
+                      AND p.profile_ref=m.profile_ref)"""
+        params = [viewer]
+        if research_id:
+            sql += " AND m.research_id=?"
+            params.append(research_id)
+        # These are association candidates, not permission decisions. Keycloak
+        # may allow or deny independently of their old role/status columns.
+        return {(str(item["research_id"]), str(item["profile_ref"])): int(item["policy_version"])
+                for item in conn.execute(sql, params)}
+
+    def _profile_membership_access(self, viewer: str, pairs: dict[tuple[str, str], int]) -> dict[str, dict[str, bool]]:
+        if self._profile_authorizer is None or not viewer or not pairs:
+            return {}
+        values = self._profile_authorizer.profile_membership_access_many(viewer=viewer, profiles=pairs)
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            current_pairs = self._profile_pairs(conn, viewer)
+        result: dict[str, dict[str, bool]] = {}
+        for (research_id, profile_ref), access in values.items():
+            pair = (research_id, profile_ref)
+            if pair not in pairs or current_pairs.get(pair) != pairs[pair]:
+                continue
+            current = result.setdefault(research_id, {"can_view": False, "can_download": False})
+            current["can_view"] = current["can_view"] or bool(access.get("can_view"))
+            current["can_download"] = current["can_download"] or bool(access.get("can_download"))
+        return result
+
     def _research_access(self, row, viewer: str | None) -> dict[str, Any]:
         viewer_ref = str(viewer or "").strip()
         membership = None
@@ -1788,6 +2039,10 @@ class ResearchCatalog(ResearchBranchesMixin):
                        ORDER BY CASE role WHEN 'owner' THEN 2 WHEN 'editor' THEN 1 ELSE 0 END DESC""",
                     (str(row["research_id"]), viewer_ref),
                 ).fetchone()
+                pairs = self._profile_pairs(conn, viewer_ref, research_id=str(row["research_id"]))
+        else:
+            pairs = {}
+        profile_access = self._profile_membership_access(viewer_ref, pairs)
         return self._research_access_values(
             research_id=str(row["research_id"]),
             owner=str(row["owner_ref"]),
@@ -1796,6 +2051,7 @@ class ResearchCatalog(ResearchBranchesMixin):
             authorized_users_json=row["authorized_users_json"],
             viewer=viewer_ref,
             membership=membership,
+            profile_access=profile_access.get(str(row["research_id"]), {}),
         )
 
     def _research_access_values(
@@ -1808,12 +2064,15 @@ class ResearchCatalog(ResearchBranchesMixin):
         authorized_users_json: Any,
         viewer: str,
         membership=None,
+        profile_access=None,
     ) -> dict[str, Any]:
         if viewer and viewer == owner:
             return _access(True, True, True, True, "owner", research_id)
         if status == "archived":
             return _access(False, False, False, False, "none", research_id)
-        if membership is not None and str(membership["status"]) == "active":
+        if self._profile_authorizer is not None and (profile_access or {}).get("can_view"):
+            return _access(True, True, bool(profile_access.get("can_download")), False, "research", research_id)
+        if self._profile_authorizer is None and membership is not None and str(membership["status"]) == "active":
             return _access(
                 True, True, True,
                 False,  # Membership grants collaboration, never research administration.

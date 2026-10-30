@@ -44,9 +44,14 @@ class ResearchBranchesMixin:
         authorizer = self._profile_authorizer
         if authorizer is None:
             return None
-        return bool(authorizer.may_write_profile(
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            if self._profile_policy_pending(conn, str(report['research_id']), actor, profile_ref):
+                raise PermissionError('Profile authorization update is pending')
+            version = self._profile_policy_version(conn, str(report['research_id']), actor, profile_ref)
+        allowed = bool(authorizer.may_write_profile(
             research_id=str(report['research_id']), viewer=actor, profile_ref=profile_ref,
         ))
+        return allowed, version
 
     def _branch_member(self, conn, report, actor: str, profile_ref: str, profile_decision=None):
         current = conn.execute('SELECT status FROM research_catalog_reports WHERE report_id=?',
@@ -58,6 +63,17 @@ class ResearchBranchesMixin:
                 WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active' ''',
                 (report['research_id'], actor, profile_ref)).fetchone()
             profile_decision = member is not None and member['role'] in {'owner', 'editor', 'contributor'}
+        else:
+            pending = conn.execute('''SELECT 1 FROM research_profile_policy_pending
+                WHERE research_id=? AND principal_ref=? AND profile_ref=?''',
+                (report['research_id'], actor, profile_ref)).fetchone()
+            if pending is not None:
+                raise PermissionError('Profile authorization update is pending')
+            if (not isinstance(profile_decision, tuple) or len(profile_decision) != 2
+                    or self._profile_policy_version(conn, str(report['research_id']), actor, profile_ref)
+                    != profile_decision[1]):
+                raise PermissionError('Profile authorization changed; retry')
+            profile_decision = profile_decision[0]
         if (current is None or current['status'] != 'active' or research is None or research['status'] != 'active'
                 or profile_decision is not True):
             raise PermissionError('this exact Profile is not an active report editor')
