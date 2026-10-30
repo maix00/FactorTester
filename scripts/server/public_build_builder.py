@@ -63,7 +63,7 @@ def prepare(run=subprocess.run, *, headroom=require_host_headroom) -> str:
             call(['buildx', 'create', '--name', NAME, '--driver', 'docker-container',
                   '--driver-opt', 'memory=2g', '--driver-opt', 'memory-swap=2g',
                   '--driver-opt', 'cpu-period=100000', '--driver-opt', 'cpu-quota=200000',
-                  '--driver-opt', 'default-load=true', '--buildkitd-config', config.name])
+                  '--buildkitd-config', config.name])
     else:
         driver = re.search(r'^Driver:\s*(\S+)\s*$', found.stdout, re.MULTILINE)
         if not driver or driver.group(1) != 'docker-container':

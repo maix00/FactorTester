@@ -24,7 +24,9 @@ def test_creates_native_bounded_builder_and_checks_actual_runtime_limits():
     assert prepare(run, headroom=lambda: None)=='tr-public-bounded'
     create=next(c for c in calls if c[1:3]==['buildx','create'])
     assert 'memory=2g' in create and 'memory-swap=2g' in create
-    assert 'default-load=true' in create
+    # Compose selects the Docker image exporter itself. Its embedded Buildx
+    # version may reject this newer driver option even when the CLI accepts it.
+    assert 'default-load=true' not in create
     assert '--buildkitd-config' in create
     assert calls[-1][1]=='inspect'
 
