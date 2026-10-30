@@ -720,3 +720,10 @@ def test_release_rejects_stale_rollback_revision_before_building():
     assert guard < script.index('bash "$public_script" build factortester-public')
     assert guard < script.index('bash "$public_script" stop-app')
     assert "{{.Config.Image}}" in script[:guard]
+
+
+def test_immutable_public_service_cannot_follow_retired_host_source():
+    entrypoint = (DEPLOYMENT / 'factortester-entrypoint.sh').read_text()
+    assert '--fixed-source /opt/factortester/app' in entrypoint
+    assert '$FACTORTESTER_FIXED_SOURCE' not in entrypoint
+    assert 'FACTORTESTER_FIXED_SOURCE' not in _compose()['services']['factortester-public']['environment']
