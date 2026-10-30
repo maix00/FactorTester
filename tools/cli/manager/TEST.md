@@ -24,7 +24,7 @@ service-port selections are included.
 
 ## E2E/subprocess coverage
 
-The subprocess tests resolve `factortester-manager` from `PATH` when available
+The subprocess tests resolve `traderesearch-manager` from `PATH` when available
 and fall back to the source module for local development. They do not set a
 working directory, and they validate real Click help/configuration behavior
 without requiring a live Manager account.

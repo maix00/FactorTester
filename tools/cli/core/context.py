@@ -54,4 +54,4 @@ def ensure_child_available(parent: str | None, key: str) -> None:
     if any(module.get("key") == key for module in modules):
         return
     location = CliState(current_parent=parent).location_label
-    raise RuntimeError(f"当前位置 {location} 下没有 {key}；请先 factortester list 查看可进入项。")
+    raise RuntimeError(f"当前位置 {location} 下没有 {key}；请先 traderesearch list 查看可进入项。")

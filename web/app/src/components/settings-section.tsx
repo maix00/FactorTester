@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import { useTranslation } from "react-i18next";
-import { DocsSettings } from "./docs-settings.tsx";
 import { ProfileSettings } from "./profile-settings.tsx";
 import { DeviceSettings } from "./device-settings.tsx";
 import { AccountActions } from "./account-actions.tsx";
@@ -12,13 +11,15 @@ import { ServerSummary } from "./server-summary.tsx";
 import { request } from "../configuration/api.ts";
 import { useAuth } from "../auth.tsx";
 
-import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
+import { ADMIN_SETTINGS_SECTIONS, visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
 
-type SettingsSectionProps={section:SettingsSectionID;onResetLayout?:()=>void};
+type SettingsSectionProps={section:SettingsSectionID;onResetLayout?:()=>void;adminSurface?:boolean};
 export function SettingsSection(props:SettingsSectionProps):React.ReactElement {
  const {session}=useAuth(),{t}=useTranslation();
- const allowed=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"});
- if(!allowed.some(item=>item.id===props.section))return <Alert type="info" message={t("settingsPanel.permissionRequired")} />;
+ const isAdminSection=ADMIN_SETTINGS_SECTIONS.includes(props.section as typeof ADMIN_SETTINGS_SECTIONS[number]);
+ const hasAdminCapability=session?.admin_capabilities?.includes("admin_console:manage")===true;
+ const allowed=props.adminSurface ? isAdminSection&&hasAdminCapability : visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:hasAdminCapability}).some(item=>item.id===props.section);
+ if(!allowed)return <Alert type="info" message={t("settingsPanel.permissionRequired")} />;
  return <SettingsSectionContent {...props}/>;
 }
 function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):React.ReactElement{
@@ -32,7 +33,6 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
       controlDatabase: "/api/control-database/config",
       manager: "/api/worktrees",
       mihomo: "/api/admin/mihomo",
-      federation: "/api/federation/config",
       quota: "/api/jobs/storage",
       updates: "/api/client/releases/beta.json",
     };
@@ -72,7 +72,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
             <div className="tr-settings-card">
               {serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
             </div>
-          ) : section === "profiles" ? <ProfileSettings/> : section === "docs" ? <DocsSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "mihomo"].includes(section) ? (
+          ) : section === "profiles" ? <ProfileSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
               {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} onRefresh={() => setReload(value => value + 1)} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>

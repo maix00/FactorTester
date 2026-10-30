@@ -89,19 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def research_read_authorizer(database: str, *, authoring: bool = False):
-    """The byte process uses local projections only; never opens PostgreSQL."""
+    """The byte process has no local identity authority or hierarchy fallback."""
     if not database:
         return None
     from server.manager.services.research_catalog import ResearchCatalog
-    from tools.data.sqlite.db import connect_sqlite
-
-    def accounts():
-        with connect_sqlite(database, readonly=True) as conn:
-            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='accounts'").fetchone() is None:
-                return []
-            return [dict(row) for row in conn.execute("SELECT username, parent_username FROM accounts")]
-
-    catalog = ResearchCatalog(database, account_provider=accounts)
+    catalog = ResearchCatalog(database)
     return catalog.can_read_authoring_publication if authoring else catalog.can_read_publication
 
 

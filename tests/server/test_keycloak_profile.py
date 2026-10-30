@@ -1,0 +1,67 @@
+from copy import deepcopy
+from server.identity.keycloak_profile import (
+    CLAIM_ATTRIBUTES, configure_identity_mappers, protect_identity_attributes,
+)
+
+
+class Adapter:
+    def __init__(self):
+        self.profile = {'attributes': [{'name': 'email', 'required': {'roles': ['user']}}], 'groups': [{'name': 'custom'}]}
+        self.mappers = []
+        self.writes = 0
+
+    def _get(self, path):
+        if path == 'users/profile':
+            return deepcopy(self.profile)
+        if path.startswith('clients?'):
+            return [{'clientId': 'manager', 'id': 'c'}]
+        return deepcopy(self.mappers)
+
+    def _put(self, path, value):
+        self.writes += 1
+        if path == 'users/profile':
+            self.profile = deepcopy(value)
+        else:
+            i = next(i for i, r in enumerate(self.mappers) if r['id'] == value['id'])
+            self.mappers[i] = deepcopy(value)
+
+    def _post(self, path, value):
+        self.writes += 1
+        self.mappers.append({**deepcopy(value), 'id': str(len(self.mappers))})
+
+
+def test_identity_attributes_cannot_be_edited_by_users_and_preserve_profile():
+    a = Adapter()
+    protect_identity_attributes(a)
+    assert a.profile['groups'] == [{'name': 'custom'}]
+    assert {'name': 'email'} in a.profile['attributes']
+    for attr in a.profile['attributes'][1:]:
+        assert attr['permissions'] == {'view': ['admin'], 'edit': ['admin']}
+    assert a.profile['unmanagedAttributePolicy'] == 'ADMIN_EDIT'
+
+
+def test_claims_use_imported_attribute_names_and_do_not_duplicate_mappers():
+    a = Adapter()
+    configure_identity_mappers(a, 'manager')
+    n = a.writes
+    configure_identity_mappers(a, 'manager')
+    assert a.writes == n
+    assert len(a.mappers) == len(CLAIM_ATTRIBUTES) + 1
+    assert next(r for r in a.mappers if r['name'] == 'manager-audience')['config']['included.client.audience'] == 'manager'
+    assert next(r for r in a.mappers if r['name'] == 'tr_organization_id')['config']['user.attribute'] == 'tr_organization_id'
+
+
+def test_manager_role_provisioning_is_explicit_and_idempotent():
+    from server.identity.keycloak_profile import ensure_manager_roles, MANAGER_ROLES
+    class Roles:
+        def __init__(self): self.roles = [{'name': 'unrelated'}]; self.writes = 0
+        def _get(self, path):
+            return [{'clientId': 'manager', 'id': 'c'}] if path.startswith('clients?') else self.roles
+        def _post(self, path, value):
+            assert path == 'clients/c/roles'
+            self.roles.append(value); self.writes += 1
+    a = Roles()
+    ensure_manager_roles(a, 'manager'); n = a.writes
+    ensure_manager_roles(a, 'manager')
+    assert a.writes == n == len(MANAGER_ROLES)
+    assert {'name': 'unrelated'} in a.roles

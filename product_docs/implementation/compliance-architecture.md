@@ -61,7 +61,7 @@
 
 - 测试字段注册、配置规范化和执行上下文：`server/manager/services/test_authoring.py`
 - 公共/私有入口、会话和传输边界：`server/manager/http/request_security.py`
-- 用户、设备和公开访问策略管理：`server/manager/http/access_control_routes.py`、`server/manager/http/account_admin_routes.py`
+- Keycloak 登录、设备会话与用户管理：`server/manager/http/auth_routes.py`、`server/manager/http/account_admin_routes.py`
 - 任务列表、聚合和跨服务投影：`server/manager/http/job_list_routes.py`、`server/manager/http/job_transfer_routes.py`、`server/manager/storage/job_index.py`
 - Job、Attempt、RunSpec hash、Artifact 和自定义分析的持久化：`server/jobs/repository/`
 - 公开技术文档的清单编译和安全渲染：`server/manager/services/technical_docs.py`

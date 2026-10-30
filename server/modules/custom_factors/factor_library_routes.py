@@ -18,6 +18,7 @@ from server.modules.custom_factors.factor_library_store import (
     delete_scope,
     ensure_scope_exists,
     load_factor_param_config,
+    list_factor_param_config_refs,
     normalize_product_group,
     rename_scope,
 )
@@ -25,7 +26,13 @@ from server.services.api_response import api_ok, route_guard
 from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user, user_file_lock_budget, get_user_file_lock
-from tools.data.account_manage import can_view_user_scope
+from server.identity.keycloak_authorization import (
+    AuthorizationUnavailable,
+    ensure_keycloak_resource,
+    keycloak_authorized_objects,
+    keycloak_request_credentials,
+    keycloak_resource_permission,
+)
 
 
 def _username() -> str | None:
@@ -33,6 +40,100 @@ def _username() -> str | None:
     if u is None:
         return None
     return u
+
+
+def _factor_library_resource_ref(owner_username: str) -> str:
+    return f"custom:{str(owner_username or '').strip()}"
+
+
+def _ensure_own_factor_library_resource(owner_username: str) -> tuple[str, str, str] | None:
+    from flask import g, has_request_context
+
+    credentials = keycloak_request_credentials()
+    if credentials is None or credentials[2] != str(owner_username):
+        return None
+    resource_ref = _factor_library_resource_ref(owner_username)
+    registered = getattr(g, "_tr_factor_libraries_registered", None) if has_request_context() else None
+    if isinstance(registered, set) and resource_ref in registered:
+        return credentials
+    ensure_keycloak_resource(
+        resource_type="factor_library",
+        resource_ref=resource_ref,
+        owner_subject=credentials[1],
+    )
+    if has_request_context():
+        if not isinstance(registered, set):
+            registered = set()
+            g._tr_factor_libraries_registered = registered
+        registered.add(resource_ref)
+    return credentials
+
+
+def _authorize_factor_library(owner_username: str, scope: str):
+    credentials = keycloak_request_credentials()
+    if credentials is None:
+        return jsonify({'success': False, 'error': '需要有效的 Keycloak 会话'}), 401
+    if credentials[2] == str(owner_username):
+        try:
+            credentials = _ensure_own_factor_library_resource(owner_username)
+        except Exception as exc:
+            return jsonify({
+                'success': False, 'code': 'authorization_unavailable',
+                'error': str(exc),
+            }), 503
+        if credentials is None:
+            return jsonify({'success': False, 'error': 'Keycloak 身份不匹配'}), 403
+    try:
+        allowed = keycloak_resource_permission(
+            credentials[0], resource_type="factor_library",
+            resource_ref=_factor_library_resource_ref(owner_username), scope=scope,
+        )
+    except Exception as exc:
+        return jsonify({
+            'success': False, 'code': 'authorization_unavailable',
+            'error': str(exc),
+        }), 503
+    if not allowed:
+        return jsonify({'success': False, 'error': 'Keycloak 未授予此因子库操作'}), 403
+    return None
+
+
+def _authorized_library_owners(username: str, *, include_shared: bool,
+                                refs: list[tuple[str, str, str]]) -> tuple[set[str], object | None]:
+    credentials = keycloak_request_credentials()
+    if credentials is None:
+        return set(), (jsonify({'success': False, 'error': '需要有效的 Keycloak 会话'}), 401)
+    if credentials[2] != str(username):
+        return set(), (jsonify({'success': False, 'error': 'Keycloak 身份不匹配'}), 403)
+    owners = {str(owner) for owner, _family, _scope in refs if owner}
+    owners.add(str(username))
+    if not include_shared:
+        owners = {str(username)}
+    try:
+        _ensure_own_factor_library_resource(username)
+        allowed = keycloak_authorized_objects(
+            credentials[0],
+            resource_type="factor_library",
+            refs=[(_factor_library_resource_ref(owner), owner) for owner in sorted(owners)],
+            scope="read",
+        )
+    except Exception as exc:
+        return set(), (jsonify({
+            'success': False, 'code': 'authorization_unavailable',
+            'error': str(exc),
+        }), 503)
+    return {str(owner) for owner in allowed}, None
+
+
+def _can_filter_organization() -> bool:
+    credentials = keycloak_request_credentials()
+    if credentials is None:
+        return False
+    from flask import g
+
+    identity = getattr(g, "keycloak_user_session", None)
+    roles = identity.get("keycloak_roles", ()) if isinstance(identity, dict) else ()
+    return "admin_console:manage" in roles
 
 
 @factor_library_internal_bp.route('/overview', methods=['GET'])
@@ -44,7 +145,17 @@ def api_factor_library_overview():
     include_subordinates = request.args.get('include_subordinates') == '1'
     product_group = request.args.get('product_group') or request.args.get('scope_key') or None
     factor_family_alias = request.args.get('factor_family_alias') or None
-    payload = build_factor_library_overview(username, include_subordinates, product_group=product_group, factor_family_alias=factor_family_alias)
+    refs = list_factor_param_config_refs(scope_key=product_group)
+    owners, failure = _authorized_library_owners(
+        username, include_shared=include_subordinates, refs=refs,
+    )
+    if failure:
+        return failure
+    payload = build_factor_library_overview(
+        username, include_subordinates, product_group=product_group,
+        factor_family_alias=factor_family_alias, authorized_owners=owners,
+        can_filter_organization=_can_filter_organization(),
+    )
     return jsonify({'success': True, **payload})
 
 
@@ -55,7 +166,17 @@ def api_factor_library_configs(ff_alias):
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     product_group = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
-    payload = list_factor_library_config_users(username, ff_alias, product_group=product_group)
+    refs = list_factor_param_config_refs(ff_alias=ff_alias, scope_key=product_group)
+    owners, failure = _authorized_library_owners(
+        username, include_shared=True, refs=refs,
+    )
+    if failure:
+        return failure
+    payload = list_factor_library_config_users(
+        username, ff_alias, product_group=product_group,
+        authorized_owners=owners,
+        can_filter_organization=_can_filter_organization(),
+    )
     return jsonify({'success': True, **payload})
 
 
@@ -65,15 +186,17 @@ def api_get_factor_library_config(ff_alias, owner_username):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    if not can_view_user_scope(username, owner_username):
-        return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
     product_group = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
+    failure = _authorize_factor_library(owner_username, "read")
+    if failure:
+        return failure
     config = load_factor_param_config(owner_username, ff_alias, scope_key=product_group)
     if not config:
         return jsonify({'success': False, 'error': '该用户尚未保存因子库参数配置'}), 404
     config = dict(config)
     config['owner_username'] = owner_username
-    config['editable'] = owner_username == username
+    manage_failure = _authorize_factor_library(owner_username, "manage")
+    config['editable'] = manage_failure is None
     return jsonify({'success': True, 'config': config})
 
 
@@ -93,6 +216,9 @@ def api_save_factor_library_config(ff_alias):
             metadata[key] = data.get(key)
     if not isinstance(params_list, list):
         return jsonify({'success': False, 'error': '参数列表格式无效'})
+    failure = _authorize_factor_library(username, "write")
+    if failure:
+        return failure
     with user_file_lock_budget(username):
         config, factors = save_current_user_library_config(
             username,
@@ -112,6 +238,9 @@ def api_delete_factor_library_config(ff_alias):
         return jsonify({'success': False, 'error': '未登录'}), 401
     scope_key = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
     factor_alias = str(request.args.get('factor_alias') or '').strip()
+    failure = _authorize_factor_library(username, "delete")
+    if failure:
+        return failure
     with user_file_lock_budget(username):
         deleted = (
             delete_factor_library_factor(
@@ -139,6 +268,9 @@ def api_add_factor_to_library_config(ff_alias):
             return jsonify({'success': False, 'error': '因子参数格式无效'}), 400
         if data.get('mode') == 'edit' and not str(data.get('replace_factor_ref') or '').strip():
             return jsonify({'success': False, 'error': '编辑目标缺少冻结引用，请刷新后重试'}), 409
+        failure = _authorize_factor_library(username, "write")
+        if failure:
+            return failure
         try:
             with user_file_lock_budget(username):
                 config, factor = save_single_library_factor(
@@ -168,6 +300,9 @@ def api_add_factor_to_library_config(ff_alias):
     scope_key = normalize_product_group(product_group)
     if not factor_alias:
         return jsonify({'success': False, 'error': '缺少 factor_alias'}), 400
+    failure = _authorize_factor_library(username, "write")
+    if failure:
+        return failure
 
     # 从 page_factors 查找因子（因子是唯一数据源），提取其参数行。
     page_uuid = str(data.get('page_uuid') or '')
@@ -218,6 +353,9 @@ def api_list_scopes():
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
+    failure = _authorize_factor_library(username, "read")
+    if failure:
+        return failure
     product_groups = list_factor_library_product_groups(username)
     return jsonify({'success': True, 'scopes': product_groups, 'product_groups': product_groups})
 
@@ -228,6 +366,9 @@ def api_ensure_scope(scope_key):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
+    failure = _authorize_factor_library(username, "manage")
+    if failure:
+        return failure
     with user_file_lock_budget(username):
         actual = ensure_scope_exists(username, scope_key)
     return jsonify({'success': True, 'scope_key': actual, 'product_group': actual})
@@ -239,6 +380,9 @@ def api_rename_scope(scope_key):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
+    failure = _authorize_factor_library(username, "manage")
+    if failure:
+        return failure
     data = request.get_json() or {}
     new_key = (data.get('new_product_group') or data.get('new_scope_key') or '').strip()
     if not new_key:
@@ -258,6 +402,9 @@ def api_delete_scope(scope_key):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
+    failure = _authorize_factor_library(username, "delete")
+    if failure:
+        return failure
     with user_file_lock_budget(username):
         ok = delete_scope(username, scope_key)
     if not ok:

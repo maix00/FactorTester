@@ -100,7 +100,7 @@ git config --worktree --unset core.hooksPath
 
 ## CLI 与测试运行时的边界
 
-`GTHT` 不安装 `factortester` 或 `factortester-manager`。这两个命令行应用
+`GTHT` 不安装 `traderesearch` 或 `traderesearch-manager`。这两个命令行应用
 属于 FTClient.app 的用户运行时，不属于仓库的服务器/量化开发依赖。普通用户
 安装 App 后由 App 激活内置 runtime；如需在终端调用，使用 App 生成的环境
 脚本：
@@ -116,8 +116,8 @@ pipx，也不要让外部 PATH 覆盖 App 管理入口。
 同一个发布包可以提供两个入口：
 
 ```text
-factortester          研究、Profile、Job 和本地客户端操作
-factortester-manager  Manager 登录、任务/生成物查询和服务器声明操作
+traderesearch          研究、Profile、Job 和本地客户端操作
+traderesearch-manager  Manager 登录、任务/生成物查询和服务器声明操作
 ```
 
 `factortester` 根命令不会注册 Manager 命令；两个入口仍然共享同一个已签名

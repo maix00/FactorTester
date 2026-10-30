@@ -66,7 +66,7 @@ def test_xcode_release_product_is_hidden_then_unregistered_and_removed(
 
 def test_manifest_builder_signs_explicit_assets(tmp_path: Path) -> None:
     private, public = _keys(tmp_path)
-    wheel = tmp_path / "factortester-0.1.0-py3-none-any.whl"
+    wheel = tmp_path / "traderesearch-0.1.0-py3-none-any.whl"
     wheel.write_bytes(b"wheel")
     manifest = create_manifest(
         version="0.1.0",
@@ -161,9 +161,9 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     for contract in (
         "CFBundleIdentifier", "CFBundleShortVersionString",
         "CFBundleVersion", "bundle_hash", "bundle-receipt.json",
-        'receipt["files"]["bin/factortester"]',
-        'receipt["files"]["bin/factortester-manager"]',
-        'receipt["files"]["bin/factortester-report-renderer"]',
+        'receipt["files"]["bin/traderesearch"]',
+        'receipt["files"]["bin/traderesearch-manager"]',
+        'receipt["files"]["bin/traderesearch-report-renderer"]',
     ):
         assert contract in source
     assert "--install|install" in source
@@ -183,12 +183,12 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
 ) -> None:
     app = tmp_path / "FTClient.app"
     resources = app / "Contents/Resources/FactorTester"
-    cli = resources / "bin/factortester"
+    cli = resources / "bin/traderesearch"
     cli.parent.mkdir(parents=True)
     cli.write_bytes(b"old")
-    manager_cli = resources / "bin/factortester-manager"
+    manager_cli = resources / "bin/traderesearch-manager"
     manager_cli.write_bytes(b"old")
-    report_renderer = resources / "bin/factortester-report-renderer"
+    report_renderer = resources / "bin/traderesearch-report-renderer"
     report_renderer.write_bytes(b"old")
     receipt = resources / "bundle-receipt.json"
     receipt.write_text(json.dumps({
@@ -542,10 +542,10 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     renderer_source = repo / "tools/cli/native/report_renderer.swift"
     renderer_source.parent.mkdir(parents=True)
     renderer_source.write_text("// renderer")
-    skill = repo / "skills/factortester-research-skill/SKILL.md"
+    skill = repo / "skills/traderesearch-research-skill/SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text(
-        "---\nname: factortester-research-skill\n"
+        "---\nname: traderesearch-research-skill\n"
         "description: Test skill.\n---\n\n# Test\n",
         encoding="utf-8",
     )
@@ -573,7 +573,7 @@ def test_embedded_runtime_writes_internal_hash_receipt(
         if "pyinstaller" in Path(command[0]).name:
             destination = Path(command[command.index("--distpath") + 1])
             destination.mkdir()
-            runtime = destination / "factortester"
+            runtime = destination / "traderesearch"
             runtime.write_bytes(b"runtime")
             runtime.chmod(0o755)
         elif command[-2:] and str(command[-2]).endswith("build_archive.py"):
@@ -608,9 +608,9 @@ def test_embedded_runtime_writes_internal_hash_receipt(
 
     body = receipt.read_text()
     assert '"version":"0.2.0"' in body
-    assert '"bin/factortester"' in body
-    assert '"bin/factortester-manager"' in body
-    assert '"bin/factortester-report-renderer"' in body
+    assert '"bin/traderesearch"' in body
+    assert '"bin/traderesearch-manager"' in body
+    assert '"bin/traderesearch-report-renderer"' in body
     assert '"adapters/vibe-trading-adapter.zip"' in body
     resources = app / "Contents/Resources/FactorTester"
     assert not (resources / "sources/Tiger/__pycache__").exists()

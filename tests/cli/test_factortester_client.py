@@ -25,18 +25,21 @@ def running_server(app: Flask) -> Iterator[str]:
         thread.join(timeout=5)
 
 
+def _authenticate_test_client(client: FactorTesterClient) -> None:
+    """Establish a test-only cookie; production CLI has no password endpoint."""
+    value = client.session.post("/test/keycloak-session", {})
+    assert value["username"] == "alice"
+
+
 @pytest.fixture()
 def fake_server() -> Iterator[str]:
     app = Flask(__name__)
     app.secret_key = "test-secret"
 
-    @app.post("/auth/login")
-    def login():
-        data = request.get_json()
-        if data == {"username": "alice", "password": "pw"}:
-            session["username"] = "alice"
-            return jsonify(success=True, username="alice")
-        return jsonify(success=False, error="bad login"), 401
+    @app.post("/test/keycloak-session")
+    def establish_test_keycloak_session():
+        session["username"] = "alice"
+        return jsonify(success=True, username="alice")
 
     @app.post("/api/client/profiles/sync")
     def sync_profile():
@@ -405,7 +408,7 @@ def fake_server() -> Iterator[str]:
 def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     client = FactorTesterClient(HttpSession(fake_server, cookies=tmp_path / "cookies.lwp"))
 
-    assert client.login("alice", "pw")["username"] == "alice"
+    _authenticate_test_client(client)
     assert client.sync_profile({
         "profile_id": "maxa",
         "display_name": "Max A",
@@ -554,12 +557,12 @@ def test_run_routes_select_service_without_changing_http_origin() -> None:
     ]
 
 
-def test_client_login_persists_across_processes_and_logout_clears_cookie(
+def test_keycloak_session_persists_across_processes_and_logout_clears_cookie(
     fake_server: str, tmp_path,
 ) -> None:
     cookie_file = tmp_path / "cookies.lwp"
     first = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
-    first.login("alice", "pw")
+    _authenticate_test_client(first)
 
     second = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
     assert second.list_workspaces()[0]["workspace_id"] == "workspace-1"
@@ -576,7 +579,7 @@ def test_binary_artifact_download_enforces_size_limit(
     client = FactorTesterClient(
         HttpSession(fake_server, cookies=tmp_path / "cookies.lwp")
     )
-    client.login("alice", "pw")
+    _authenticate_test_client(client)
 
     with pytest.raises(ValueError, match="download limit"):
         client.job_artifact(
@@ -596,7 +599,7 @@ def test_client_discards_corrupt_cookie_jar_without_traceback(fake_server: str, 
 
 def test_client_fetches_settings_and_candidates(fake_server: str, tmp_path) -> None:
     client = FactorTesterClient(HttpSession(fake_server, cookies=tmp_path / "cookies.lwp"))
-    client.login("alice", "pw")
+    _authenticate_test_client(client)
 
     assert client.manifest("group_test")["application"] == "group_test"
     assert client.tab_manifest("group_test", "engine")["tab"]["key"] == "engine"

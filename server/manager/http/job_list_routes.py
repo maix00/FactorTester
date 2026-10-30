@@ -52,6 +52,18 @@ def _updated_at_key(item: dict) -> tuple[int, float | str]:
 class JobListRoutesMixin:
     """Serve task scopes while preserving local and federated fallbacks."""
 
+    def _subordinate_users(self, session: dict[str, object]) -> list[dict[str, object]]:
+        """Project descendants only from the request's verified Keycloak claims."""
+        from server.identity.keycloak_directory import managed_users_for_claims
+
+        username = str(session.get("username") or "").strip()
+        users = managed_users_for_claims(
+            groups=session.get("keycloak_groups") or (),
+            roles=session.get("keycloak_roles") or (),
+        )
+        return [row for row in users
+                if str(row.get("username") or "").strip() != username]
+
     def _get_job_list_routes(self, parsed) -> bool:
         if parsed.path == "/api/jobs/ports":
             session = self._session()
@@ -171,6 +183,7 @@ class JobListRoutesMixin:
                         page=requested_page,
                         limit=limit,
                         source_scope=source_scope,
+                        delegated_user_token=self._bearer_token(),
                         **object_filter,
                     )
                 except (ConnectionError, OSError, TypeError, ValueError) as exc:
@@ -258,6 +271,7 @@ class JobListRoutesMixin:
                         page=requested_page,
                         limit=limit,
                         source_scope=scope,
+                        delegated_user_token=self._bearer_token(),
                         **object_filter,
                     )
                     projection = getattr(self.state, "local_run_projection", None)
@@ -268,7 +282,21 @@ class JobListRoutesMixin:
                             limit=limit,
                         )
                 elif scope == "subordinates":
-                    users = self._subordinate_users(principal)
+                    try:
+                        users = self._subordinate_users(session or {})
+                    except PermissionError:
+                        json_response(self, {
+                            "success": False,
+                            "error": "Keycloak hierarchy administration permission required",
+                        }, 403)
+                        return True
+                    except Exception:
+                        json_response(self, {
+                            "success": False,
+                            "code": "keycloak_directory_unavailable",
+                            "error": "Keycloak user hierarchy is unavailable",
+                        }, 503)
+                        return True
                     requested_user = str(
                         query.get("username", query.get("user", [""]))[0] or "",
                     ).strip()
@@ -302,6 +330,7 @@ class JobListRoutesMixin:
                         limit=limit,
                         source_scope="subordinates",
                         username=requested_user,
+                        delegated_user_token=self._bearer_token(),
                         **object_filter,
                     )
                     projection = getattr(self.state, "local_run_projection", None)

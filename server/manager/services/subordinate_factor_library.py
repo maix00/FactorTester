@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from server.manager.services.account_domain_projection import factor_rows_from_sync
@@ -10,42 +9,24 @@ from server.manager.services.account_domain_projection import factor_rows_from_s
 
 def direct_subordinate_accounts(
     principal: str,
-    local_account_store: object | None,
+    _retired_local_account_store: object | None = None,
 ) -> list[dict[str, Any]]:
-    """Return active first-level children from the local account mirror."""
+    """Return Keycloak-managed descendants for the verified current request.
+
+    The compatibility argument is ignored so this boundary cannot regress to
+    reading a local identity mirror. Keycloak Realm Group nesting supplies the
+    management scope; object access is still decided by FGAP separately.
+    """
     owner = str(principal or "").strip()
-    if not owner or local_account_store is None:
+    if not owner:
         return []
     try:
-        rows = local_account_store.load_accounts()
-    except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+        from server.identity.keycloak_directory import managed_users_for_verified_request
+
+        rows = managed_users_for_verified_request(owner)
+    except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
         return []
-    current = next(
-        (
-            row for row in rows
-            if isinstance(row, Mapping)
-            and str(row.get("username") or "").strip() == owner
-        ),
-        None,
-    )
-    if current is None:
-        return []
-    organization_id = str(current.get("organization_id") or "default")
-    children = [
-        dict(row)
-        for row in rows
-        if isinstance(row, Mapping)
-        and row.get("active", True) is not False
-        and str(row.get("parent_username") or "").strip() == owner
-        and str(row.get("organization_id") or "default") == organization_id
-    ]
-    return sorted(
-        children,
-        key=lambda row: (
-            str(row.get("alias") or row.get("username") or "").lower(),
-            str(row.get("username") or ""),
-        ),
-    )
+    return rows
 
 
 def subordinate_factor_rows(

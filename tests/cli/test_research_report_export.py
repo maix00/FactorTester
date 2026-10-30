@@ -107,7 +107,7 @@ def test_pdf_export_invokes_the_configured_native_renderer(
         "load_profile_root",
         lambda _path: client_root,
     )
-    renderer = tmp_path / "factortester-report-renderer"
+    renderer = tmp_path / "traderesearch-report-renderer"
     renderer.write_text(
         "#!/bin/sh\n"
         "set -eu\n"
@@ -117,7 +117,11 @@ def test_pdf_export_invokes_the_configured_native_renderer(
         encoding="utf-8",
     )
     renderer.chmod(0o755)
-    monkeypatch.setenv("FACTORTESTER_REPORT_RENDERER", str(renderer))
+    monkeypatch.setenv("TRADERESEARCH_REPORT_RENDERER", str(renderer))
+    monkeypatch.setenv(
+        "FACTORTESTER_REPORT_RENDERER",
+        str(tmp_path / "legacy-renderer-must-not-win"),
+    )
     output = tmp_path / "研究报告.pdf"
 
     exported = CliRunner().invoke(report_cli, _args(output, "pdf"))

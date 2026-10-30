@@ -58,6 +58,26 @@ def _append_subject_clause(
 class JobQueryImplementation:
     """Keep JobRecord reconstruction and bounded queue queries in one owner."""
 
+    def owner_refs(self, *, limit: int = 100_000) -> list[str]:
+        """List distinct Job owners without loading job payloads.
+
+        Storage inventory uses these ownership labels to reconcile retained
+        artifacts. They are not an identity or authorization directory.
+        Refuse an oversized inventory instead of silently omitting owners.
+        """
+        selected_limit = int(limit)
+        if not 1 <= selected_limit <= 100_000:
+            raise ValueError("owner reference limit is outside the safety budget")
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT owner FROM research_jobs "
+                "WHERE owner IS NOT NULL AND owner<>'' ORDER BY owner LIMIT ?",
+                (selected_limit + 1,),
+            ).fetchall()
+        if len(rows) > selected_limit:
+            raise RuntimeError("Job owner inventory exceeds the safety budget")
+        return [str(row["owner"]) for row in rows]
+
     def load(self, job_id: str, *, owner: str | None = None) -> JobRecord | None:
         clauses = ["job_id=?"]
         args: list[Any] = [str(job_id)]
@@ -695,6 +715,8 @@ class JobQueryImplementation:
             job_id=str(row["job_id"]),
             run_id=str(row["run_id"]),
             owner=str(row["owner"]),
+            owner_issuer=str(row["owner_issuer"] or ""),
+            owner_subject=str(row["owner_subject"] or ""),
             workspace_id=str(row["workspace_id"]),
             kind=str(row["kind"]),
             status=JobStatus(row["status"]),

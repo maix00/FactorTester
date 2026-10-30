@@ -15,6 +15,11 @@ from tools.data.sqlite.factor_source_store import upsert_factor_source, delete_f
 def test_current_head_restores_exact_local_snapshot_without_network(tmp_path, monkeypatch):
     from tools.data.sqlite.factor_source_versions import record_factor_formula_version
     from tools.data.sqlite.factor_family_heads import family_head
+    from server.identity import keycloak_authorization
+    monkeypatch.setattr(
+        keycloak_authorization, "keycloak_factor_source_permission",
+        lambda *args, **kwargs: True,
+    )
     monkeypatch.setattr(settings, 'CACHE_DB_PATH', tmp_path / 'cache.sqlite')
     monkeypatch.setenv('FACTORTESTER_SERVER_ID', 'peer')
     source = ('from tools.factors import FactorFamily\nfrom tools.factors.FactorExpr import ConstExpr\n'
@@ -37,6 +42,11 @@ def test_current_head_restores_exact_local_snapshot_without_network(tmp_path, mo
 
 
 def test_family_head_controls_peer_detail_edit_delete_and_cache(tmp_path, monkeypatch):
+    from server.identity import keycloak_authorization
+    monkeypatch.setattr(
+        keycloak_authorization, "keycloak_factor_source_permission",
+        lambda *args, **kwargs: True,
+    )
     control = MemoryControlStore()
     left = AccountDomainSyncService(sqlite_path=tmp_path/'left.sqlite', control_store=control, manager_id='left')
     right = AccountDomainSyncService(sqlite_path=tmp_path/'right.sqlite', control_store=control, manager_id='right')
@@ -117,9 +127,13 @@ def test_current_family_rejects_invisible_owner_before_storage_or_hydration(monk
     import pytest
     from server.manager.services import factor_family_current
 
-    monkeypatch.setattr(factor_family_current, "can_view_user_scope", lambda *_: False)
+    from server.identity import keycloak_authorization
+    monkeypatch.setattr(
+        keycloak_authorization, "keycloak_factor_source_permission",
+        lambda *args, **kwargs: False,
+    )
     monkeypatch.setattr(factor_family_current, "family_head",
                         lambda *_: pytest.fail("unauthorized request reached storage"))
-    with pytest.raises(PermissionError, match="outside your visible scope"):
+    with pytest.raises(PermissionError, match="not authorized by Keycloak"):
         ensure_current_family(SimpleNamespace(), "custom", "Probe",
                               principal="alice", owner="other")

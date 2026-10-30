@@ -319,7 +319,15 @@ def _visible_library_overview(username: str) -> dict:
     from flask import g, has_request_context
 
     if not has_request_context():
-        return build_factor_library_overview(username, include_subordinates=True)
+        from server.modules.custom_factors.factor_library_service import (
+            authorized_factor_library_owners,
+        )
+        owners = authorized_factor_library_owners(
+            username, include_shared=False, scope="use",
+        )
+        return build_factor_library_overview(
+            username, include_subordinates=False, authorized_owners=owners,
+        )
     cache = getattr(g, "_factor_library_overview_cache", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -327,7 +335,15 @@ def _visible_library_overview(username: str) -> dict:
     if username not in cache:
         _overview_build.active = True
         try:
-            cache[username] = build_factor_library_overview(username, include_subordinates=True)
+            from server.modules.custom_factors.factor_library_service import (
+                authorized_factor_library_owners,
+            )
+            owners = authorized_factor_library_owners(
+                username, include_shared=True, scope="use",
+            )
+            cache[username] = build_factor_library_overview(
+                username, include_subordinates=True, authorized_owners=owners,
+            )
         finally:
             _overview_build.active = False
     return cache[username]

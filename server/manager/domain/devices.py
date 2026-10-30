@@ -100,11 +100,6 @@ def _normalise_record(
         "username": username,
         "device_name": str(value.get("device_name") or "").strip()[:128],
         "enabled": bool(value.get("enabled", True)),
-        # All surviving records are public allowlist devices.  Keep the
-        # persisted columns for non-destructive compatibility with existing
-        # PostgreSQL/JSON snapshots, but normalize old rows to the new policy.
-        "public_access": True,
-        "quota_exempt": True,
         "created_at": created_at,
         "updated_at": updated_at,
         "source_server_id": source,
@@ -233,9 +228,8 @@ class DeviceRegistry:
         if isinstance(local, dict):
             for device_id, value in local.items():
                 try:
-                    if isinstance(value, dict) and (
-                        value.get("public_access") is not True
-                        or value.get("quota_exempt") is not True
+                    if isinstance(value, dict) and any(
+                        key in value for key in ("public_access", "quota_exempt")
                     ):
                         migrated = True
                     record = _normalise_record(
@@ -258,9 +252,8 @@ class DeviceRegistry:
             records: dict[str, dict[str, object]] = {}
             for item in value.get("devices") or []:
                 try:
-                    if isinstance(item, dict) and (
-                        item.get("public_access") is not True
-                        or item.get("quota_exempt") is not True
+                    if isinstance(item, dict) and any(
+                        key in item for key in ("public_access", "quota_exempt")
                     ):
                         migrated = True
                     record = _normalise_record(
@@ -329,8 +322,6 @@ class DeviceRegistry:
                 "enrollment_ip": enrollment_ip,
                 "last_seen_ip": enrollment_ip,
                 "enabled": True,
-                "public_access": True,
-                "quota_exempt": True,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -370,7 +361,6 @@ class DeviceRegistry:
                 for item in self._all_locked()
                 if (not owner or item.get("username") == owner)
                 and bool(item.get("enabled"))
-                and bool(item.get("public_access"))
             )
 
     def public_user_count(self) -> int:
@@ -380,7 +370,7 @@ class DeviceRegistry:
             return len({
                 str(item.get("username") or "")
                 for item in self._all_locked()
-                if bool(item.get("enabled")) and bool(item.get("public_access"))
+                if bool(item.get("enabled"))
             } - {""})
 
     def public_device_total_count(self, *, username: str = "") -> int:
@@ -396,7 +386,6 @@ class DeviceRegistry:
                 for item in self._all_locked()
                 if (not owner or item.get("username") == owner)
                 and bool(item.get("enabled"))
-                and bool(item.get("public_access"))
             )
 
     def revoke(self, device_id: str) -> dict[str, object]:
@@ -569,6 +558,9 @@ class DeviceChallengeStore:
         self.ttl_seconds = max(30.0, min(600.0, float(ttl_seconds)))
         self._lock = threading.RLock()
         self._values: dict[str, tuple[bytes, float]] = {}
+        self._device_login_tickets: dict[
+            str, tuple[str, str, str, float]
+        ] = {}
 
     def issue(self) -> tuple[str, bytes]:
         identifier = secrets.token_urlsafe(24)
@@ -589,3 +581,41 @@ class DeviceChallengeStore:
         if value is None or value[1] <= time.time():
             raise PermissionError("device challenge is expired")
         return value[0]
+
+    def issue_device_login_ticket(
+        self, *, username: str, device_id: str, origin: str,
+    ) -> str:
+        """Bind a verified device proof to one subsequent Keycloak OIDC flow."""
+        principal = str(username or "").strip()
+        identifier = normalise_device_id(device_id)
+        trusted_origin = str(origin or "").strip().rstrip("/")
+        if not principal or not trusted_origin.startswith(("https://", "http://")):
+            raise DeviceRegistryError("device login identity or origin is invalid")
+        ticket = secrets.token_urlsafe(32)
+        now = time.time()
+        with self._lock:
+            self._device_login_tickets = {
+                key: value for key, value in self._device_login_tickets.items()
+                if value[3] > now
+            }
+            while len(self._device_login_tickets) >= 1024:
+                self._device_login_tickets.pop(next(iter(self._device_login_tickets)))
+            self._device_login_tickets[ticket] = (
+                principal, identifier, trusted_origin, now + self.ttl_seconds,
+            )
+        return ticket
+
+    def consume_device_login_ticket(
+        self, ticket: object, *, origin: str,
+    ) -> tuple[str, str]:
+        """Consume one device-to-OIDC binding; reject replay or origin changes."""
+        key = str(ticket or "").strip()
+        with self._lock:
+            value = self._device_login_tickets.pop(key, None)
+        if (
+            value is None
+            or value[3] <= time.time()
+            or not secrets.compare_digest(value[2], str(origin or "").strip().rstrip("/"))
+        ):
+            raise PermissionError("device login ticket is invalid or expired")
+        return value[0], value[1]

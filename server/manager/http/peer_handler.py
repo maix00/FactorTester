@@ -7,13 +7,11 @@ import sys
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
-from server.manager.http.federation_routes import FederationRoutesMixin
+from server.manager.http.federation.execution_nodes import ExecutionNodeRoutesMixin
 from server.manager.http.federation.node_control import NodeControlRoutesMixin
 from server.manager.http.federation.transfers import TransferFederationRoutesMixin
+from server.manager.http.federation_routes import FederationRoutesMixin
 from server.manager.http.responses import json_response
-
-
-from server.manager.http.federation.execution_nodes import ExecutionNodeRoutesMixin
 
 
 class PeerControlHandler(
@@ -53,6 +51,9 @@ class PeerControlHandler(
         handlers = {
             "/api/federation/register": self._federation_register,
             "/api/federation/sync/events": self._federation_sync_events,
+            "/api/federation/identity-sync/check-disable": (
+                self._federation_identity_sync_check_disable
+            ),
             "/api/federation/jobs/query": self._federation_jobs_query,
             "/api/federation/public-data": self._federation_public_data,
             "/api/federation/sync/reconcile": self._federation_sync_reconcile,

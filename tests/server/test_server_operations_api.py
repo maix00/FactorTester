@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, g
 import pytest
 
 from server.server_operations import server_operations_bp
@@ -14,12 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _client(monkeypatch, *, role: str):
     monkeypatch.setattr(
-        "server.server_operations.get_account",
-        lambda username: {
-            "username": username,
-            "role": role,
-            "is_admin": role == "super_admin",
-        },
+        "server.server_operations.keycloak_request_credentials",
+        lambda: ("test-token", "subject-root", "root"),
     )
     app = Flask(
         __name__,
@@ -27,6 +23,19 @@ def _client(monkeypatch, *, role: str):
         static_folder=None,
     )
     app.secret_key = "test"
+
+    @app.before_request
+    def verified_keycloak_identity():
+        identity = {
+            "username": "root",
+            "keycloak_roles": ("admin_console:manage",) if role == "super_admin" else (),
+        }
+        g.keycloak_user_session = identity
+        monkeypatch.setattr(
+            "server.services.session_runtime._keycloak_request_session",
+            lambda: identity,
+        )
+
     app.register_blueprint(server_operations_bp)
     client = app.test_client()
     with client.session_transaction() as session:

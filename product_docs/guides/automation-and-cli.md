@@ -1,12 +1,12 @@
 ## 何时使用 CLI {#when-to-use-cli}
 
-重复提交、批量检查、研究报告 authoring 和任务核对适合使用 FactorTester CLI。先通过 `factortester --help` 或具体子命令的 `--help` 读取当前安装版本披露的合同；不要根据旧文档猜测参数，也不要直接改写服务器数据库、工作区索引或报告存储。
+重复提交、批量检查、研究报告 authoring 和任务核对适合使用 TradeResearch CLI。先通过 `traderesearch --help` 或具体子命令的 `--help` 读取当前安装版本披露的合同；不要根据旧文档猜测参数，也不要直接改写服务器数据库、工作区索引或报告存储。
 
 CLI 命令按业务对象组织：因子库、产品库、测试配置/任务、Research/Report/Evidence 和公开文档。命令返回的稳定 ref、schema version、状态和错误码比人类可读的名称更适合脚本判断。
 
 ## Agent 如何使用平台 {#agent-platform-use}
 
-Agent 应使用已安装的 `cli-anything-factortester-research` 或 `cli-anything-factortester-manager` Skill。Skill 负责说明何时查询、怎样形成证据、哪些操作需要正式对象引用，以及失败后如何安全恢复；CLI 是实际执行和返回结构化结果的唯一入口。
+Agent 应使用已安装的 `cli-anything-traderesearch-research` 或 `cli-anything-traderesearch-manager` Skill。Skill 负责说明何时查询、怎样形成证据、哪些操作需要正式对象引用，以及失败后如何安全恢复；CLI 是实际执行和返回结构化结果的唯一入口。
 
 ## 保持可追溯 {#keep-traceable}
 

@@ -90,7 +90,7 @@ def test_factor_family_rejects_other_users_custom_factor(monkeypatch) -> None:
         get_factor_family_instance("18800000000:UserAlpha", username="18717974771")
 
 
-def test_visible_but_unregistered_other_user_factor_remains_private(
+def test_legacy_local_visibility_does_not_grant_other_user_factor_access(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -109,20 +109,14 @@ def test_visible_but_unregistered_other_user_factor_remains_private(
             """
         )
     monkeypatch.setattr(factor_registry.Settings, "CACHE_DB_PATH", db_path)
-    monkeypatch.setattr(
-        factor_registry,
-        "can_view_user_scope",
-        lambda current, owner: (current, owner) == ("MaxA", "18717974771"),
-        raising=False,
-    )
     monkeypatch.setattr(factor_registry, "load_public_factor_source", lambda factor_id: None)
     monkeypatch.setattr(factor_registry.os.path, "isfile", lambda path: False)
 
-    with pytest.raises(ImportError, match="factor family source"):
+    with pytest.raises(PermissionError, match="not accessible"):
         get_factor_family_instance("18717974771:UserAlpha", username="MaxA")
 
 
-def test_visible_registered_other_user_factor_is_executable_with_owner_identity(
+def test_manager_authorized_other_user_factor_is_executable_with_owner_identity(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -150,12 +144,6 @@ def test_visible_registered_other_user_factor_is_executable_with_owner_identity(
     monkeypatch.setattr(factor_registry.Settings, "CACHE_DB_PATH", db_path)
     monkeypatch.setattr(
         factor_registry,
-        "can_view_user_scope",
-        lambda current, owner: (current, owner) == ("MaxA", "18717974771"),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        factor_registry,
         "load_factor_source",
         lambda username, factor_id: (
             _FACTOR_SOURCE
@@ -166,17 +154,20 @@ def test_visible_registered_other_user_factor_is_executable_with_owner_identity(
     monkeypatch.setattr(factor_registry, "load_public_factor_source", lambda factor_id: None)
     monkeypatch.setattr(factor_registry.os.path, "isfile", lambda path: False)
 
-    factor = factor_from_alias(
-        "18717974771:UserAlpha",
-        username="MaxA",
-    )
+    with factor_registry.authorized_factor_source_owners(
+        ["18717974771", "principal:18717974771"],
+    ):
+        factor = factor_from_alias(
+            "18717974771:UserAlpha",
+            username="MaxA",
+        )
 
     assert factor.alias.startswith("UserAlpha")
     assert factor.name.startswith("runtime-factor:18717974771:UserAlpha")
     assert factor.owner_ref == "18717974771"
 
 
-def test_visible_hydrated_other_user_factor_is_executable_before_library_sync(
+def test_manager_authorized_hydrated_factor_is_executable_before_library_sync(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -197,12 +188,6 @@ def test_visible_hydrated_other_user_factor_is_executable_before_library_sync(
     monkeypatch.setattr(factor_registry.Settings, "CACHE_DB_PATH", db_path)
     monkeypatch.setattr(
         factor_registry,
-        "can_view_user_scope",
-        lambda current, owner: (current, owner) == ("MaxA", "18717974771"),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        factor_registry,
         "load_factor_source",
         lambda username, factor_id: (
             _FACTOR_SOURCE
@@ -213,10 +198,13 @@ def test_visible_hydrated_other_user_factor_is_executable_before_library_sync(
     monkeypatch.setattr(factor_registry, "load_public_factor_source", lambda factor_id: None)
     monkeypatch.setattr(factor_registry.os.path, "isfile", lambda path: False)
 
-    source = factor_registry.resolve_factor_family_source(
-        "18717974771:UserAlpha",
-        username="MaxA",
-    )
+    with factor_registry.authorized_factor_source_owners(
+        ["18717974771", "principal:18717974771"],
+    ):
+        source = factor_registry.resolve_factor_family_source(
+            "18717974771:UserAlpha",
+            username="MaxA",
+        )
 
     assert source["canonical_family_ref"] == "18717974771:UserAlpha"
     assert source["source_code"] == _FACTOR_SOURCE
@@ -241,7 +229,6 @@ def test_manager_authorized_direct_child_source_is_executable(
             """
         )
     monkeypatch.setattr(factor_registry.Settings, "CACHE_DB_PATH", db_path)
-    monkeypatch.setattr(factor_registry, "can_view_user_scope", lambda *_: False)
     monkeypatch.setattr(
         factor_registry,
         "load_factor_source",
@@ -263,7 +250,6 @@ def test_manager_authorized_direct_child_source_is_executable(
 def test_manager_authorized_principal_ref_is_executable(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(factor_registry, "can_view_user_scope", lambda *_: False)
     monkeypatch.setattr(
         factor_registry,
         "load_factor_source",
@@ -285,8 +271,6 @@ def test_manager_authorized_principal_ref_is_executable(
 
 
 def test_manager_authorization_does_not_include_unlisted_owner(monkeypatch) -> None:
-    monkeypatch.setattr(factor_registry, "can_view_user_scope", lambda *_: False)
-
     with (
         factor_registry.authorized_factor_source_owners(["parent", "child"]),
         pytest.raises(PermissionError, match="not accessible"),
@@ -319,6 +303,40 @@ def test_public_family_source_uses_canonical_owner(monkeypatch) -> None:
 
     assert source["canonical_family_ref"] == "public:UserAlpha"
     assert source["source_owner"] == "public"
+
+
+def test_cross_owner_factor_resolution_uses_keycloak_use_scope(
+    monkeypatch,
+) -> None:
+    from flask import Flask, g
+
+    calls = []
+    monkeypatch.setattr(
+        "server.identity.keycloak_authorization.keycloak_request_credentials",
+        lambda: ("token", "subject-parent", "parent"),
+    )
+    monkeypatch.setattr(
+        "server.identity.keycloak_authorization.keycloak_factor_source_permission",
+        lambda token, *, owner_username, factor_id, scope: (
+            calls.append((token, owner_username, factor_id, scope)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        factor_registry, "load_factor_source",
+        lambda owner, factor_id: _FACTOR_SOURCE
+        if (owner, factor_id) == ("child", "UserAlpha") else None,
+    )
+    app = Flask(__name__)
+    with app.test_request_context("/"):
+        g.keycloak_user_session = {
+            "keycloak_subject": "subject-parent", "username": "parent",
+        }
+        source = factor_registry.resolve_factor_family_source(
+            "child:UserAlpha", username="parent",
+        )
+
+    assert source["canonical_family_ref"] == "child:UserAlpha"
+    assert calls == [("token", "child", "UserAlpha", "use")]
 
 
 def test_page_cache_is_not_factor_family_existence_authority(monkeypatch) -> None:

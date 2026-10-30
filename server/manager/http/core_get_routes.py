@@ -19,6 +19,7 @@ from server.manager.http.localization import web_localization
 from server.manager.http.pages import (
     PUBLIC_DEVICE_COMPLIANCE_NOTICE,
     PUBLIC_REGISTRATION_NOTICE,
+    public_compliance_information,
 )
 from server.manager.http.responses import json_response
 from server.manager.services.profile_storage_inventory import (
@@ -39,29 +40,26 @@ from server.manager.web.assets import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _admin_capabilities(username: str, role: str) -> list[str]:
-    if str(role or "") == "super_admin":
-        return ["admin_console:read", "admin_console:manage"]
-    import os
-    from server.permissions.entries import PermissionStore
+def _admin_capabilities(
+    username: str = "", role: str = "", keycloak_roles=(),
+    keycloak_groups=(),
+) -> list[str]:
+    """Project Manager capabilities only from Keycloak client roles."""
+    del username, role
+    allowed_roles = set(keycloak_roles or ())
+    capabilities = [
+        capability for capability in (
+            "admin_console:read", "admin_console:manage",
+        ) if capability in allowed_roles
+    ]
+    from server.identity.realm_groups import administrative_group_role
 
-    db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get(
-        "FACTORTESTER_PERMISSIONS_DB", ""
-    )
-    if not db:
-        return []
-    from server.permissions.subjects import subjects_for_user
-
-    store = PermissionStore(db)
-    subjects = subjects_for_user(username)
-    allowed = []
-    for capability in ("read", "manage"):
-        if any(store.allows(
-            subject=subject, resource_type="admin_console",
-            resource_ref="dispatch", action=capability,
-        ) for subject in subjects):
-            allowed.append(f"admin_console:{capability}")
-    return allowed
+    delegated_role = administrative_group_role(tuple(keycloak_groups or ()))
+    if delegated_role in {"org_admin", "level_admin"}:
+        capabilities.append("identity:manage")
+    if delegated_role == "org_admin":
+        capabilities.append("federation:manage")
+    return capabilities
 
 
 class CoreGetRoutesMixin:
@@ -69,20 +67,32 @@ class CoreGetRoutesMixin:
 
     def _serve_public_entry(self) -> None:
         """Expose the same legal text and policy flags to the React login gate."""
+        from server.identity.auth_mode import keycloak_enabled
+        keycloak = keycloak_enabled()
         json_response(self, {
             "success": True,
             "compliance_notice": PUBLIC_DEVICE_COMPLIANCE_NOTICE,
             "registration_notice": PUBLIC_REGISTRATION_NOTICE,
-            "public_registration_enabled": bool(
-                getattr(self.state, "public_registration_enabled", False)
-            ),
+            "public_registration_enabled": False,
+            "authentication_provider": "keycloak",
             "require_device_auth": bool(
                 getattr(self.state, "require_device_auth", False)
             ),
             "public_server": bool(getattr(self.state, "public_server", False)),
+            "public_compliance_information": (
+                public_compliance_information()
+                if bool(getattr(self.state, "public_server", False))
+                else {}
+            ),
         })
 
     def _get_entry_routes(self, parsed) -> bool:
+        if parsed.path == "/auth/oidc/start":
+            self._oidc_login_start(parsed)
+            return True
+        if parsed.path == "/auth/oidc/callback":
+            self._oidc_login_callback(parsed)
+            return True
         if parsed.path == "/api/public/entry":
             self._serve_public_entry()
             return True
@@ -119,9 +129,18 @@ class CoreGetRoutesMixin:
                 next_path=str(requested or "/"),
             ):
                 return True
+            from server.identity.auth_mode import auth_mode
+            if keycloak_enabled():
+                from urllib.parse import quote
+                self._send_redirect(
+                    "/auth/oidc/start?next=" + quote(str(requested or "/app"), safe="/"),
+                )
+                return True
             self._serve_login_page(parsed)
             return True
         if not self._public_login_gate(parsed, method="GET"):
+            return True
+        if self._reject_retired_local_identity_route(parsed):
             return True
         if (parsed.path == "/api/storage/deferred-job-cleanup"
                 and self._deferred_job_cleanup_route(parsed, method="GET")):
@@ -243,11 +262,14 @@ class CoreGetRoutesMixin:
         if parsed.path == "/api/devices":
             self._device_list()
             return True
-        if parsed.path == "/api/admin/access-control":
-            self._admin_access_control()
+        if parsed.path == "/api/admin/devices":
+            self._admin_device_list()
             return True
         if parsed.path == "/api/admin/account-directory":
             self._admin_account_directory()
+            return True
+        if parsed.path == "/api/admin/users":
+            self._admin_identity_users(parsed)
             return True
         if parsed.path == "/api/device/summary":
             self._device_summary()
@@ -260,6 +282,9 @@ class CoreGetRoutesMixin:
             return True
         if parsed.path == "/api/federation/config":
             self._federation_config()
+            return True
+        if parsed.path == "/api/admin/federation/settings":
+            self._admin_federation_settings()
             return True
         if parsed.path == "/api/control-database/config":
             self._control_database_config()
@@ -423,11 +448,41 @@ class CoreGetRoutesMixin:
         if parsed.path == "/api/session":
             session = self.state.session(self._bearer_token())
             if session is None:
-                json_response(self, {"success": False, "error": "login required"}, 401)
+                visitor = self._visitor_mode()
+                if visitor is None:
+                    json_response(self, {"success": False, "error": "login required"}, 401)
+                    return True
+                # This is a UI session projection of the Keycloak-managed
+                # visitor service account.  It does not create a Manager
+                # account or a second permission source; API authorization
+                # continues to use the live VisitorMode and Keycloak roles.
+                json_response(self, {
+                    "success": True,
+                    "username": "public-visitor",
+                    "alias": "访客",
+                    "role": "visitor",
+                    "visitor_login": True,
+                    "keycloak_subject": visitor.keycloak_subject,
+                    "keycloak_roles": [
+                        role for role, enabled in (
+                            ("access", True),
+                            ("submit", visitor.can_submit),
+                            ("artifact-download", visitor.can_download_artifacts),
+                        ) if enabled
+                    ],
+                    "capabilities": {
+                        "manager": False,
+                        "research": False,
+                        "public_visitor": True,
+                    },
+                    "admin_capabilities": [],
+                })
                 return True
             capability_session = dict(session)
             capability_session["admin_capabilities"] = _admin_capabilities(
                 str(session.get("username") or ""), str(session.get("role") or ""),
+                session.get("keycloak_roles", ()),
+                session.get("keycloak_groups", ()),
             )
             json_response(self, {"success": True, **capability_session})
             return True
@@ -440,6 +495,8 @@ class CoreGetRoutesMixin:
                 capabilities = _admin_capabilities(
                     str(browser_session.get("username") or ""),
                     str(browser_session.get("role") or ""),
+                    browser_session.get("keycloak_roles", ()),
+                    browser_session.get("keycloak_groups", ()),
                 )
                 if "admin_console:read" not in capabilities:
                     json_response(self, {
@@ -608,6 +665,8 @@ class CoreGetRoutesMixin:
         if self._redirect_plain_http_to_https():
             return
         parsed = urlparse(self.path)
+        if self._proxy_keycloak(parsed, method="GET"):
+            return
         handlers = (
             self._get_entry_routes,
             self._get_technical_docs_routes,
@@ -633,6 +692,8 @@ class CoreGetRoutesMixin:
         if self._redirect_plain_http_to_https():
             return
         parsed = urlparse(self.path)
+        if self._proxy_keycloak(parsed, method="HEAD", head_only=True):
+            return
         if self._serve_client_release(parsed.path):
             return
         self.send_error(404)

@@ -2,6 +2,20 @@ import XCTest
 @testable import FTClient
 
 final class ClientCLIResolutionTests: XCTestCase {
+    func testCanonicalBundleCommandWinsOverLegacyPhysicalName() {
+        let resolved = ClientCLIResolution.firstExecutable(
+            [
+                "/Applications/FTClient.app/bundled/traderesearch",
+                "/Applications/FTClient.app/bundled/factortester",
+            ],
+            isExecutable: { $0.contains("bundled") }
+        )
+        XCTAssertEqual(
+            resolved,
+            "/Applications/FTClient.app/bundled/traderesearch"
+        )
+    }
+
     func testBundledCLIWinsOverStaleConfiguredPath() {
         let resolved = ClientCLIResolution.resolve(
             bundledPath: "/Applications/FTClient.app/bundled/factortester",

@@ -8,6 +8,7 @@ export interface PageDefinition {
   mobileTab?: string;
   icon?: string;
   sidebarVisible?: boolean;
+  requiredAdminCapability?: string | readonly string[];
 }
 
 const pages = new Map<string, PageDefinition>();
@@ -36,14 +37,30 @@ export function pagesForScope(scope: "desktop" | "mobile"): PageDefinition[] {
   );
 }
 
+export function pagesForAdminCapabilities(
+  scope: "desktop" | "mobile",
+  capabilities: readonly string[] = [],
+): PageDefinition[] {
+  return pagesForScope(scope).filter(
+    (page) => !page.requiredAdminCapability || (
+      typeof page.requiredAdminCapability === "string"
+        ? capabilities.includes(page.requiredAdminCapability)
+        : page.requiredAdminCapability.some((value) => capabilities.includes(value))
+    ),
+  );
+}
+
 export const BUILTIN_PAGES: PageDefinition[] = [
   { id: "research", route: "/research?section=researches", title: "研究", scope: "both", mobileTab: "research", icon: "research" },
-  { id: "configuration", route: "/backtest?view=configuration", title: "测试", scope: "both", mobileTab: "tests", icon: "settings" },
-  { id: "jobs", route: "/jobs?section=types", title: "任务队列", scope: "both", icon: "runs" },
+  { id: "test-bench", route: "/tests", title: "测试台", scope: "both", mobileTab: "tests", icon: "runs" },
+  { id: "configuration", route: "/backtest?view=configuration", title: "测试", scope: "both", icon: "settings", sidebarVisible: false },
+  { id: "jobs", route: "/jobs?section=types", title: "任务队列", scope: "both", icon: "runs", sidebarVisible: false },
   { id: "trading", route: "/trading", title: "交易台", scope: "both", mobileTab: "trading", icon: "trading" },
   { id: "products", route: "/products", title: "产品库", scope: "both", icon: "catalog" },
   { id: "factors", route: "/factors", title: "因子库", scope: "both", icon: "factor" },
   { id: "strategies", route: "/strategies?scope=public", title: "策略库", scope: "both", icon: "strategy" },
+  { id: "admin", route: "/admin", title: "管理员功能", scope: "both", icon: "account", requiredAdminCapability: ["admin_console:manage", "identity:manage", "federation:manage"] },
+  { id: "technical-docs", route: "/docs", title: "技术文档", scope: "both", icon: "docs" },
   { id: "more", route: "/app?view=more", title: "更多功能", scope: "mobile", mobileTab: "more", icon: "workspace", sidebarVisible: false },
   { id: "settings", route: "/settings/account", title: "设置", scope: "both", icon: "settings", sidebarVisible: false },
   { id: "source-detail", route: "/products/sources/detail", title: "数据源族", scope: "both", icon: "catalog", sidebarVisible: false },

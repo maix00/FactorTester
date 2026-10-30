@@ -164,7 +164,7 @@ def register_workspace_strategy_commands(workspace: click.Group) -> None:
 def _state():
     state = load_state()
     if not state.workspace_id:
-        raise click.ClickException("尚未选择测试配置工作区；请先运行 factortester workspace create/use")
+        raise click.ClickException("尚未选择测试配置工作区；请先运行 traderesearch workspace create/use")
     return state
 
 

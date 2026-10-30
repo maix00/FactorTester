@@ -44,3 +44,14 @@ def test_node_and_cache_domain_are_not_manager_identity():
         assert 'TR_EXECUTION_NODE_ID:' in env['TR_EXECUTION_NODE_ID']
         assert 'TR_SHARED_STORAGE_ID:' in env['TR_DATA_DEVICE_REF']
         assert 'FACTORTESTER_SERVER_ID' not in env['TR_DATA_DEVICE_REF']
+
+
+def test_standalone_execution_node_uses_owning_manager_cache_authority():
+    compose = yaml.safe_load(
+        (ROOT/'deploy/docker/execution-node/compose.yaml').read_text()
+    )
+    for name in ('worker', 'market'):
+        env = compose['services'][name]['environment']
+        assert env['FACTORTESTER_SERVER_ID'] == '${TR_MANAGER_ID:?set owning Manager identity}'
+        assert env['TR_DATA_DEVICE_REF'] == '${TR_SHARED_STORAGE_ID:?set actual kernel/storage domain}'
+        assert env['TR_SHARED_DATA_CACHE_ROOT'] == '/shared-cache'

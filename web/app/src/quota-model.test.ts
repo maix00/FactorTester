@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateQuota, cleanupPlan, isOfflineFailure } from "./quota-model.ts";
+import { aggregateQuota, cleanupPlan, isOfflineFailure, summarizeQuotaServers } from "./quota-model.ts";
 
 test("combines distinct servers and latest profile observations without counting snapshots twice", () => {
   const rows = aggregateQuota([
@@ -45,4 +45,26 @@ test("ordinary errors and authorization failures cannot schedule offline cleanup
   assert.equal(isOfflineFailure({ status: 403 }), false);
   assert.equal(isOfflineFailure({ status: 500 }), false);
   assert.equal(isOfflineFailure(new Error("invalid response")), false);
+});
+
+test("server summary deduplicates observations and keeps live reachability separate from snapshots", () => {
+  const rows = summarizeQuotaServers([
+    { id: "local", snapshot: false, data: { artifact_bytes: 10, artifact_count: 2, observed_at: "2026-01-03" } },
+    { id: "remote", snapshot: true, observedAt: "2026-01-01", data: { output_bytes: 20, output_count: 1 } },
+    { id: "blocked", snapshot: true, queueAllowed: false, data: { artifact_bytes: 3, artifact_count: 1 } },
+  ], {
+    profile_snapshots: [
+      { storage_server_id: "remote", status: "last_observed", inventory: { observed_at: "2026-01-02", categories: { reports: { bytes: 5, file_count: 1 } } } },
+      { storage_server_id: "local", status: "last_observed", inventory: { observed_at: "2026-01-02", categories: { reports: { bytes: 2, file_count: 1 } } } },
+    ],
+    cross_server: { servers: [
+      { storage_server_id: "remote", status: "last_observed", inventory: { observed_at: "2026-01-04", categories: { reports: { bytes: 7, file_count: 2 } } } },
+    ] },
+  }, [{ server_id: "remote", status: "pending" }]);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.find(row => row.id === "remote"), {
+    id: "remote", status: "last_observed", bytes: 27, count: 3, observedAt: "2026-01-04", pendingDeletions: 1,
+  });
+  assert.equal(rows.find(row => row.id === "local")?.status, "current");
+  assert.equal(rows.find(row => row.id === "blocked")?.status, "unavailable");
 });

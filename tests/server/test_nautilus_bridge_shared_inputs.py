@@ -98,6 +98,62 @@ def test_actual_shared_replay_matches_catalog_engine(tmp_path, monkeypatch):
     assert list(cache.root.glob('*.arrow'))
 
 
+def test_actual_nautilus_replay_consumes_data_io_socket_handles(tmp_path, monkeypatch):
+    import json
+    import threading
+    import time
+    from nautilus_trader import _libnautilus as native
+    from server.data_io.service import DataIOService
+    from server.services.nautilus_bridge.backtest_runner import _load_input, replay_catalog_batches
+    from server.services.nautilus_bridge.strategy_backtest import _frozen_shared_plan
+    from tests.server.test_nautilus_bridge_backtest_runner import _real_catalog
+    from tests.server.test_nautilus_bridge_factor_stream import _engine
+    from tools.factors.expr import CLOSE
+
+    if not callable(getattr(native, 'replay_shared_inputs', None)):
+        pytest.skip('requires the locally rebuilt composed Nautilus extension')
+    cache = SharedColumnarCache(tmp_path/'cache', CacheScope('server','test','platform','local'))
+    monkeypatch.setattr(shared_inputs, 'host_input_cache', lambda: cache)
+    rows = []
+    for code, month in [('T','2403'),('TL','2406')]:
+        folder = tmp_path/code; folder.mkdir()
+        rows.append(_load_input(_real_catalog(folder,code=code,month=month,count=8)))
+
+    socket_path = tmp_path/'run'/'data.sock'
+    service = DataIOService(socket_path=socket_path, allowed_roots=[tmp_path],
+                            cache_factory=lambda: cache, max_requests=2)
+    server = service.bind()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 2
+    while not socket_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.005)
+    monkeypatch.setenv('TR_DATA_IO_SOCKET_PATH', str(socket_path))
+    products = ['T','TL']
+    plan, _ = _frozen_shared_plan(
+        {'signal':CLOSE.rolling(2).semantics(min_periods=1).mean()},
+        {'signal':'fixture'},tuple(products),None)
+    engine = _engine(rows)
+    try:
+        runtime = native.attach_factor_family(engine,json.dumps(plan),products,
+            [row[2]['bar_type'] for row in rows],json.dumps([{
+                'strategy_id':'group-1','signal_output':0,'rule':{
+                    'kind':'cross_sectional_group','split_count':2,'group_index':1}}]))
+        result = replay_catalog_batches(engine,rows,max_input_bars=16,batch_minutes=1,
+                                        input_transport='shared')
+        runtime.ensure_success()
+        assert result['bars'] == 16
+        assert engine.get_result().iterations == 16
+        assert not engine.generate_fills_report().empty
+        assert len(list(cache.root.glob('*.arrow'))) >= 2
+    finally:
+        engine.dispose()
+        server.shutdown()
+        server.server_close()
+        socket_path.unlink(missing_ok=True)
+        thread.join(timeout=2)
+
+
 def test_actual_shared_invalid_inputs_fail_before_loading():
     from nautilus_trader import _libnautilus as native
     from nautilus_trader.backtest import BacktestEngine

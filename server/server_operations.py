@@ -7,12 +7,11 @@ browser directly.
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from server.services.http_auth import login_required
 from server.services.manager_control import manager_action, manager_snapshot
-from server.services.session_runtime import require_user
-from tools.data.account_manage import get_account, is_super_admin_account
+from server.identity.keycloak_authorization import keycloak_request_credentials
 
 
 server_operations_bp = Blueprint("server_operations", __name__, url_prefix="/admin")
@@ -23,11 +22,17 @@ _ALLOWED_ACTIONS = frozenset({
 
 
 def _require_super_admin():
-    account = get_account(require_user())
-    if not is_super_admin_account(account):
+    if keycloak_request_credentials() is None:
         return jsonify({
             "success": False,
-            "error": "只有超级管理员可以管理服务器运行状态",
+            "error": "需要有效的 Keycloak 会话",
+        }), 401
+    identity = getattr(g, "keycloak_user_session", None)
+    roles = identity.get("keycloak_roles", ()) if isinstance(identity, dict) else ()
+    if "admin_console:manage" not in roles:
+        return jsonify({
+            "success": False,
+            "error": "需要 Keycloak 服务器管理权限",
         }), 403
     return None
 

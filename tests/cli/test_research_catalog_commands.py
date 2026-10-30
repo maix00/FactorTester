@@ -35,7 +35,7 @@ class FakeResearchClient:
 def test_research_cli_exposes_report_spaces_without_link_command(monkeypatch, tmp_path):
     from tools.cli.release.local_profile import LocalProfileStore
     from tools.cli.release.local_profile_contracts import new_local_profile
-    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(tmp_path / "client"))
+    monkeypatch.setenv("TRADERESEARCH_CLIENT_ROOT", str(tmp_path / "client"))
     LocalProfileStore(tmp_path / "client").save(new_local_profile(
         profile_id="self", display_name="self", workspace_root=tmp_path / "workspace", principal_ref="alice",
     ))

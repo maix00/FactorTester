@@ -425,7 +425,7 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
         assert payload["ready"] is False
         assert payload["can_start_inspection_and_planning"] is True
         assert payload["claim_command"] == (
-            f"factortester client profile claim {profile_id} {agent_id}"
+            f"traderesearch client profile claim {profile_id} {agent_id}"
         )
         assert "Codex" not in payload["agent_prompt"]
         receipt = payload["claim_receipt"]

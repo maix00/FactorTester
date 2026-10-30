@@ -313,7 +313,7 @@ class HttpSession:
         body = None
         headers = {
             "Accept": "text/event-stream",
-            "User-Agent": "FactorTester-CLI/1",
+            "User-Agent": "TradeResearch-CLI/1",
             "X-FactorTester-Client": "cli",
         }
         headers = self._headers(headers)
@@ -368,7 +368,7 @@ class HttpSession:
         body = None
         headers = {
             "Accept": "application/json",
-            "User-Agent": "FactorTester-CLI/1",
+            "User-Agent": "TradeResearch-CLI/1",
             "X-FactorTester-Client": "cli",
         }
         if extra_headers:

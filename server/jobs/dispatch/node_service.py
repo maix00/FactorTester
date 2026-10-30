@@ -289,7 +289,8 @@ class ExecutionNodeService:
             raise ValueError("report has incomplete or unverified files")
         ref = publish_job_report(job_id=record.job_id, attempt=record.attempt,
                                  owner=record.owner, reports_dir=str(folder),
-                                 metadata={"node_id": node_id, "engine": "nautilus_trader"})
+                                 metadata={"node_id": node_id, "engine": "nautilus_trader"},
+                                 owner_subject=record.owner_subject)
         if ref:
             self.repository.set_report_ref(record.job_id, ref)
         return {"report_ref": ref}

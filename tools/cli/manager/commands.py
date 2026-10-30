@@ -1,9 +1,8 @@
-"""Authentication and server-owned declarations for ``factortester-manager``."""
+"""Authentication and server-owned declarations for ``traderesearch-manager``."""
 
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import click
@@ -71,34 +70,23 @@ def configure_manager(
 
 
 @manager.command("login")
-@click.option("--username", required=True)
-@click.option("--password", default="", hide_input=True)
-@click.option("--credentials-stdin", is_flag=True, hidden=True)
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
-def login_manager(
-    username: str,
-    password: str,
-    credentials_stdin: bool,
-    as_json: bool,
-) -> None:
-    """Authenticate a Manager administrator and save the URL-scoped token."""
-    if credentials_stdin:
-        credentials = json.load(sys.stdin)
-        username = str(credentials.get("username") or username)
-        password = str(credentials.get("password") or "")
-    elif not password:
-        password = click.prompt("Password", hide_input=True)
+def login_manager(as_json: bool) -> None:
+    """Import and verify this endpoint's existing Keycloak desktop session."""
     config = load_manager_config()
-    value = ManagerClient(config).login(username, password)
-    capabilities = value.get("capabilities")
-    if not isinstance(capabilities, dict) or not capabilities.get("manager"):
+    from tools.cli.native_session import load_token
+
+    token = load_token(config.base_url)
+    if not token:
         raise click.ClickException(
-            "登录成功，但当前账号没有 Manager 管理权限（需要 super_admin）"
+            "Manager CLI 不再接受本地密码。请先在 TradeResearch 网页或桌面端"
+            "通过 Keycloak 登录到此 Manager，再重试。"
         )
-    token = str(value.pop("token", "") or "")
+    client = ManagerClient(config, token=token)
+    value = client.require_manager()
     ManagerCredentialStore(config).write(token)
-    _echo(value, as_json)
+    _echo({"status": "authenticated", **value}, as_json)
 
 
 @manager.command("logout")

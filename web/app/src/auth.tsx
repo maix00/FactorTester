@@ -5,21 +5,31 @@ import { CloseOutlined } from "@ant-design/icons";
 import { loadScript } from "./assets.ts";
 import { request } from "./configuration/api.ts";
 import { notify } from "./notifications/core.ts";
+import { managerRegistrationEnabled } from "./auth-model.ts";
 
 export type AuthSession = {
   username?: string;
   alias?: string;
   role?: string;
   capabilities?: Record<string, boolean>;
+  admin_capabilities?: string[];
   visitor_login?: boolean;
 } | null;
 
 type PublicEntry = {
   compliance_notice?: string;
   registration_notice?: string;
+  public_compliance_information?: {
+    service_operator?: string;
+    icp_record?: string;
+    security_record?: string;
+    compliance_contact?: string;
+    privacy_policy_url?: string;
+  };
   public_registration_enabled?: boolean;
   require_device_auth?: boolean;
   public_server?: boolean;
+  authentication_provider?: "manager" | "keycloak";
 };
 
 type AuthContextValue = {
@@ -37,8 +47,8 @@ export function useAuth(): AuthContextValue {
 
 function notifyNative(action: "session-updated" | "logout"): void {
   const handler = (window as unknown as {
-    webkit?: { messageHandlers?: { factorTesterAuthentication?: { postMessage?: (value: { action: string }) => void } } };
-  }).webkit?.messageHandlers?.factorTesterAuthentication;
+    webkit?: { messageHandlers?: { tradeResearchAuthentication?: { postMessage?: (value: { action: string }) => void } } };
+  }).webkit?.messageHandlers?.tradeResearchAuthentication;
   handler?.postMessage?.({ action });
 }
 
@@ -57,6 +67,17 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
   const [entry, setEntry] = useState<PublicEntry | null>(null);
   const [checking, setChecking] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
+  const [authError, setAuthError] = useState("");
+
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const error = query.get("auth_error");
+    if (!error) return;
+    setAuthError(error);
+    query.delete("auth_error");
+    const search = query.toString();
+    history.replaceState(history.state, "", `${location.pathname}${search ? `?${search}` : ""}${location.hash}`);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,23 +103,27 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
     try {
       const response=await fetch("/auth/logout", {method:"POST",credentials:"same-origin"});
       if(!response.ok && response.status!==401)throw new Error(t("auth.logoutFailed"));
+      const value = await readJSON(response);
       notifyNative("logout");setSession(null);setDialogMode(null);
+      if (typeof value.logout_url === "string" && value.logout_url) location.assign(value.logout_url);
     } catch {notify({code:"auth.logout.failed",type:"error",message:t("auth.logoutFailed")});}
   },[t]);
-  const value = useMemo(() => ({session,logout,openAuth:setDialogMode,registrationEnabled:Boolean(entry?.public_registration_enabled)}), [session,logout,entry]);
+  const registrationEnabled = managerRegistrationEnabled(entry);
+  const value = useMemo(() => ({session,logout,openAuth:setDialogMode,registrationEnabled}), [session,logout,registrationEnabled]);
   const authenticated=(next:AuthSession):void=>{notifyNative("session-updated");setSession(next);setDialogMode(null);};
   if(checking)return <div className="tr-auth-loading" role="status">{t("loading")}</div>;
   return <AuthContext.Provider value={value}>
     {session ? <div key={session.username||"session"} className="tr-authenticated-app" inert={Boolean(dialogMode)} aria-hidden={dialogMode?true:undefined}>{children}</div>:null}
-    {!session || dialogMode ? <AuthOverlay key={dialogMode||"login"} mode={dialogMode||"login"} entry={entry} unavailable={unavailable}
+    {!session || dialogMode ? <AuthOverlay key={dialogMode||"login"} mode={dialogMode||"login"} entry={entry} unavailable={unavailable} authError={authError}
       onClose={session?()=>setDialogMode(null):undefined} onAuthenticated={authenticated}/>:null}
   </AuthContext.Provider>;
 }
 
-function AuthOverlay({ entry, unavailable, onAuthenticated, mode:initialMode, onClose }: {
+function AuthOverlay({ entry, unavailable, authError, onAuthenticated, mode:initialMode, onClose }: {
   mode:"login"|"register"; onClose?:()=>void;
   entry: PublicEntry | null;
   unavailable: boolean;
+  authError: string;
   onAuthenticated: (session: AuthSession) => void;
 }): React.ReactElement {
   const { t } = useTranslation();
@@ -129,6 +154,20 @@ function AuthOverlay({ entry, unavailable, onAuthenticated, mode:initialMode, on
     || t("auth.complianceFallback");
   const publicGate = Boolean(entry?.require_device_auth || entry?.public_server);
   const fullCompliance = `/compliance?next=${encodeURIComponent(currentPath())}`;
+  const keycloakMode = entry?.authentication_provider === "keycloak";
+  const displayMode = keycloakMode ? "login" : mode;
+  const startKeycloakLogin = (): void => {
+    location.assign(`/auth/oidc/start?next=${encodeURIComponent(currentPath())}`);
+  };
+  const keycloakErrorMessage = authError === "provider"
+    ? t("auth.keycloakErrors.provider")
+    : authError === "unverified"
+      ? t("auth.keycloakErrors.unverified")
+      : authError === "public_login_denied"
+        ? t("auth.keycloakErrors.publicLoginDenied")
+        : authError === "device"
+          ? t("auth.keycloakErrors.deviceRejected")
+      : authError ? t("auth.keycloakErrors.invalid") : "";
 
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
@@ -151,7 +190,7 @@ function AuthOverlay({ entry, unavailable, onAuthenticated, mode:initialMode, on
         if (value.redirect) setRedirect(String(value.redirect));
         return;
       }
-      const {username:principal,alias,role,capabilities,visitor_login}=value;
+      const {username:principal,alias,role,capabilities,admin_capabilities,visitor_login}=value;
       if(visitor_login){
         try {
           await loadScript("/research-static/app/visitor-device.js");
@@ -160,7 +199,7 @@ function AuthOverlay({ entry, unavailable, onAuthenticated, mode:initialMode, on
           await devices.ensureForSession({api:request},{username:principal,visitor_login});
         } catch {notify({code:"auth.device.failed",type:"error",message:t("auth.deviceEnrollmentFailed")});}
       }
-      onAuthenticated({username:principal,alias,role,capabilities,visitor_login});
+      onAuthenticated({username:principal,alias,role,capabilities,admin_capabilities,visitor_login});
     } catch {
       setError(t("auth.networkFailed"));
     } finally {
@@ -175,12 +214,19 @@ function AuthOverlay({ entry, unavailable, onAuthenticated, mode:initialMode, on
           {onClose?<button type="button" className="tr-auth-close" onClick={onClose} aria-label={t("close")}><CloseOutlined/></button>:null}
           <Brand />
 
-          <h1 id="tr-auth-title">{mode==="register"?t("auth.register"):t("auth.title")}</h1>
-          <p>{mode==="register"?t("auth.registerHint"):t("auth.hint")}</p>
+          <h1 id="tr-auth-title">{displayMode==="register"?t("auth.register"):t("auth.title")}</h1>
+          <p>{displayMode==="register"?t("auth.registerHint"):t("auth.hint")}</p>
         </header>
+        {keycloakMode ? <div className="tr-auth-form">
+          <p>{t("auth.keycloakManaged")}</p>
+          <button type="button" className="tr-auth-submit" onClick={startKeycloakLogin}>{t("auth.keycloakSignIn")}</button>
+          {publicGate?<a className="tr-auth-redirect" href={fullCompliance}>{t("auth.publicVisitorEntry")}</a>:null}
+          {keycloakErrorMessage ? <p className="tr-auth-error" role="alert">{keycloakErrorMessage}</p> : null}
+          {unavailable ? <p className="tr-auth-error" role="alert">{t("auth.unavailable")}</p> : null}
+        </div> : <>
         <nav className="tr-auth-switch" aria-label={t("auth.account")}>
           <button type="button" aria-pressed={mode==="login"} onClick={()=>{setMode("login");setError("");}}>{t("auth.signIn")}</button>
-          <button type="button" aria-pressed={mode==="register"} onClick={()=>{setMode("register");setError("");}}>{t("auth.register")}</button>
+          {entry?.public_registration_enabled?<button type="button" aria-pressed={mode==="register"} onClick={()=>{setMode("register");setError("");}}>{t("auth.register")}</button>:null}
         </nav>
         {mode==="register"&&!entry?.public_registration_enabled?<p role="status">{entry?.registration_notice||t("auth.registrationClosed")}</p>:<form className="tr-auth-form" onSubmit={submit}>
           <label>
@@ -204,13 +250,20 @@ function AuthOverlay({ entry, unavailable, onAuthenticated, mode:initialMode, on
           {error ? <p className="tr-auth-error" role="alert">{error}</p> : null}
           {redirect ? <a className="tr-auth-redirect" href={redirect}>{t("auth.guidedLogin")}</a> : null}
           {unavailable ? <p className="tr-auth-error" role="alert">{t("auth.unavailable")}</p> : null}
-        </form>}
+        </form>}</>}
         <footer>
           <span>{t("auth.managedAccess")}</span>
           <details className="tr-auth-access"><summary>{t("auth.accessInformation")}</summary>
             <p>{compliance}</p>
             {entry?.registration_notice?<p>{entry.registration_notice}</p>:null}
             {publicGate?<p>{t("auth.publicVisitorHint")}</p>:null}
+            {publicGate?<dl className="tr-auth-public-compliance">
+              <dt>{t("auth.serviceOperator")}</dt><dd>{entry?.public_compliance_information?.service_operator||t("auth.notConfigured")}</dd>
+              <dt>{t("auth.filingInformation")}</dt><dd>{entry?.public_compliance_information?.icp_record||t("auth.notConfigured")}</dd>
+              {entry?.public_compliance_information?.security_record?<><dt>{t("auth.securityFiling")}</dt><dd>{entry.public_compliance_information.security_record}</dd></>:null}
+              {entry?.public_compliance_information?.compliance_contact?<><dt>{t("auth.complianceContact")}</dt><dd>{entry.public_compliance_information.compliance_contact}</dd></>:null}
+              {entry?.public_compliance_information?.privacy_policy_url?<><dt>{t("auth.privacyPolicy")}</dt><dd><a href={entry.public_compliance_information.privacy_policy_url} rel="noopener noreferrer" target="_blank">{entry.public_compliance_information.privacy_policy_url}</a></dd></>:null}
+            </dl>:null}
             <a href={fullCompliance}>{t("auth.openCompliance")}</a>
             <p>{t("auth.complianceFooter")}</p>
           </details>

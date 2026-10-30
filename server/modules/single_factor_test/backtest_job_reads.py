@@ -697,134 +697,60 @@ def get_test_job(job_id: str):
     return jsonify(payload)
 
 
-def _can_read_report(actor: str, document: dict, report_ref: str) -> bool:
-    if document.get("owner") == actor:
-        return True
-    from tools.data.account_manage import get_account, is_super_admin_account
+def _keycloak_request_token() -> str:
+    from flask import request
+    scheme, _, value = str(request.headers.get("Authorization") or "").partition(" ")
+    if scheme.lower() == "bearer" and value:
+        return value.strip()
+    return str(request.cookies.get("ft-manager-session") or "").strip()
 
-    if is_super_admin_account(get_account(actor)):
-        return True
-    import os
-    from server.permissions.entries import PermissionStore
 
-    db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get(
-        "FACTORTESTER_PERMISSIONS_DB", ""
-    )
-    if not db:
+def _keycloak_resource_decision(document: dict, scope: str) -> bool | None:
+    """Return None only when Keycloak is unavailable; never trust owner fields."""
+    token = _keycloak_request_token()
+    resource_id = str(document.get("keycloak_resource_id") or "").strip()
+    if not token or not resource_id:
         return False
-    from server.permissions.subjects import subjects_for_user
+    try:
+        from server.identity.keycloak_authorization import keycloak_authorized
+        return keycloak_authorized(token, resource_id=resource_id, scope=scope)
+    except Exception:
+        return None
 
-    subjects = subjects_for_user(actor)
-    store = PermissionStore(db)
-    return any(store.allows(
-        subject=subject, resource_type="report",
-        resource_ref=report_ref, action="read",
-    ) for subject in subjects)
+
+def _keycloak_authorization_response(document: dict, scope: str, error: str):
+    """Return an HTTP denial/unavailable response, or None when authorized."""
+    decision = _keycloak_resource_decision(document, scope)
+    if decision is True:
+        return None
+    status = 503 if decision is None else 403
+    code = "authorization_unavailable" if status == 503 else "authorization_denied"
+    return jsonify({"success": False, "error": error, "code": code}), status
+
+
+def _can_read_report(actor: str, document: dict, report_ref: str) -> bool | None:
+    """Report ownership and grants are evaluated by Keycloak, never by local ACLs."""
+    del actor, report_ref
+    return _keycloak_resource_decision(document, "read")
 
 
 @sft_bp.get("/api/auth/oidc/start")
 def oidc_start():
-    """Begin the Keycloak authorization-code flow for browser clients."""
-    import secrets
-    from flask import session, url_for
-    from server import branding
-    from server.identity.auth_mode import keycloak_enabled
-    from server.identity.keycloak import oidc_authorization_url
-
-    if not keycloak_enabled():
-        return jsonify({"success": False, "error": "Keycloak login is disabled"}), 503
-    base_url = branding.env("KEYCLOAK_URL")
-    realm = branding.env("KEYCLOAK_REALM")
-    client_id = branding.env("KEYCLOAK_CLIENT_ID")
-    if not (base_url and realm and client_id):
-        return jsonify({"success": False, "error": "OIDC is not configured"}), 503
-    state = secrets.token_urlsafe(24)
-    session["oidc_state"] = state
-    redirect_uri = url_for("sft.oidc_callback", _external=True)
-    return jsonify({"success": True, "authorization_url": oidc_authorization_url(
-        base_url=base_url, realm=realm, client_id=client_id,
-        redirect_uri=redirect_uri, state=state,
-    )})
+    """Retire the old Flask-session OIDC path in favor of Manager sessions."""
+    return jsonify({"success": False, "code": "manager_oidc_required",
+                    "error": "Start Keycloak login at /auth/oidc/start."}), 410
 
 
 @sft_bp.get("/api/auth/oidc/logout")
 def oidc_logout():
-    from flask import redirect, session, url_for
-    from server import branding
-    from server.identity.auth_mode import keycloak_enabled
-    from server.identity.keycloak import oidc_logout_url
-
-    session.clear()
-    if not keycloak_enabled():
-        return redirect("/")
-    url = oidc_logout_url(
-        base_url=branding.env("KEYCLOAK_URL"), realm=branding.env("KEYCLOAK_REALM"),
-        client_id=branding.env("KEYCLOAK_CLIENT_ID"),
-        post_logout_redirect_uri=url_for("sft.oidc_logout", _external=True),
-    )
-    return redirect(url)
+    return jsonify({"success": False, "code": "manager_oidc_required",
+                    "error": "Sign out at /auth/logout."}), 410
 
 
 @sft_bp.get("/api/auth/oidc/callback")
 def oidc_callback():
-    """Complete the authorization-code flow and establish the session."""
-    from flask import redirect, request, session
-    from server import branding
-    from server.identity.auth_mode import keycloak_enabled
-    from server.identity.keycloak import OIDCClient, oidc_userinfo
-
-    if not keycloak_enabled():
-        return jsonify({"success": False, "error": "Keycloak login is disabled"}), 503
-    code = str(request.args.get("code") or "")
-    state = str(request.args.get("state") or "")
-    expected = str(session.pop("oidc_state", "") or "")
-    if not code or not state or state != expected:
-        return jsonify({"success": False, "error": "invalid OIDC state"}), 400
-    redirect_uri = request.url_root.rstrip("/") + "/api/auth/oidc/callback"
-    client = OIDCClient(
-        branding.env("KEYCLOAK_URL"), branding.env("KEYCLOAK_REALM"),
-        branding.env("KEYCLOAK_CLIENT_ID"),
-        client_secret=branding.env("KEYCLOAK_CLIENT_SECRET"),
-    )
-    tokens = client.exchange_code(code, redirect_uri)
-    try:
-        profile = oidc_userinfo(
-            base_url=branding.env("KEYCLOAK_URL"), realm=branding.env("KEYCLOAK_REALM"),
-            access_token=str(tokens.get("access_token") or ""),
-        )
-    except Exception:
-        from server.identity.keycloak import jwt_claims
-
-        profile = jwt_claims(
-            str(tokens.get("id_token") or tokens.get("access_token") or "")
-        )
-    username = str(profile.get("preferred_username") or profile.get("sub") or "")
-    if not username:
-        return jsonify({"success": False, "error": "OIDC profile has no username"}), 401
-    # Keycloak lowercases usernames; retain the legacy spelling when available.
-    try:
-        from server.identity.keycloak import KeycloakAdminAdapter
-        identity = KeycloakAdminAdapter(
-            branding.env("KEYCLOAK_URL"), branding.env("KEYCLOAK_REALM"),
-            client_id=branding.env("KEYCLOAK_ADMIN_CLIENT_ID", "admin-cli"),
-            client_secret=branding.env("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
-        ).user(username)
-        legacy = (getattr(identity, "attributes", {}) or {}).get("legacy_username") if identity else None
-        if legacy:
-            username = legacy[0] if isinstance(legacy, (tuple, list)) else str(legacy)
-    except Exception:
-        pass
-    role = "user"
-    try:
-        from tools.data.account_manage import get_account
-        account = get_account(username)
-        if account is not None:
-            role = str(account.role or "user")
-    except Exception:
-        pass
-    session["username"] = username
-    session["role"] = role
-    return redirect("/")
+    return jsonify({"success": False, "code": "manager_oidc_required",
+                    "error": "Complete Keycloak login at /auth/oidc/callback."}), 410
 
 
 @sft_bp.post("/api/objects")
@@ -850,12 +776,22 @@ def put_versioned_object():
     if not url:
         return jsonify({"success": False, "error": "object store unavailable"}), 503
     store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    from server.identity.keycloak_authorization import keycloak_request_identity
+    identity = keycloak_request_identity()
+    if identity is None or identity.username != actor:
+        return jsonify({"success": False, "error": "verified Keycloak owner is required",
+                        "code": "authorization_unavailable"}), 503
     try:
         put_object(store, VersionedObject(
             ref=ref, kind=kind, owner=actor, payload=payload,
             links=dict(body.get("links") or {}),
+            owner_subject=identity.subject,
         ))
-    except Exception:
+    except Exception as exc:
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        if isinstance(exc, AuthorizationUnavailable):
+            return jsonify({"success": False, "error": "Keycloak resource registration is unavailable",
+                            "code": "authorization_unavailable"}), 503
         return jsonify({"success": False, "error": "object already exists or write failed"}), 409
     try:
         from server.jobs.dispatch.audit import append_audit
@@ -883,16 +819,9 @@ def get_versioned_object(object_ref: str):
         document = get_object(store, object_ref)
     except Exception:
         return jsonify({"success": False, "error": "object not found"}), 404
-    if document.get("owner") != actor:
-        from server.permissions.subjects import subjects_for_user
-        from server.permissions.entries import PermissionStore
-
-        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
-        if not (db and any(PermissionStore(db).allows(
-            subject=subject, resource_type=str(document.get("kind") or ""),
-            resource_ref=object_ref, action="read",
-        ) for subject in subjects_for_user(actor))):
-            return jsonify({"success": False, "error": "object access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "object access denied")
+    if denied:
+        return denied
     return jsonify({"success": True, "document": document})
 
 
@@ -910,8 +839,9 @@ def get_report_conflicts(report_ref: str):
         document = store.get_report(report_ref)
     except Exception:
         return jsonify({"success": False, "error": "report not found"}), 404
-    if not _can_read_report(actor, document, report_ref):
-        return jsonify({"success": False, "error": "report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "report access denied")
+    if denied:
+        return denied
     return jsonify({"success": True, "conflicts": store.conflicts(report_ref)})
 
 
@@ -930,19 +860,11 @@ def resolve_report_conflicts(report_ref: str):
         document = store.get_report(report_ref)
     except Exception:
         return jsonify({"success": False, "error": "report not found"}), 404
-    if document.get("owner") != actor:
-        from tools.data.account_manage import get_account, is_super_admin_account
-        if not is_super_admin_account(get_account(actor)):
-            import os as _os
-            from server.permissions.entries import PermissionStore
-            db = _os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or _os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
-            from server.permissions.subjects import subjects_for_user
-
-            if not (db and any(PermissionStore(db).allows(
-                subject=subject, resource_type="admin_console",
-                resource_ref="dispatch", action="manage",
-            ) for subject in subjects_for_user(actor))):
-                return jsonify({"success": False, "error": "report owner or admin manage permission required"}), 403
+    denied = _keycloak_authorization_response(
+        document, "manage", "report conflict management is not authorized",
+    )
+    if denied:
+        return denied
     keep_rev = str((request.get_json(silent=True) or {}).get("keep_rev") or "")
     if not keep_rev:
         return jsonify({"success": False, "error": "keep_rev is required"}), 400
@@ -975,8 +897,9 @@ def list_report_attachments(report_ref: str):
         document = store.get_report(report_ref)
     except Exception:
         return jsonify({"success": False, "error": "report not found"}), 404
-    if not _can_read_report(actor, document, report_ref):
-        return jsonify({"success": False, "error": "report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "report access denied")
+    if denied:
+        return denied
     attachments = document.get("_attachments") if isinstance(document.get("_attachments"), dict) else {}
     return jsonify({"success": True, "attachments": [
         {"name": name, "content_type": str(meta.get("content_type") or ""),
@@ -1006,8 +929,9 @@ def get_report_attachment(report_ref: str, name: str):
         document = store.get_report(report_ref)
     except Exception:
         return jsonify({"success": False, "error": "report not found"}), 404
-    if not _can_read_report(actor, document, report_ref):
-        return jsonify({"success": False, "error": "report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "report access denied")
+    if denied:
+        return denied
     attachment = (document.get("attachments") or {}).get(name)
     if not attachment:
         return jsonify({"success": False, "error": "attachment not found"}), 404
@@ -1042,8 +966,11 @@ def apply_research_report_operation(publication_id: str):
         document = get_research_report(store, publication_id)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
-    if document.get("owner_ref") != actor:
-        return jsonify({"success": False, "error": "only the research report owner may edit"}), 403
+    denied = _keycloak_authorization_response(
+        document, "write", "research report edit is not authorized",
+    )
+    if denied:
+        return denied
     if document.get("projection_hash"):
         try:
             result = apply_projection_operation(
@@ -1134,8 +1061,11 @@ def get_research_report_conflicts(publication_id: str):
         document = get_research_report(store, publication_id)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
-    if document.get("owner_ref") != actor:
-        return jsonify({"success": False, "error": "only the research report owner may inspect conflicts"}), 403
+    denied = _keycloak_authorization_response(
+        document, "read", "research report conflict access is not authorized",
+    )
+    if denied:
+        return denied
     return jsonify({"success": True, "conflicts": store.conflicts(document_id(publication_id))})
 
 
@@ -1155,8 +1085,11 @@ def resolve_research_report_conflicts(publication_id: str):
         document = get_research_report(store, publication_id)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
-    if document.get("owner_ref") != actor:
-        return jsonify({"success": False, "error": "only the research report owner may resolve conflicts"}), 403
+    denied = _keycloak_authorization_response(
+        document, "manage", "research report conflict management is not authorized",
+    )
+    if denied:
+        return denied
     keep_rev = str((request.get_json(silent=True) or {}).get("keep_rev") or "")
     if not keep_rev:
         return jsonify({"success": False, "error": "keep_rev is required"}), 400
@@ -1188,8 +1121,9 @@ def get_research_report_chapter(publication_id: str, chapter_id: str):
         document = get_research_report(store, publication_id)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
-    if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
-        return jsonify({"success": False, "error": "research report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "research report access denied")
+    if denied:
+        return denied
     meta = (document.get("attachments") or {}).get(chapter_attachment_path(chapter_id)) or {}
     name = str(meta.get("name") or "")
     if not name:
@@ -1224,12 +1158,16 @@ def get_research_report_agent(publication_id: str):
     store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
     try:
         document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    denied = _keycloak_authorization_response(document, "read", "research report access denied")
+    if denied:
+        return denied
+    try:
         value = projection(store, document)
         index_value = load_index(store, document)
     except Exception:
-        return jsonify({"success": False, "error": "research report not found"}), 404
-    if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
-        return jsonify({"success": False, "error": "research report access denied"}), 403
+        return jsonify({"success": False, "error": "research report projection not found"}), 404
     return jsonify({"success": True, "manifest": agent_manifest(document, index_value), "markdown": agent_markdown(store, document, index_value)})
 
 
@@ -1247,12 +1185,16 @@ def get_research_report_agent_markdown(publication_id: str):
     store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
     try:
         document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    denied = _keycloak_authorization_response(document, "read", "research report access denied")
+    if denied:
+        return denied
+    try:
         value = projection(store, document)
         index_value = load_index(store, document)
     except Exception:
-        return jsonify({"success": False, "error": "research report not found"}), 404
-    if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
-        return jsonify({"success": False, "error": "research report access denied"}), 403
+        return jsonify({"success": False, "error": "research report content is unavailable"}), 404
     return Response(agent_markdown(store, document, index_value), mimetype="text/markdown")
 
 
@@ -1272,9 +1214,9 @@ def get_research_report_projection(publication_id: str):
         value = projection(store, document)
     except Exception:
         return jsonify({"success": False, "error": "research report projection not found"}), 404
-    visibility = str(document.get("visibility") or "private")
-    if document.get("owner_ref") != actor and visibility != "public":
-        return jsonify({"success": False, "error": "research report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "research report access denied")
+    if denied:
+        return denied
     return jsonify({"success": True, "projection": value})
 
 
@@ -1293,18 +1235,9 @@ def list_research_report_attachments(publication_id: str):
         document = get_research_report(store, publication_id)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
-    visibility = str(document.get("visibility") or "private")
-    allowed = document.get("owner_ref") == actor or visibility == "public"
-    if not allowed:
-        from server.permissions.entries import PermissionStore
-        from server.permissions.subjects import subjects_for_user
-        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
-        allowed = bool(db and any(PermissionStore(db).allows(
-            subject=subject, resource_type="research_report",
-            resource_ref=publication_id, action="read",
-        ) for subject in subjects_for_user(actor)))
-    if not allowed:
-        return jsonify({"success": False, "error": "research report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "research report access denied")
+    if denied:
+        return denied
     attachments = document.get("attachments") if isinstance(document.get("attachments"), dict) else {}
     return jsonify({"success": True, "attachments": [
         {"path": path, **meta} for path, meta in sorted(attachments.items())
@@ -1326,18 +1259,9 @@ def get_research_report_attachment(publication_id: str, name: str):
         document = get_research_report(store, publication_id)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
-    visibility = str(document.get("visibility") or "private")
-    allowed = document.get("owner_ref") == actor or visibility == "public"
-    if not allowed:
-        from server.permissions.entries import PermissionStore
-        from server.permissions.subjects import subjects_for_user
-        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
-        allowed = bool(db and any(PermissionStore(db).allows(
-            subject=subject, resource_type="research_report",
-            resource_ref=publication_id, action="read",
-        ) for subject in subjects_for_user(actor)))
-    if not allowed:
-        return jsonify({"success": False, "error": "research report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "research report access denied")
+    if denied:
+        return denied
     attachments = document.get("attachments") if isinstance(document.get("attachments"), dict) else {}
     meta = next((item for item in attachments.values()
                  if isinstance(item, dict) and item.get("name") == name), None)
@@ -1365,18 +1289,9 @@ def get_research_report_document(publication_id: str):
         document = get_research_report(store, publication_id)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
-    visibility = str(document.get("visibility") or "private")
-    allowed = document.get("owner_ref") == actor or visibility == "public"
-    if not allowed:
-        from server.permissions.entries import PermissionStore
-        from server.permissions.subjects import subjects_for_user
-        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
-        allowed = bool(db and any(PermissionStore(db).allows(
-            subject=subject, resource_type="research_report",
-            resource_ref=publication_id, action="read",
-        ) for subject in subjects_for_user(actor)))
-    if not allowed:
-        return jsonify({"success": False, "error": "research report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "research report access denied")
+    if denied:
+        return denied
     return jsonify({"success": True, "document": document})
 
 
@@ -1400,8 +1315,9 @@ def get_report_document(report_ref: str):
         document = store.get_report(report_ref)
     except Exception:
         return jsonify({"success": False, "error": "report not found"}), 404
-    if not _can_read_report(actor, document, report_ref):
-        return jsonify({"success": False, "error": "report access denied"}), 403
+    denied = _keycloak_authorization_response(document, "read", "report access denied")
+    if denied:
+        return denied
     return jsonify({"success": True, "document": document})
 
 

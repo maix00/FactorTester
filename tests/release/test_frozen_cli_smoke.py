@@ -4,7 +4,7 @@ from tools.cli.app import cli
 
 
 def test_frozen_smoke_commands_exist_in_current_cli(tmp_path, monkeypatch):
-    binary = tmp_path / "factortester"
+    binary = tmp_path / "traderesearch"
     binary.write_bytes(next(iter(assets._MACHO_PREFIXES)))
     checked = []
 

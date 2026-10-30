@@ -13,7 +13,6 @@ export function MobileSettingsPage({ onOpen }: { onOpen: (section: MobileSetting
   return (
     <section className="tr-mobile-workspace">
       <header>
-        <h1>{t("settingsPanel.title")}</h1>
         <p>{t("settingsPanel.mobileHint")}</p>
       </header>
       <div className="tr-mobile-open-list">
@@ -29,16 +28,10 @@ export function MobileSettingsPage({ onOpen }: { onOpen: (section: MobileSetting
   );
 }
 
-export function MobileSettingDetail({ section, onBack }: { section: MobileSettingSection; onBack: () => void }): React.ReactElement {
+export function MobileSettingDetail({ section }: { section: MobileSettingSection }): React.ReactElement {
   const { t } = useTranslation();
   return (
     <div className="tr-mobile-settings-detail">
-      <header className="tr-mobile-page-header">
-        <button type="button" className="tr-mobile-back" aria-label={t("back")} onClick={onBack}>
-          <PageIcon name="back" />
-        </button>
-        <strong>{t(`settingsPanel.sections.${section}`)}</strong>
-      </header>
       <div className="tr-mobile-settings-body">
         <SettingsSection key={section} section={section}/>
       </div>

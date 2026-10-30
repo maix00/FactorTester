@@ -22,10 +22,7 @@ from server.services.http_auth import login_required
 from server.services.research_configurations import rename_factor_family_alias
 from server.services.session_runtime import current_user
 from tools.data.account_manage import (
-    can_view_user_scope,
     delete_factor_family_configs,
-    get_account,
-    is_super_admin_account,
     list_factor_family_dependency_configs,
 )
 from tools.data.factor_workspace.storage import (
@@ -47,7 +44,78 @@ from tools.data.sqlite.factor_family_heads import family_head
 
 
 def _current_user_is_super_admin() -> bool:
-    return is_super_admin_account(get_account(current_user()))
+    try:
+        from flask import g
+
+        identity = getattr(g, "keycloak_user_session", None)
+        roles = identity.get("keycloak_roles", ()) if isinstance(identity, dict) else ()
+        return "admin_console:manage" in roles
+    except Exception:
+        return False
+
+
+def _keycloak_subject_for_current_user(username: str) -> str:
+    from server.identity.auth_mode import keycloak_enabled
+
+    if not keycloak_enabled():
+        return ""
+    from server.identity.keycloak_authorization import keycloak_request_credentials
+
+    credentials = keycloak_request_credentials()
+    if credentials is None or credentials[2] != str(username):
+        raise PermissionError("verified Keycloak subject is required")
+    return credentials[1]
+
+
+def _ensure_custom_factor_keycloak_resource(username: str, factor_id: str) -> None:
+    from server.identity.auth_mode import keycloak_enabled
+
+    if not keycloak_enabled():
+        return
+    from server.identity.keycloak_authorization import ensure_keycloak_resource
+
+    ensure_keycloak_resource(
+        resource_type="factor_source",
+        resource_ref=f"custom:{username}:{factor_id}",
+        owner_subject=_keycloak_subject_for_current_user(username),
+    )
+
+
+def _delete_custom_factor_keycloak_resource(username: str, factor_id: str) -> None:
+    from server.identity.auth_mode import keycloak_enabled
+
+    if not keycloak_enabled():
+        return
+    from server.identity.keycloak_authorization import delete_keycloak_resource
+
+    delete_keycloak_resource(
+        resource_type="factor_source",
+        resource_ref=f"custom:{username}:{factor_id}",
+        owner_subject=_keycloak_subject_for_current_user(username),
+    )
+
+
+def _custom_factor_access_allowed(
+    username: str, owner_username: str, factor_id: str, scope: str = "read",
+) -> bool:
+    from server.identity.keycloak_authorization import (
+        keycloak_factor_source_permission,
+        keycloak_request_credentials,
+    )
+
+    credentials = keycloak_request_credentials()
+    if credentials is None or credentials[2] != str(username):
+        return False
+    return keycloak_factor_source_permission(
+        credentials[0], owner_username=owner_username, factor_id=factor_id,
+        scope=scope,
+    )
+
+
+def _custom_factor_read_allowed(username: str, owner_username: str, factor_id: str) -> bool:
+    return _custom_factor_access_allowed(
+        username, owner_username, factor_id, "read",
+    )
 
 
 def _username():
@@ -121,6 +189,16 @@ def api_create_factor():
         formula_fingerprint = _family_formula_fingerprint(source_code, factor_id)
     except ValueError as error:
         return jsonify({'success': False, 'error': str(error)}), 400
+    try:
+        _ensure_custom_factor_keycloak_resource(username, factor_id)
+    except PermissionError as error:
+        return jsonify({'success': False, 'error': str(error)}), 403
+    except Exception as error:
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        if isinstance(error, AuthorizationUnavailable):
+            return jsonify({'success': False, 'error': str(error),
+                            'code': 'authorization_unavailable'}), 503
+        raise
     save_factor_source(
         username,
         factor_id,
@@ -249,6 +327,17 @@ def api_update_factor(factor_id):
     except ValueError as error:
         return jsonify({'success': False, 'error': str(error)}), 400
 
+    try:
+        _ensure_custom_factor_keycloak_resource(username, new_name)
+    except PermissionError as error:
+        return jsonify({'success': False, 'error': str(error)}), 403
+    except Exception as error:
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        if isinstance(error, AuthorizationUnavailable):
+            return jsonify({'success': False, 'error': str(error),
+                            'code': 'authorization_unavailable'}), 503
+        raise
+
     chinese_name = chinese_name or old_meta.get('chinese_name', '')
     description = description or old_meta.get('description', '')
     save_factor_source(
@@ -267,6 +356,7 @@ def api_update_factor(factor_id):
         # 同步文件名：类名改了但 URL 里的 factor_id 还是旧名，
         # 先按新类名保存（上面已做），再删旧文件，保持文件名与类名一致。
         if rename_factor_source(username, factor_id, new_name):
+            _delete_custom_factor_keycloak_resource(username, factor_id)
             factor_id = new_name
 
     try:
@@ -366,7 +456,10 @@ def api_delete_factor(factor_id):
     if request.args.get('revision'):
         from server.modules.custom_factors.family_transfer import delete_family
         try:
-            return jsonify(delete_family('custom',username,factor_id,expected_revision=request.args['revision']))
+            value = delete_family('custom', username, factor_id,
+                                  expected_revision=request.args['revision'])
+            _delete_custom_factor_keycloak_resource(username, factor_id)
+            return jsonify(value)
         except ValueError as error:
             return jsonify({'success':False,'error':str(error)}),409
     existing_source = load_factor_source(username, factor_id)
@@ -382,6 +475,16 @@ def api_delete_factor(factor_id):
     cascade = delete_factor_family_configs(old_name or factor_id, username=username)
     if existing_source is not None:
         delete_factor_source(username, factor_id)
+
+    if existing_source is not None:
+        try:
+            _delete_custom_factor_keycloak_resource(username, factor_id)
+        except Exception as error:
+            from server.identity.keycloak_authorization import AuthorizationUnavailable
+            if isinstance(error, AuthorizationUnavailable):
+                return jsonify({'success': False, 'error': str(error),
+                                'code': 'authorization_unavailable'}), 503
+            raise
 
     invalidate_custom_factor_cache(username, factor_id)
     if old_name:
@@ -433,7 +536,15 @@ def api_get_factor(factor_id):
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     owner_username = cast(str, (request.args.get('owner_username') or username)).strip()
-    if not can_view_user_scope(username, owner_username):
+    try:
+        allowed = _custom_factor_read_allowed(username, owner_username, factor_id)
+    except Exception as error:
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        if isinstance(error, AuthorizationUnavailable):
+            return jsonify({'success': False, 'error': str(error),
+                            'code': 'authorization_unavailable'}), 503
+        raise
+    if not allowed:
         return jsonify({'success': False, 'error': '无权查看该用户因子'}), 403
     source = load_factor_source(owner_username, factor_id)
     if source is None:

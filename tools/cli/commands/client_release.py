@@ -17,7 +17,6 @@ import click
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_catalog import (
     catalog_local_run,
-    catalog_migration,
     catalog_source,
     catalog_status,
     init_catalog,
@@ -96,6 +95,7 @@ def _run_release_with_host_python(
         if value is not True:
             command.append(str(value))
     environment = os.environ.copy()
+    environment.pop("TRADERESEARCH_ENTRYPOINT", None)
     environment.pop("FACTORTESTER_ENTRYPOINT", None)
     subprocess.run(
         command,
@@ -109,7 +109,6 @@ client.add_command(client_adapter)
 client.add_command(client_profile)
 client.add_command(catalog_source, name="source")
 client.add_command(catalog_local_run, name="local-run")
-client.add_command(catalog_migration, name="migration")
 register_strategy_profile_commands(client_profile)
 register_profile_revision_commands(client_profile)
 
@@ -301,7 +300,7 @@ def publish_release(**options) -> None:
     "--release-dir",
     "release_directory",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="factortester-manager client release 的输出目录；按目标重签名并打包。",
+    help="traderesearch-manager client release 的输出目录；按目标重签名并打包。",
 )
 @click.option("--version", default="", help="可选；默认读取包内 beta.json。")
 @click.option("--build", type=click.IntRange(min=1), default=None)

@@ -82,9 +82,30 @@ def test_single_factor_freezes_only_changed_row_and_preserves_old_versions(monke
             assert row == old[index]
 
 
+@pytest.fixture(autouse=True)
+def _verified_keycloak_sessions(monkeypatch):
+    """Exercise the Keycloak-only request contract, never the retired Flask login."""
+    import server.identity.user_session as user_session
+
+    def verify(token: str):
+        if not token.startswith("test:"):
+            return None
+        username = token.removeprefix("test:")
+        return {
+            "username": username,
+            "keycloak_subject": f"subject:{username}",
+            "keycloak_issuer": "https://identity.example/realms/test",
+            "keycloak_groups": (),
+            "keycloak_roles": ("admin_console:manage",),
+            "role": "super_admin",
+        }
+
+    monkeypatch.setattr(user_session, "keycloak_session", verify)
+
+
 def _login(client, username: str = "alice") -> None:
-    with client.session_transaction() as session:
-        session["username"] = username
+    # Manager sessions carry the verified Keycloak access token in this cookie.
+    client.set_cookie("ft-manager-session", f"test:{username}")
 
 
 def test_public_family_mutations_are_superadmin_only(monkeypatch) -> None:

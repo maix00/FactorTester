@@ -36,14 +36,6 @@ class ManagerClient:
         if context is not None:options["context"]=context
         return urlopen(request, **options)
 
-    def login(self, username: str, password: str) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            "/auth/login",
-            payload={"username": username, "password": password},
-            authenticated=False,
-        )
-
     def logout(self) -> dict[str, Any]:
         return self._request("POST", "/auth/logout")
 
@@ -434,7 +426,7 @@ class ManagerClient:
         if authenticated:
             if not self.token:
                 raise RuntimeError(
-                    "Manager 尚未登录，请先运行 factortester-manager login"
+                    "Manager 尚未登录，请先运行 traderesearch-manager login"
                 )
             headers["Authorization"] = f"Bearer {self.token}"
         request = Request(url, data=body, headers=headers, method=method)

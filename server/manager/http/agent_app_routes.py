@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import sqlite3
 import time
 from urllib.parse import parse_qs
 
@@ -13,6 +16,9 @@ from server.manager.services.agent_app_server import (
 )
 from server.manager.services.provider_thread_chatkit import provider_item
 from server.manager.storage.profile_runtime_store import ProfileRuntimeError
+from server.permissions.agent_assistant import (
+    can_use_agent_assistant,
+)
 
 _SENSITIVE_EVENT_KEYS = frozenset({
     "api_key",
@@ -85,11 +91,25 @@ class AgentAppServerRoutesMixin:
             raise AgentAppServerError("Profile Agent supervisor is unavailable")
         return service
 
+    def _get_agent_permission_routes(self, parsed) -> bool:
+        if parsed.path != "/api/admin/agent-permissions":
+            return False
+        json_response(self, {"success": False, "code": "keycloak_managed_permissions",
+                             "error": "Manage permissions in Keycloak"}, 410)
+        return True
+
     def _agent_app_profile(self, profile_id: str) -> tuple[str, str]:
         session = self._agent_session()
         if session is None:
             raise AgentAppServerError("login required")
         principal = self._agent_principal(session)
+        if not can_use_agent_assistant(
+            principal, str(session.get("role") or ""), session.get("keycloak_roles", ()),
+        ):
+            raise AgentAppServerError(
+                "Agent Assistant use is not permitted",
+                code="permission_denied",
+            )
         identifier = str(profile_id or "").strip()
         if not self._profile_exists(principal, identifier):
             raise AgentAppServerError("Profile does not belong to current account")
@@ -99,7 +119,21 @@ class AgentAppServerRoutesMixin:
     def _agent_app_error(self, exc: Exception) -> None:
         message = str(exc)
         lowered = message.casefold()
-        if "not found" in lowered:
+        code = str(
+            getattr(exc, "code", "agent_runtime_error")
+            or "agent_runtime_error"
+        )
+        if isinstance(exc, (sqlite3.Error, OSError)):
+            code = "agent_state_unavailable"
+        if code == "permission_denied":
+            status = 401 if lowered == "login required" else 403
+        elif code == "agent_state_unavailable":
+            status = 503
+        elif code == "capacity_reached":
+            status = 429
+        elif code in {"start_in_progress", "start_cancelled"}:
+            status = 409
+        elif "not found" in lowered:
             status = 404
         else:
             status = 409 if "claim" in lowered or "running" in lowered else 400
@@ -108,15 +142,14 @@ class AgentAppServerRoutesMixin:
             {
                 "success": False,
                 "error": message,
-                "code": str(
-                    getattr(exc, "code", "agent_runtime_error")
-                    or "agent_runtime_error"
-                ),
+                "code": code,
             },
             status,
         )
 
     def _get_agent_app_routes(self, parsed) -> bool:
+        if self._get_agent_permission_routes(parsed):
+            return True
         if parsed.path not in {
             "/api/client/profile-agent",
             "/api/client/profile-agent/events",
@@ -289,6 +322,8 @@ class AgentAppServerRoutesMixin:
             return
 
     def _post_agent_app_routes(self, parsed) -> bool:
+        if parsed.path == "/api/admin/agent-permissions":
+            return self._get_agent_permission_routes(parsed)
         if parsed.path not in {
             "/api/client/profile-agent/start",
             "/api/client/profile-agent/stop",

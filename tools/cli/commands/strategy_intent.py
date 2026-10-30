@@ -106,7 +106,7 @@ def configure_strategy_intent(
 def _configuration():
     state = load_state()
     if not state.workspace_id:
-        raise click.ClickException("尚未选择 research workspace；请先运行 factortester workspace create/use")
+        raise click.ClickException("尚未选择 research workspace；请先运行 traderesearch workspace create/use")
     return state, client_from_config().get_workspace_configuration(state.workspace_id)
 
 

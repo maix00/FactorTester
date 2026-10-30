@@ -12,9 +12,6 @@ from server.manager.http.visitor_access import (
     normalize_visitor_id,
     visitor_principal,
 )
-from tools.data.account_manage import accounts_lock, load_accounts
-
-
 def install_manager_gateway_auth(app: Flask) -> None:
     """Project one authenticated 7998 user into a sibling service request."""
     @app.before_request
@@ -48,11 +45,10 @@ def install_manager_gateway_auth(app: Flask) -> None:
         if owner == "__public_graph__":
             session["manager_gateway_public_graph"] = True
             return
-        with accounts_lock:
-            exists = any(
-                str(account.get("username") or "") == owner
-                for account in load_accounts()
-            )
-        if exists:
+        # The HMAC capability is issued only to the sibling Manager after it
+        # validates the Keycloak browser session.  Do not make the old local
+        # account database a second identity authority or scan every account
+        # on each proxied request.
+        if len(owner) <= 256 and not any(ord(char) < 32 for char in owner):
             session["username"] = owner
             session["manager_gateway"] = True

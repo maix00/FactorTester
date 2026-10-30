@@ -24,19 +24,13 @@ def _enabled() -> bool:
 
 
 def principal_refs() -> list[str]:
-    """Every account whose projections are worth warming."""
-    try:
-        from tools.data.account_manage import load_accounts
+    """Return no identities: startup must not enumerate Keycloak users.
 
-        accounts = load_accounts() or []
-    except Exception:
-        return []
-    values: list[str] = []
-    for account in accounts:
-        username = str((account or {}).get("username") or "").strip()
-        if username and username not in values:
-            values.append(username)
-    return values
+    Authenticated caches are warmed on demand after an authorized request;
+    startup only warms public projections. Enumerating identities here would
+    turn a cache optimization into a full Keycloak directory scan.
+    """
+    return []
 
 
 def _timed(label: str, action: Callable[[], Any], log: Callable[[str], None]) -> float:

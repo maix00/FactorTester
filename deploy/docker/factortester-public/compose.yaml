@@ -2,6 +2,8 @@ name: ${FACTORTESTER_PUBLIC_PROJECT:-factortester-public}
 
 services:
   factortester-public:
+    env_file:
+      - ${TR_MANAGER_IDENTITY_ENV_FILE:-/dev/null}
     image: ${FACTORTESTER_PUBLIC_IMAGE:-factortester-public}:${FACTORTESTER_REVISION:?set FACTORTESTER_REVISION}
     build:
       context: ../../..
@@ -58,7 +60,7 @@ services:
       FACTORTESTER_LAN_ADDRESSES: ${FACTORTESTER_PUBLIC_ADDRESS:?set FACTORTESTER_PUBLIC_ADDRESS}
       FACTORTESTER_MIHOMO_BIN: /usr/local/bin/mihomo
       FACTORTESTER_MIHOMO_CONFIG_FILE: /state/mihomo.yaml
-      FACTORTESTER_MANAGED_ORGANIZATIONS: ${FACTORTESTER_MANAGED_ORGANIZATIONS:-default}
+      FACTORTESTER_MANAGED_ORGANIZATIONS: ${FACTORTESTER_MANAGED_ORGANIZATIONS:?set organization IDs owned by this Manager}
       FACTORTESTER_COUCHDB_URL: ${FACTORTESTER_COUCHDB_URL:-}
       FACTORTESTER_COUCHDB_DB: ${FACTORTESTER_COUCHDB_DB:-ft_objects}
       # The job pool keeps 1 planner + 2 execution workers alive, and each
@@ -79,9 +81,13 @@ services:
       # Only explicitly configured browser ingress origins may display the
       # visitor entry. The Manager public IP is intentionally not included.
       FACTORTESTER_PUBLIC_VISITOR_ORIGINS: ${FACTORTESTER_PUBLIC_VISITOR_ORIGINS:-}
-      # Empty by default: only explicitly allowlisted ordinary accounts may
-      # convert a public visitor session into an origin-bound login.
-      FACTORTESTER_PUBLIC_VISITOR_LOGIN_ALLOWLIST: ${FACTORTESTER_PUBLIC_VISITOR_LOGIN_ALLOWLIST:-}
+      # These public values are supplied by the service operator. Empty values
+      # are shown as unconfigured; the application never invents filing status.
+      FACTORTESTER_PUBLIC_SERVICE_OPERATOR: ${FACTORTESTER_PUBLIC_SERVICE_OPERATOR:-}
+      FACTORTESTER_PUBLIC_ICP_RECORD: ${FACTORTESTER_PUBLIC_ICP_RECORD:-}
+      FACTORTESTER_PUBLIC_SECURITY_RECORD: ${FACTORTESTER_PUBLIC_SECURITY_RECORD:-}
+      FACTORTESTER_PUBLIC_COMPLIANCE_CONTACT: ${FACTORTESTER_PUBLIC_COMPLIANCE_CONTACT:-}
+      FACTORTESTER_PUBLIC_PRIVACY_POLICY_URL: ${FACTORTESTER_PUBLIC_PRIVACY_POLICY_URL:-}
       FACTORTESTER_MANAGER_TLS_CERT: /run/secrets/manager-tls/manager.crt
       FACTORTESTER_MANAGER_TLS_KEY: /run/secrets/manager-tls/manager.key
       FACTORTESTER_ARTIFACT_TLS_CERT: /run/secrets/manager-tls/manager.crt

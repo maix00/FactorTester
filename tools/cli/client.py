@@ -42,12 +42,6 @@ class FactorTesterClient(
     def __init__(self, session: HttpSession) -> None:
         self.session = session
 
-    def login(self, username: str, password: str) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/auth/login",
-            {"username": username, "password": password},
-        ))
-
     def current_principal(self) -> dict[str, Any]:
         return self._expect_success(self.session.get("/api/session"))
 

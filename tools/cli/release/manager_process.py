@@ -146,7 +146,7 @@ def _resolve_python_executable(plist: Path) -> Path:
             return candidate.expanduser()
     raise RuntimeError(
         "Manager restart requires a valid server Python runtime; "
-        "the bundled FactorTester CLI is not a Python interpreter"
+        "the bundled TradeResearch CLI is not a Python interpreter"
     )
 
 

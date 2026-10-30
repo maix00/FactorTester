@@ -22,10 +22,10 @@ def product_library(ctx: click.Context) -> None:
     if ctx.invoked_subcommand is None:
         ensure_child_available(None, "products")
         click.echo("产品库")
-        click.echo("下一层: factortester product-library list")
+        click.echo("下一层: traderesearch product-library list")
         click.echo(
-            "可用功能: factortester product-library info <产品>；"
-            "factortester product-library groups list|add|subjects"
+            "可用功能: traderesearch product-library info <产品>；"
+            "traderesearch product-library groups list|add|subjects"
         )
 
 

@@ -21,9 +21,9 @@ def test_client_wheel_materializes_research_cli_without_graph_harness(tmp_path):
     )
 
     assert result["python"]["commands"] == [
-        "factortester", "factortester-manager",
+        "traderesearch", "traderesearch-manager",
     ]
-    binary = staging / "runtime" / "python" / "bin" / "factortester"
+    binary = staging / "runtime" / "python" / "bin" / "traderesearch"
     output = subprocess.check_output(
         [binary, "research", "reports", "--help"], text=True,
     )

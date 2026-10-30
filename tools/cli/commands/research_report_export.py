@@ -132,7 +132,7 @@ def _render_pdf(payload: bytes, target: Path) -> None:
     staged: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            suffix=".md", prefix=".factortester-report-", delete=False,
+            suffix=".md", prefix=".traderesearch-report-", delete=False,
         ) as stream:
             source = Path(stream.name)
             stream.write(payload)
@@ -303,14 +303,16 @@ def _export_markdown_images(
 
 def _resolve_pdf_renderer() -> Path:
     candidates: list[Path] = []
-    configured = os.environ.get("FACTORTESTER_REPORT_RENDERER", "").strip()
-    if configured:
-        candidates.append(Path(configured).expanduser())
+    for key in ("TRADERESEARCH_REPORT_RENDERER", "FACTORTESTER_REPORT_RENDERER"):
+        configured = os.environ.get(key, "").strip()
+        if configured:
+            candidates.append(Path(configured).expanduser())
     executable = Path(sys.executable).resolve()
-    candidates.append(executable.parent / "factortester-report-renderer")
-    discovered = shutil.which("factortester-report-renderer")
-    if discovered:
-        candidates.append(Path(discovered))
+    for name in ("traderesearch-report-renderer", "factortester-report-renderer"):
+        candidates.append(executable.parent / name)
+        discovered = shutil.which(name)
+        if discovered:
+            candidates.append(Path(discovered))
     for candidate in candidates:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate

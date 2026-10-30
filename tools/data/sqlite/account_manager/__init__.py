@@ -5,14 +5,6 @@ from __future__ import annotations
 import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
-from .user import load_accounts, save_accounts, ensure_user_schema
-from .user_level import (
-    load_levels,
-    load_organizations,
-    save_levels,
-    save_organizations,
-    ensure_user_level_schema,
-)
 from .product_group import (
     ensure_product_group_schema,
     load_product_groups,
@@ -55,9 +47,8 @@ from .factor_research_result import (
     save_factor_research_run,
 )
 def ensure_account_manager_sqlite_store() -> str:
+    """Create only research metadata schemas; identity belongs to Keycloak."""
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_user_schema(conn)
-        ensure_user_level_schema(conn)
         ensure_product_group_schema(conn)
         ensure_product_category_schema(conn)
         ensure_factor_set_schema(conn)

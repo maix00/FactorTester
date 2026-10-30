@@ -394,21 +394,13 @@
       "core"
     ],
     "settings-devices": [
-      "settings",
-      "access-table"
+      "settings"
     ],
     "settings-control-database": [
       "settings"
     ],
     "manager": [
       "core"
-    ],
-    "manager-access": [
-      "manager",
-      "access-table"
-    ],
-    "manager-accounts": [
-      "manager"
     ],
     "manager-mihomo": [
       "manager"
@@ -420,9 +412,6 @@
       "core"
     ],
     "factor-catalog-runtime": [],
-    "access-table": [
-      "core"
-    ],
     "chart-workbench-price": [
       "charts"
     ],
@@ -1045,12 +1034,6 @@
     "manager": [
       "settings/manager.js"
     ],
-    "manager-access": [
-      "manager/access-control.js"
-    ],
-    "manager-accounts": [
-      "manager/accounts.js"
-    ],
     "manager-mihomo": [
       "manager/mihomo.js"
     ],
@@ -1079,9 +1062,6 @@
     ],
     "factor-catalog-runtime": [
       "catalog/factor-catalog-runtime.js"
-    ],
-    "access-table": [
-      "manager/access-control-table.js"
     ],
     "chart-workbench-price": [],
     "chart-workbench-asset": [],
@@ -1309,9 +1289,6 @@
     "settings/settings.js",
     "settings/devices.js",
     "settings/control-database.js",
-    "manager/access-control-table.js",
-    "manager/access-control.js",
-    "manager/accounts.js",
     "settings/manager.js",
     "manager/mihomo.js",
     "trading/workbench.js",

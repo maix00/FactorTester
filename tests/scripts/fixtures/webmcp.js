@@ -67,7 +67,7 @@ global.location = {
 };
 global.document = {
   documentElement,
-  title: "FactorTester",
+  title: "TradeResearch",
   modelContext: {registerTool: tool => registrations.set(tool.name, tool)},
   getElementById: () => null,
   querySelector: selector => selector === "#page-title" ? {textContent: "IC 测试"} : null,
@@ -95,7 +95,7 @@ vm.runInThisContext(fs.readFileSync(
   ]);
 
   const capabilities = await registrations.get("factortester_capabilities").execute({query: "subordinate"});
-  assert.equal(capabilities.surfaces[0].id, "manager_accounts");
+  assert.equal(capabilities.surfaces.some(surface => surface.id === "manager_accounts"), false);
   assert.equal(capabilities.authenticated, true);
 
   await registrations.get("factortester_open_surface").execute({surface: "backtest"}, {});

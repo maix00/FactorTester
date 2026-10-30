@@ -1,4 +1,4 @@
-"""Small SQLite store for Strategy metadata, revisions, and shares."""
+"""Small SQLite store for Strategy metadata and revisions; permissions belong to Keycloak."""
 
 from __future__ import annotations
 
@@ -48,20 +48,12 @@ class StrategyLibraryStore:
                     created_by TEXT NOT NULL,
                     created_at REAL NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS strategy_library_shares (
-                    strategy_ref TEXT NOT NULL,
-                    principal_ref TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    PRIMARY KEY(strategy_ref, principal_ref)
-                );
                 CREATE INDEX IF NOT EXISTS idx_strategy_library_owner
                     ON strategy_library_entries(owner_ref, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_strategy_library_visibility
                     ON strategy_library_entries(visibility, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_strategy_library_revision
                     ON strategy_library_revisions(strategy_ref, revision_number);
-                CREATE INDEX IF NOT EXISTS idx_strategy_library_share_principal
-                    ON strategy_library_shares(principal_ref, strategy_ref);
                 """
             )
             migrate_revision_identity(db)
@@ -117,7 +109,7 @@ class StrategyLibraryStore:
         import os
         from server.jobs.storage.couchdb_authority import libraries_read_enabled
 
-        if scope in {"mine", "public", "superiors", "authorized"} and libraries_read_enabled():
+        if libraries_read_enabled():
             url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
             if url:
                 try:
@@ -128,51 +120,27 @@ class StrategyLibraryStore:
                         url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
                     )).strategies(principal if scope == "mine" else "")
                     needle = str(query or "").strip().lower()
-                    shares = set()
-                    if scope == "authorized":
-                        try:
-                            shares = set(CouchDBLibraryReader(CouchDBObjectStore(
-                                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
-                            )).shared_strategies(principal))
-                        except Exception:
-                            shares = set()
-                        if not shares:
-                            with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
-                                shares = {str(row["strategy_ref"]) for row in db.execute(
-                                    "SELECT strategy_ref FROM strategy_library_shares WHERE principal_ref=?",
-                                    (principal,),
-                                ).fetchall()}
                     rows = []
                     for doc in docs:
                         payload = doc.get("payload") or {}
                         entry = dict(payload.get("entry") or {})
                         revision = dict(payload.get("revision") or {})
                         owner = str(entry.get("owner_ref") or "")
-                        visibility = str(entry.get("visibility") or "private")
-                        if scope == "public" and visibility != "public":
+                        if scope == "mine" and owner != principal:
                             continue
-                        if scope == "superiors" and not (
-                            owner in subordinate_users and visibility in {"public", "superiors"}
-                        ):
+                        if scope == "subordinates" and owner not in subordinate_users:
                             continue
-                        if scope == "authorized":
-                            if str(entry.get("strategy_ref") or "") not in shares:
-                                continue
+                        if scope == "shared" and owner == principal:
+                            continue
+                        self._scope_sql(scope, principal, subordinate_users)
                         if needle and needle not in str(entry.get("name") or "").lower() \
                                 and needle not in str(entry.get("strategy_ref") or "").lower():
                             continue
-                        rows.append({**entry,
-                                     "revision_ref": revision.get("revision_ref"),
-                                     "revision_number": revision.get("revision_number"),
-                                     "source_sha256": revision.get("source_sha256"),
-                                     "entrypoint": revision.get("entrypoint"),
-                                     "hooks": revision.get("hooks") or [],
-                                     "requirements": revision.get("requirements") or {},
-                                     "created_by": revision.get("created_by"),
-                                     "revision_created_at": revision.get("created_at"),
-                                     "shared_strategy_ref": None})
-                    rows.sort(key=lambda item: (-float(item.get("updated_at") or 0),
-                                                str(item.get("strategy_ref") or "")))
+                        rows.append({"entry": entry, "revision": {
+                            key: value for key, value in revision.items() if key != "source_code"
+                        }})
+                    rows.sort(key=lambda item: (-float(item["entry"].get("updated_at") or 0),
+                                                str(item["entry"].get("strategy_ref") or "")))
                     total = len(rows)
                     page = max(1, int(page)); limit = max(1, min(100, int(limit)))
                     start = (page - 1) * limit
@@ -192,15 +160,13 @@ class StrategyLibraryStore:
             FROM strategy_library_entries AS e
             JOIN strategy_library_revisions AS r
               ON r.revision_ref = e.current_revision_ref
-            LEFT JOIN strategy_library_shares AS s
-              ON s.strategy_ref = e.strategy_ref AND s.principal_ref = ?
         """
         where_sql = f"""
             WHERE e.deleted_at = 0
               {query_sql}
               AND ({scope_sql})
         """
-        base_params = [principal, *query_params, *scope_params]
+        base_params = [*query_params, *scope_params]
         page = max(1, int(page))
         limit = max(1, min(100, int(limit)))
         offset = (page - 1) * limit
@@ -217,8 +183,7 @@ class StrategyLibraryStore:
                        r.strategy_ref AS revision_strategy_ref,
                        r.revision_number, r.source_sha256, r.entrypoint,
                        r.hooks_json, r.requirements_json, r.created_by,
-                       r.created_at AS revision_created_at,
-                       s.strategy_ref AS shared_strategy_ref
+                       r.created_at AS revision_created_at
                 {from_sql}
                 {where_sql}
                 ORDER BY e.updated_at DESC, e.strategy_ref
@@ -242,23 +207,9 @@ class StrategyLibraryStore:
             placeholders = ", ".join("?" for _ in subordinate_users)
             return f"e.owner_ref IN ({placeholders})", sorted(subordinate_users)
         if scope == "shared":
-            return (
-                "e.owner_ref <> ? AND e.visibility IN ('shared', 'public') "
-                "AND (e.visibility = 'public' OR s.strategy_ref IS NOT NULL)",
-                [principal],
-            )
+            return "e.owner_ref <> ?", [principal]
         if scope == "all":
-            owner_sql = ["e.owner_ref = ?"]
-            params: list[Any] = [principal]
-            if subordinate_users:
-                placeholders = ", ".join("?" for _ in subordinate_users)
-                owner_sql.append(f"e.owner_ref IN ({placeholders})")
-                params.extend(sorted(subordinate_users))
-            owner_sql.extend([
-                "e.visibility = 'public'",
-                "(e.visibility = 'shared' AND s.strategy_ref IS NOT NULL)",
-            ])
-            return " OR ".join(f"({value})" for value in owner_sql), params
+            return "1", []
         raise ValueError("strategy scope must be mine, subordinates, shared, or all")
 
     @classmethod
@@ -282,7 +233,6 @@ class StrategyLibraryStore:
                 "created_by": str(row["created_by"]),
                 "created_at": float(row["revision_created_at"]),
             },
-            "explicitly_shared": row["shared_strategy_ref"] is not None,
         }
 
     def _sync_couchdb(self, strategy_ref: str) -> None:
@@ -528,69 +478,3 @@ class StrategyLibraryStore:
         if result.rowcount == 1:
             self._sync_delete(strategy_ref)
         return result.rowcount == 1
-
-    def shares(self, strategy_ref: str) -> list[str]:
-        import os
-        from server.jobs.storage.couchdb_authority import libraries_read_enabled
-
-        if libraries_read_enabled():
-            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
-            if url:
-                try:
-                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
-                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
-
-                    values = CouchDBLibraryReader(CouchDBObjectStore(
-                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
-                    )).strategy_shares(strategy_ref)
-                    if values:
-                        return values
-                except Exception:
-                    pass
-        with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
-            rows = db.execute(
-                "SELECT principal_ref FROM strategy_library_shares WHERE strategy_ref=? ORDER BY principal_ref",
-                (strategy_ref,),
-            ).fetchall()
-        return [str(row["principal_ref"]) for row in rows]
-
-    def grant(self, strategy_ref: str, principal_ref: str) -> None:
-        with self._lock, connect_sqlite(self.db_path, timeout=10) as db:
-            db.execute(
-                "INSERT OR IGNORE INTO strategy_library_shares(strategy_ref, principal_ref, created_at) VALUES (?, ?, ?)",
-                (strategy_ref, principal_ref, time.time()),
-            )
-        self._sync_share(strategy_ref, principal_ref, grant=True)
-
-    def revoke(self, strategy_ref: str, principal_ref: str) -> bool:
-        with self._lock, connect_sqlite(self.db_path, timeout=10) as db:
-            result = db.execute(
-                "DELETE FROM strategy_library_shares WHERE strategy_ref=? AND principal_ref=?",
-                (strategy_ref, principal_ref),
-            )
-        if result.rowcount == 1:
-            self._sync_share(strategy_ref, principal_ref, grant=False)
-        return result.rowcount == 1
-
-    def _sync_share(self, strategy_ref: str, principal_ref: str, *, grant: bool) -> None:
-        import os
-        from server.jobs.storage.couchdb_authority import libraries_write_enabled
-
-        if not libraries_write_enabled():
-            return
-        url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
-        if not url:
-            return
-        try:
-            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
-            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
-
-            writer = CouchDBLibraryWriter(CouchDBObjectStore(
-                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
-            ))
-            if grant:
-                writer.grant_strategy_share(strategy_ref, principal_ref)
-            else:
-                writer.revoke_strategy_share(strategy_ref, principal_ref)
-        except Exception:
-            pass

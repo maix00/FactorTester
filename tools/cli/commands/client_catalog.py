@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -15,10 +14,8 @@ from tools.cli.catalog.local_runs import (
     LocalRunStore,
     validate_local_run_requirements,
 )
-from tools.cli.catalog.product_paths import parse_classifier_object_path
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
-from tools.cli.core.sqlite import connect_sqlite
 from tools.cli.local_sources import ClientSourceCatalog
 from tools.cli.release.profile import load_profile_root
 
@@ -190,155 +187,11 @@ def local_run_outbox(
     click.echo(_json(value) if as_json else _human_status(value))
 
 
-@click.group("migration")
-def catalog_migration() -> None:
-    """Read-only checks for the pre-existing account product groups."""
-
-
-@catalog_migration.command("preflight")
-@click.option("--username", required=True)
-@click.option(
-    "--legacy-db",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Legacy account SQLite file; defaults to the runtime account database.",
-)
-@_root_option
-@click.option("--json", "as_json", is_flag=True)
-@friendly_errors
-def migration_preflight(
-    username: str,
-    legacy_db: Path | None,
-    release_profile: Path | None,
-    as_json: bool,
-) -> None:
-    """Inspect old product-group rows without writing or deleting anything."""
-    if legacy_db is None:
-        raise click.UsageError(
-            "--legacy-db is required for the read-only migration preflight"
-        )
-    database = legacy_db
-    groups = _read_legacy_groups(database, username)
-    result = {
-        "schema_version": 1,
-        "mode": "read_only",
-        "legacy_database": str(database.expanduser().resolve()),
-        "local_catalog_database": str(
-            LocalCatalogStore(load_profile_root(release_profile)).database_path
-        ),
-        "username": username,
-        "group_count": len(groups),
-        "groups": [_inspect_group(group) for group in groups],
-        "safe_to_migrate": bool(groups) and all(
-            item["migration_status"] == "canonical_paths_only"
-            for item in map(_inspect_group, groups)
-        ),
-        "next_actions": [
-            "resolve_category_paths_against_a_catalog_revision",
-            "freeze_product_membership_hashes",
-            "import_factor_and_factor_set_revisions",
-            "verify_counts_before_removing_legacy_bindings",
-        ],
-    }
-    click.echo(_json(result) if as_json else _human_preflight(result))
-
-
-def _read_legacy_groups(database: Path, username: str) -> list[dict[str, Any]]:
-    if not database.is_file():
-        return []
-    try:
-        connection = connect_sqlite(
-            database.expanduser().resolve(), readonly=True, timeout=5.0,
-        )
-    except sqlite3.Error:
-        return []
-    connection.row_factory = sqlite3.Row
-    try:
-        table = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='account_product_groups'"
-        ).fetchone()
-        if table is None:
-            return []
-        rows = connection.execute(
-            """
-            SELECT group_name, sort_index, payload_json, updated_at
-            FROM account_product_groups
-            WHERE username = ?
-            ORDER BY sort_index, group_name
-            """,
-            (username,),
-        ).fetchall()
-    finally:
-        connection.close()
-    result = []
-    for row in rows:
-        try:
-            value = json.loads(str(row["payload_json"] or "{}"))
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(value, dict):
-            continue
-        value.setdefault("name", row["group_name"])
-        result.append(value)
-    return result
-
-
-def _inspect_group(group: dict[str, Any]) -> dict[str, Any]:
-    paths = group.get("paths")
-    if not isinstance(paths, list):
-        paths = []
-    canonical = 0
-    category = 0
-    invalid = 0
-    for raw_path in paths:
-        path = str(raw_path or "").strip()
-        if path.startswith("-"):
-            path = path[1:].strip()
-        try:
-            parse_classifier_object_path(path)
-        except ValueError:
-            if path.startswith("Product/") and len(path.split("/")) >= 3:
-                category += 1
-            else:
-                invalid += 1
-        else:
-            canonical += 1
-    if invalid:
-        status = "invalid_paths"
-    elif category:
-        status = "category_paths_need_snapshot"
-    else:
-        status = "canonical_paths_only"
-    return {
-        "name": str(group.get("name") or ""),
-        "group_ref": str(group.get("id") or ""),
-        "path_count": len(paths),
-        "canonical_path_count": canonical,
-        "category_path_count": category,
-        "invalid_path_count": invalid,
-        "factor_ref_count": len(group.get("factor_refs") or []),
-        "factor_set_ref_count": len(group.get("factor_set_refs") or []),
-        "migration_status": status,
-    }
-
-
 def _human_status(value: dict[str, Any]) -> str:
     return (
         f"database={value['database']} schema={value['schema_version']} "
         f"products={value['products']} groups={value['product_groups']} "
         f"factors={value['factors']} factor_sets={value['factor_sets']}"
-    )
-
-
-def _human_preflight(value: dict[str, Any]) -> str:
-    return (
-        f"read-only groups={value['group_count']} "
-        f"safe_to_migrate={str(value['safe_to_migrate']).lower()}\n"
-        + "\n".join(
-            f"{item['name']}: {item['migration_status']} "
-            f"paths={item['path_count']}"
-            for item in value["groups"]
-        )
     )
 
 

@@ -32,6 +32,10 @@ def test_manager_serves_beta_asset_head_without_body(tmp_path: Path) -> None:
         def _redirect_plain_http_to_https(self) -> bool:
             return False
 
+        def _proxy_keycloak(self, _parsed, *, method: str, head_only: bool) -> bool:
+            del method, head_only
+            return False
+
         def log_message(self, _format: str, *_args: object) -> None:
             return
 

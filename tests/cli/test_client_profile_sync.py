@@ -13,7 +13,7 @@ def test_profile_sync_command_keeps_local_success_distinct_from_pending_pg(
     tmp_path, monkeypatch,
 ) -> None:
     root = tmp_path / "client"
-    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    monkeypatch.setenv("TRADERESEARCH_CLIENT_ROOT", str(root))
     LocalProfileStore(root).save(new_local_profile(
         profile_id="maxa",
         display_name="Max A",

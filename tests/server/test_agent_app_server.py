@@ -16,6 +16,9 @@ from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_app_server import AgentAppServerSupervisor
 from server.manager.services.agent_app_server_errors import AgentAppServerError
+from server.manager.services.agent_app_server_process import AgentAppServerProcessError
+from server.manager.services.agent_app_server_session import AgentAppServerSession
+from server.manager.services.agent_skill_runtime import AgentSkillRuntime
 from server.manager.services.agent_conversation_runtime import (
     AgentConversationRuntimeObserver,
 )
@@ -38,9 +41,17 @@ PROFILE_ID = "profile-main"
 def _bypass_process_namespace_in_app_server_unit_tests(monkeypatch):
     """Process protocol tests are separate from Bubblewrap boundary tests."""
     monkeypatch.setattr(ProfileAgentSandbox, "command", lambda _self, child: child)
+    # Most of this protocol suite tests transport, not the Keycloak role gate.
+    # The focused authorization tests cover the allow/deny boundary.
+    from server.manager.http import agent_app_routes
+    monkeypatch.setattr(
+        agent_app_routes, "can_use_agent_assistant", lambda *_args: True,
+    )
 
 
-def _fake_codex(path: Path, *, history: bool = False) -> str:
+def _fake_codex(
+    path: Path, *, history: bool = False, initialize_delay: float = 0.0,
+) -> str:
     turns = repr(
         [
             {
@@ -72,8 +83,10 @@ def _fake_codex(path: Path, *, history: bool = False) -> str:
         """#!/usr/bin/env python3
 import json
 import sys
+import time
 
 HISTORY_TURNS = __HISTORY_TURNS__
+INITIALIZE_DELAY = __INITIALIZE_DELAY__
 
 for raw in sys.stdin:
     request = json.loads(raw)
@@ -81,6 +94,7 @@ for raw in sys.stdin:
     if method == "skills/list":
         result = {"data": [{"cwd": request.get("params", {}).get("cwds", [""])[0], "skills": []}]}
     elif method == "initialize":
+        time.sleep(INITIALIZE_DELAY)
         result = {"userAgent": "fake-codex"}
     elif method == "model/list":
         result = {"data": [{
@@ -140,7 +154,9 @@ for raw in sys.stdin:
     if "id" in request:
         sys.stdout.write(json.dumps({"id": request["id"], "result": result}) + "\\n")
         sys.stdout.flush()
-""".replace("__HISTORY_TURNS__", turns),
+""".replace("__HISTORY_TURNS__", turns).replace(
+            "__INITIALIZE_DELAY__", repr(max(0.0, float(initialize_delay))),
+        ),
         encoding="utf-8",
     )
     os.chmod(path, 0o700)
@@ -151,6 +167,34 @@ def _fake_factor_tester(path: Path) -> str:
     path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     os.chmod(path, 0o700)
     return str(path)
+
+
+def _claimed_agent_service(tmp_path: Path, monkeypatch, profile_id: str = PROFILE_ID):
+    monkeypatch.setenv(
+        "FACTORTESTER_CLI", _fake_factor_tester(tmp_path / "factortester")
+    )
+    monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    service.bind_runtime(
+        PRINCIPAL, profile_id, runtime_kind="server", executor_id="public-1",
+    )
+    provider = service.save_provider(PRINCIPAL, {
+        "label": "fake provider",
+        "runtime_kind": "server",
+        "protocol": "openai_compatible",
+        "base_url": "https://api.example.test/v1",
+        "default_model": "research-model",
+        "token": "server-secret-token",
+    })
+    service.claim(PRINCIPAL, profile_id, provider_id=provider["provider_id"])
+    return service, provider
 
 
 def _provider_health_ok(provider, **_kwargs):
@@ -684,6 +728,82 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     assert resumed_claim is not None
     assert resumed_claim["status"] == "claimed"
     supervisor.stop(PRINCIPAL, PROFILE_ID)
+
+
+def test_agent_supervisor_cancels_a_starting_process_on_stop(tmp_path, monkeypatch):
+    service, _provider = _claimed_agent_service(tmp_path, monkeypatch)
+    supervisor = AgentAppServerSupervisor(
+        service,
+        codex_binary=_fake_codex(
+            tmp_path / "fake-codex", initialize_delay=10.0,
+        ),
+    )
+    key = (PRINCIPAL, PROFILE_ID)
+    failures = []
+
+    def start():
+        try:
+            supervisor.start(*key)
+        except Exception as exc:  # asserted below from the worker thread
+            failures.append(exc)
+
+    worker = threading.Thread(target=start)
+    worker.start()
+    deadline = time.monotonic() + 5.0
+    starting_session = None
+    while time.monotonic() < deadline and worker.is_alive():
+        with supervisor._lock:
+            starting_session = supervisor._starting_sessions.get(key)
+        if starting_session is not None and starting_session.process is not None:
+            break
+        time.sleep(0.01)
+    if starting_session is None or starting_session.process is None:
+        worker.join(timeout=1.0)
+        pytest.fail(f"Agent startup ended before process became observable: {failures!r}")
+    assert starting_session.process.is_running()
+
+    supervisor.stop(*key)
+    worker.join(timeout=3.0)
+    assert not worker.is_alive()
+    assert failures and isinstance(failures[0], AgentAppServerError)
+    assert failures[0].code == "start_cancelled"
+    assert not supervisor.status(*key)["running"]
+    supervisor.stop_all()
+
+
+def test_agent_supervisor_limits_live_sessions_and_reaps_idle_ones(
+    tmp_path, monkeypatch,
+):
+    service, provider = _claimed_agent_service(tmp_path, monkeypatch)
+    second_profile = "profile-secondary"
+    service.bind_runtime(
+        PRINCIPAL, second_profile, runtime_kind="server", executor_id="public-1",
+    )
+    service.claim(PRINCIPAL, second_profile, provider_id=provider["provider_id"])
+    supervisor = AgentAppServerSupervisor(
+        service,
+        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        max_active_sessions=1,
+        idle_timeout_seconds=30,
+        reaper_interval_seconds=1,
+    )
+    supervisor.start(PRINCIPAL, PROFILE_ID)
+    with pytest.raises(AgentAppServerError) as capacity:
+        supervisor.start(PRINCIPAL, second_profile)
+    assert capacity.value.code == "capacity_reached"
+
+    key = (PRINCIPAL, PROFILE_ID)
+    expired_at = time.monotonic() - 31
+    supervisor._last_activity[key] = expired_at
+    supervisor._processing_turns[key] = {"turn_id": "still-running"}
+    supervisor._reap_idle_sessions_once(now=time.monotonic())
+    assert supervisor.status(*key)["running"]
+
+    supervisor._processing_turns.pop(key)
+    supervisor._last_activity[key] = expired_at
+    supervisor._reap_idle_sessions_once(now=time.monotonic())
+    assert not supervisor.status(*key)["running"]
+    supervisor.stop_all()
 
 
 def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
@@ -1412,6 +1532,43 @@ def test_profile_agent_routes_reject_client_managed_profile(tmp_path):
     assert "not bound to a server runtime" in _response(handler)["error"]
 
 
+def test_profile_agent_routes_deny_without_explicit_assistant_permission(
+    tmp_path, monkeypatch,
+):
+    from server.manager.http import agent_app_routes
+
+    monkeypatch.setattr(
+        agent_app_routes, "can_use_agent_assistant", lambda *_args: False,
+    )
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    supervisor = AgentAppServerSupervisor(service)
+    handler = _AppHandler(service, supervisor)
+
+    assert handler._get_agent_app_routes(
+        urlparse(f"/api/client/profile-agent?profile_id={PROFILE_ID}"),
+    )
+    assert handler.response_status == 403
+    assert _response(handler)["code"] == "permission_denied"
+
+
+def test_agent_permission_admin_route_is_retired_without_creating_database(tmp_path, monkeypatch):
+    db = tmp_path / "permissions.db"
+    handler = _AppHandler(None, None, {"subject": "user:alice", "effect": "allow"})
+    assert handler._post_agent_app_routes(urlparse("/api/admin/agent-permissions"))
+    assert handler.response_status == 410
+    handler = _AppHandler(None, None)
+    assert handler._get_agent_app_routes(urlparse("/api/admin/agent-permissions"))
+    assert handler.response_status == 410
+    assert not db.exists()
+
+
 def test_profile_agent_runtime_events_update_conversation_metadata(tmp_path):
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
@@ -1499,6 +1656,7 @@ def test_profile_agent_runtime_events_update_conversation_metadata(tmp_path):
 
 
 def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.manager.http.agent_routes.can_use_agent_assistant", lambda *_args: True)
     monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
@@ -1528,6 +1686,7 @@ def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
 
 
 def test_provider_test_route_returns_stable_error_classification(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.manager.http.agent_routes.can_use_agent_assistant", lambda *_args: True)
     def reject(_provider):
         raise AgentProviderHealthError(
             "provider rejected the API key (HTTP 401)",
@@ -1608,6 +1767,55 @@ def test_provider_preflight_failure_blocks_process_start(tmp_path, monkeypatch):
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False
 
 
+def test_agent_session_stop_is_not_blocked_by_inflight_rpc(tmp_path):
+    entered = threading.Event()
+    stopped = threading.Event()
+
+    class BlockingProcess:
+        def is_running(self):
+            return not stopped.is_set()
+
+        def request(self, *_args, **_kwargs):
+            entered.set()
+            stopped.wait(timeout=5)
+            if stopped.is_set():
+                raise AgentAppServerProcessError("app-server stopped")
+            return {"result": {}}
+
+        def stop(self):
+            stopped.set()
+
+    runtime = AgentSkillRuntime(tmp_path / "profile")
+    runtime._prepare_directories()
+    session = AgentAppServerSession(
+        runtime=runtime,
+        provider={"protocol": "openai_responses"},
+        codex_binary="codex",
+    )
+    process = BlockingProcess()
+    session.process = process  # type: ignore[assignment]
+    session.ready = True
+    session._prepared_params = lambda _method, params: dict(params)  # type: ignore[method-assign]
+
+    request_thread = threading.Thread(
+        target=lambda: pytest.raises(
+            AgentAppServerError, session.request, "model/list", {},
+        ),
+        daemon=True,
+    )
+    request_thread.start()
+    assert entered.wait(timeout=1)
+
+    started = time.monotonic()
+    session.stop()
+    elapsed = time.monotonic() - started
+    request_thread.join(timeout=1)
+
+    assert stopped.is_set()
+    assert elapsed < 0.5
+    assert not request_thread.is_alive()
+
+
 def test_missing_factor_tester_cli_blocks_process_start(tmp_path, monkeypatch):
     monkeypatch.delenv("FACTORTESTER_CLI", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
@@ -1643,7 +1851,7 @@ def test_missing_factor_tester_cli_blocks_process_start(tmp_path, monkeypatch):
         codex_binary=_fake_codex(tmp_path / "fake-codex"),
     )
 
-    with pytest.raises(AgentAppServerError, match="FactorTester CLI") as error:
+    with pytest.raises(AgentAppServerError, match="TradeResearch CLI") as error:
         supervisor.start(PRINCIPAL, PROFILE_ID)
     assert error.value.code == "runtime_missing"
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False

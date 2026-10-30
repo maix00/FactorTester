@@ -4,30 +4,101 @@ from __future__ import annotations
 
 import html
 import json
+import os
 from collections.abc import Mapping
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from server.manager.http.localization import page_localization
 
 
 PUBLIC_REGISTRATION_NOTICE = (
-    "根据工信部及通信管理相关网络信息服务合规要求，本公网实例暂不开放自助注册；"
-    "如需账号，请联系本服务管理员。"
+    "本公网实例已关闭自助注册。账户由管理员创建；"
+    "访客模式使用受限身份，不等同于个人账户。"
 )
 
 PUBLIC_DEVICE_COMPLIANCE_NOTICE = (
-    "本公网入口只向服务器白名单用户及其已认证设备提供访问。根据工信部及"
-    "通信管理相关网络信息服务合规要求，公网 IP/域名提供信息服务是否需要"
-    "备案，应以主管部门和接入服务商核定为准。"
-    "本系统不采集 MAC、IMEI、浏览器指纹、定位或原始 User-Agent 等设备画像；"
-    "仅使用随机设备编号和公钥签名进行访问控制，并为安全审计记录粗粒度客户端"
-    "名称、登记来源 IP、最近访问 IP 及时间。上述记录仅向对应用户和授权管理员"
-    "显示，按最小必要原则处理。白名单用户应在本公网服务器的访客模式中使用"
-    "自己的账号和密码登录；登录成功后，当前浏览器会自动生成设备密钥并登记，"
-    "私钥只保留在当前浏览器的不可导出存储中。已登记白名单设备仍可由用户本人或"
-    "超级管理员撤销。没有有效白名单或已认证设备的访问只能"
-    "看到本合规提示，未授权用户不开放登录、注册或设备登记。"
+    "本服务用于研究、测试和数据展示。使用时请遵守适用法律法规及服务规则，"
+    "不得提交无权使用的数据或内容。服务会处理账户、任务配置与结果，以及"
+    "提供服务和保障安全所需的信息。处理方式、保存期限和联系渠道以本部署公布的"
+    "隐私政策为准。运营方应根据服务实际情况核实并公示适用的许可或备案信息。"
 )
+
+_MIIT_FILING_URL = "https://beian.miit.gov.cn/"
+
+
+def public_compliance_information() -> dict[str, str]:
+    """Return deployment-owned public legal metadata without inventing values."""
+    values = {
+        "service_operator": os.environ.get(
+            "FACTORTESTER_PUBLIC_SERVICE_OPERATOR", ""
+        ).strip()[:256],
+        "icp_record": os.environ.get(
+            "FACTORTESTER_PUBLIC_ICP_RECORD", ""
+        ).strip()[:256],
+        "security_record": os.environ.get(
+            "FACTORTESTER_PUBLIC_SECURITY_RECORD", ""
+        ).strip()[:256],
+        "compliance_contact": os.environ.get(
+            "FACTORTESTER_PUBLIC_COMPLIANCE_CONTACT", ""
+        ).strip()[:256],
+        "privacy_policy_url": os.environ.get(
+            "FACTORTESTER_PUBLIC_PRIVACY_POLICY_URL", ""
+        ).strip()[:2048],
+    }
+    privacy_url = values["privacy_policy_url"]
+    try:
+        parsed = urlsplit(privacy_url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            values["privacy_policy_url"] = ""
+    except ValueError:
+        values["privacy_policy_url"] = ""
+    return values
+
+
+def _public_compliance_information_html(
+    information: Mapping[str, str],
+) -> str:
+    labels = (
+        ("service_operator", "服务运营主体"),
+        ("icp_record", "ICP备案/许可信息"),
+        ("security_record", "公安联网备案信息（如适用）"),
+        ("compliance_contact", "合规联系渠道"),
+    )
+    rows = []
+    for key, label in labels:
+        value = str(information.get(key) or "").strip()
+        if key == "icp_record" and not value:
+            value = "请联系服务运营方核实适用信息"
+        elif key == "security_record" and not value:
+            continue
+        elif not value:
+            continue
+        rows.append(
+            "<dt>" + html.escape(label) + "</dt><dd>"
+            + html.escape(value) + "</dd>"
+        )
+    privacy_url = str(information.get("privacy_policy_url") or "").strip()
+    privacy = (
+        '<p><a rel="noopener noreferrer" href="'
+        + html.escape(privacy_url, quote=True)
+        + '">查看部署方隐私政策</a></p>'
+        if privacy_url else
+        "<p>请联系服务运营方了解隐私政策及数据保存期限。</p>"
+    )
+    filing = (
+        '<p><a rel="noopener noreferrer" href="'
+        + _MIIT_FILING_URL
+        + '">工信部备案管理系统</a></p>'
+    )
+    return (
+        '<section class="public-compliance-info" aria-labelledby="public-compliance-title">'
+        '<h2 id="public-compliance-title">公网服务信息</h2><dl>'
+        + "".join(rows)
+        + "</dl>"
+        + filing
+        + privacy
+        + "</section>"
+    )
 
 _CARD_STYLE = """:root{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(520px,calc(100vw - 40px));box-sizing:border-box;padding:28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 35px #11182718}h1{margin:0 0 8px;font-size:24px}p{color:#4b5563;line-height:1.55}.notice{margin:18px 0;padding:12px;border:1px solid #f59e0b66;border-radius:8px;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.55}label{display:block;margin:14px 0;font-size:14px}input{display:block;box-sizing:border-box;width:100%;margin-top:6px;padding:10px 11px;border:1px solid #d1d5db;border-radius:7px;font:inherit}button{width:100%;padding:10px 12px;border:0;border-radius:7px;background:#2563eb;color:#fff;font:inherit;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.error{margin-top:12px;color:#b91c1c;font-size:13px}.ok{margin-top:12px;color:#047857;font-size:13px}"""
 
@@ -94,19 +165,17 @@ def _device_auth_script(
         + ";const messages="
         + _script(messages)
         + r""";
-const format=(template,values)=>Object.entries(values).reduce((text,[key,value])=>text.split("{"+key+"}").join(String(value)),template);
 const b64=value=>{const text=atob(value.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-value.length%4)%4));return Uint8Array.from(text,ch=>ch.charCodeAt(0));};
 const b64url=value=>{const bytes=new Uint8Array(value);let text="";for(const byte of bytes)text+=String.fromCharCode(byte);return btoa(text).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");};
 const openDB=()=>new Promise((resolve,reject)=>{if(!window.indexedDB)return reject(Object.assign(new Error(messages.storageUnavailable),{stage:"storage"}));const request=indexedDB.open("factortester-device",1);request.onupgradeneeded=()=>request.result.createObjectStore("credentials",{keyPath:"device_id"});request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>db.close();resolve(db);};request.onerror=()=>reject(Object.assign(request.error||new Error(messages.storageUnavailable),{stage:"storage"}));});
 const credentials=async()=>{const db=await openDB();return new Promise((resolve,reject)=>{const values=[];const transaction=db.transaction("credentials","readonly");const finish=(error,value)=>{db.close();if(error)reject(Object.assign(error,{stage:"storage"}));else resolve(value);};transaction.oncomplete=()=>finish(null,values);transaction.onerror=()=>finish(transaction.error||new Error(messages.storageUnavailable));transaction.onabort=()=>finish(transaction.error||new Error(messages.storageUnavailable));const request=transaction.objectStore("credentials").openCursor();request.onsuccess=event=>{const cursor=event.target.result;if(cursor){values.push(cursor.value);cursor.continue();}};request.onerror=()=>finish(request.error||new Error(messages.storageUnavailable));});};
 const post=async(path,body,stage)=>{let response;try{response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},credentials:"same-origin",cache:"no-store",mode:"same-origin",redirect:"error",body:JSON.stringify(body)});}catch(cause){cause.stage=stage;cause.kind="network";throw cause;}let payload={};try{payload=await response.json();}catch{}if(!response.ok||!payload.success){const error=new Error(payload.error||messages.notApproved);error.status=response.status;error.stage=stage;throw error;}return payload;};
-const countLabel=document.querySelector("#public-device-count");const loadCount=async()=>{try{const response=await fetch("/api/device/summary",{credentials:"same-origin",cache:"no-store"});const payload=await response.json();if(!response.ok||!payload.success)throw new Error(messages.unavailable);const values={users:Number(payload.public_user_count||0),devices:Number(payload.public_device_total_count??payload.public_device_count??0)};countLabel.textContent=format(payload.scope==="account"?messages.account:messages.system,values);}catch(_){countLabel.textContent=messages.unavailable;}};
 const statusLabel=document.querySelector("#device-auth-status");const setStatus=value=>{statusLabel.textContent=value;};const wait=delay=>new Promise(resolve=>setTimeout(resolve,delay));const MAX_AUTHENTICATION_RUNS=2;let authenticationRuns=0;let authenticationRunning=false;let authenticationSucceeded=false;let lastAuthenticationError=null;let authenticationRetryTimer=0;
 const failureMessage=error=>{const stage=String(error?.stage||"");if(error?.kind==="network")return messages[stage+"NetworkFailed"]||messages.networkFailed;const key=stage+"Failed";return messages[key]||messages.failed;};
 const transientFailure=error=>error?.kind==="network"||[408,425,429,500,502,503,504].includes(Number(error?.status));
 const scheduleAuthenticationRetry=()=>{if(authenticationSucceeded||authenticationRuns>=MAX_AUTHENTICATION_RUNS||!transientFailure(lastAuthenticationError)||authenticationRetryTimer)return;authenticationRetryTimer=setTimeout(()=>{authenticationRetryTimer=0;if(authenticationRunning||authenticationSucceeded)return;setStatus(messages.retrying||messages.authenticating);void authenticate();},2500);};
-const authenticate=async()=>{if(authenticationRunning||authenticationSucceeded||authenticationRuns>=MAX_AUTHENTICATION_RUNS)return;authenticationRunning=true;authenticationRuns+=1;let lastError=null;lastAuthenticationError=null;try{if(window.isSecureContext===false){const error=new Error(messages.transportFailed);error.stage="transport";lastError=error;setStatus(failureMessage(error));return;}let saved;try{saved=await credentials();}catch(error){lastError=error;setStatus(failureMessage(error));return;}if(!saved.length){setStatus(messages.noCredential);return;}setStatus(messages.authenticating);for(const credential of saved){for(const delay of [0,400,1200]){if(delay)await wait(delay);try{const challenge=await post("/api/device/challenge",{device_id:credential.device_id},"challenge");let signature;try{signature=await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},credential.private_key,b64(challenge.challenge));}catch(error){error.stage="signing";throw error;}await post("/api/device/verify",{challenge_id:challenge.challenge_id,device_id:credential.device_id,public_key:credential.public_key,signature:b64url(signature),next:nextPath},"verify");authenticationSucceeded=true;lastAuthenticationError=null;setStatus(messages.success);window.location.replace(nextPath);return;}catch(error){lastError=error;if(error?.status===403)break;}}}lastAuthenticationError=lastError;setStatus(failureMessage(lastError));}catch(error){lastAuthenticationError=error;setStatus(failureMessage(error));}finally{authenticationRunning=false;scheduleAuthenticationRetry();}};
-const startAuthentication=()=>{void authenticate().finally(loadCount);};
+const authenticate=async()=>{if(authenticationRunning||authenticationSucceeded||authenticationRuns>=MAX_AUTHENTICATION_RUNS)return;authenticationRunning=true;authenticationRuns+=1;let lastError=null;lastAuthenticationError=null;try{if(window.isSecureContext===false){const error=new Error(messages.transportFailed);error.stage="transport";lastError=error;setStatus(failureMessage(error));return;}let saved;try{saved=await credentials();}catch(error){lastError=error;setStatus(failureMessage(error));return;}if(!saved.length){setStatus(messages.noCredential);return;}setStatus(messages.authenticating);for(const credential of saved){for(const delay of [0,400,1200]){if(delay)await wait(delay);try{const challenge=await post("/api/device/challenge",{device_id:credential.device_id},"challenge");let signature;try{signature=await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},credential.private_key,b64(challenge.challenge));}catch(error){error.stage="signing";throw error;}const verified=await post("/api/device/verify",{challenge_id:challenge.challenge_id,device_id:credential.device_id,public_key:credential.public_key,signature:b64url(signature),next:nextPath},"verify");authenticationSucceeded=true;lastAuthenticationError=null;setStatus(messages.success);window.location.replace(verified.login_url||nextPath);return;}catch(error){lastError=error;if(error?.status===403)break;}}}lastAuthenticationError=lastError;setStatus(failureMessage(lastError));}catch(error){lastAuthenticationError=error;setStatus(failureMessage(error));}finally{authenticationRunning=false;scheduleAuthenticationRetry();}};
+const startAuthentication=()=>{void authenticate();};
 window.addEventListener("online",authenticate);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")authenticate();});if(document.readyState==="complete")startAuthentication();else window.addEventListener("load",startAuthentication,{once:true});"""
     )
 
@@ -116,53 +185,33 @@ def compliance_page(
     *,
     accept_language: object = "",
     visitor_entry_href: str = "",
+    public_server: bool = False,
+    compliance_information: Mapping[str, str] | None = None,
 ) -> bytes:
     # The public compliance notice is a jurisdiction-specific Chinese notice,
     # so it deliberately does not vary with the requesting browser language.
     del accept_language
     locale, strings = page_localization("zh-Hans")
     messages = {
-        "loading": _text(
-            strings,
-            "当前已登记的公网访问用户与设备数量：正在查询……",
-        ),
-        "system": _text(
-            strings,
-            "当前系统已登记的公网访问用户数：{users}；设备数：{devices}。",
-        ),
-        "account": _text(
-            strings,
-            "当前账户已登记的公网访问用户数：{users}；设备数：{devices}。",
-        ),
-        "unavailable": _text(
-            strings,
-            "当前已登记的公网访问用户与设备数量：暂时无法查询。",
-        ),
-        "storageUnavailable": _text(strings, "设备凭证存储不可用"),
-        "storageFailed": "设备凭证读取失败，请重新打开此页面。",
-        "notApproved": _text(strings, "设备未获批准"),
-        "checking": "正在检查本浏览器的设备凭证……",
-        "authenticating": "检测到已登记设备，正在自动登录……",
-        "retrying": "设备连接暂时失败，正在自动重试……",
+        "storageUnavailable": _text(strings, "暂时无法确认设备状态"),
+        "storageFailed": "无法确认当前访问状态，请刷新页面重试。",
+        "notApproved": _text(strings, "当前无法自动登录，请使用账户登录。"),
+        "checking": "正在确认访问状态……",
+        "authenticating": "正在登录……",
+        "retrying": "连接暂时不可用，正在重试……",
         "noCredential": (
-            "当前浏览器来源没有已登记的设备密钥。白名单用户请点击访客模式，"
-            "使用自己的账号和密码登录；登录后当前浏览器会自动登记。"
+            "请使用账户登录，或以受限访客身份继续。"
         ),
-        "failed": (
-            "设备自动登录失败。请确认设备仍在白名单中，或进入访客模式重新登录。"
-        ),
-        "challengeFailed": "获取设备挑战失败，请稍后重试。",
-        "signingFailed": "设备密钥签名阶段失败，请使用登记时相同的浏览器来源。",
-        "verifyFailed": "设备验证阶段失败，请确认设备仍在白名单中。",
-        "networkFailed": "与公网服务器通信失败，请检查网络或证书信任。",
-        "challengeNetworkFailed": "获取设备挑战时与公网服务器通信失败，请检查网络或证书信任。",
-        "verifyNetworkFailed": "提交设备验证时与公网服务器通信失败，请检查网络或证书信任。",
-        "transportFailed": "当前页面不是受信任的 HTTPS 安全来源，无法进行设备自动登录。",
-        "success": "设备验证成功，正在进入 FactorTester……",
-        "visitorEntry": (
-            "以访客模式访问公网 IP（与内网未登录访问权限一致；仅显示本服务器最近 "
-            "20 条测试任务，不提供生成物下载）"
-        ),
+        "failed": "无法自动登录，请使用账户登录或稍后重试。",
+        "challengeFailed": "登录未完成，请稍后重试。",
+        "signingFailed": "登录未完成，请使用账户重新登录。",
+        "verifyFailed": "无法确认登录状态，请重新登录。",
+        "networkFailed": "暂时无法连接服务，请检查网络后重试。",
+        "challengeNetworkFailed": "暂时无法连接服务，请检查网络后重试。",
+        "verifyNetworkFailed": "暂时无法连接服务，请检查网络后重试。",
+        "transportFailed": "请通过安全连接访问服务后重试。",
+        "success": "登录成功，正在进入 TradeResearch……",
+        "visitorEntry": "以受限访客身份继续",
         "visitorTestingOnly": "仅供测试使用",
     }
     visitor_entry = ""
@@ -176,14 +225,19 @@ def compliance_page(
             + html.escape(messages["visitorTestingOnly"])
             + "）</span></p>"
         )
+    compliance_information_html = (
+        _public_compliance_information_html(
+            compliance_information or public_compliance_information()
+        )
+        if public_server else ""
+    )
     device_auth_script = _device_auth_script(
         safe_login_next(next_path),
         messages,
     )
     return f"""<!doctype html><html lang="{html.escape(locale, quote=True)}"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>FactorTester</title></head>
-<body style="margin:2rem;max-width:52rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7"><p>{_html(strings, PUBLIC_DEVICE_COMPLIANCE_NOTICE)}</p>{visitor_entry}
-<p id="public-device-count">{html.escape(messages["loading"])}</p>
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>TradeResearch</title></head>
+<body style="margin:2rem;max-width:52rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7"><p>{_html(strings, PUBLIC_DEVICE_COMPLIANCE_NOTICE)}</p>{compliance_information_html}{visitor_entry}
 <p id="device-auth-status" role="status" aria-live="polite">{html.escape(messages["checking"])}</p>
 <script>{device_auth_script}</script></body></html>""".encode("utf-8")
 

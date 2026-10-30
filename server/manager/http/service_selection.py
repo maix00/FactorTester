@@ -485,31 +485,14 @@ class ServiceSelectionRoutesMixin:
                     raise
 
     def _authorized_factor_source_owners(self, principal: str) -> list[str]:
-        """Use the same direct-child mirror that supplies catalog visibility."""
-        from server.manager.services.subordinate_factor_library import (
-            direct_subordinate_accounts,
-        )
+        """Allow only the submitting user's own source outside the HTTP check.
 
-        client_state = getattr(self.state, "client_state", None)
-        store = getattr(client_state, "local_account_store", None)
-        if store is None:
-            try:
-                from server.manager.storage.local_accounts import LocalAccountStore
-
-                store = LocalAccountStore()
-            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
-                store = None
-        usernames = [str(principal or "").strip()]
-        usernames.extend(
-            str(item.get("username") or "").strip()
-            for item in direct_subordinate_accounts(principal, store)
-        )
-        owners: list[str] = []
-        for username in dict.fromkeys(usernames):
-            if not username:
-                continue
-            owners.extend([username, f"principal:{username}"])
-        return owners
+        Cross-owner source access is evaluated per factor by the verified
+        request token in ``factor_registry``. Do not widen it into an owner
+        list derived from the legacy local account tree.
+        """
+        username = str(principal or "").strip()
+        return [username, f"principal:{username}"] if username else []
 
     def _capable_service_route(
         self,

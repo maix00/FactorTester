@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
-
 from server.manager.http.federation.node_values import query_value
 from server.manager.http.responses import json_response
+from server.manager.http.request_security import read_json_object
 
 
 class NodeControlRoutesMixin:
@@ -49,14 +48,7 @@ class NodeControlRoutesMixin:
         }, headers={"Cache-Control": "no-store"})
 
     def _node_json_body(self, maximum: int) -> tuple[bytes, dict[str, object]]:
-        length = int(self.headers.get("Content-Length", "0"))
-        if length <= 0 or length > maximum:
-            raise ValueError("request body is invalid")
-        body = self.rfile.read(length)
-        value = json.loads(body.decode("utf-8"))
-        if not isinstance(value, dict):
-            raise ValueError("request body must be an object")
-        return body, value
+        return read_json_object(self, maximum)
 
     def _json_body(self, maximum: int) -> dict[str, object]:
         return self._node_json_body(maximum)[1]

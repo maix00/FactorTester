@@ -52,7 +52,7 @@ def test_print_reports_every_step(capsys):
             "stored": True,
             "mirror": {"mirrored": True, "path": "/w/custom_factors/ProbeMirror.py",
                        "workspace_root": "/w", "overwrote_divergent": True,
-                       "refresh_hint": "factortester factor-library workspace user download"},
+                       "refresh_hint": "traderesearch factor-library workspace user download"},
         }
     )
     out = capsys.readouterr().out

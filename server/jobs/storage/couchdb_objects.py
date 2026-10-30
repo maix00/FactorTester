@@ -15,6 +15,8 @@ class VersionedObject:
     payload: dict[str, Any]
     schema_version: int = 1
     links: dict[str, str] = field(default_factory=dict)
+    keycloak_resource_id: str = ""
+    owner_subject: str = field(default="", repr=False, compare=False)
 
     def to_doc(self) -> dict[str, Any]:
         if self.kind not in {"factor_version", "strategy_version"}:
@@ -26,11 +28,24 @@ class VersionedObject:
             "owner": self.owner,
             "payload": dict(self.payload),
             "links": dict(self.links),
+            **({"keycloak_resource_id": self.keycloak_resource_id}
+               if self.keycloak_resource_id else {}),
         }
 
 
 def put_object(store, obj: VersionedObject) -> None:
-    store._request("PUT", obj.ref, json.dumps(obj.to_doc()).encode())
+    document = obj.to_doc()
+    from server.identity.auth_mode import keycloak_enabled
+    if keycloak_enabled() and not document.get("keycloak_resource_id"):
+        from server.identity.keycloak_authorization import ensure_keycloak_resource
+
+        if not obj.owner_subject:
+            raise PermissionError("Keycloak resource registration requires a verified owner")
+        document["keycloak_resource_id"] = ensure_keycloak_resource(
+            resource_type=obj.kind, resource_ref=obj.ref,
+            owner_subject=obj.owner_subject,
+        )
+    store._request("PUT", obj.ref, json.dumps(document).encode())
 
 
 def get_object(store, ref: str) -> dict[str, Any]:

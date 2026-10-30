@@ -120,23 +120,23 @@ def _factor_research_plan(
         "steps": [
             {
                 "phase": "workspace",
-                "command": f"factortester workspace create {family_args}",
+                "command": f"traderesearch workspace create {family_args}",
             },
             {
                 "phase": "configuration",
-                "command": f"factortester workspace update --file {configuration}",
+                "command": f"traderesearch workspace update --file {configuration}",
             },
             {
                 "phase": "run",
-                "command": f"factortester run submit {analysis_args}",
+                "command": f"traderesearch run submit {analysis_args}",
             },
             {
                 "phase": "observe",
-                "command": "factortester job list && factortester job watch <job_id>",
+                "command": "traderesearch job list && traderesearch job watch <job_id>",
             },
             {
                 "phase": "result",
-                "command": "factortester job status <job_id> && factortester job artifact <job_id> <name>",
+                "command": "traderesearch job status <job_id> && traderesearch job artifact <job_id> <name>",
             },
         ],
         "notes": [
