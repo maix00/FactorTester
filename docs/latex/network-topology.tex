@@ -132,7 +132,7 @@
   \draw[host] (.53,5.28) rectangle (4.43,9.73);
   \draw[host] (.45,5.2) rectangle (4.35,9.65);
   \node[text=blue!55!black] at (.8,9.15) {\faServer};
-  \node[heading,font=\scriptsize\bfseries] at (1.1,9.15) {\TRlabel{执行节点主机}{Execution host}};
+  \node[heading,font=\small\bfseries] at (1.1,9.15) {\TRlabel{执行节点主机}{Execution host}};
   \node[service,text width=1.4cm] (worker) at (1.55,8.0) {{\faCogs}\\Nautilus};
   \node[service,text width=1.4cm] (alpha) at (3.45,8.0) {{\faChartLine}\\Alpha};
   \node[data,text width=1.4cm] (workerio) at (1.55,6.2) {{\faHdd}\\Data I/O};
@@ -146,7 +146,7 @@
   \draw[host] (5.43,5.28) rectangle (9.23,9.73);
   \draw[host] (5.35,5.2) rectangle (9.15,9.65);
   \node[text=teal!65!black] at (5.7,9.15) {\faHdd};
-  \node[heading,font=\scriptsize\bfseries] at (6.0,9.15) {\TRlabel{数据专用主机}{Data-only host}};
+  \node[heading,font=\small\bfseries] at (6.0,9.15) {\TRlabel{数据专用主机}{Data-only host}};
   \node[pendingservice,text width=3.2cm] (onlyio) at (7.1,7.85) {{\faHdd}\\Data I/O\\\TRlabel{有界 Arrow 缓存}{Bounded Arrow cache}};
   \node[data,text width=2.6cm] (onlybundle) at (7.1,5.95) {{\faDatabase\,\faDatabase\,\faDatabase}\\Bundles};
   \draw[dataflow] (onlybundle) -- (onlyio);
