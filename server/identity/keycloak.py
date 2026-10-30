@@ -104,7 +104,10 @@ class KeycloakAdminAdapter:
             headers={"Authorization": f"Bearer {self._token()}", "Accept": "application/json"},
         )
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.loads(response.read())
+            body = response.read()
+            # Authorization Services searches return 204 when no named
+            # policy exists. An empty 200 remains a malformed response.
+            return None if response.status == 204 else json.loads(body)
 
     def _identity(self, raw: dict, groups: list[str], orgs: list[str]) -> Identity:
         display_name = " ".join(
@@ -146,7 +149,7 @@ class KeycloakAdminAdapter:
             raise RuntimeError("Keycloak user lookup returned an invalid result")
         matches = [
             row for row in rows
-            if isinstance(row, dict) and str(row.get("username") or "") == str(username)
+            if isinstance(row, dict) and str(row.get("username") or "").casefold() == str(username).casefold()
         ]
         if len(matches) > 1:
             raise LookupError("Keycloak username is ambiguous")
@@ -232,7 +235,7 @@ class KeycloakAdminAdapter:
         rows = self._get(f"users?{query}")
         matches = [row for row in rows or []
                    if isinstance(row, dict)
-                   and str(row.get("username") or "") == str(username)]
+                   and str(row.get("username") or "").casefold() == str(username).casefold()]
         if len(matches) != 1 or not str(matches[0].get("id") or ""):
             raise LookupError(f"Keycloak user is missing or ambiguous: {username}")
         return str(matches[0]["id"])
@@ -275,7 +278,7 @@ class KeycloakAdminAdapter:
         current = self._get(f"users/{urllib.parse.quote(selected_id, safe='')}")
         if not isinstance(current, dict) or not str(current.get("id") or "") == selected_id:
             raise LookupError("Keycloak user is missing or changed")
-        if str(current.get("username") or "") != str(username):
+        if str(current.get("username") or "").casefold() != str(username).casefold():
             raise ValueError("Keycloak username differs from the migration identity")
         current["enabled"] = bool(enabled)
         if email:
@@ -311,7 +314,7 @@ class KeycloakAdminAdapter:
             role = self._get(f"clients/{client_uuid}/roles/{encoded}")
             if not isinstance(role, dict) or str(role.get("name") or "") != role_name:
                 raise LookupError(f"Keycloak client role is missing: {role_name}")
-            self._put(
+            self._post(
                 f"users/{user_id}/role-mappings/clients/{client_uuid}", [role],
             )
             assigned.append(role_name)

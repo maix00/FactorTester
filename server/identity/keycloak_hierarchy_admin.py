@@ -323,8 +323,21 @@ class KeycloakHierarchyProvisioner:
 
     def _named(self, endpoint: str, name: str, kind: str) -> dict[str, Any] | None:
         query = urlencode({"name": name})
-        return _exactly_one(_rows(self.adapter._get(f"{endpoint}?{query}")),
-                            what=kind, name=name)
+        row = _exactly_one(_rows(self.adapter._get(f"{endpoint}?{query}")),
+                           what=kind, name=name)
+        # Search returns a generic PolicyRepresentation, whose config differs
+        # from the typed group/scope representation used for parity checks.
+        if row is not None and row.get("type") in {"group", "scope"} and row.get("id"):
+            typed = self.adapter._get(
+                f"{endpoint.removesuffix('/search')}/{row['type']}/{row['id']}"
+            )
+            if row["type"] == "scope":
+                base = endpoint.split("/permission/", 1)[0] + f"/policy/{row['id']}"
+                typed["resources"] = [r["name"] for r in self.adapter._get(base + "/resources")]
+                typed["scopes"] = [r["name"] for r in self.adapter._get(base + "/scopes")]
+                typed["policies"] = [r["name"] for r in self.adapter._get(base + "/associatedPolicies")]
+            return typed
+        return row
 
     def _ensure_group_policy(self, client_uuid: str, name: str, group_id: str) -> bool:
         base = f"clients/{client_uuid}/authz/resource-server/policy"

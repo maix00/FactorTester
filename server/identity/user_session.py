@@ -83,7 +83,13 @@ class UserSessionVerifier:
             # operation to the matching organization group path.
             admin_capabilities.append("federation:manage")
         value = {
-            'username': str(claims['preferred_username']),
+            # The admin-owned label preserves existing object owner refs;
+            # Keycloak normalizes its login name to lowercase. Never accept
+            # this mapping without the stable migrated identity claim.
+            'username': (_string_claim(claims, 'tr_username')
+                         if _string_claim(claims, 'tr_identity_id')
+                         and _string_claim(claims, 'tr_username')
+                         else str(claims['preferred_username'])),
             'alias': str(claims.get('name') or claims['preferred_username']),
             'role': role,
             'keycloak_subject': str(claims['sub']),

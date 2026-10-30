@@ -208,3 +208,12 @@ def test_keycloak_scoped_admin_roles_do_not_use_legacy_hierarchy(monkeypatch):
         assert manager['role'] == 'org_admin'
         assert is_org_admin_account(manager)
         assert not is_any_admin_account(manager)
+
+
+def test_admin_owned_identity_label_preserves_owner_refs_after_login_normalization():
+    client = Client()
+    client.claims.update(preferred_username='org@alice@1', tr_username='ORG@Alice@1')
+    verifier = UserSessionVerifier(client, issuer='https://id/realms/tr', audience='manager')
+    assert verifier.session('without-stable-id')['username'] == 'org@alice@1'
+    client.claims['tr_identity_id'] = 'stable-id'
+    assert verifier.session('with-stable-id')['username'] == 'ORG@Alice@1'

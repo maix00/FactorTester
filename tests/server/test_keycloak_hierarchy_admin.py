@@ -283,3 +283,24 @@ def test_group_pagination_builds_paths_without_loading_members_per_group():
 
     assert index["/traderesearch"]["id"] == "g1"
     assert index["/traderesearch/organizations"]["id"] == "g2"
+
+
+def test_real_keycloak_generic_search_loads_typed_policy_and_scope_associations():
+    class API:
+        def _get(self, path):
+            if '/search?' in path:
+                return {'id': 'p', 'name': 'grant', 'type': 'scope', 'resourceType': 'Groups'}
+            if path.endswith('/scope/p'):
+                return {'id': 'p', 'name': 'grant', 'resourceType': 'Groups'}
+            if path.endswith('/resources'):
+                return [{'name': 'group-id', '_id': 'resource-id'}]
+            if path.endswith('/scopes'):
+                return [{'name': 'view-members', 'id': 'scope-id'}]
+            if path.endswith('/associatedPolicies'):
+                return [{'name': 'admin-group-policy', 'id': 'policy-id'}]
+            raise AssertionError(path)
+    row = KeycloakHierarchyProvisioner(API())._named(
+        'clients/c/authz/resource-server/permission/search', 'grant', 'scope permission')
+    assert row['resources'] == ['group-id']
+    assert row['scopes'] == ['view-members']
+    assert row['policies'] == ['admin-group-policy']
