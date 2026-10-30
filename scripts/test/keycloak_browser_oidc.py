@@ -71,7 +71,8 @@ def main() -> int:
                 identity = keycloak_session(token)
                 raise SystemExit(f"Manager session verification failed (HTTP {response.status}, browser_http={browser_status}, cookie_present={has_session}, token_bytes={len(token)}, introspection_valid={identity is not None}, public_allowed={may_login_public_server(identity)})")
             session = response.json()
-            if (session.get("username") != username or not session.get("keycloak_subject")
+            expected_principal = os.environ.get("KEYCLOAK_EXPECTED_PRINCIPAL", username)
+            if (session.get("username") != expected_principal or not session.get("keycloak_subject")
                     or not session.get("keycloak_issuer") or session.get("visitor_login")):
                 raise SystemExit("Manager returned no matching Keycloak user session")
             expected_role = os.environ.get("KEYCLOAK_EXPECTED_ROLE")
