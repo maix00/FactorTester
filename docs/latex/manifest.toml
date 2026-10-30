@@ -221,6 +221,10 @@ source = "docs/runbooks/public-host-down.md"
 title = "Research 授权迁移与验收"
 source = "docs/operations/research-keycloak-cutover.md"
 
+[[sections.documents]]
+title = "本机目录迁移与回退"
+source = "docs/operations/local-path-migration.md"
+
 [[sections]]
 id = "testing"
 title = "测试与验收"
