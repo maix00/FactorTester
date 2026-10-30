@@ -331,6 +331,7 @@ def _protection_request(settings: dict[str, str], token: str, method: str,
 
 def ensure_keycloak_resource(
     *, resource_type: str, resource_ref: str, owner_subject: str,
+    owner_scopes: tuple[str, ...] | None = None,
 ) -> str:
     """Idempotently register a user-authorized object in Keycloak.
 
@@ -342,6 +343,10 @@ def ensure_keycloak_resource(
     owner_subject = str(owner_subject or "").strip()
     if not owner_subject or len(owner_subject) > 255:
         raise ValueError("Keycloak resource owner subject is required")
+    selected_scopes = _RESOURCE_SCOPES if owner_scopes is None else tuple(owner_scopes)
+    if (not selected_scopes or len(set(selected_scopes)) != len(selected_scopes)
+            or any(scope not in _RESOURCE_SCOPES for scope in selected_scopes)):
+        raise ValueError("invalid Keycloak resource owner scopes")
     resource_uri = keycloak_resource_uri(resource_type, resource_ref)
     settings = oidc_settings()
     client = ServiceOIDCClient(
@@ -397,7 +402,7 @@ def ensure_keycloak_resource(
                 )
                 if resource_uri not in {str(uri) for uri in confirmed_uris if uri}:
                     raise AuthorizationUnavailable("Keycloak resource URI update did not persist")
-            _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject)
+            _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject, selected_scopes)
             return resource_id
 
     body = {
@@ -430,7 +435,7 @@ def ensure_keycloak_resource(
                             and str(row.get("name") or "") == resource_name), "")
     if not resource_id:
         raise AuthorizationUnavailable("Keycloak resource registration returned no identity")
-    _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject)
+    _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject, selected_scopes)
     return resource_id
 
 
@@ -478,7 +483,8 @@ def delete_keycloak_resource(
 
 
 def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
-                         resource_name: str, owner_subject: str) -> None:
+                         resource_name: str, owner_subject: str,
+                         owner_scopes: tuple[str, ...] = _RESOURCE_SCOPES) -> None:
     """Ensure the Keycloak subject owning a private resource can manage it."""
     # Keycloak 26.8 pins Protection API ownership to the resource server.
     # User ownership is expressed by a stable subject attribute and UMA policy.
@@ -506,12 +512,14 @@ def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
                and str(row.get("name") or "") == policy_name]
     if len(matches) > 1:
         raise AuthorizationUnavailable("duplicate Keycloak owner policies")
-    expected_scopes = sorted(_RESOURCE_SCOPES)
+    expected_scopes = sorted(owner_scopes)
     if matches:
         policy = matches[0]
         users = sorted(str(value) for value in policy.get("users", []) if value)
         scopes = sorted(str(value) for value in policy.get("scopes", []) if value)
-        if (len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes:
+        if ((len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes
+                or any(policy.get(key) for key in ("roles", "groups", "clients"))
+                or str(policy.get("logic") or "POSITIVE") != "POSITIVE"):
             raise AuthorizationUnavailable("conflicting Keycloak owner policy")
         return
     body = {
@@ -537,5 +545,7 @@ def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
         raise AuthorizationUnavailable("Keycloak owner policy was not confirmed")
     users = sorted(str(value) for value in matches[0].get("users", []) if value)
     scopes = sorted(str(value) for value in matches[0].get("scopes", []) if value)
-    if (len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes:
+    if ((len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes
+            or any(matches[0].get(key) for key in ("roles", "groups", "clients"))
+            or str(matches[0].get("logic") or "POSITIVE") != "POSITIVE"):
         raise AuthorizationUnavailable("Keycloak owner policy verification failed")

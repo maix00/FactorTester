@@ -120,6 +120,45 @@ def test_resource_creation_rejects_mismatched_existing_owner(monkeypatch):
         raise AssertionError("resource owned by another user must not be reused")
 
 
+def test_profile_owner_may_only_share_and_existing_scope_conflict_fails(monkeypatch):
+    from server.identity import federation_identity_sync
+
+    class Directory:
+        def _get(self, path):
+            assert path == "users/subject-alice"
+            return {"id": "subject-alice", "username": "alice"}
+    monkeypatch.setattr(federation_identity_sync, "manager_keycloak_admin_adapter", Directory)
+    policy = {}
+    def protection(_settings, _token, method, path, body=None):
+        if method == "GET" and path == "resource_set/r":
+            return 200, {"attributes": {"traderesearch_owner_subject": ["subject-alice"]}}, ""
+        if method == "GET" and path.startswith("uma-policy?"):
+            return 200, [dict(policy)] if policy else [], ""
+        if method == "POST" and path == "uma-policy/r":
+            policy.update(body)
+            return 201, {}, ""
+        raise AssertionError((method, path))
+    monkeypatch.setattr(authz, "_protection_request", protection)
+    authz._ensure_owner_policy({}, "pat", "r", "profile", "subject-alice", ("share",))
+    assert policy["scopes"] == ["share"]
+    authz._ensure_owner_policy({}, "pat", "r", "profile", "subject-alice", ("share",))
+    with pytest.raises(authz.AuthorizationUnavailable, match="conflicting"):
+        authz._ensure_owner_policy({}, "pat", "r", "profile", "subject-alice")
+    assert policy["scopes"] == ["share"]
+    policy["roles"] = ["anyone"]
+    with pytest.raises(authz.AuthorizationUnavailable, match="conflicting"):
+        authz._ensure_owner_policy({}, "pat", "r", "profile", "subject-alice", ("share",))
+
+
+def test_invalid_owner_scopes_are_rejected_before_accessing_keycloak():
+    with pytest.raises(ValueError, match="owner scopes"):
+        authz.ensure_keycloak_resource(resource_type="research_profile", resource_ref="p",
+                                       owner_subject="subject", owner_scopes=("all",))
+    with pytest.raises(ValueError, match="owner scopes"):
+        authz.ensure_keycloak_resource(resource_type="research_profile", resource_ref="p",
+                                       owner_subject="subject", owner_scopes=())
+
+
 def test_authorize_many_batches_and_returns_only_explicit_grants(monkeypatch):
     from urllib.parse import parse_qs
 
