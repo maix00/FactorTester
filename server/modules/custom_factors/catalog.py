@@ -8,11 +8,6 @@ import tempfile
 import time
 
 from server.modules.shared.param_meta import serialize_param_meta
-from tools.data.account_manage import (
-    account_display_name,
-    direct_subordinate_accounts_for,
-    get_account,
-)
 from tools.data.factor_workspace.storage import load_public_factor_source
 from tools.data.sqlite.factor_source_store import (
     get_factor_source_metadata,
@@ -58,32 +53,6 @@ def list_custom_factors(username: str) -> list:
     """Return the persisted family summaries for one owner."""
     from tools.data.sqlite.factor_metadata import list_factor_summaries
     return list_factor_summaries("custom", username)
-
-
-def list_visible_custom_factors(username: str) -> list:
-    factors = []
-    accounts = [
-        get_account(username) or {'username': username},
-        *direct_subordinate_accounts_for(username),
-    ]
-    for account in accounts:
-        owner_username = account.get('username')
-        if not owner_username:
-            continue
-        owner_alias = account_display_name(account)
-        for factor in list_custom_factors(owner_username):
-            item = dict(factor)
-            # Visibility and editability are separate permissions. A direct
-            # parent may inspect a subordinate's registered family formula and
-            # read-only source, but only the owner may edit it.
-            item['source_access'] = True
-            item['owner_username'] = owner_username
-            item['owner_alias'] = owner_alias
-            item['owner_organization_id'] = account.get('organization_id') or ''
-            item['owner_organization_name'] = account.get('organization_name') or ''
-            item['can_edit'] = owner_username == username
-            factors.append(item)
-    return factors
 
 
 def list_public_factors() -> list:

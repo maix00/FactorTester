@@ -28,6 +28,8 @@ class JobTestReportDocument:
     schema_version: int = 1
     metadata: dict[str, Any] = field(default_factory=dict)
     attachments: dict[str, str] = field(default_factory=dict)
+    keycloak_resource_id: str = ""
+    owner_subject: str = field(default="", repr=False, compare=False)
 
     def to_doc(self) -> dict[str, Any]:
         return {
@@ -38,6 +40,8 @@ class JobTestReportDocument:
             "owner": self.owner,
             "metadata": dict(self.metadata),
             "attachments": dict(self.attachments),
+            **({"keycloak_resource_id": self.keycloak_resource_id}
+               if self.keycloak_resource_id else {}),
             "content_sha256": hashlib.sha256(
                 json.dumps(self.metadata, sort_keys=True).encode()
             ).hexdigest(),
@@ -78,6 +82,14 @@ class CouchDBObjectStore:
             return response.status, response.read()
 
     def put_report(self, report: JobTestReportDocument, *, overwrite: bool = False) -> None:
+        from server.identity.auth_mode import keycloak_enabled
+        if keycloak_enabled() and not report.keycloak_resource_id:
+            from server.identity.keycloak_authorization import ensure_keycloak_resource
+
+            report.keycloak_resource_id = ensure_keycloak_resource(
+                resource_type="job_test_report", resource_ref=report.report_ref,
+                owner_subject=report.owner_subject,
+            )
         doc = report.to_doc()
         if overwrite:
             try:
@@ -154,10 +166,11 @@ class CouchDBObjectStore:
 
 def write_report(store: CouchDBObjectStore, *, job_id: str, owner: str,
                  revision: int, metadata: dict[str, Any],
-                 files: dict[str, tuple[bytes, str]]) -> JobTestReportDocument:
+                 files: dict[str, tuple[bytes, str]],
+                 owner_subject: str = "") -> JobTestReportDocument:
     report = JobTestReportDocument(
         report_ref=f"report:{job_id}:{int(revision)}", job_id=job_id,
-        owner=owner, metadata=dict(metadata),
+        owner=owner, metadata=dict(metadata), owner_subject=owner_subject,
     )
     store.put_report(report)
     for name, (data, content_type) in files.items():
@@ -170,7 +183,8 @@ def write_report(store: CouchDBObjectStore, *, job_id: str, owner: str,
 
 def publish_job_report(*, job_id: str, attempt: int, owner: str,
                        reports_dir: str, metadata: dict[str, Any] | None = None,
-                       store: CouchDBObjectStore | None = None) -> str | None:
+                       store: CouchDBObjectStore | None = None,
+                       owner_subject: str = "") -> str | None:
     """Publish a completed Job report directory; None when CouchDB is not configured."""
     import os
     from pathlib import Path
@@ -194,6 +208,7 @@ def publish_job_report(*, job_id: str, attempt: int, owner: str,
     report = write_report(
         store, job_id=job_id, owner=owner, revision=max(1, int(attempt)),
         metadata={"kind": "nautilus_report", **(metadata or {})}, files=files,
+        owner_subject=owner_subject,
     )
     return report.report_ref
 

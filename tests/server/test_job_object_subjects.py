@@ -47,6 +47,8 @@ def _record(job_id: str, job_spec: dict[str, object]) -> JobRecord:
         workspace_id="workspace-1",
         kind="backtest",
         status=JobStatus.SUBMITTED,
+        owner_issuer="https://id.example/realms/tr",
+        owner_subject="test-subject:alice",
         job_spec=job_spec,
         created_at=time.time(),
     )

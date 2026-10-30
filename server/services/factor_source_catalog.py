@@ -7,7 +7,6 @@ from typing import Any
 
 from server.modules.custom_factors.catalog import _load_factor_family_from_source
 from server.modules.shared.param_meta import serialize_param_meta
-from tools.data.account_manage import can_view_user_scope
 from tools.data.factor_workspace.storage import (
     load_factor_source,
     load_public_factor_source,
@@ -34,8 +33,10 @@ class FactorSourceCatalog:
         if source_kind == "public":
             return "__public_jobs__"
         owner = str(owner_username or principal).strip()
-        if owner != principal and not can_view_user_scope(principal, owner):
-            raise PermissionError("无权查看该用户因子源码")
+        # This is a storage/catalog adapter and is also called by trusted
+        # execution workers. Request authorization belongs at the HTTP boundary
+        # and is evaluated by Keycloak there; local account tables are not an
+        # authorization source.
         return owner
 
     @staticmethod
@@ -47,31 +48,7 @@ class FactorSourceCatalog:
     ) -> tuple[str, str]:
         if source_kind == "custom":
             owner = str(owner_username or principal).strip()
-            # A principal always may read its own factor sources: the account
-            # catalog only decides visibility of *other* users' sources, and
-            # it may transiently fail (e.g. control-db fallback to an empty
-            # local store) — that must never lock a user out of their own
-            # source.  Reading one's own file needs no cross-account grant.
-            if not owner or owner == principal:
-                return owner or principal, (
-                    load_factor_source(owner or principal, factor_id) or ""
-                )
-            if not can_view_user_scope(principal, owner):
-                import sys
-                import traceback
-                print(
-                    "[fsc-deny] PermissionError deny: "
-                    f"principal={principal!r} owner={owner!r} "
-                    f"factor={factor_id!r}\n"
-                    + "\n".join(traceback.format_stack()),
-                    file=sys.stderr, flush=True,
-                )
-                raise PermissionError(
-                    "无权查看该用户因子源码: "
-                    f"principal={principal!r} owner={owner!r} "
-                    f"factor={factor_id!r}"
-                )
-            return owner, load_factor_source(owner, factor_id) or ""
+            return owner or principal, load_factor_source(owner or principal, factor_id) or ""
         return "__public_jobs__", load_public_factor_source(factor_id) or ""
 
     @staticmethod

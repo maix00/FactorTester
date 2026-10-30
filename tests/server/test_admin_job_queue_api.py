@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from flask import Flask
+from flask import Flask, g
 import pytest
 
 import settings as Settings
@@ -16,20 +16,43 @@ from tools.data.sqlite.db import connect_sqlite
 def _client(monkeypatch, tmp_path, *, role: str):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
     monkeypatch.setattr(
-        "server.admin.get_account",
-        lambda username: {
-            "username": username,
-            "role": role,
-            "is_admin": role == "super_admin",
-        },
+        "server.identity.keycloak_authorization.keycloak_request_credentials",
+        lambda: ("test-token", "subject-root", "root"),
     )
     app = Flask(__name__)
     app.secret_key = "test"
+
+    @app.before_request
+    def verified_keycloak_identity():
+        g.keycloak_user_session = {
+            "username": "root",
+            "keycloak_roles": ("admin_console:manage",) if role == "super_admin" else (),
+        }
+
     app.register_blueprint(admin_bp)
     client = app.test_client()
     with client.session_transaction() as session:
         session["username"] = "root"
     return client
+
+
+def test_local_user_administration_is_retired() -> None:
+    client = _client_without_state()
+    for path, method in (
+        ("/admin/api/users", "get"),
+        ("/admin/api/organizations", "get"),
+        ("/admin/api/levels", "get"),
+    ):
+        response = getattr(client, method)(path)
+        assert response.status_code == 410
+        assert response.get_json()["code"] == "keycloak_managed_identity"
+
+
+def _client_without_state():
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(admin_bp)
+    return app.test_client()
 
 
 def _create_job(repository: JobRepository, *, job_id: str, owner: str, updated_at: float) -> None:

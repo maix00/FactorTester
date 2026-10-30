@@ -5,6 +5,7 @@ import json
 import pytest
 
 from flask import Flask
+from flask import g, session
 
 from server.manager.services import public_catalog
 from server.manager.services.account_domain_projection import factor_rows_from_sync
@@ -14,7 +15,9 @@ from server.manager.services.federated_factor_projection import (
 )
 from server.modules.custom_factors import (
     catalog_routes,
+    crud_routes,
     editor_routes,
+    factor_library_routes,
     factor_library_internal_bp,
     factor_library_service,
 )
@@ -29,6 +32,23 @@ from tools.factors.formula_identity import freeze_factor_identity
 def isolated_catalog_database(tmp_path, monkeypatch):
     import settings as Settings
     monkeypatch.setattr(Settings, 'CACHE_DB_PATH', tmp_path / 'catalog.sqlite')
+
+    def verified_test_session():
+        username = str(session.get("username") or "").strip()
+        if not username:
+            return None
+        identity = {
+            "username": username,
+            "keycloak_subject": f"test-subject:{username}",
+            "keycloak_roles": tuple(session.get("test_keycloak_roles") or ()),
+        }
+        g.keycloak_user_session = identity
+        return identity
+
+    monkeypatch.setattr(
+        "server.services.session_runtime._keycloak_request_session",
+        verified_test_session,
+    )
 
 
 def _frozen_factor(
@@ -91,9 +111,10 @@ def _app() -> Flask:
     return app
 
 
-def _login(client, username: str = "alice") -> None:
+def _login(client, username: str = "alice", *, roles: tuple[str, ...] = ()) -> None:
     with client.session_transaction() as session:
         session["username"] = username
+        session["test_keycloak_roles"] = roles
 
 
 def test_account_domain_projection_requires_complete_v2_factor_records() -> None:
@@ -234,9 +255,9 @@ def test_public_source_applied_requires_superadmin_and_verifies_source(
     raw = source.encode()
     digest = hashlib.sha256(raw).hexdigest()
     invalidated: list[str] = []
-    monkeypatch.setattr(editor_routes, "get_account", lambda name: {"name": name})
     monkeypatch.setattr(
-        editor_routes, "is_super_admin_account", lambda account: account["name"] == "root",
+        crud_routes, "_current_user_is_super_admin",
+        lambda: "admin_console:manage" in tuple(session.get("test_keycloak_roles") or ()),
     )
     monkeypatch.setattr(
         editor_routes, "load_public_factor_source", lambda factor_id: source,
@@ -256,7 +277,7 @@ def test_public_source_applied_requires_superadmin_and_verifies_source(
         "/api/internal/factor-library/public-source-applied",
         json=payload,
     ).status_code == 403
-    _login(client, "root")
+    _login(client, "root", roles=("admin_console:manage",))
     response = client.post(
         "/api/internal/factor-library/public-source-applied",
         json=payload,
@@ -552,6 +573,9 @@ def test_federated_projection_keeps_source_family_and_merges_member_counts() -> 
 def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch) -> None:
     fingerprint = "a" * 64
     monkeypatch.setattr(
+        crud_routes, "_custom_factor_read_allowed", lambda *_args: True,
+    )
+    monkeypatch.setattr(
         catalog_routes._SOURCE_CATALOG,
         "versions",
         lambda *_args, **_kwargs: {
@@ -579,6 +603,26 @@ def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch)
     assert "factor_family_ref" not in payload
     assert payload["current_fingerprint"] == fingerprint
     assert payload["versions"][0]["family_formula_fingerprint"] == fingerprint
+
+
+def test_custom_source_version_route_denies_without_keycloak_grant(monkeypatch) -> None:
+    called = []
+    monkeypatch.setattr(
+        crud_routes, "_custom_factor_read_allowed", lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        catalog_routes._SOURCE_CATALOG, "versions",
+        lambda *_args, **_kwargs: called.append(True),
+    )
+    client = _app().test_client()
+    _login(client, "alice")
+
+    response = client.get(
+        "/api/internal/factor-library/family-sources/custom/Momentum/versions",
+    )
+
+    assert response.status_code == 403
+    assert called == []
 
 
 def test_source_version_route_returns_persisted_snapshot_without_current_source(
@@ -841,7 +885,9 @@ def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch
             assert params == {"N": "20d"}
             return type("Factor", (), {"alias": "Momentum|N:20d"})()
 
-    monkeypatch.setattr(editor_routes, "can_view_user_scope", lambda *_args: True)
+    monkeypatch.setattr(
+        editor_routes, "_custom_factor_access_response", lambda *_args: None,
+    )
     monkeypatch.setattr(
         editor_routes, "get_factor_family_instance",
         lambda family_ref, **_kwargs: Family()
@@ -903,3 +949,66 @@ def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch
             }],
         },
     }
+
+
+def test_other_users_factor_config_is_authorized_before_loading(monkeypatch) -> None:
+    client = _app().test_client()
+    _login(client, "alice")
+    loaded = []
+    monkeypatch.setattr(
+        factor_library_routes, "keycloak_request_credentials",
+        lambda: ("token", "subject-alice", "alice"),
+    )
+    monkeypatch.setattr(
+        factor_library_routes, "keycloak_resource_permission",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        factor_library_routes, "load_factor_param_config",
+        lambda *args, **kwargs: loaded.append((args, kwargs)) or {"params_list": []},
+    )
+
+    response = client.get(
+        "/api/internal/factor-library/configurations/Momentum/bob"
+        "?product_group=default",
+    )
+
+    assert response.status_code == 403
+    assert loaded == []
+
+
+def test_own_factor_config_uses_keycloak_resource_and_scope(monkeypatch) -> None:
+    client = _app().test_client()
+    _login(client, "alice")
+    ensured = []
+    decisions = []
+    monkeypatch.setattr(
+        factor_library_routes, "keycloak_request_credentials",
+        lambda: ("token", "subject-alice", "alice"),
+    )
+    monkeypatch.setattr(
+        factor_library_routes, "ensure_keycloak_resource",
+        lambda **kwargs: ensured.append(kwargs) or "resource-id",
+    )
+
+    def allow(_token, **kwargs):
+        decisions.append(kwargs)
+        return True
+
+    monkeypatch.setattr(factor_library_routes, "keycloak_resource_permission", allow)
+    monkeypatch.setattr(
+        factor_library_routes, "load_factor_param_config",
+        lambda *_args, **_kwargs: {"params_list": []},
+    )
+
+    response = client.get(
+        "/api/internal/factor-library/configurations/Momentum/alice"
+        "?product_group=default",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["config"]["editable"] is True
+    assert len(ensured) == 1
+    assert ensured[0]["resource_type"] == "factor_library"
+    assert ensured[0]["owner_subject"] == "subject-alice"
+    assert [decision["scope"] for decision in decisions] == ["read", "manage"]

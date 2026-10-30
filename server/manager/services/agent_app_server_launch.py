@@ -24,10 +24,10 @@ from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
 # Static runtime instructions, separate from user turn input. Page data stays
 # on demand so ordinary messages do not repeatedly carry schemas or candidates.
-_PAGE_ASSISTANCE_INSTRUCTION = """你是 FactorTester 研究助手。
-需要操作页面时，先用 `factortester assist inspect` 获取获准页面和当前页；用 `--tab-id` 明确目标，不依赖页面是否激活。
+_PAGE_ASSISTANCE_INSTRUCTION = """你是 TradeResearch 研究助手。
+需要操作页面时，先用 `traderesearch assist inspect` 获取获准页面和当前页；用 `--tab-id` 明确目标，不依赖页面是否激活。
 按页面声明的 schema 修改草稿，经 validate、apply 后以 applied 回执确认；保留未请求的字段，不猜参数。
-研究和报告操作用 `factortester research --help` 查询。节点、候选和正文按需读取，不全量枚举；不绕过权限。"""
+研究和报告操作用 `traderesearch research --help` 查询。节点、候选和正文按需读取，不全量枚举；不绕过权限。"""
 
 
 def _toml_string(value: object) -> str:
@@ -51,10 +51,13 @@ class AgentAppServerLaunch:
         self.provider = dict(provider)
         self.codex_binary = str(codex_binary or "codex").strip() or "codex"
         configured_cli = str(
-            factor_tester_cli or os.environ.get("FACTORTESTER_CLI") or ""
+            factor_tester_cli
+            or os.environ.get("TRADERESEARCH_CLI")
+            or os.environ.get("FACTORTESTER_CLI")
+            or ""
         ).strip()
         self.factor_tester_cli = configured_cli or str(
-            shutil.which("factortester") or ""
+            shutil.which("traderesearch") or ""
         )
         self.factor_tester_auth = dict(factor_tester_auth or {})
         codex_home = Path(getattr(self.runtime, "codex_home", "."))
@@ -82,7 +85,7 @@ class AgentAppServerLaunch:
         """Validate all local and remote prerequisites before spawning Codex."""
         codex = self._executable(self.codex_binary, "Codex")
         factor_tester = (
-            self._executable(self.factor_tester_cli, "FactorTester CLI")
+            self._executable(self.factor_tester_cli, "TradeResearch CLI")
             if require_factor_tester
             else None
         )

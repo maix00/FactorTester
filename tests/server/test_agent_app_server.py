@@ -41,9 +41,8 @@ PROFILE_ID = "profile-main"
 def _bypass_process_namespace_in_app_server_unit_tests(monkeypatch):
     """Process protocol tests are separate from Bubblewrap boundary tests."""
     monkeypatch.setattr(ProfileAgentSandbox, "command", lambda _self, child: child)
-    # Most of this legacy protocol suite tests the server transport, not the
-    # new platform permission gate. Dedicated tests below exercise allow and
-    # deny behavior against the real PermissionStore.
+    # Most of this protocol suite tests transport, not the Keycloak role gate.
+    # The focused authorization tests cover the allow/deny boundary.
     from server.manager.http import agent_app_routes
     monkeypatch.setattr(
         agent_app_routes, "can_use_agent_assistant", lambda *_args: True,
@@ -1561,7 +1560,6 @@ def test_profile_agent_routes_deny_without_explicit_assistant_permission(
 
 def test_agent_permission_admin_route_is_retired_without_creating_database(tmp_path, monkeypatch):
     db = tmp_path / "permissions.db"
-    monkeypatch.setenv("TRADERESEARCH_PERMISSIONS_DB", str(db))
     handler = _AppHandler(None, None, {"subject": "user:alice", "effect": "allow"})
     assert handler._post_agent_app_routes(urlparse("/api/admin/agent-permissions"))
     assert handler.response_status == 410
@@ -1853,7 +1851,7 @@ def test_missing_factor_tester_cli_blocks_process_start(tmp_path, monkeypatch):
         codex_binary=_fake_codex(tmp_path / "fake-codex"),
     )
 
-    with pytest.raises(AgentAppServerError, match="FactorTester CLI") as error:
+    with pytest.raises(AgentAppServerError, match="TradeResearch CLI") as error:
         supervisor.start(PRINCIPAL, PROFILE_ID)
     assert error.value.code == "runtime_missing"
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False

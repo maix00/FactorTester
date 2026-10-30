@@ -101,25 +101,20 @@ def sync_local_storage(state: Any, *, log: Callable[[str], None] = print) -> dic
     store = getattr(state, "control_store", None)
     if store is None:
         return {"measured": 0, "failed": 0}
-    accounts = store.load_accounts()
-    principals = set()
-    for account in accounts:
-        candidate = str(account.get("username") or "")
-        try:
-            principals.add(validate_principal_identifier(candidate, "principal"))
-        except ValueError:
-            continue
+    profile_principals: set[str] = set()
     users = Path(state.data_root) / "users"
     if users.is_dir() and not users.is_symlink():
         for path in users.iterdir():
             if not path.is_dir() or path.is_symlink():
                 continue
             try:
-                principals.add(validate_principal_identifier(path.name, "principal"))
+                profile_principals.add(
+                    validate_principal_identifier(path.name, "principal")
+                )
             except ValueError:
                 continue
     measured = failed = 0
-    for principal in sorted(principals):
+    for principal in sorted(profile_principals):
         try:
             inventory = scan_profile_storage(state.data_root, principal)
             store.record_profile_usage(
@@ -135,7 +130,19 @@ def sync_local_storage(state: Any, *, log: Callable[[str], None] = print) -> dic
 
         repo = JobRepository()
         if repo.db_path.is_file():
-            for principal in sorted(principals):
+            # Job ownership is a storage label, not an identity directory.
+            # This bounded projection avoids recreating or querying retired
+            # SQLite account tables during startup.
+            job_principals: set[str] = set()
+            for value in repo.owner_refs():
+                try:
+                    job_principals.add(
+                        validate_principal_identifier(value, "principal")
+                    )
+                except ValueError:
+                    failed += 1
+                    log("startup Job inventory skipped an invalid owner ref")
+            for principal in sorted(job_principals):
                 try:
                     local = repo._local_storage_breakdown(principal)
                     store.reconcile_server_usage(

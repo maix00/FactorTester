@@ -5,94 +5,25 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-import sys
 import threading
 import time
 
 from server.manager.config import (
     MANAGER_SESSION_CLEANUP_INTERVAL_SECONDS,
     MANAGER_SESSION_IDLE_TTL_SECONDS,
-    MANAGER_SESSION_REFRESH_WINDOW_SECONDS,
-    MANAGER_SESSION_TOUCH_INTERVAL_SECONDS,
     MANAGER_SESSION_TTL_SECONDS,
 )
-from server.manager.domain.organization_scope import (
-    default_managed_organization,
-    organization_descriptor,
-    validate_alias,
-)
-from server.manager.storage.control_db import ControlDatabaseError
-from server.manager.storage.local_accounts import LocalAccountStore
 from server.manager.storage.session_store import ManagerSessionStore
 from server.manager.system import write_owner_only_once as _write_owner_only_once
 
 
 class SessionStateMixin:
     """Own account sessions without coupling them to HTTP transport."""
-    def login(
-        self,
-        username: str,
-        password: str,
-        *,
-        authentication: str = "password",
-        origin: str = "",
-    ) -> tuple[str, str, str]:
-        if self.control_store is None:
-            # Keep the legacy helper's two-argument seam for local clients and
-            # tests that replace the SQLite authenticator.
-            principal, role = self._authenticate_credentials(username, password)
-        else:
-            local = LocalAccountStore()
-            try:
-                local.sync_pending(self.control_store)
-            except ControlDatabaseError:
-                # The normal authority attempt below will fail in the same
-                # way, after which the just-created local account can log in.
-                pass
-            try:
-                principal, role = self._authenticate_credentials(
-                    username,
-                    password,
-                    control_store=self.control_store,
-                )
-            except ControlDatabaseError:
-                # PostgreSQL is authoritative.  During an outage, use only
-                # the account rows already present in this Manager's existing
-                # SQLite database; no account/device cache is created here.
-                principal, role = self._authenticate_credentials(
-                    username,
-                    password,
-                    control_store=LocalAccountStore(),
-                )
-        return self._issue_session(
-            principal,
-            role,
-            alias=self._alias_for_principal(principal),
-            authentication=authentication,
-            origin=origin,
-        )
+    def login(self, *args, **kwargs):
+        raise PermissionError("password login is retired; authenticate through Keycloak")
 
-    def login_device(
-        self,
-        username: str,
-        *,
-        origin: str = "",
-    ) -> tuple[str, str, str]:
-        """Issue an origin-bound session after a registered device proves its key."""
-        if self.control_store is None:
-            account = self.account_for_principal(username)
-        else:
-            account = self._account_for_principal_from(self.control_store, username)
-        if account is None or not bool(account.get("active", True)):
-            raise PermissionError("device account is not active")
-        role = self._role_for_account(account)
-        return self._issue_session(
-            str(account["username"]),
-            role,
-            alias=str(account.get("alias") or account["username"]),
-            authentication="device",
-            origin=origin,
-        )
+    def login_device(self, *args, **kwargs):
+        raise PermissionError("device authentication must complete through Keycloak OIDC")
 
     def issue_agent_session(
         self,
@@ -161,168 +92,16 @@ class SessionStateMixin:
                 sessions.pop(self._token_hash(value), None)
         self.logout(value)
 
-    def account_for_principal(self, username: str) -> dict[str, object] | None:
-        principal = str(username or "").strip()
-        if not principal:
-            return None
-        if self.control_store is not None:
-            return self._account_for_principal_from(self.control_store, principal)
-        else:
-            from tools.data.account_manage import accounts_lock, load_accounts
-            with accounts_lock:
-                accounts = load_accounts()
-        return next(
-            (dict(item) for item in accounts
-             if str(item.get("username") or "") == principal),
-            None,
-        )
 
-    def public_visitor_login_account(
-        self,
-        username: str,
-    ) -> dict[str, object] | None:
-        """Resolve one explicitly allowlisted account for visitor login.
 
-        Visitor login is intentionally narrower than normal Manager login:
-        the submitted identifier must resolve to exactly one account, that
-        account must be named by the deployment allowlist.  The allowlist may
-        include an active administrator when a super-admin explicitly grants
-        that access; the account's normal role and capabilities are preserved.
-        References are compared case-sensitively so an alias cannot silently
-        resolve to another account.  An empty or invalid allowlist fails
-        closed.
-        """
-        value = str(username or "").strip()
-        central_accounts = self._central_public_visitor_accounts()
-        if central_accounts is not None:
-            # An empty central result is authoritative: removing the last
-            # row must not resurrect an old deployment environment variable.
-            candidates = [
-                dict(account)
-                for account in central_accounts
-                if value and value in self._account_login_references(account)
-            ]
-        else:
-            allowlist = tuple(
-                str(item or "").strip()
-                for item in getattr(self, "public_visitor_login_allowlist", ())
-                if str(item or "").strip()
-            )
-            if not value or not allowlist:
-                return None
-            accounts = self._public_visitor_accounts()
-            candidates = [
-                dict(account)
-                for account in accounts
-                if value in self._account_login_references(account)
-                and any(
-                    reference in self._account_login_references(account)
-                    for reference in allowlist
-                )
-            ]
-        if len(candidates) != 1:
-            # This includes duplicate aliases and role changes made after a
-            # deployment allowlist was written.  Do not reveal which account
-            # caused the ambiguity to an unauthenticated visitor.
-            return None
-        account = candidates[0]
-        if not bool(account.get("active", True)):
-            return None
-        return account
 
-    def _central_public_visitor_accounts(
-        self,
-    ) -> list[dict[str, object]] | None:
-        """Read the PostgreSQL visitor policy when its API is available.
 
-        ``None`` means the configured store is unavailable or is an older
-        local/test adapter without the policy API.  An empty list is a valid
-        central result and remains authoritative.
-        """
-        store = getattr(self, "control_store", None)
-        reader = getattr(store, "public_visitor_login_accounts", None)
-        if not callable(reader):
-            return None
-        try:
-            return [
-                dict(item)
-                for item in reader(
-                    server_id=str(getattr(self, "server_id", "") or ""),
-                )
-            ]
-        except (ControlDatabaseError, OSError, RuntimeError, TypeError, ValueError):
-            return None
 
-    def _public_visitor_accounts(self) -> list[dict[str, object]]:
-        """Read the account authority, falling back to existing local SQLite."""
-        if self.control_store is not None:
-            try:
-                return [dict(item) for item in self.control_store.load_accounts()]
-            except ControlDatabaseError:
-                # Public visitor login must retain the same local-account
-                # outage behavior as normal password login.
-                pass
-        return [dict(item) for item in LocalAccountStore().load_accounts()]
 
     @staticmethod
-    def _account_login_references(account: dict[str, object]) -> tuple[str, ...]:
-        """Return exact canonical, organization+alias, and alias references."""
-        references: list[str] = []
-        for value in (account.get("username"), account.get("alias")):
-            normalized = str(value or "").strip()
-            if normalized and normalized not in references:
-                references.append(normalized)
-        organization = str(account.get("organization_id") or "").strip()
-        alias = str(account.get("alias") or "").strip()
-        if organization and alias:
-            organization_alias = f"{organization}@{alias}"
-            if organization_alias not in references:
-                references.append(organization_alias)
-        return tuple(references)
-
-    @staticmethod
-    def _account_for_principal_from(
-        store: object,
-        principal: str,
-    ) -> dict[str, object] | None:
-        accounts = store.load_accounts()
-        return next(
-            (
-                dict(item) for item in accounts
-                if str(item.get("username") or "") == principal
-            ),
-            None,
-        )
-
-    def _alias_for_principal(self, principal: str) -> str:
-        """Resolve the UI alias without making it an auth dependency.
-
-        The alias is presentation metadata.  A session must still be usable
-        when PostgreSQL is unavailable, so a failed central lookup falls back
-        to this Manager's existing local account table and finally to the
-        canonical principal itself.
-        """
-        value = str(principal or "").strip()
-        if not value:
-            return ""
-        stores = []
-        if self.control_store is not None:
-            stores.append(self.control_store)
-            stores.append(LocalAccountStore())
-        else:
-            stores.append(None)
-        for store in stores:
-            try:
-                account = (
-                    self._account_for_principal_from(store, value)
-                    if store is not None
-                    else self.account_for_principal(value)
-                )
-            except ControlDatabaseError:
-                continue
-            if account is not None:
-                return str(account.get("alias") or value).strip() or value
-        return value
+    def _alias_for_principal(principal: str) -> str:
+        # Display identity comes from verified Keycloak claims at request time.
+        return str(principal or "").strip()
 
     def _issue_session(
         self,
@@ -351,248 +130,55 @@ class SessionStateMixin:
             self._session_store().upsert(token_hash, session, now=now)
         return token, principal, role
 
-    def register(self, alias: str, password: str, organization_id: str = "") -> tuple[str, str, str, str]:
-        if self.control_store is not None:
-            result = self._register_with_control_outbox(
-                alias, password, organization_id,
-            )
-            self._initialize_registered_profile(result[0])
-            return result
-        from tools.data.account_manage import (
-            DEFAULT_ORGANIZATION_NAME,
-            ROLE_SUPER_ADMIN,
-            ROLE_USER,
-            accounts_lock,
-            hash_password,
-            list_organizations_with_default,
-            load_accounts,
-            next_account_username,
-            root_level_id_for_org,
-            save_accounts,
-        )
-        alias = validate_alias(alias)
-        password = str(password or "")
-        if not password:
-            raise ValueError("用户名和密码不能为空")
-        if len(password) < 6:
-            raise ValueError("密码至少6位")
-        organization_id = self._registration_organization(organization_id)
-        organizations = list_organizations_with_default()
-        organizations = self._with_managed_organization_descriptors(organizations)
-        org = next((item for item in organizations if item.get("id") == organization_id), None)
-        if not org:
-            raise ValueError("机构不存在")
-        with accounts_lock:
-            accounts = load_accounts()
-            full_name = next_account_username(accounts, organization_id, alias)
-            salt = secrets.token_hex(16)
-            role = ROLE_SUPER_ADMIN if not accounts else ROLE_USER
-            accounts.append({
-                "username": full_name, "alias": alias, "salt": salt,
-                "hash": hash_password(password, salt), "role": role,
-                "is_admin": role == ROLE_SUPER_ADMIN,
-                "organization_id": organization_id,
-                "organization_name": org.get("name") or DEFAULT_ORGANIZATION_NAME,
-                "level_id": root_level_id_for_org(organization_id),
-                "parent_username": "",
-            })
-            save_accounts(accounts)
-        result = (full_name, role, alias, organization_id)
-        self._initialize_registered_profile(full_name)
-        return result
 
-    def _initialize_registered_profile(self, principal: str) -> None:
-        initializer = getattr(
-            getattr(self, "client_state", None),
-            "ensure_self_profile",
-            None,
-        )
-        if not callable(initializer):
-            return
-        try:
-            initializer(principal)
-        except (
-            AttributeError, ConnectionError, OSError, RuntimeError,
-            TypeError, ValueError,
-        ) as exc:
-            # Account registration has already committed. The owner's first
-            # Profile-directory read retries this idempotent initialization.
-            sys.stderr.write(
-                f"[manager] reserved self Profile initialization pending: {exc}\n"
-            )
 
-    def _register_with_control_outbox(
-        self,
-        alias: str,
-        password: str,
-        organization_id: str = "",
-    ) -> tuple[str, str, str, str]:
-        """Register locally when PG is down and push it on a later request."""
-        from tools.data.account_manage import (
-            DEFAULT_ORGANIZATION_NAME,
-            ROLE_USER,
-            hash_password,
-            root_level_id_for_org,
-        )
 
-        alias = validate_alias(alias)
-        password = str(password or "")
-        if not password:
-            raise ValueError("用户名和密码不能为空")
-        if len(password) < 6:
-            raise ValueError("密码至少6位")
 
-        local = LocalAccountStore()
-        try:
-            local.sync_pending(self.control_store)
-        except ControlDatabaseError:
-            pass
-        accounts = local.load_accounts()
-        try:
-            organizations = [
-                dict(item) for item in self.control_store.load_organizations()
-            ]
-        except ControlDatabaseError:
-            organizations = local.organizations()
-        organizations = self._with_managed_organization_descriptors(organizations)
-        organization_id = self._registration_organization(organization_id)
-        org = next(
-            (item for item in organizations
-             if str(item.get("id") or "") == organization_id),
-            None,
-        )
-        if not org:
-            raise ValueError("机构不存在")
-        full_name = local.unique_registration_username(
-            organization_id, alias, accounts,
-        )
-        salt = secrets.token_hex(16)
-        # A disconnected Manager must never bootstrap a new super-admin from
-        # an unverified local registration.  The account can be promoted by
-        # the central administration path after synchronization.
-        role = ROLE_USER
-        account = {
-            "username": full_name,
-            "alias": alias,
-            "salt": salt,
-            "hash": hash_password(password, salt),
-            "role": role,
-            "is_admin": False,
-            "is_developer": False,
-            "organization_id": organization_id,
-            "organization_name": str(org.get("name") or DEFAULT_ORGANIZATION_NAME),
-            "level_id": root_level_id_for_org(organization_id),
-            "parent_username": "",
-            "active": True,
-        }
-        local.add_pending_account(account)
-        try:
-            self.control_store.create_account(account)
-        except ControlDatabaseError:
-            # Keep both the local account and its outbox row for a future
-            # request after the central database becomes reachable.
-            pass
-        except (TypeError, ValueError) as exc:
-            local.remove_account(full_name)
-            raise ValueError(str(exc)) from exc
-        else:
-            local.remove_pending(full_name)
-        return full_name, role, alias, organization_id
-
-    def _registration_organization(self, organization_id: str) -> str:
-        requested = str(organization_id or "").strip()
-        managed = tuple(getattr(self, "managed_organizations", ()) or ())
-        if not managed:
-            raise ValueError("Manager没有配置可管理的机构")
-        selected = requested or default_managed_organization(managed)
-        if selected not in managed:
-            raise ValueError("此 Manager 不管理该机构")
-        return selected
-
-    def _with_managed_organization_descriptors(
-        self,
-        organizations: list[dict[str, object]],
-    ) -> list[dict[str, object]]:
-        result = [dict(item) for item in organizations]
-        known = {str(item.get("id") or "") for item in result}
-        for organization_id in tuple(getattr(self, "managed_organizations", ()) or ()):
-            if organization_id not in known:
-                result.append(organization_descriptor(organization_id))
-        return result
 
     def session(self, token: str) -> dict[str, object] | None:
-        from server.identity.auth_mode import auth_mode
-        if auth_mode() == "keycloak":
-            from server.identity.user_session import keycloak_session
-            return keycloak_session(token)
+        from server.identity.user_session import keycloak_session, may_login_public_server
+
+        identity = keycloak_session(token)
+        if identity is not None:
+            if bool(getattr(self, "public_server", False)) and not may_login_public_server(identity):
+                return None
+            return identity
+
+        # Manager-minted local credentials exist only for the ephemeral Profile
+        # Agent capability. They are never a browser, device, or user login.
+        # Most request-facing callers are a ManagerState, but this mixin is
+        # also used directly by identity tests and small adapters. Without an
+        # Agent record, fail closed before touching the local session lock or
+        # persistent session store.
+        agent_sessions = getattr(self, "_agent_sessions", None)
+        if not agent_sessions:
+            return None
         now = time.time()
+        token_hash = self._token_hash(token)
         with self._session_lock:
             self._cleanup_sessions_locked(now)
-            token_hash = self._token_hash(token)
-            session = self._sessions.get(token_hash)
-            if session is None:
+            record = self._sessions.get(token_hash)
+            agent_record = agent_sessions.get(token_hash)
+            if (record is None or agent_record is None or len(record) < 4
+                    or str(record[3] or "") != "agent"
+                    or float(record[2]) <= now):
                 return None
-            principal, role, expires_at = session[:3]
-            if expires_at <= now:
-                self._sessions.pop(token_hash, None)
-                self._session_store().delete(token_hash)
+            principal = str(record[0] or "").strip()
+            if principal != str(agent_record.get("principal") or "").strip():
                 return None
-            created_at = self._session_timestamp(session, 6, now)
-            last_seen_at = self._session_timestamp(session, 7, now)
-            refreshed = expires_at - now <= MANAGER_SESSION_REFRESH_WINDOW_SECONDS
-            touched = now - last_seen_at >= MANAGER_SESSION_TOUCH_INTERVAL_SECONDS
-            if refreshed or touched or len(session) < 8:
-                expires_at = now + MANAGER_SESSION_TTL_SECONDS
-                if not refreshed:
-                    expires_at = float(session[2])
-                session = (
-                    principal,
-                    role,
-                    expires_at,
-                    str(session[3] if len(session) >= 4 else "password"),
-                    str(session[4] if len(session) >= 5 else "").strip().rstrip("/"),
-                    str(session[5] if len(session) >= 6 else "").strip(),
-                    created_at,
-                    now,
-                )
-                self._sessions[token_hash] = session
-                self._session_store().upsert(token_hash, session, now=now)
         return {
             "username": principal,
-            "alias": (
-                str(session[5] or "").strip()
-                if len(session) >= 6 else ""
-            ) or self._alias_for_principal(principal),
-            "role": role,
-            "capabilities": {
-                "manager": role == "super_admin",
-                "research": True,
-            },
+            "alias": principal,
+            "role": "user",
+            "capabilities": {"manager": False, "research": True},
+            "authentication": "agent",
         }
 
     def session_allows_device_origin(self, token: str, origin: str) -> bool:
-        """Allow only a device-authenticated session on its issuing origin.
-
-        Password sessions and legacy sessions created before origin metadata was
-        introduced intentionally fail closed on a public device-gated Manager.
-        The private key remains origin-local; this only binds the resulting
-        HttpOnly session cookie to the origin that completed the challenge.
-        """
-        if self.session(token) is None:
-            return False
-        expected_origin = str(origin or "").strip().rstrip("/")
-        if not expected_origin:
-            return False
-        with self._session_lock:
-            value = self._sessions.get(self._token_hash(token))
-            if value is None or len(value) < 5:
-                return False
-            authentication = str(value[3] or "")
-            session_origin = str(value[4] or "").strip().rstrip("/")
-        return (
-            authentication in {"device", "visitor-password"}
-            and session_origin == expected_origin
-        )
+        # Device approval is an input to Keycloak OIDC; it does not mint a
+        # second local account session.
+        del token, origin
+        return False
 
     def session_principal(self, token: str) -> str | None:
         session = self.session(token)

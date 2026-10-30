@@ -167,19 +167,11 @@ class ClientFactorCatalogMixin:
         if not re.fullmatch(r"factor:v2:[A-Za-z0-9_-]{43}", reference):
             raise ValueError("因子引用无效")
 
-        account_store = self.local_account_store
-        if account_store is None:
-            try:
-                from server.manager.storage.local_accounts import LocalAccountStore
-
-                account_store = LocalAccountStore()
-            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
-                account_store = None
         from server.manager.services.subordinate_factor_library import (
             direct_subordinate_accounts,
         )
 
-        children = direct_subordinate_accounts(owner, account_store)
+        children = direct_subordinate_accounts(owner)
         visible_owners = [owner, *(
             str(item.get("username") or "").strip()
             for item in children
@@ -384,15 +376,7 @@ class ClientFactorCatalogMixin:
             self.factor_library(principal, refresh=True)
             if refresh else self.factor_library(principal)
         )
-        account_store = self.local_account_store
-        if account_store is None:
-            try:
-                from server.manager.storage.local_accounts import LocalAccountStore
-
-                account_store = LocalAccountStore()
-            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
-                account_store = None
-        accounts = direct_subordinate_accounts(principal, account_store)
+        accounts = direct_subordinate_accounts(principal)
         subordinate_rows: list[dict[str, Any]] = []
         for account in accounts:
             owner = str(account.get("username") or "").strip()
@@ -470,15 +454,7 @@ class ClientFactorCatalogMixin:
             direct_subordinate_accounts,
         )
 
-        account_store = self.local_account_store
-        if account_store is None:
-            try:
-                from server.manager.storage.local_accounts import LocalAccountStore
-
-                account_store = LocalAccountStore()
-            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
-                account_store = None
-        children = direct_subordinate_accounts(principal, account_store)
+        children = direct_subordinate_accounts(principal)
         subordinate: list[dict[str, Any]] = []
         for account in children:
             owner = str(account.get("username") or "").strip()

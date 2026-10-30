@@ -52,6 +52,20 @@ def _factor_resource_projection(
 class CatalogRoutesMixin:
     """Serve Manager-owned catalogs without consulting execution ports."""
 
+    def _require_factor_source_read(
+        self, *, kind: str, factor_id: str, owner_username: str, principal: str,
+    ) -> None:
+        if kind != "custom":
+            return
+        from server.identity.keycloak_authorization import keycloak_factor_source_permission
+
+        if not keycloak_factor_source_permission(
+            self._bearer_token(),
+            owner_username=owner_username or principal,
+            factor_id=factor_id,
+        ):
+            raise PermissionError("Keycloak denied factor source access")
+
     def _serve_report_reference(self, parsed) -> bool:
         if parsed.path != "/api/report-references/validate":
             return False
@@ -90,8 +104,7 @@ class CatalogRoutesMixin:
             return principal
         if owner:
             from server.manager.services.subordinate_factor_library import direct_subordinate_accounts
-            account_store = getattr(self.state.client_state, 'local_account_store', None)
-            if any(item.get('username') == owner for item in direct_subordinate_accounts(principal, account_store)):
+            if any(item.get('username') == owner for item in direct_subordinate_accounts(principal)):
                 return owner
         reader = getattr(self.state.client_state, "factor_set_scopes", None)
         scopes = reader(principal) if callable(reader) else {}
@@ -450,6 +463,10 @@ class CatalogRoutesMixin:
                         source_owner = member['owner_ref'].removeprefix('principal:')
                         kind = 'public' if source_owner in {'public', '__public_jobs__', '__public__'} else 'custom'
                         alias, fingerprint = identity['family_alias'], identity['family_formula_fingerprint']
+                        self._require_factor_source_read(
+                            kind=kind, factor_id=alias, owner_username=source_owner,
+                            principal=principal,
+                        )
                         catalog = FactorSourceCatalog()
                         try:
                             source = catalog.version(principal, kind, alias, fingerprint, owner_username=source_owner)
@@ -495,6 +512,10 @@ class CatalogRoutesMixin:
                 owner = str(
                     query.get("owner_username", [""])[0] or ""
                 )
+                self._require_factor_source_read(
+                    kind=kind, factor_id=factor_id, owner_username=owner,
+                    principal=principal,
+                )
                 selected_version = (
                     unquote(fingerprint)
                     if fingerprint is not None else None
@@ -502,7 +523,8 @@ class CatalogRoutesMixin:
                 if selected_version in (None, 'current'):
                     from server.manager.services.factor_family_current import ensure_current_family
                     if not ensure_current_family(self.state, kind, factor_id,
-                                                 principal=principal, owner=owner):
+                                                 principal=principal, owner=owner,
+                                                 access_token=self._bearer_token()):
                         raise FileNotFoundError('因子家族已删除或源码尚不可用')
 
                 def read_source_catalog():
@@ -552,6 +574,7 @@ class CatalogRoutesMixin:
                 json_response(self, FactorSourceManifest().build(
                     principal,
                     server_id=self.state.server_id,
+                    access_token=self._bearer_token(),
                     include_subordinates=str(
                         query.get("include_subordinates", ["1"])[0] or "1"
                     ) == "1",

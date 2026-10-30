@@ -78,13 +78,16 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     self._research_catalog_superior_refs(viewer)
                     if relation == "superiors" else []
                 )
+                from server.identity.keycloak_directory import managed_users_for_verified_request
+
                 values = []
-                store = getattr(self.state, "control_store", None)
-                for item in ([] if store is None else store.load_accounts()):
+                candidates = managed_users_for_verified_request(
+                    viewer, include_self=True,
+                )
+                for item in candidates:
                     username = str(item.get("username") or "").strip()
                     if (
                         not username or username == viewer
-                        or item.get("active", True) is False
                         or (relation == "superiors" and username not in superior_refs)
                         or (needle and needle not in username.casefold())
                     ):
@@ -504,27 +507,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         ]
 
     def _research_catalog_superior_refs(self, viewer: str) -> list[str]:
-        store = getattr(self.state, "control_store", None)
-        accounts = [] if store is None else list(store.load_accounts())
-        by_username = {
-            str(item.get("username") or "").strip(): item
-            for item in accounts if isinstance(item, dict)
-        }
-        result: list[str] = []
-        current = str(viewer or "").strip()
-        visited: set[str] = set()
-        while current and current not in visited:
-            visited.add(current)
-            account = by_username.get(current)
-            if account is None or account.get("active", True) is False:
-                break
-            parent = str(account.get("parent_username") or "").strip()
-            superior = by_username.get(parent)
-            if not parent or superior is None or superior.get("active", True) is False:
-                break
-            result.append(parent)
-            current = parent
-        return result
+        from flask import g, has_request_context
+
+        identity = getattr(g, "keycloak_user_session", None) if has_request_context() else None
+        if not isinstance(identity, dict) or str(identity.get("username") or "") != str(viewer):
+            return []
+        parent = str(identity.get("parent_username") or "").strip()
+        return [parent] if parent else []
 
     def _sync_research_report_publications(
         self,

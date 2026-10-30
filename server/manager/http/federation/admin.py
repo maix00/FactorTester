@@ -16,7 +16,10 @@ from server.identity.federation_identity_sync import (
     organization_group_paths,
     set_group_sync_value,
 )
-from server.identity.realm_groups import organization_group_path
+from server.identity.realm_groups import (
+    managed_member_group_paths,
+    organization_group_path,
+)
 from server.manager.domain.federation import ServiceRoute
 from server.manager.domain.organization_scope import configured_managed_organizations
 from server.manager.http.responses import json_response
@@ -103,12 +106,7 @@ class FederationAdminRoutesMixin:
         if is_super:
             return session, True, set()
         groups = session.get("keycloak_groups") or ()
-        organization_paths = {
-            path for path in (
-                organization_group_from_admin_scope(value)
-                for value in groups
-            ) if path
-        }
+        organization_paths = managed_member_group_paths(groups)
         return session, False, organization_paths
 
     @staticmethod

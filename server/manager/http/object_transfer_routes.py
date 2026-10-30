@@ -20,7 +20,6 @@ from server.services.research_evidence_catalog import evidence_source
 from tools.cli.release.research_reporting.public_research.object_store import (
     PublicResearchObjectStore,
 )
-from tools.data.account_manage import can_view_user_scope
 
 _ACCESS_PATH = "/api/transfers/objects/access"
 _DOWNLOAD_ACCESS_PATH = "/api/transfers/objects/download-access"
@@ -135,10 +134,30 @@ class ObjectTransferRoutesMixin:
                 ).strip().lower()
                 metadata = factor_store.metadata(object_id, expected_sha256=supplied_hash)
                 owner = str(metadata.get("source_owner") or "").strip()
-                if owner != "public" and owner != principal and not can_view_user_scope(
-                    principal, owner,
-                ):
-                    raise PermissionError("factor source is outside your visible scope")
+                if owner != "public":
+                    from server.identity.keycloak_authorization import (
+                        AuthorizationUnavailable,
+                        keycloak_factor_source_permission,
+                    )
+
+                    identity_token = self._bearer_token()
+                    if not identity_token:
+                        raise PermissionError("verified Keycloak login is required")
+                    try:
+                        allowed = keycloak_factor_source_permission(
+                            identity_token,
+                            owner_username=owner,
+                            factor_id=str(metadata.get("factor_id") or ""),
+                            scope="read",
+                        )
+                    except AuthorizationUnavailable as exc:
+                        raise RuntimeError(
+                            "Keycloak authorization is unavailable"
+                        ) from exc
+                    if not allowed:
+                        raise PermissionError(
+                            "Keycloak denied access to this factor source"
+                        )
                 expected_sha256 = str(
                     metadata.get("source_sha256") or ""
                 ).strip().lower()

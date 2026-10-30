@@ -1,6 +1,8 @@
 import sqlite3
 
-from scripts.migrations.keycloak_accounts import export_accounts, export_directory
+from scripts.migrations.keycloak_accounts import (
+    export_accounts, export_directory, stable_legacy_identity_id,
+)
 
 
 def _create_directory(db):
@@ -37,6 +39,7 @@ def test_export_accounts_preserves_nonsecret_hierarchy_without_password_material
 
     assert rows == [{
         "username": "alice", "alias": "A", "role": "level_admin",
+        "tr_identity_id": stable_legacy_identity_id("alice"),
         "is_admin": False, "is_developer": False,
         "organization_id": "org-1", "organization": "Org One",
         "level_id": "child-1", "parent_username": "",
@@ -50,16 +53,14 @@ def test_export_directory_preserves_levels_and_does_not_mutate_source(tmp_path):
 
     directory = export_directory(db)
 
-    assert directory["organizations"] == [{
-        "id": "default", "name": "默认机构", "description": "系统默认机构",
-        "synthetic": True,
-    }, {"id": "org-1", "name": "Org One", "description": ""}]
-    assert [row["id"] for row in directory["levels"]] == [
-        "default__ROOT", "child-1", "org-1__ROOT", "root-1",
+    assert directory["organizations"] == [
+        {"id": "org-1", "name": "Org One", "description": ""},
     ]
-    assert directory["levels"][1]["parent_level_id"] == "root-1"
-    assert directory["levels"][0]["synthetic"] is True
-    assert directory["levels"][2]["synthetic"] is True
+    assert [row["id"] for row in directory["levels"]] == [
+        "child-1", "org-1__ROOT", "root-1",
+    ]
+    assert directory["levels"][0]["parent_level_id"] == "root-1"
+    assert directory["levels"][1]["synthetic"] is True
 
     with sqlite3.connect(db) as conn:
         names = {row[0] for row in conn.execute(
@@ -76,8 +77,8 @@ def test_read_only_export_does_not_create_missing_tables(tmp_path):
     directory = export_directory(db)
 
     assert directory["accounts"] == []
-    assert directory["organizations"][0]["synthetic"] is True
-    assert directory["levels"][0]["synthetic"] is True
+    assert directory["organizations"] == []
+    assert directory["levels"] == []
     with sqlite3.connect(db) as conn:
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
@@ -102,3 +103,9 @@ def test_case_collisions_are_reported():
     assert case_collisions([
         {"username": "Alice"}, {"username": "alice"}, {"username": "bob"},
     ]) == {"alice": ["Alice", "alice"]}
+
+
+def test_stable_identity_id_tracks_legacy_primary_key_not_mutable_org():
+    assert stable_legacy_identity_id("Alice") == stable_legacy_identity_id("alice")
+    assert stable_legacy_identity_id("alice")
+    assert stable_legacy_identity_id("") == ""

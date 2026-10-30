@@ -124,10 +124,10 @@ class AgentAppServerRoutesMixin:
             or "agent_runtime_error"
         )
         if isinstance(exc, (sqlite3.Error, OSError)):
-            code = "permission_store_unavailable"
+            code = "agent_state_unavailable"
         if code == "permission_denied":
             status = 401 if lowered == "login required" else 403
-        elif code == "permission_store_unavailable":
+        elif code == "agent_state_unavailable":
             status = 503
         elif code == "capacity_reached":
             status = 429

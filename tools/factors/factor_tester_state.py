@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
-    from tools.data.account_manage import User
+    from server.identity.principal import Principal
     from tools.data.types import DataTime
     from tools.factors.Factors import Factor
     from tools.factors.FactorRunResult import FactorRunResult
@@ -31,7 +31,7 @@ class FactorTesterState:
         start_dt: Optional["DataTime"] = None,
         end_dt: Optional["DataTime"] = None,
         group_calendar_freq: Optional[Any] = None,
-        user: Optional["User"] = None,
+        user: Optional["Principal"] = None,
     ) -> None:
         self.alias = alias
         self.user = user

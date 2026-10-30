@@ -156,10 +156,9 @@ def test_role_apply_applies_only_global_roles_when_plan_has_no_blockers():
             return [role for role in roles if role.endswith(":manage")]
 
     plan = role_mappings_for_accounts([
-        {"username": "root", "role": "super_admin"},
-        {"username": "alice", "role": "developer"},
-    ], [{"id": "default"}, *ORG], [
-        {"id": "default__ROOT", "organization_id": "default"},
+        {"username": "root", "role": "super_admin", "organization_id": "org-1"},
+        {"username": "alice", "role": "developer", "organization_id": "org-1"},
+    ], ORG, [
         {"id": "org-1__ROOT", "organization_id": "org-1"},
     ])
     adapter = Adapter()

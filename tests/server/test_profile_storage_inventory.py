@@ -14,6 +14,7 @@ from server.manager.services.profile_storage_inventory import (
     scan_profile_storage,
 )
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
+from server.manager.http.account_admin_routes import AccountAdministrationRoutesMixin
 from server.manager.http.federation.public_data import FederationPublicDataRoutesMixin
 from server.manager.services.startup_storage_inventory import sync_local_storage
 
@@ -79,9 +80,6 @@ def test_startup_records_complete_local_usage_and_keeps_failed_snapshot(tmp_path
     job_snapshots = []
 
     class Store:
-        def load_accounts(self):
-            return [{"username": "alice"}]
-
         def record_profile_usage(self, **kwargs):
             snapshots.append(kwargs)
 
@@ -90,6 +88,9 @@ def test_startup_records_complete_local_usage_and_keeps_failed_snapshot(tmp_path
 
     class Repo:
         db_path = tmp_path / "jobs.sqlite"
+
+        def owner_refs(self):
+            return ["alice"]
 
         def _local_storage_breakdown(self, owner):
             assert owner == "alice"
@@ -119,7 +120,7 @@ def test_profile_inventory_route_is_session_scoped(tmp_path) -> None:
         path.parent.mkdir(parents=True)
         path.write_bytes(value)
 
-    class Handler(CoreGetRoutesMixin):
+    class Handler(CoreGetRoutesMixin, AccountAdministrationRoutesMixin):
         def __init__(self, session, store=None):
             self._current_session = session
             self.state = SimpleNamespace(data_root=tmp_path, server_id="server-a",
@@ -227,7 +228,7 @@ def test_quota_snapshot_is_principal_scoped_and_skips_live_scan(tmp_path, monkey
             assert principal == "alice" and default_bytes > 0
             return 100
 
-    class Handler(CoreGetRoutesMixin):
+    class Handler(CoreGetRoutesMixin, AccountAdministrationRoutesMixin):
         def __init__(self, session, store):
             self._current_session = session
             self.state = SimpleNamespace(data_root=tmp_path, server_id="local",

@@ -31,11 +31,6 @@ from server.services.factor_workspace import (
 from server.services.http_auth import login_required
 from server.services.run_input_inspection import instantiate_factor_metadata
 from server.services.session_runtime import current_user
-from tools.data.account_manage import (
-    can_view_user_scope,
-    get_account,
-    is_super_admin_account,
-)
 from tools.data.factor_workspace.repository import FactorWorkspaceRepository
 from tools.data.factor_workspace.storage import (
     assert_canonical_factor_workspace_root,
@@ -45,6 +40,35 @@ from tools.data.factor_workspace.storage import (
 )
 from tools.factors.formula_identity import freeze_factor_identity
 from tools.factors.factor_param_resolution import factor_param_resolver_scope
+
+
+def _custom_factor_access_response(owner_username: str, factor_id: str, scope: str):
+    from server.identity.keycloak_authorization import (
+        AuthorizationUnavailable,
+        keycloak_factor_source_permission,
+        keycloak_request_credentials,
+    )
+
+    credentials = keycloak_request_credentials()
+    if credentials is None:
+        return jsonify({'success': False, 'error': '需要有效的 Keycloak 会话'}), 401
+    if credentials[2] != str(current_user() or ""):
+        return jsonify({'success': False, 'error': 'Keycloak 身份不匹配'}), 403
+    try:
+        allowed = keycloak_factor_source_permission(
+            credentials[0], owner_username=owner_username,
+            factor_id=factor_id, scope=scope,
+        )
+    except AuthorizationUnavailable as exc:
+        return jsonify({
+            'success': False, 'code': 'authorization_unavailable',
+            'error': str(exc),
+        }), 503
+    if not allowed:
+        return jsonify({
+            'success': False, 'error': 'Keycloak 未授予该因子的访问权限',
+        }), 403
+    return None
 
 
 def _freeze_validated_factor(factor_family, params, owner_ref):
@@ -86,8 +110,10 @@ def _freeze_validated_factor(factor_family, params, owner_ref):
 @factor_library_internal_bp.route('/public-source-applied', methods=['POST'])
 @login_required
 def api_public_source_applied():
+    from server.modules.custom_factors.crud_routes import _current_user_is_super_admin
+
     username = current_user()
-    if not is_super_admin_account(get_account(username)):
+    if not _current_user_is_super_admin():
         return jsonify({'success': False, 'error': '只有超级管理员可以同步公共因子家族'}), 403
     values = (request.get_json(silent=True) or {}).get('factors') or []
     if not isinstance(values, list) or len(values) > 256:
@@ -129,12 +155,12 @@ def api_validate_expr():
         is_public = bool(data.get('is_public')) or owner_username in {
             'public', '__public_jobs__',
         }
-        if not is_public and not can_view_user_scope(username, owner_username):
-            return jsonify({
-                'success': False,
-                'valid': False,
-                'error': '当前身份无权读取该因子家族',
-            }), 403
+        if not is_public:
+            failure = _custom_factor_access_response(
+                owner_username, family_alias, "use",
+            )
+            if failure:
+                return failure
         family_ref = (
             f'public:{family_alias}' if is_public
             else f'{owner_username}:{family_alias}'
@@ -187,6 +213,12 @@ def api_validate_expr():
         is_public = bool(data.get('is_public')) or owner_username in {
             'public', '__public_jobs__',
         }
+        if not is_public:
+            failure = _custom_factor_access_response(
+                owner_username, family_alias, "use",
+            )
+            if failure:
+                return failure
         family_ref = (
             f'public:{family_alias}' if is_public
             else f'{owner_username}:{family_alias}'
@@ -266,8 +298,11 @@ def api_validate_expr():
     owner_username = (data.get('owner_username') or username or '').strip()
 
     if not source_code and factor_id:
-        if not can_view_user_scope(username, owner_username):
-            return jsonify({'success': True, 'valid': False, 'error': '无权查看该用户因子'})
+        failure = _custom_factor_access_response(
+            owner_username, factor_id, "use",
+        )
+        if failure:
+            return failure
         loaded_source = load_factor_source(owner_username, factor_id) or ''
         source_code = loaded_source
 
@@ -368,6 +403,10 @@ def api_visual_operators():
 @login_required
 def api_source_root():
     username = current_user()
+    from server.modules.custom_factors.factor_library_routes import _authorize_factor_library
+    failure = _authorize_factor_library(username, "manage")
+    if failure:
+        return failure
     if request.method == 'GET':
         from tools.data.sqlite.factor_source_settings import load_factor_source_root
         configured_root = load_factor_source_root(username) or ''
@@ -401,6 +440,10 @@ def api_sync_workspace():
     username = current_user()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
+    from server.modules.custom_factors.factor_library_routes import _authorize_factor_library
+    failure = _authorize_factor_library(username, "manage")
+    if failure:
+        return failure
     data = request.get_json(silent=True) or {}
     branch_mode = (data.get('branch_mode') or 'force').strip()
     result = sync_factor_workspace(username, branch_mode=branch_mode)
@@ -413,11 +456,16 @@ def api_push_workspace():
     username = current_user()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
+    from server.modules.custom_factors.factor_library_routes import _authorize_factor_library
+    failure = _authorize_factor_library(username, "manage")
+    if failure:
+        return failure
     data = request.get_json(silent=True) or {}
     branch_mode = (data.get('branch_mode') or 'auto').strip()
+    from server.modules.custom_factors.crud_routes import _current_user_is_super_admin
     result = push_factor_workspace(
         username,
-        allow_public_write=is_super_admin_account(get_account(username)),
+        allow_public_write=_current_user_is_super_admin(),
         branch_mode=branch_mode,
     )
     return jsonify({'success': True, **result})
@@ -429,6 +477,10 @@ def api_workspace_merge_download():
     username = current_user()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
+    from server.modules.custom_factors.factor_library_routes import _authorize_factor_library
+    failure = _authorize_factor_library(username, "manage")
+    if failure:
+        return failure
     try:
         result = FactorWorkspaceRepository(username).merge_download_snapshot()
     except Exception as exc:

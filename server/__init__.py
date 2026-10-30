@@ -38,11 +38,9 @@ def create_app():
     install_manager_gateway_auth(app)
 
     # ── 启动时一次性建好所有 SQLite schema（避免每个 API 请求重复检查） ──
-    from tools.data.account_manage import ensure_account_manager_sqlite_store
     from server.jobs.repository import JobRepository
     from server.services.research_configurations import ensure_schema as ensure_research_configuration_schema
     from server.services.research_runs import ensure_schema as ensure_research_run_schema
-    ensure_account_manager_sqlite_store()
     job_repository = JobRepository()
     job_repository.ensure_schema()
     app.extensions['job_repository'] = job_repository

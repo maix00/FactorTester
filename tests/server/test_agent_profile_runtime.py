@@ -603,13 +603,7 @@ def _route_payload(handler):
 
 def test_agent_routes_require_account_session_and_never_return_provider_token(
     tmp_path,
-    monkeypatch,
 ):
-    monkeypatch.setattr(
-        agent_routes,
-        "can_use_agent_assistant",
-        lambda username, role: username == PRINCIPAL and role == "user",
-    )
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "agent-provider.key",
@@ -622,7 +616,10 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
 
     authenticated = _AgentRouteHandler(
         service,
-        session={"username": PRINCIPAL, "role": "user"},
+        session={
+            "username": PRINCIPAL, "role": "user",
+            "keycloak_roles": ("agent_assistant:use",),
+        },
         payload={
             "label": "provider",
             "runtime_kind": "server",
@@ -642,7 +639,10 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
 
     listing = _AgentRouteHandler(
         service,
-        session={"username": PRINCIPAL, "role": "user"},
+        session={
+            "username": PRINCIPAL, "role": "user",
+            "keycloak_roles": ("agent_assistant:use",),
+        },
     )
     assert listing._get_agent_routes(urlparse("/api/client/agent-models")) is True
     list_response = _route_payload(listing)
@@ -672,7 +672,10 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
 
     duplicate = _AgentRouteHandler(
         service,
-        session={"username": PRINCIPAL, "role": "user"},
+        session={
+            "username": PRINCIPAL, "role": "user",
+            "keycloak_roles": ("agent_assistant:use",),
+        },
     )
     provider_id = response["provider"]["provider_id"]
     assert duplicate._post_agent_routes(urlparse(
@@ -686,18 +689,12 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
 
 def test_agent_routes_deny_all_agent_operations_without_assistant_permission(
     tmp_path,
-    monkeypatch,
 ):
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "agent-provider.key",
         data_root=tmp_path / "data",
         server_id="public-1",
-    )
-    monkeypatch.setattr(
-        agent_routes,
-        "can_use_agent_assistant",
-        lambda *_args: False,
     )
     payload = {
         "label": "provider",
@@ -737,11 +734,6 @@ def test_agent_routes_deny_all_agent_operations_without_assistant_permission(
 
 
 def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        agent_routes,
-        "can_use_agent_assistant",
-        lambda username, role: username == PRINCIPAL and role == "user",
-    )
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "agent-provider.key",
@@ -751,7 +743,10 @@ def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path, mon
     )
     handler = _AgentRouteHandler(
         service,
-        session={"username": PRINCIPAL, "role": "user"},
+        session={
+            "username": PRINCIPAL, "role": "user",
+            "keycloak_roles": ("agent_assistant:use",),
+        },
         payload={
             "label": "provider",
             "runtime_kind": "server",
@@ -776,11 +771,6 @@ def test_agent_provider_listing_never_contacts_upstream_providers(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setattr(
-        agent_routes,
-        "can_use_agent_assistant",
-        lambda username, role: username == PRINCIPAL and role == "user",
-    )
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "agent-provider.key",
@@ -805,7 +795,10 @@ def test_agent_provider_listing_never_contacts_upstream_providers(
     monkeypatch.setattr(AgentProviderHealth, "test", fail_if_health_check_runs)
     listing = _AgentRouteHandler(
         service,
-        session={"username": PRINCIPAL, "role": "user"},
+        session={
+            "username": PRINCIPAL, "role": "user",
+            "keycloak_roles": ("agent_assistant:use",),
+        },
     )
 
     assert listing._get_agent_routes(urlparse("/api/client/agent-models")) is True

@@ -9,6 +9,7 @@ from server import branding
 import sqlite3
 import threading
 import time
+from dataclasses import replace
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -103,6 +104,29 @@ class JobRepository(
         if record.terminal_assurance is not None:
             raise ValueError("terminal assurance is repository-owned")
         now = record.created_at or time.time()
+        from server.identity.auth_mode import keycloak_enabled
+        if keycloak_enabled():
+            try:
+                from server.identity.keycloak_authorization import (
+                    keycloak_request_identity,
+                )
+
+                identity = keycloak_request_identity()
+            except Exception:
+                identity = None
+            if identity is not None:
+                if identity.username != record.owner:
+                    raise PermissionError("Job owner does not match the verified Keycloak principal")
+                if record.owner_subject and record.owner_subject != identity.subject:
+                    raise PermissionError("Job retry cannot change its Keycloak owner")
+                if record.owner_issuer and record.owner_issuer != identity.issuer:
+                    raise PermissionError("Job retry cannot change its Keycloak issuer")
+                record = replace(
+                    record, owner_issuer=identity.issuer,
+                    owner_subject=identity.subject,
+                )
+            elif not record.owner_subject or not record.owner_issuer:
+                raise PermissionError("Job creation requires a verified Keycloak owner")
         job_spec_raw = orjson.dumps(record.job_spec, option=orjson.OPT_SORT_KEYS)
         with self._connection() as conn:
             if record.step_mode:
@@ -124,7 +148,8 @@ class JobRepository(
                 conn.execute(
                     """
                     INSERT INTO research_jobs (
-                        job_id, run_id, owner, workspace_id, kind, status,
+                        job_id, run_id, owner, owner_issuer, owner_subject,
+                        workspace_id, kind, status,
                         job_role, parent_job_id, supplemental_kind,
                         supplemental_identity, source_artifact_hash,
                         retry_of, attempt, step_mode, retention_mode,
@@ -132,12 +157,14 @@ class JobRepository(
                         job_spec_json, job_spec_hash, run_spec_hash,
                         entitlement_json, execution_plan_json,
                         execution_plan_hash, queued_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.job_id,
                         record.run_id,
                         record.owner,
+                        record.owner_issuer,
+                        record.owner_subject,
                         record.workspace_id,
                         record.kind,
                         record.status.value,

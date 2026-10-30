@@ -1,4 +1,5 @@
 import json
+from scripts.migrations.keycloak_accounts import stable_legacy_identity_id
 
 from scripts.migrations.keycloak_directory_compare import (
     compare_directories,
@@ -9,6 +10,7 @@ from scripts.migrations.keycloak_directory_compare import (
 def _snapshot(*, key="users", username="alice", role="user", active_marker=False):
     account = {
         "username": username,
+        "tr_identity_id": stable_legacy_identity_id(username),
         "alias": "Alice",
         "role": role,
         "is_admin": False,
@@ -56,9 +58,9 @@ def test_case_change_and_role_mismatch_fail_closed_without_emitting_usernames(
     report = json.loads(output)
 
     assert report["legacy_directory_preflight_passes"] is False
-    assert report["users"]["casefold_matched_count"] == 1
-    assert report["users"]["username_case_difference_count"] == 1
-    assert report["users"]["account_field_differences"] == {"role": 1}
+    assert report["users"]["stable_identity_matched_count"] == 1
+    assert report["users"]["username_difference_count"] == 1
+    assert report["users"]["account_field_differences"] == {"role": 1, "username": 1}
     assert "Alice" not in output
     assert "alice" not in output
 
@@ -92,4 +94,32 @@ def test_matching_but_unmapped_or_unprovisioned_roles_block_cutover():
     assert report["legacy_role_mapping_plan"]["right"][
         "scoped_authorization_not_provisioned_rows"
     ] == 1
+    assert report["legacy_directory_preflight_passes"] is False
+
+
+def test_same_legacy_primary_key_has_same_identity_across_org_snapshots():
+    left = _snapshot()
+    right = _snapshot()
+    right["users"][0]["organization_id"] = "org-2"
+    right["users"][0]["organization_name"] = "Org Two"
+
+    report = compare_directories(left, right)
+
+    assert report["users"]["stable_identity_matched_count"] == 1
+    assert report["users"]["exact_identity_set_match"] is True
+    assert report["users"]["account_field_differences"]["organization_id"] == 1
+    assert report["legacy_directory_preflight_passes"] is False
+    assert report["legacy_directory_preflight_passes"] is False
+
+
+def test_missing_or_invalid_stable_identity_blocks_cutover():
+    left = _snapshot()
+    right = _snapshot(active_marker=True)
+    left["users"][0].pop("tr_identity_id")
+    right["users"][0]["tr_identity_id"] = "not-a-uuid"
+
+    report = compare_directories(left, right)
+
+    assert report["users"]["missing_stable_identity_rows"] == [1, 0]
+    assert report["users"]["invalid_stable_identity_rows"] == [0, 1]
     assert report["legacy_directory_preflight_passes"] is False

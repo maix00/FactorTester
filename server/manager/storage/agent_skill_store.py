@@ -11,6 +11,10 @@ from typing import Iterator
 
 from tools.data.sqlite.db import connect_sqlite
 TABLE = "manager_profile_skill_selections"
+LEGACY_SKILL_IDS = {
+    "factortester-research": "traderesearch-research",
+    "factortester-manager-maintenance": "traderesearch-server-maintenance",
+}
 
 
 class AgentSkillStore:
@@ -44,6 +48,30 @@ class AgentSkillStore:
                 )
                 """
             )
+            # Skill ids are persisted user preferences, not authorization
+            # grants. Move the two renamed selections once so existing
+            # Profiles keep their choices while old Skill projections are
+            # removed by the normal runtime synchronization path.
+            for old_id, current_id in LEGACY_SKILL_IDS.items():
+                rows = db.execute(
+                    f"""SELECT principal, profile_id, selected_at
+                        FROM {TABLE} WHERE skill_id = ?""",
+                    (old_id,),
+                ).fetchall()
+                if not rows:
+                    continue
+                db.executemany(
+                    f"""INSERT OR IGNORE INTO {TABLE} (
+                        principal, profile_id, skill_id, selected_at
+                    ) VALUES (?, ?, ?, ?)""",
+                    [
+                        (str(row[0]), str(row[1]), current_id, float(row[2]))
+                        for row in rows
+                    ],
+                )
+                db.execute(
+                    f"DELETE FROM {TABLE} WHERE skill_id = ?", (old_id,),
+                )
 
     @staticmethod
     def _text(value: object, field: str) -> str:

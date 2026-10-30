@@ -90,6 +90,8 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             job_id TEXT PRIMARY KEY,
             run_id TEXT NOT NULL,
             owner TEXT NOT NULL,
+            owner_issuer TEXT NOT NULL DEFAULT '',
+            owner_subject TEXT NOT NULL DEFAULT '',
             workspace_id TEXT NOT NULL,
             kind TEXT NOT NULL,
             status TEXT NOT NULL,
@@ -301,6 +303,14 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
     if "report_ref" not in columns:
         conn.execute(
             "ALTER TABLE research_jobs ADD COLUMN report_ref TEXT NOT NULL DEFAULT ''"
+        )
+    if "owner_issuer" not in columns:
+        conn.execute(
+            "ALTER TABLE research_jobs ADD COLUMN owner_issuer TEXT NOT NULL DEFAULT ''"
+        )
+    if "owner_subject" not in columns:
+        conn.execute(
+            "ALTER TABLE research_jobs ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''"
         )
     supplemental_columns = {
         "job_role", "parent_job_id", "supplemental_kind",

@@ -8,10 +8,7 @@ from typing import Any
 import threading
 import uuid
 
-from flask import session
-
-from tools.data.account_manage import accounts_lock, load_accounts
-
+from flask import abort, g, has_request_context, request, session
 
 user_file_locks: dict[str, threading.Lock] = {}
 user_file_locks_meta = threading.Lock()
@@ -69,6 +66,30 @@ def cleanup_session_resource(sid: str) -> None:
 
 
 def current_user() -> str | None:
+    if has_request_context():
+        try:
+            from server.identity.auth_mode import keycloak_enabled
+            if keycloak_enabled():
+                identity = _keycloak_request_session()
+                if identity:
+                    return str(identity.get("username") or "") or None
+                # The Manager's loopback gateway has already verified the
+                # signed-in Keycloak session.  Its principal header is trusted
+                # only after manager_gateway_auth validates the shared
+                # capability token and loopback peer address.
+                if session.get("manager_gateway"):
+                    delegated = str(session.get("username") or "").strip()
+                    return delegated or None
+        except Exception:
+            # Session verification failures never become an authenticated
+            # principal; keycloak-only mode returns None below.
+            pass
+        try:
+            from server.identity.auth_mode import keycloak_enabled
+            if keycloak_enabled():
+                return None
+        except Exception:
+            return None
     return session.get('username')
 
 
@@ -76,23 +97,51 @@ def current_user_obj():
     username = current_user()
     if not username:
         return None
+    if has_request_context():
+        identity = getattr(g, "keycloak_user_session", None)
+        if identity and str(identity.get("username") or "") == username:
+            from server.identity.principal import Principal
+            roles = set(identity.get("keycloak_roles") or ())
+            return Principal(name=username, is_admin="admin_console:manage" in roles)
     return user_obj_for_name(username)
 
 
 def user_obj_for_name(username: str):
-    """Build a User domain object without requiring a Flask request context."""
-    from tools.data.account_manage import User
-    with accounts_lock:
-        accounts = load_accounts()
-    acct = next((a for a in accounts if a['username'] == username), None)
-    is_admin = bool(acct and acct.get('is_admin', False))
-    return User(name=username, is_admin=is_admin)
+    """Build a non-authoritative domain identity without a local user lookup.
+
+    Authorization is always evaluated from the verified Keycloak session or
+    Keycloak Authorization Services.  Background calculations may still need
+    the legacy ``User`` value object for file naming, but the local account
+    database must not grant roles when no request identity is available.
+    """
+    from server.identity.principal import Principal
+    return Principal(name=str(username or ""), is_admin=False)
 
 
 def require_user() -> str:
-    username = session.get('username')
-    assert username is not None
+    username = current_user()
+    if not username:
+        abort(401)
     return username
+
+
+def _keycloak_request_session() -> dict[str, Any] | None:
+    """Resolve and memoize the verified Manager session for a Flask request."""
+    cached = getattr(g, "keycloak_user_session", None)
+    if isinstance(cached, dict):
+        return cached
+    scheme, _, bearer = str(request.headers.get("Authorization") or "").partition(" ")
+    token = bearer.strip() if scheme.lower() == "bearer" else ""
+    token = token or str(request.cookies.get("ft-manager-session") or "").strip()
+    if not token:
+        return None
+    from server.identity.user_session import keycloak_session
+    value = keycloak_session(token)
+    if value:
+        g.keycloak_user_session = value
+        g.keycloak_access_token = token
+        return value
+    return None
 
 
 
