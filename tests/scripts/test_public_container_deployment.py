@@ -714,3 +714,11 @@ def test_public_native_artifact_preflight_precedes_push_and_app_stop() -> None:
     assert activation.index('sha256sum -c checksums.sha256') < activation.index('stop-app')
     assert 'TR_NATIVE_WHEEL_CONTEXT=$native_context' in activation
     assert _compose()['services']['factortester-public']['build']['additional_contexts']['native-wheels']
+
+
+def test_release_rejects_stale_rollback_revision_before_building():
+    script = (ROOT / "scripts/server/activate_public_revision.sh").read_text()
+    guard = script.index("configured revision does not match running application")
+    assert guard < script.index('bash "$public_script" build factortester-public')
+    assert guard < script.index('bash "$public_script" stop-app')
+    assert "{{.Config.Image}}" in script[:guard]
