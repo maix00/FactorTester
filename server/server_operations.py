@@ -22,14 +22,15 @@ _ALLOWED_ACTIONS = frozenset({
 
 
 def _require_super_admin():
+    from server.identity.server_admission import current_manager_role
+
     if keycloak_request_credentials() is None:
         return jsonify({
             "success": False,
             "error": "需要有效的 Keycloak 会话",
         }), 401
     identity = getattr(g, "keycloak_user_session", None)
-    roles = identity.get("keycloak_roles", ()) if isinstance(identity, dict) else ()
-    if "admin_console:manage" not in roles:
+    if not current_manager_role(identity, "admin_console:manage"):
         return jsonify({
             "success": False,
             "error": "需要 Keycloak 服务器管理权限",

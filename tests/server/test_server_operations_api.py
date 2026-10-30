@@ -17,6 +17,10 @@ def _client(monkeypatch, *, role: str):
         "server.server_operations.keycloak_request_credentials",
         lambda: ("test-token", "subject-root", "root"),
     )
+    monkeypatch.setattr(
+        "server.identity.server_admission.current_manager_role",
+        lambda identity, name: role == "super_admin" and name in identity.get("keycloak_roles", ()),
+    )
     app = Flask(
         __name__,
         template_folder=None,
@@ -90,6 +94,20 @@ def test_non_super_admin_cannot_use_server_operations_api(
 
     assert response.status_code == 403
     assert response.get_json()["success"] is False
+
+
+def test_revoked_admin_cannot_control_server_with_old_token(monkeypatch):
+    client = _client(monkeypatch, role="super_admin")
+    monkeypatch.setattr("server.server_operations.manager_snapshot", lambda: {"instances": []})
+    allowed = {"current": True}
+    monkeypatch.setattr(
+        "server.identity.server_admission.current_manager_role",
+        lambda identity, name: allowed["current"] and name in identity.get("keycloak_roles", ()),
+    )
+    assert client.get("/admin/api/server-instances").status_code == 200
+    allowed["current"] = False
+    assert client.get("/admin/api/server-instances").status_code == 403
+    assert client.post("/admin/api/server-instances/x/actions", json={"action": "restart"}).status_code == 403
 
 
 def test_super_admin_reads_bounded_manager_snapshot_without_capability(
