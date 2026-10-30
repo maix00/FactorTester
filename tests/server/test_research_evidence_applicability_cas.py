@@ -57,6 +57,7 @@ def test_patch_requires_revision_and_reports_conflict_with_stable_code(monkeypat
                         lambda _handler, body, status=200: responses.append((status, body)))
     class Handler(research_object_routes.ResearchObjectRoutesMixin):
         payload = {}
+        state = SimpleNamespace()
         def _session(self):
             return {"username": "alice"}
         def _json_body(self, _maximum):
@@ -77,3 +78,29 @@ def test_patch_requires_revision_and_reports_conflict_with_stable_code(monkeypat
     assert responses[-1][0] == 409
     assert responses[-1][1]["code"] == "evidence_applicability_conflict"
     assert get_evidence(owner="alice", evidence_ref=ref)["applicability_revision"] == new_revision
+
+
+def test_patch_uses_authoritative_evidence_owner_and_checks_manage_permission(monkeypatch, tmp_path):
+    ref, revision = _setup(monkeypatch, tmp_path)
+    responses = []
+    monkeypatch.setattr(research_object_routes, "json_response",
+                        lambda _handler, body, status=200: responses.append((status, body)))
+    class Handler(research_object_routes.ResearchObjectRoutesMixin):
+        allowed = False
+        def _session(self):
+            return {"username": "bob"}
+        def _json_body(self, _maximum):
+            return {"applicability": _scope("products:delegated"),
+                    "expected_applicability_revision": revision}
+        def _evidence_read_context(self, *, evidence_ref, viewer):
+            assert evidence_ref == ref and viewer == "bob"
+            return "alice", {"can_view": True, "can_manage": self.allowed}
+    handler = Handler()
+    route = SimpleNamespace(path=f"/api/research-evidence/{ref}/applicability")
+    handler._patch_research_object_routes(route)
+    assert responses[-1][0] == 403
+    assert get_evidence(owner="alice", evidence_ref=ref)["applicability_revision"] == revision
+    handler.allowed = True
+    handler._patch_research_object_routes(route)
+    assert responses[-1][0] == 200
+    assert get_evidence(owner="alice", evidence_ref=ref)["applicability"]["product_group_refs"] == ["products:delegated"]

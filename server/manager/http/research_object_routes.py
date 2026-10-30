@@ -462,9 +462,15 @@ class ResearchObjectRoutesMixin:
         try:
             data = self._research_object_body(256 * 1024)
             if applicability:
+                evidence_ref = unquote(applicability.group(1))
+                evidence_owner, access = self._evidence_read_context(
+                    evidence_ref=evidence_ref, viewer=owner,
+                )
+                if not access.get("can_manage"):
+                    raise PermissionError("Evidence applicability management is not authorized")
                 value = update_evidence_applicability(
-                    owner=owner,
-                    evidence_ref=unquote(applicability.group(1)),
+                    owner=evidence_owner,
+                    evidence_ref=evidence_ref,
                     applicability=data.get("applicability") or {},
                     expected_applicability_revision=data.get("expected_applicability_revision"),
                 )
@@ -483,7 +489,7 @@ class ResearchObjectRoutesMixin:
             json_response(self, {"success": False, "code": "evidence_applicability_revision_required",
                                  "error": str(exc)}, 400)
             return True
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, PermissionError, TypeError, ValueError) as exc:
             self._research_object_error(exc)
             return True
         key = "evidence" if applicability else "tag"

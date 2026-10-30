@@ -5,22 +5,32 @@ from flask import Flask
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test import research_evidence_routes as _legacy_routes  # noqa: F401
+from tests.server.test_server_admission import ORG, SERVER, auth
 
 
-def _client():
+def _client(monkeypatch, auth):
+    from server.identity import user_session
+    _provider, verified, _internal, _public = auth
+    verified = {**verified, "tr_identity_id": "alice-id"}
+    monkeypatch.setenv("TRADERESEARCH_PUBLIC_SERVER", "0")
+    monkeypatch.setenv("TRADERESEARCH_SERVER_ID", SERVER)
+    monkeypatch.setenv("FACTORTESTER_MANAGED_ORGANIZATIONS", ORG)
+    monkeypatch.setattr(user_session, "keycloak_session", lambda token:
+                        verified if token == "verified-test-token" else None)
     app = Flask(__name__)
     app.secret_key = "test-secret"
     app.register_blueprint(sft_bp)
     client = app.test_client()
+    client.environ_base["HTTP_AUTHORIZATION"] = "Bearer verified-test-token"
     with client.session_transaction() as session:
         session["username"] = "alice"
     return client
 
 
-def test_fragment_bound_evidence_http_workflow(monkeypatch, tmp_path) -> None:
+def test_fragment_bound_evidence_http_workflow(monkeypatch, tmp_path, auth) -> None:
     path = tmp_path / "catalog.db"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(path))
-    client = _client()
+    client = _client(monkeypatch, auth)
 
     retired = client.post("/api/research-evidence", json={})
     assert retired.status_code == 410
