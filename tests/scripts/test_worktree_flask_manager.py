@@ -758,8 +758,8 @@ def test_super_admin_server_jobs_use_permissioned_projection(
         } if token == "admin-token" else None,
     )
 
-    def aggregate_server_jobs(*, principal, cursor, limit):
-        calls.append((principal, cursor, limit))
+    def aggregate_server_jobs(*, principal, cursor, limit, delegated_user_token):
+        calls.append((principal, cursor, limit, delegated_user_token))
         return {
             "public": False,
             "jobs": [{"job_id": "admin-job", "port": 8176}],
@@ -786,7 +786,60 @@ def test_super_admin_server_jobs_use_permissioned_projection(
 
     assert payload["public"] is False
     assert payload["jobs"][0]["job_id"] == "admin-job"
-    assert calls == [("admin@1", "", 100)]
+    assert calls == [("admin@1", "", 100, "admin-token")]
+
+
+def test_permissioned_server_jobs_forward_verified_token_to_local_service(tmp_path, monkeypatch):
+    state = manager.ManagerState(tmp_path, "python")
+    calls = []
+    monkeypatch.setattr(state, "ordered_job_service_ports", lambda: [8141])
+
+    def service_json(port, path, principal, *, delegated_user_token):
+        calls.append((port, path, principal, delegated_user_token))
+        return {"jobs": [{"job_id": "job-a", "updated_at": 2}], "total": 35,
+                "has_more": True, "next_cursor": "next"}
+
+    monkeypatch.setattr(state, "service_json", service_json)
+    page = state.aggregate_server_jobs(principal="admin", limit=20,
+                                       delegated_user_token="verified-token")
+    assert calls == [(8141, "/api/jobs?scope=server&limit=20", "admin", "verified-token")]
+    assert page["total"] == 35 and page["has_more"] and page["next_cursor"] == "next"
+
+
+def test_service_gateway_delegates_only_to_approved_loopback(monkeypatch):
+    import io
+    from email.message import Message
+    from server.manager.http import gateway as gateway_module
+
+    requests = []
+
+    class Response(io.BytesIO):
+        status = 200
+        headers = Message()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+
+    def open_request(request, *, timeout):
+        requests.append(request)
+        return Response(b'{"success":true}')
+
+    monkeypatch.setattr(gateway_module, "urlopen", open_request)
+    service = gateway_module.ServiceGateway(available_ports=lambda: [8141],
+                                            capability_token=lambda: "service-capability")
+    assert service.json(port=8141, path="/api/jobs", principal="admin",
+                        delegated_user_token="verified-token")["success"]
+    assert requests[0].full_url == "http://127.0.0.1:8141/api/jobs"
+    assert requests[0].get_header("Authorization") == "Bearer verified-token"
+    with pytest.raises(ValueError):
+        service.json(port=8141, path="/api/jobs", principal="admin",
+                     delegated_user_token="bad\nheader")
+    with pytest.raises(ValueError):
+        service.json(port=9999, path="/api/jobs", principal="admin",
+                     delegated_user_token="verified-token")
 
 
 def test_manager_job_scope_proxy_uses_one_preferred_service(

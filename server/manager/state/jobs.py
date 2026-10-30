@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import heapq
 import os
 import threading
 import time
@@ -538,6 +539,7 @@ class JobProjectionStateMixin:
         self, *, principal: str, cursor: str = "", limit: int = 20,
         object_kind: str = "", object_ref: str = "",
         object_owner_ref: str = "", object_alias: str = "",
+        delegated_user_token: str = "",
         _allow_federation: bool = True,
     ) -> dict[str, object]:
         """Read the permissioned server projection for a Manager user.
@@ -556,11 +558,9 @@ class JobProjectionStateMixin:
             if cursor:
                 query["cursor"] = cursor
             try:
-                value = self.service_json(
-                    port,
-                    "/api/jobs?" + urlencode(query),
-                    principal,
-                )
+                args = (port, "/api/jobs?" + urlencode(query), principal)
+                value = (self.service_json(*args, delegated_user_token=delegated_user_token)
+                         if delegated_user_token else self.service_json(*args))
                 jobs: list[dict[str, object]] = []
                 for item in value.get("jobs") or []:
                     if not isinstance(item, dict):
@@ -613,6 +613,7 @@ class JobProjectionStateMixin:
         limit: int = 20,
         object_kind: str = "", object_ref: str = "",
         object_owner_ref: str = "", object_alias: str = "",
+        delegated_user_token: str = "",
         _allow_federation: bool = True,
     ) -> dict[str, object]:
         """Read one account projection from the shared job repository.
@@ -638,11 +639,9 @@ class JobProjectionStateMixin:
             if scope == "subordinates" and username:
                 query["username"] = username
             try:
-                value = self.service_json(
-                    port,
-                    "/api/jobs?" + urlencode(query),
-                    principal,
-                )
+                args = (port, "/api/jobs?" + urlencode(query), principal)
+                value = (self.service_json(*args, delegated_user_token=delegated_user_token)
+                         if delegated_user_token else self.service_json(*args))
                 jobs: list[dict[str, object]] = []
                 for item in value.get("jobs") or []:
                     if not isinstance(item, dict):
@@ -728,10 +727,9 @@ class JobProjectionStateMixin:
         """
         bounded = min(100, max(1, int(limit)))
         requested_page = max(1, int(page))
-        # Every source contributes to one globally ordered list.  Fetch from
-        # page one with enough rows to assemble the requested global page;
-        # asking each source for page N and then slicing the merged result
-        # would skip rows whenever the sources have different lengths.
+        # A source can contribute the entire requested global page. Fetch a
+        # bounded first batch from each, then lazily continue only streams
+        # consumed while merging; do not cap the entire history at 100 rows.
         source_limit = min(100, bounded * requested_page)
         source_scope = str(source_scope or "mine").strip().lower()
         username = str(username or "").strip()
@@ -755,17 +753,19 @@ class JobProjectionStateMixin:
             cached["sync_mode"] = "cache"
             return cached
 
-        combined: list[dict[str, object]] = []
+        streams: list[dict[str, object]] = []
         source_status: list[dict[str, object]] = []
         object_query = _object_job_query(
             object_kind, object_ref, object_owner_ref, object_alias,
         )
 
-        def query_local() -> tuple[dict[str, object], list[dict[str, object]]]:
+        def query_local(page: int = 1, cursor: str = "") -> tuple[dict[str, object], list[dict[str, object]]]:
             if source_scope == "server":
                 local_payload = self.aggregate_server_jobs(
                     principal=principal,
+                    cursor=cursor,
                     limit=source_limit,
+                    delegated_user_token=delegated_user_token,
                     **object_query,
                     _allow_federation=False,
                 )
@@ -773,13 +773,15 @@ class JobProjectionStateMixin:
                 account_query = {
                     "principal": principal,
                     "scope": source_scope,
-                    "page": 1,
+                    "page": page,
                     "limit": source_limit,
                     "_allow_federation": False,
                     **object_query,
                 }
                 if username:
                     account_query["username"] = username
+                if delegated_user_token:
+                    account_query["delegated_user_token"] = delegated_user_token
                 local_payload = self.aggregate_account_jobs(**account_query)
             local_jobs: list[dict[str, object]] = []
             for item in local_payload.get("jobs") or []:
@@ -797,16 +799,18 @@ class JobProjectionStateMixin:
                 local_jobs.append(self._annotate_local_job(item, local_port))
             return local_payload, local_jobs
 
-        def query_peer(route: ServiceRoute) -> tuple[ServiceRoute, dict[str, object]]:
+        def query_peer(route: ServiceRoute, page: int = 1, cursor: str = "") -> tuple[ServiceRoute, dict[str, object]]:
+            continuation = {"cursor": cursor} if cursor else {}
             return route, self.federation_gateway.query_jobs(
                 route,
                 requester_server_id=self.server_id,
                 principal=principal,
                 delegated_user_token=delegated_user_token,
                 scope=source_scope,
-                page=1,
+                page=page,
                 limit=source_limit,
                 username=username,
+                **continuation,
                 **object_query,
             )
 
@@ -821,6 +825,38 @@ class JobProjectionStateMixin:
                     "error": "registered server is offline",
                 })
         online_peer_routes = [route for route in peer_routes if route.online]
+        if not online_peer_routes and source_scope != "server":
+            # With a single available account projection there is no merge:
+            # let its indexed query seek directly to the requested page.
+            source_limit = bounded
+            try:
+                local_payload, local_jobs = query_local(requested_page)
+                local_status = {
+                    "server_id": self.server_id,
+                    "endpoint": os.environ.get(
+                        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT", "http://127.0.0.1:7998",
+                    ),
+                    "status": "stale" if local_payload.get("stale") else "ok",
+                    "job_count": len(local_jobs),
+                    "total": int(local_payload.get("total") or len(local_jobs)),
+                    "has_more": bool(local_payload.get("has_more")),
+                }
+            except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                local_jobs = []
+                local_payload = {}
+                local_status = {"server_id": self.server_id, "status": "error",
+                                "job_count": 0, "total": 0, "error": str(exc)}
+            source_status.append(local_status)
+            total = int(local_status["total"])
+            return self._cross_server_cache_put(cache_key, {
+                "success": True, "scope": "cross-server", "source_scope": source_scope,
+                "sync_mode": "on_demand", "jobs": local_jobs, "page": requested_page,
+                "page_size": len(local_jobs), "total": total,
+                "total_pages": max(1, (total + bounded - 1) // bounded),
+                "has_more": bool(local_payload.get("has_more")), "next_cursor": None,
+                "partial": any(item.get("status") not in {"ok", "stale"} for item in source_status),
+                "sources": sorted(source_status, key=lambda item: str(item.get("server_id") or "")),
+            })
         # The local service request used to finish before any peer request was
         # submitted.  A slow worktree therefore blocked every remote source
         # even though the federation gateway could already be serving them.
@@ -850,8 +886,7 @@ class JobProjectionStateMixin:
                             "error": str(exc),
                         })
                         continue
-                    combined.extend(local_jobs)
-                    source_status.append({
+                    status = {
                         "server_id": self.server_id,
                         "endpoint": os.environ.get(
                             "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
@@ -861,7 +896,9 @@ class JobProjectionStateMixin:
                         "job_count": len(local_jobs),
                         "total": int(local_payload.get("total") or len(local_jobs)),
                         "has_more": bool(local_payload.get("has_more")),
-                    })
+                    }
+                    source_status.append(status)
+                    streams.append({"route": None, "rows": local_jobs, "payload": local_payload, "status": status})
                     continue
                 base_status = {
                     "server_id": route.server_id,
@@ -880,28 +917,70 @@ class JobProjectionStateMixin:
                     })
                     continue
                 jobs = self._annotate_route_jobs(route, payload)
-                combined.extend(jobs)
-                source_status.append({
+                status = {
                     **base_status,
                     "job_count": len(jobs),
                     "total": int(payload.get("total") or len(jobs)),
                     "has_more": bool(payload.get("has_more")),
-                })
+                }
+                source_status.append(status)
+                streams.append({"route": route, "rows": jobs, "payload": payload, "status": status})
 
-        def sort_key(item: dict[str, object]) -> tuple[object, str, str, int]:
-            try:
-                port = int(item.get("port") or 0)
-            except (TypeError, ValueError):
-                port = 0
-            return (
-                self.job_index._updated_order(item.get("updated_at")),
-                str(item.get("server_id") or ""),
-                str(item.get("job_id") or ""),
-                port,
-            )
+        def batch_signature(batch):
+            return (len(batch),
+                    str(batch[0].get("job_id") or "") if batch else "",
+                    str(batch[-1].get("job_id") or "") if batch else "")
 
-        unique: dict[tuple[str, int, str], dict[str, object]] = {}
-        for item in combined:
+        def source_rows(stream: dict[str, object]):
+            # Each local repository already orders by update time. Keep only
+            # one bounded batch per source while traversing older pages.
+            page_number = 1
+            payload = stream["payload"]
+            rows = stream["rows"]
+            status = stream["status"]
+            route = stream["route"]
+            while True:
+                yield from rows
+                if not payload.get("has_more"):
+                    return
+                cursor = str(payload.get("next_cursor") or "") if source_scope == "server" else ""
+                if source_scope == "server" and not cursor:
+                    status.update(status="error", error="source did not provide a continuation cursor")
+                    return
+                page_number += 1
+                try:
+                    if route is None:
+                        next_payload, next_rows = query_local(page_number, cursor)
+                    else:
+                        _route, next_payload = query_peer(route, page_number, cursor)
+                        next_rows = self._annotate_route_jobs(route, next_payload)
+                except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                    status.update(status="error", error=str(exc))
+                    return
+                # An old peer that ignores cursor must not silently repeat the
+                # first page or loop indefinitely.
+                if (not next_rows or batch_signature(next_rows) == batch_signature(rows) or
+                        (source_scope == "server" and
+                         str(next_payload.get("next_cursor") or "") == cursor and
+                         next_payload.get("has_more"))):
+                    status.update(status="error", error="source did not advance pagination")
+                    return
+                payload, rows = next_payload, next_rows
+                status["job_count"] = int(status["job_count"]) + len(rows)
+                status["has_more"] = bool(payload.get("has_more"))
+
+        streams.sort(key=lambda stream: str(stream["status"].get("server_id") or ""))
+        merged = heapq.merge(
+            *(source_rows(stream) for stream in streams),
+            key=lambda item: self.job_index._updated_order(item.get("updated_at")),
+            reverse=True,
+        )
+        start = (requested_page - 1) * bounded
+        seen: set[tuple[str, int, str]] = set()
+        page_jobs: list[dict[str, object]] = []
+        unique_count = 0
+        has_more = False
+        for item in merged:
             job_id = str(item.get("job_id") or "").strip()
             if not job_id:
                 continue
@@ -910,23 +989,22 @@ class JobProjectionStateMixin:
             except (TypeError, ValueError):
                 port = 0
             key = (str(item.get("server_id") or self.server_id), port, job_id)
-            current = unique.get(key)
-            if current is None or sort_key(item) > sort_key(current):
-                unique[key] = item
-        ordered = sorted(unique.values(), key=sort_key, reverse=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            if unique_count >= start + bounded:
+                has_more = True
+                break
+            if unique_count >= start:
+                page_jobs.append(item)
+            unique_count += 1
+
         total = sum(
             int(item.get("total") or 0)
             for item in source_status
-            if str(item.get("status") or "") in {"ok", "stale"}
+            if str(item.get("status") or "") != "offline"
         )
-        total = max(total, len(ordered))
-        start = (requested_page - 1) * bounded
-        page_jobs = ordered[start:start + bounded]
-        has_more = start + bounded < total or any(
-            bool(item.get("has_more"))
-            for item in source_status
-            if str(item.get("status") or "") in {"ok", "stale"}
-        )
+        total = max(total, unique_count + int(has_more))
         return self._cross_server_cache_put(cache_key, {
             "success": True,
             "scope": "cross-server",

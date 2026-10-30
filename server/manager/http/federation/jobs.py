@@ -30,6 +30,9 @@ class FederationJobRoutesMixin:
             scope = str(payload.get("scope") or "").strip().lower()
             page = int(payload.get("page") or 1)
             limit = int(payload.get("limit") or 100)
+            cursor = str(payload.get("cursor") or "").strip()
+            if len(cursor) > 4096:
+                raise ValueError("cursor is invalid")
             if not requester:
                 raise ValueError("requester_server_id is required")
             if requester == self.state.server_id:
@@ -95,6 +98,7 @@ class FederationJobRoutesMixin:
                     "success": False,
                     "error": "mine scope may only query the authenticated principal",
                 }, 403)
+                return
             if page < 1 or not 1 <= limit <= 100:
                 raise ValueError("page or limit is invalid")
             object_filter = {
@@ -108,8 +112,9 @@ class FederationJobRoutesMixin:
             if scope == "server":
                 value = self.state.aggregate_server_jobs(
                     principal=principal,
-                    cursor="",
+                    cursor=cursor,
                     limit=limit,
+                    delegated_user_token=delegated_user_token,
                     **object_filter,
                     _allow_federation=False,
                 )
@@ -119,6 +124,7 @@ class FederationJobRoutesMixin:
                     "scope": scope,
                     "page": page,
                     "limit": limit,
+                    "delegated_user_token": delegated_user_token,
                     "_allow_federation": False,
                     **object_filter,
                 }

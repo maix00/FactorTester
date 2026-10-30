@@ -123,6 +123,7 @@ class FederatedGateway:
         scope: str,
         page: int = 1,
         limit: int = 100,
+        cursor: str = "",
         username: str = "",
         object_kind: str = "",
         object_ref: str = "",
@@ -152,6 +153,8 @@ class FederatedGateway:
         }
         if username:
             payload["username"] = str(username)
+        if cursor:
+            payload["cursor"] = str(cursor)
         for key, value in (
             ("object_kind", object_kind),
             ("object_ref", object_ref),

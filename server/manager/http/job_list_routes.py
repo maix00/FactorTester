@@ -207,6 +207,7 @@ class JobListRoutesMixin:
                     if session is not None and str(session.get("role") or "") == "super_admin":
                         payload = self.state.aggregate_server_jobs(
                             principal=principal, cursor=cursor, limit=limit,
+                            delegated_user_token=self._bearer_token(),
                             **object_filter,
                         )
                         projection = getattr(self.state, "local_run_projection", None)

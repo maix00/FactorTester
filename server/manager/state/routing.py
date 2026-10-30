@@ -422,8 +422,9 @@ class RoutingStateMixin:
         ]
 
     def service_json(
-        self, port: int, path: str, principal: str,
+        self, port: int, path: str, principal: str, *, delegated_user_token: str = "",
     ) -> dict[str, object]:
-        return self.gateway.json(
-            port=port, path=path, principal=principal,
-        )
+        kwargs = {"port": port, "path": path, "principal": principal}
+        if delegated_user_token:
+            kwargs["delegated_user_token"] = delegated_user_token
+        return self.gateway.json(**kwargs)
