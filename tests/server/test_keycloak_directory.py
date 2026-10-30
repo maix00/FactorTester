@@ -6,8 +6,10 @@ from server.identity.keycloak import Identity
 from server.identity.keycloak_directory import (
     clear_directory_cache,
     managed_users_for_claims,
+    managed_users_for_verified_request,
     users_in_admin_scope,
 )
+from server.identity.request_context import bind_verified_identity, identity_request
 from server.identity.realm_groups import (
     GROUP_ROOT,
     component,
@@ -112,3 +114,29 @@ def test_unprivileged_or_invalid_pagination_fails_closed():
             groups=(organization_admin_group_path("gtht"),), roles=(),
             adapter=DirectoryAdapter(), limit=201,
         )
+
+
+def test_native_manager_directory_uses_only_the_verified_request_claims(monkeypatch):
+    clear_directory_cache()
+    adapter = DirectoryAdapter()
+    monkeypatch.setattr("server.identity.keycloak_directory.manager_keycloak_admin_adapter", lambda: adapter)
+    session = {"username": "admin", "keycloak_subject": "subject-admin",
+               "keycloak_issuer": "https://identity.example.test/realms/trade",
+               "keycloak_groups": (organization_admin_group_path("gtht"),), "keycloak_roles": ()}
+    assert managed_users_for_verified_request("admin") == []
+    with identity_request():
+        bind_verified_identity("verified-token", session)
+        assert [row["username"] for row in managed_users_for_verified_request("admin")] == ["member-a"]
+        assert managed_users_for_verified_request("another-user") == []
+    assert adapter.calls == [f"{GROUP_ROOT}/organizations/{component('org', 'gtht')}"]
+
+
+def test_native_unprivileged_identity_gets_empty_directory_without_a_query(monkeypatch):
+    adapter = DirectoryAdapter()
+    monkeypatch.setattr("server.identity.keycloak_directory.manager_keycloak_admin_adapter", lambda: adapter)
+    with identity_request():
+        bind_verified_identity("verified-token", {"username": "member", "keycloak_subject": "s",
+            "keycloak_issuer": "https://identity.example.test/realms/trade",
+            "keycloak_groups": (), "keycloak_roles": ()})
+        assert managed_users_for_verified_request("member") == []
+    assert adapter.calls == []

@@ -113,19 +113,28 @@ def managed_users_for_verified_request(
     try:
         from flask import g, has_request_context
 
-        if not has_request_context():
-            return []
-        identity = getattr(g, "keycloak_user_session", None)
+        flask_request = has_request_context()
+        if flask_request:
+            identity = getattr(g, "keycloak_user_session", None)
+            request_cache = getattr(g, "tr_managed_user_directory", None)
+        else:
+            from server.identity.request_context import current_verified_identity
+
+            verified = current_verified_identity()
+            identity = verified[1] if verified else None
+            request_cache = None
         if (not isinstance(identity, dict)
                 or str(identity.get("username") or "").strip() != selected_principal):
             return []
-        request_cache = getattr(g, "tr_managed_user_directory", None)
         if isinstance(request_cache, dict) and selected_principal in request_cache:
             cached_users = request_cache[selected_principal]
             return [row for row in cached_users
                     if include_self or str(row.get("username") or "") != selected_principal]
         groups = identity.get("keycloak_groups", ())
         roles = identity.get("keycloak_roles", ())
+        if ("admin_console:manage" not in (roles or ())
+                and not managed_member_group_paths(groups)):
+            return []
         first = users_in_admin_scope(
             groups=groups, roles=roles, limit=min(200, selected_max_users), offset=0,
         )
@@ -144,10 +153,11 @@ def managed_users_for_verified_request(
             offset += len(next_users)
         if offset < total:
             raise RuntimeError("Keycloak managed directory exceeds its configured limit")
-        if not isinstance(request_cache, dict):
-            request_cache = {}
-            g.tr_managed_user_directory = request_cache
-        request_cache[selected_principal] = tuple(users)
+        if flask_request:
+            if not isinstance(request_cache, dict):
+                request_cache = {}
+                g.tr_managed_user_directory = request_cache
+            request_cache[selected_principal] = tuple(users)
         return [row for row in users
                 if include_self or str(row.get("username") or "") != selected_principal]
     except ImportError:
