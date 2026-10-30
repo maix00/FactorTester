@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -406,30 +408,53 @@ def create_evidence(
     return get_composed_evidence(owner=owner, evidence_ref=evidence_ref)
 
 
+class EvidenceApplicabilityConflict(RuntimeError):
+    """The Evidence scope changed since this editor last read it."""
+
+
+class EvidenceApplicabilityRevisionRequired(ValueError):
+    """The editor did not provide a valid scope revision."""
+
+
+def _applicability_revision(raw_json: str) -> str:
+    return "sha256:" + hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
+
+
 def update_evidence_applicability(
-    *, owner: str, evidence_ref: str, applicability: Any,
+    *, owner: str, evidence_ref: str, applicability: Any, expected_applicability_revision: str,
 ) -> dict[str, Any]:
     """Update interpretive scope without changing immutable Evidence identity."""
     target = required_text(evidence_ref, "evidence_ref", maximum=512)
+    expected = str(expected_applicability_revision or "").strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
+        raise EvidenceApplicabilityRevisionRequired("expected_applicability_revision is required and must be sha256")
     scope = validate_applicability(applicability)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "SELECT identity_refs_json FROM research_fragment_evidence_objects "
+            "SELECT identity_refs_json, applicability_json FROM research_fragment_evidence_objects "
             "WHERE evidence_ref=? AND owner=?",
             (target, owner),
         ).fetchone()
         if row is None:
             raise KeyError("fragment-bound research evidence not found")
+        original = str(row["applicability_json"])
+        if _applicability_revision(original) != expected:
+            raise EvidenceApplicabilityConflict("Evidence applicability changed; refresh before saving")
         check_identity_scope(
             {"identity_refs": json.loads(row["identity_refs_json"])}, scope,
         )
-        conn.execute(
+        updated = canonical(scope)
+        changed = conn.execute(
             "UPDATE research_fragment_evidence_objects SET applicability_json=? "
-            "WHERE evidence_ref=? AND owner=?",
-            (canonical(scope), target, owner),
+            "WHERE evidence_ref=? AND owner=? AND applicability_json=?",
+            (updated, target, owner, original),
         )
-    return {"evidence_ref": target, "applicability": scope}
+        if changed.rowcount != 1:
+            raise EvidenceApplicabilityConflict("Evidence applicability changed; refresh before saving")
+    return {"evidence_ref": target, "applicability": scope,
+            "applicability_revision": _applicability_revision(updated)}
 
 
 def get_composed_evidence(
@@ -478,6 +503,7 @@ def get_composed_evidence(
         "description_zh": row["description_zh"],
         "claim_summary": row["claim_summary"],
         "applicability": json.loads(row["applicability_json"]),
+        "applicability_revision": _applicability_revision(str(row["applicability_json"])),
         "identity_refs": json.loads(row["identity_refs_json"]),
         "limitations": json.loads(row["limitations_json"]),
         "conflicts": json.loads(row["conflicts_json"]),

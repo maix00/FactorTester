@@ -15,6 +15,8 @@ from server.services import (
     research_workspaces,
 )
 from server.services.research_evidence_catalog import (
+    EvidenceApplicabilityConflict,
+    EvidenceApplicabilityRevisionRequired,
     attach_tag,
     capture_job_source,
     create_evidence,
@@ -464,6 +466,7 @@ class ResearchObjectRoutesMixin:
                     owner=owner,
                     evidence_ref=unquote(applicability.group(1)),
                     applicability=data.get("applicability") or {},
+                    expected_applicability_revision=data.get("expected_applicability_revision"),
                 )
             else:
                 value = update_tag(
@@ -472,6 +475,14 @@ class ResearchObjectRoutesMixin:
                     title_zh=data.get("title_zh"),
                     description_zh=data.get("description_zh"),
                 )
+        except EvidenceApplicabilityConflict:
+            json_response(self, {"success": False, "code": "evidence_applicability_conflict",
+                                 "error": "Evidence applicability changed; refresh before saving"}, 409)
+            return True
+        except EvidenceApplicabilityRevisionRequired as exc:
+            json_response(self, {"success": False, "code": "evidence_applicability_revision_required",
+                                 "error": str(exc)}, 400)
+            return True
         except (KeyError, TypeError, ValueError) as exc:
             self._research_object_error(exc)
             return True
