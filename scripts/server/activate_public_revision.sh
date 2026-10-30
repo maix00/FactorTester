@@ -165,8 +165,18 @@ else
   echo "FACTORTESTER_PUBLIC_CACHE_FROM=factortester-public:$old_revision" \
     | sudo tee -a "$next_env" >/dev/null
 fi
-bash "$release_path/scripts/server/check_public_build_capacity.sh"
+cache_plan="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  TR_PUBLIC_PYTHON_SOURCE_ROOT="$release_root/$old_revision" \
+  TR_PUBLIC_PYTHON_SOURCE_IMAGE="$current_image" \
+  TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
+  bash "$public_script" python-cache-plan)"
+snapshot_mib="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["snapshot_mib"])' <<< "$cache_plan")"
+sudo bash "$release_path/scripts/server/check_public_build_capacity.sh" \
+  --cache-root "$container_root/python-deps-cache" --snapshot-mib "$snapshot_mib"
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  TR_PUBLIC_PYTHON_SOURCE_ROOT="$release_root/$old_revision" \
+  TR_PUBLIC_PYTHON_SOURCE_IMAGE="$current_image" \
+  TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
   bash "$public_script" build factortester-public
 postgres_before="$(
   sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
@@ -300,6 +310,11 @@ postgres_after="$(sudo docker inspect --format '{{.Id}}' "$postgres_after")"
 
 switched=0
 trap - ERR INT TERM
+if ! sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+  TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
+  bash "$public_script" python-cache-promote; then
+  echo "Warning: Python dependency cache promotion failed; the verified application remains online" >&2
+fi
 if ! sudo rm -f "$next_env"; then
   echo "Warning: candidate release configuration was retained" >&2
 fi

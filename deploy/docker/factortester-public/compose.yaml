@@ -10,6 +10,7 @@ services:
       dockerfile: deploy/docker/factortester-public/FactorTester.Dockerfile
       additional_contexts:
         native-wheels: ${TR_NATIVE_WHEEL_CONTEXT:-./runtime-wheels}
+        python-deps: ${TR_PUBLIC_PYTHON_CACHE_CONTEXT:-./wheels}
       # The bounded BuildKit container owns its reusable local cache; host
       # image tags are not registry cache references visible to this driver.
       args:
@@ -19,6 +20,8 @@ services:
         FACTORTESTER_UID: ${FACTORTESTER_UID:-1000}
         FACTORTESTER_GID: ${FACTORTESTER_GID:-1000}
         NAUTILUS_VENDOR_REVISION: ${FACTORTESTER_NAUTILUS_VENDOR_REVISION:-unknown}
+        TR_PUBLIC_PYTHON_DEPS_ID: ${TR_PUBLIC_PYTHON_DEPS_ID:-unmanaged}
+        TR_PUBLIC_PYTHON_REUSE_REQUIRED: ${TR_PUBLIC_PYTHON_REUSE_REQUIRED:-0}
         PIP_INDEX_URL: ${FACTORTESTER_PIP_INDEX_URL:-https://pypi.org/simple}
         CODEX_VERSION: ${FACTORTESTER_CODEX_VERSION:-0.147.0}
         CODEX_NPM_REGISTRY: ${FACTORTESTER_CODEX_NPM_REGISTRY:-https://registry.npmjs.org}

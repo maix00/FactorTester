@@ -40,25 +40,38 @@ RUN sed -i \
     && rm -rf /var/lib/apt/lists/*
 
 COPY deploy/requirements-public-linux.txt /tmp/requirements-public-linux.txt
-RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
-    && python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
-        -r /tmp/requirements-public-linux.txt \
+# BEGIN TRADERESEARCH PYTHON DEPENDENCIES
+ARG TR_PUBLIC_PYTHON_DEPS_ID=unmanaged
+ARG TR_PUBLIC_PYTHON_REUSE_REQUIRED=0
+COPY scripts/server/public_python_dependencies.py /tmp/tr-python-dependencies.py
+RUN --mount=type=bind,from=python-deps,target=/mnt/tr-python-deps,readonly \
+    --mount=type=cache,id=tr-public-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
+    if [ -f /mnt/tr-python-deps/manifest.json ]; then \
+        python /tmp/tr-python-dependencies.py install --snapshot /mnt/tr-python-deps --identity "${TR_PUBLIC_PYTHON_DEPS_ID}"; \
+    else \
+        test "${TR_PUBLIC_PYTHON_REUSE_REQUIRED}" = 0 || { echo 'unchanged Python dependency snapshot is missing' >&2; exit 1; }; \
+        python -m pip install --index-url "${PIP_INDEX_URL}" --upgrade pip; \
+        python -m pip install --index-url "${PIP_INDEX_URL}" -r /tmp/requirements-public-linux.txt; \
+    fi \
+    && python -m pip check \
     && python -c "import celery, plotly; print('execution dependencies ready')"
+LABEL org.traderesearch.python-deps.identity="${TR_PUBLIC_PYTHON_DEPS_ID}"
+# END TRADERESEARCH PYTHON DEPENDENCIES
 
 # Keep the dependency layers cached from the previous release; explicitly
 # remove the inherited setuid bit before any Profile Agent is started.
 RUN chmod 0755 /usr/bin/bwrap
 
-FROM factortester-public-deps AS factortester-cli-builder
+FROM factortester-public-deps AS traderesearch-cli-builder
 
 COPY tools/cli /runtime/tools/cli
-COPY deploy/docker/factortester-public/factortester-cli /build/factortester-cli
+COPY deploy/docker/factortester-public/traderesearch-cli /build/traderesearch-cli
 RUN python -m compileall -q -b /runtime \
     && find /runtime -type f -name '*.py' -delete \
     && find /runtime -type d -name __pycache__ -prune -exec rm -rf {} + \
-    && PYTHONPATH=/runtime /build/factortester-cli --help \
-        >/tmp/factortester-help \
-    && grep -F 'TradeResearch CLI' /tmp/factortester-help >/dev/null
+    && PYTHONPATH=/runtime /build/traderesearch-cli --help \
+        >/tmp/traderesearch-help \
+    && grep -F 'TradeResearch CLI' /tmp/traderesearch-help >/dev/null
 
 FROM factortester-public-deps AS factortester-public
 # The npm package is a small launcher around the platform package. Install
@@ -179,20 +192,21 @@ COPY deploy/docker/factortester-public/factortester-entrypoint.sh \
     /usr/local/bin/factortester-public-entrypoint
 COPY deploy/docker/factortester-public/start-fixed-service.py \
     /usr/local/bin/start-fixed-service
-COPY --from=factortester-cli-builder /runtime \
-    /usr/local/lib/factortester-cli
-COPY deploy/docker/factortester-public/factortester-cli \
-    /usr/local/bin/factortester
+COPY --from=traderesearch-cli-builder /runtime \
+    /usr/local/lib/traderesearch-cli
+COPY deploy/docker/factortester-public/traderesearch-cli \
+    /usr/local/bin/traderesearch
 RUN set -eu; \
-    rm -f /usr/local/bin/factortester-manager; \
-    test -x /usr/local/bin/factortester; \
+    rm -f /usr/local/bin/factortester /usr/local/bin/factortester-manager; \
+    test -x /usr/local/bin/traderesearch; \
+    test ! -e /usr/local/bin/factortester; \
     test ! -e /usr/local/bin/factortester-manager; \
-    factortester --help >/tmp/factortester-help; \
-    grep -F 'TradeResearch CLI' /tmp/factortester-help >/dev/null; \
-    rm -f /tmp/factortester-help; \
+    traderesearch --help >/tmp/traderesearch-help; \
+    grep -F 'TradeResearch CLI' /tmp/traderesearch-help >/dev/null; \
+    rm -f /tmp/traderesearch-help; \
     mkdir /opt/factortester/app/.git; \
     printf '%s\n' "$FACTORTESTER_REVISION" > /opt/factortester/app/.deployment-revision; \
-    chmod 0555 /usr/local/bin/factortester \
+    chmod 0555 /usr/local/bin/traderesearch \
         /usr/local/bin/factortester-public-entrypoint \
         /usr/local/bin/start-fixed-service; \
     find /opt/factortester/app -type d -exec chmod 0555 {} +; \

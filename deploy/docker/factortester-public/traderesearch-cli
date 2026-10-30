@@ -1,7 +1,7 @@
 #!/bin/sh
 exec /usr/local/bin/python -c '
 import sys
-sys.path.insert(0, "/usr/local/lib/factortester-cli")
+sys.path.insert(0, "/usr/local/lib/traderesearch-cli")
 from tools.cli.app import cli
 cli()
 ' "$@"
