@@ -8,16 +8,35 @@ from server.modules.single_factor_test import sft_bp
 
 @pytest.fixture(autouse=True)
 def verified_manager_keycloak_session(monkeypatch):
+    from tests.server.test_server_admission import Keycloak, ISSUER, ORG, SERVER
+    from server.identity import server_admission as admission
+    from server.identity.realm_groups import organization_group_path
+    provider = Keycloak()
+    provider.user["attributes"]["tr_identity_id"] = ["stable-alice"]
+    monkeypatch.setattr(admission, "oidc_settings", lambda: {
+        "issuer": ISSUER, "roles_client_id": "tr-manager", "client_id": "tr-manager"})
+    monkeypatch.setattr("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", lambda: provider)
+    for name in ("PUBLIC_SERVER", "SERVER_ID", "MANAGED_ORGANIZATIONS"):
+        monkeypatch.delenv("TRADERESEARCH_" + name, raising=False)
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "0")
+    monkeypatch.setenv("FACTORTESTER_SERVER_ID", SERVER)
+    monkeypatch.setenv("FACTORTESTER_MANAGED_ORGANIZATIONS", ORG)
+    admission.clear_server_admission_cache()
     monkeypatch.setenv("TRADERESEARCH_AUTH_MODE", "keycloak")
     monkeypatch.setattr(
         "server.identity.user_session.keycloak_session",
-        lambda token: ({"username": "alice", "role": "user", "keycloak_roles": ()}
+        lambda token: ({"username": "alice", "role": "user", "keycloak_roles": (),
+                        "keycloak_subject": "subject", "keycloak_issuer": ISSUER,
+                        "tr_identity_id": "stable-alice", "organization_id": ORG,
+                        "keycloak_groups": [organization_group_path(ORG) + "/levels/a"]}
                        if token == "keycloak-access-token" else None),
     )
     monkeypatch.setattr(
         "server.identity.keycloak_authorization.keycloak_authorized",
         lambda _token, **_kwargs: True,
     )
+    yield
+    admission.clear_server_admission_cache()
 
 
 def _allow_keycloak_resource(monkeypatch):
@@ -29,6 +48,36 @@ def _allow_keycloak_resource(monkeypatch):
 
 def _manager_token(client):
     client.set_cookie("ft-manager-session", "keycloak-access-token")
+
+
+def test_research_report_write_capability_and_mutation_use_current_keycloak_scope(monkeypatch):
+    state, seen = {"read": True, "write": True, "offline": False}, []
+    class Store:
+        def __init__(self, *_args, **_kwargs): pass
+    def decision(token, *, resource_id, scope, use_cache):
+        assert token == "keycloak-access-token" and resource_id == "report-resource"
+        assert use_cache is False
+        seen.append(scope)
+        if state["offline"] and scope == "write":
+            raise ConnectionError("Keycloak offline")
+        return state[scope]
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    monkeypatch.setattr("server.jobs.storage.couchdb_research_reports.get_research_report",
+                        lambda _store, _publication: {"keycloak_resource_id": "report-resource"})
+    monkeypatch.setattr("server.identity.keycloak_authorization.keycloak_authorized", decision)
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client(); _manager_token(client)
+    assert client.get("/api/research-reports/p1").get_json()["access"]["can_write"] is True
+    state["write"] = False
+    assert client.get("/api/research-reports/p1").get_json()["access"]["can_write"] is False
+    denied = client.post("/api/research-reports/p1/operations", json={"base_rev": "1-a", "op": "noop"})
+    assert denied.status_code == 403 and denied.get_json()["code"] == "authorization_denied"
+    state["offline"] = True
+    assert client.get("/api/research-reports/p1").get_json()["access"]["can_write"] is None
+    unavailable = client.post("/api/research-reports/p1/operations", json={"base_rev": "1-a", "op": "noop"})
+    assert unavailable.status_code == 503 and unavailable.get_json()["code"] == "authorization_unavailable"
+    assert "read" in seen and "write" in seen
 
 
 def test_report_owner_without_keycloak_resource_mapping_is_denied(monkeypatch):

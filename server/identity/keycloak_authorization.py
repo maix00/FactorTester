@@ -41,7 +41,7 @@ def _backchannel(settings: dict[str, str]) -> str:
 
 
 def keycloak_authorized(
-    token: str, *, resource_id: str, scope: str,
+    token: str, *, resource_id: str, scope: str, use_cache: bool = True,
 ) -> bool:
     """Evaluate one resource scope using the caller's own Keycloak token.
 
@@ -59,7 +59,7 @@ def keycloak_authorized(
     now = time.monotonic()
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
-        if cached is not None and cached[0] > now:
+        if use_cache and cached is not None and cached[0] > now:
             _CACHE.move_to_end(key)
             return cached[1]
         if cached is not None:
@@ -75,10 +75,11 @@ def keycloak_authorized(
         )
     except Exception as exc:
         raise AuthorizationUnavailable("Keycloak authorization is unavailable") from exc
-    with _CACHE_LOCK:
-        while len(_CACHE) >= _CACHE_LIMIT:
-            _CACHE.popitem(last=False)
-        _CACHE[key] = (time.monotonic() + _CACHE_TTL_SECONDS, bool(allowed))
+    if use_cache:
+        with _CACHE_LOCK:
+            while len(_CACHE) >= _CACHE_LIMIT:
+                _CACHE.popitem(last=False)
+            _CACHE[key] = (time.monotonic() + _CACHE_TTL_SECONDS, bool(allowed))
     return bool(allowed)
 
 

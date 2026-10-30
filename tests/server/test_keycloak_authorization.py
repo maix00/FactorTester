@@ -64,6 +64,26 @@ def test_uncached_mutation_check_observes_revocation_and_invalidates_local_entry
     authz.clear_authorization_cache()
 
 
+def test_single_resource_uncached_check_observes_revocation(monkeypatch):
+    authz.clear_authorization_cache()
+    state, calls = {"allow": True}, []
+    class Client:
+        def __init__(self, *_args, **_kwargs): pass
+        def authorize(self, _token, **_kwargs):
+            calls.append(1)
+            return state["allow"]
+    monkeypatch.setattr(authz, "oidc_settings", lambda: {
+        "authz_client_id": "tr-api", "authz_client_secret": "secret",
+        "base_url": "https://id.example", "realm": "research"})
+    monkeypatch.setattr(authz, "ServiceOIDCClient", Client)
+    assert authz.keycloak_authorized("token", resource_id="resource", scope="write")
+    state["allow"] = False
+    assert not authz.keycloak_authorized("token", resource_id="resource", scope="write", use_cache=False)
+    assert not authz.keycloak_authorized("token", resource_id="resource", scope="write")
+    assert len(calls) == 3
+    authz.clear_authorization_cache()
+
+
 def test_resource_creation_reuses_registered_resource(monkeypatch):
     policy = {}
     from server.identity import federation_identity_sync
