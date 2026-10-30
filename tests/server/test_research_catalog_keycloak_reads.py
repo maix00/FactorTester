@@ -89,3 +89,69 @@ def test_strict_catalog_does_not_grant_evidence_by_legacy_owner_name(tmp_path):
 def test_strict_catalog_cannot_disable_profile_membership_checks(tmp_path):
     with pytest.raises(ValueError, match="Profile membership"):
         ResearchCatalog(tmp_path / "invalid.sqlite", research_authorizer=object())
+
+
+def test_explicit_grants_use_verified_keycloak_subject_and_never_write_legacy_acl(tmp_path):
+    import sqlite3
+    catalog, public, private, _permissions, _calls = _fixture(tmp_path)
+    actions = []
+    class Manager:
+        allowed = True
+        def require_resource_share(self, **kwargs):
+            actions.append(("check", kwargs))
+            if not self.allowed:
+                raise PermissionError("denied")
+        def set_user_grant(self, **kwargs):
+            actions.append(("set", kwargs))
+            return True
+        def list_user_grants(self, **kwargs):
+            actions.append(("list", kwargs))
+            return [{"identity_id": "id-bob", "scopes": ["read"]}]
+    manager = Manager()
+    catalog._profile_grant_manager = manager
+    catalog._profile_identity_resolver = lambda username: {"identity_id": "id-bob", "subject": "subject-bob"}
+    result = catalog.set_explicit_grant(public, actor="alice", principal_ref="bob", scopes=["use", "read"])
+    assert result["identity_id"] == "id-bob" and result["scopes"] == ["read", "use"]
+    assert actions[-1][1]["subject"] == "subject-bob" and actions[-1][1]["source"] == "explicit"
+    assert catalog.list_explicit_grants(public, actor="alice")[0]["identity_id"] == "id-bob"
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT authorized_users_json FROM research_catalog_researches WHERE research_id=?",
+                          (public,)).fetchone()[0] == "[]"
+    with pytest.raises(ValueError, match="require read"):
+        catalog.set_explicit_grant(public, actor="alice", principal_ref="bob", scopes=["write"])
+    with pytest.raises(ValueError, match="does not belong"):
+        catalog.set_explicit_grant(private, actor="alice", principal_ref="bob", scopes=["read"],
+                                   target_kind="report", report_id="public-report")
+    manager.allowed = False
+    catalog._profile_identity_resolver = lambda _: pytest.fail("unauthorized identity enumeration")
+    with pytest.raises(PermissionError):
+        catalog.set_explicit_grant(public, actor="alice", principal_ref="bob", scopes=["read"])
+
+
+def test_explicit_grants_route_uses_manager_session_and_reports_keycloak_outage(tmp_path, monkeypatch):
+    from server.manager.http import research_catalog_routes as routes
+    catalog, public, _private, _permissions, _calls = _fixture(tmp_path)
+    recorded, responses = [], []
+    class Manager:
+        def require_resource_share(self, **kwargs):
+            recorded.append(("check", kwargs))
+        def set_user_grant(self, **kwargs):
+            recorded.append(("set", kwargs))
+            return True
+        def list_user_grants(self, **_kwargs):
+            raise AuthorizationUnavailable("identity offline")
+    catalog._profile_grant_manager = Manager()
+    catalog._profile_identity_resolver = lambda _name: {"identity_id": "stable-bob", "subject": "subject-bob"}
+    class Handler(routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=catalog)
+        def _session(self):
+            return {"username": "alice"}
+        def _json_body(self, _maximum):
+            return {"principal_ref": "bob", "scopes": ["read"]}
+    monkeypatch.setattr(routes, "json_response", lambda _self, data, status=200: responses.append((data, status)))
+    handler = Handler()
+    path = f"/api/research/{public}/grants"
+    assert handler._post_research_catalog_routes(SimpleNamespace(path=path, query=""))
+    assert responses[-1][1] == 200 and recorded[-1][1]["actor"] == "alice"
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query=""))
+    assert responses[-1][1] == 503

@@ -230,6 +230,8 @@ def test_independent_keycloak_grants_can_be_updated_and_revoked():
         settings_provider=lambda: {}, token_provider=lambda _: "protection-token", request=request,
         user_provider=lambda subject: {"id": subject, "username": "bob", "enabled": True,
                                       "attributes": {"tr_identity_id": ["identity-b"]}},
+        user_by_identity=lambda stable: {"id": "subject-b", "username": "bob", "enabled": True,
+                                         "attributes": {"tr_identity_id": [stable]}},
         clear_cache=lambda: invalidations.append(True))
     common = {"actor": "alice", "resource_type": "research", "resource_ref": "r",
               "identity_id": "identity-b", "subject": "subject-b"}
@@ -243,6 +245,9 @@ def test_independent_keycloak_grants_can_be_updated_and_revoked():
                                       identity_id="identity-b", subject="subject-b", scopes=["read"],
                                       require_identical=True)
     assert sorted(explicit["scopes"]) == ["read", "use"]
+    assert manager.list_user_grants(actor="alice", resource_type="research", resource_ref="r") == [
+        {"identity_id": "identity-b", "subject": "subject-b", "username": "bob", "enabled": True,
+         "scopes": ["read", "use"]}]
     explicit["roles"] = ["unrelated-role"]
     with pytest.raises(AuthorizationUnavailable, match="conflicts"):
         manager.set_user_grant(**common, source="explicit", scopes=[])
@@ -250,7 +255,7 @@ def test_independent_keycloak_grants_can_be_updated_and_revoked():
     assert manager.set_user_grant(**common, source="explicit", scopes=[])
     assert len(policies) == 1
     assert sorted(next(iter(policies.values()))["scopes"]) == ["read", "use"]
-    assert len(invalidations) == 10  # six fresh caller checks plus four changes
+    assert len(invalidations) == 11  # seven fresh caller checks plus four changes
 
 
 def test_user_grants_require_verified_share_permission_and_cannot_delegate_admin():

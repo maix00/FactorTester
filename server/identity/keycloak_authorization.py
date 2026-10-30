@@ -335,6 +335,33 @@ def _protection_request(settings: dict[str, str], token: str, method: str,
         return response.status, json.loads(raw) if raw else {}, location
 
 
+def protection_token(settings: dict[str, str]) -> str:
+    client = ServiceOIDCClient(_backchannel(settings), settings["realm"], settings["authz_client_id"],
+                               client_secret=settings["authz_client_secret"], timeout=3.0)
+    token = str(client.client_credentials().get("access_token") or "")
+    if not token:
+        raise AuthorizationUnavailable("Keycloak did not issue a Protection API token")
+    return token
+
+
+def lookup_keycloak_resource(settings: dict[str, str], pat: str, resource_type: str,
+                             resource_ref: str, *, request=_protection_request) -> dict:
+    """Resolve one exact resource name/URI, rejecting ambiguity or substitution."""
+    resource_name = keycloak_resource_name(resource_type, resource_ref)
+    resource_uri = keycloak_resource_uri(resource_type, resource_ref)
+    query = urlencode({"name": resource_name, "first": 0, "max": 10, "deep": "true"})
+    _, found, _ = request(settings, pat, "GET", f"resource_set?{query}")
+    rows = found if isinstance(found, list) else found.get("resources", []) if isinstance(found, dict) else []
+    matches = [row for row in rows if isinstance(row, dict) and row.get("name") == resource_name]
+    if len(matches) != 1:
+        raise AuthorizationUnavailable("Keycloak resource is missing or ambiguous")
+    resource_id = str(matches[0].get("_id") or matches[0].get("id") or "")
+    uris = matches[0].get("uris") or ([matches[0].get("uri")] if matches[0].get("uri") else [])
+    if not resource_id or resource_uri not in uris:
+        raise AuthorizationUnavailable("Keycloak resource identity changed")
+    return matches[0]
+
+
 def ensure_keycloak_resource(
     *, resource_type: str, resource_ref: str, owner_subject: str,
     owner_scopes: tuple[str, ...] | None = None,

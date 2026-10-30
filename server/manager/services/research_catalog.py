@@ -1565,6 +1565,55 @@ class ResearchCatalog(ResearchBranchesMixin):
             ).fetchone()
         return self._report_value(updated, viewer=actor)
 
+    def _keycloak_share_target(self, research_id: str, target_kind: str, report_id: str):
+        if self._research_authorizer is None or self._profile_grant_manager is None:
+            raise RuntimeError("Keycloak Research sharing is not enabled")
+        research = self._research_row(research_id)
+        if str(research["status"]) != "active":
+            raise ValueError("archived Research cannot receive new grants")
+        if target_kind == "research":
+            if report_id:
+                raise ValueError("research sharing cannot specify a report")
+            return "research", research_id
+        if target_kind != "report":
+            raise ValueError("target_kind must be research or report")
+        report = self._report_row(report_id)
+        if str(report["research_id"]) != research_id or str(report["status"]) != "active":
+            raise ValueError("active report does not belong to this Research")
+        return "research_report", str(report["report_id"])
+
+    def list_explicit_grants(self, research_id: str, *, actor: str,
+                             target_kind: str = "research", report_id: str = "") -> list[dict[str, Any]]:
+        kind, target = self._keycloak_share_target(research_id, target_kind, report_id)
+        return self._profile_grant_manager.list_user_grants(actor=actor, resource_type=kind, resource_ref=target)
+
+    def set_explicit_grant(self, research_id: str, *, actor: str, principal_ref: str,
+                           scopes, target_kind: str = "research", report_id: str = "") -> dict[str, Any]:
+        """Create/revoke one Keycloak grant; local ACL fields are never written."""
+        kind, target = self._keycloak_share_target(research_id, target_kind, report_id)
+        if not callable(self._profile_identity_resolver):
+            raise RuntimeError("Keycloak Research identity resolution is not configured")
+        if not isinstance(scopes, list) or any(not isinstance(scope, str) for scope in scopes):
+            raise ValueError("grant scopes must be an array")
+        normalized = sorted(set(scopes))
+        if any(scope not in {"read", "use", "write"} for scope in normalized):
+            raise ValueError("invalid Research grant scope")
+        if any(scope in normalized for scope in ("use", "write")) and "read" not in normalized:
+            raise ValueError("use and write grants also require read")
+        manager = self._profile_grant_manager
+        # Do not allow unauthorized callers to enumerate identities.
+        manager.require_resource_share(actor=actor, resource_type=kind, resource_ref=target)
+        principal = _principal(principal_ref)
+        identity = self._profile_identity_resolver(principal)
+        stable = str(identity.get("identity_id") or "").strip() if isinstance(identity, dict) else ""
+        subject = str(identity.get("subject") or "").strip() if isinstance(identity, dict) else ""
+        if not stable or not subject:
+            raise LookupError("Research grant identity is unavailable")
+        changed = manager.set_user_grant(actor=actor, resource_type=kind, resource_ref=target,
+            source="explicit", identity_id=stable, subject=subject, scopes=normalized)
+        return {"target_kind": target_kind, "research_id": research_id, "report_id": report_id,
+                "identity_id": stable, "principal_ref": principal, "scopes": normalized, "changed": bool(changed)}
+
     def create_share_link(
         self,
         *,

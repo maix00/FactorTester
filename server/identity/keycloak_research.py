@@ -16,7 +16,6 @@ from urllib.parse import quote, urlencode
 
 from server.identity.keycloak_authorization import (
     AuthorizationUnavailable,
-    _backchannel,
     _protection_request,
     clear_authorization_cache,
     delete_keycloak_resource,
@@ -26,6 +25,8 @@ from server.identity.keycloak_authorization import (
     keycloak_resource_name,
     keycloak_resource_permission,
     keycloak_resource_uri,
+    lookup_keycloak_resource,
+    protection_token as _protection_token,
 )
 
 
@@ -255,22 +256,23 @@ _USER_GRANT_SCOPES = frozenset({"read", "use", "write"})
 _RESOURCE_KINDS = frozenset({"research", "research_report", "research_profile"})
 
 
-def _protection_token(settings: dict[str, str]) -> str:
-    from server.identity.keycloak import ServiceOIDCClient
-    client = ServiceOIDCClient(_backchannel(settings), settings["realm"], settings["authz_client_id"],
-                               client_secret=settings["authz_client_secret"], timeout=3.0)
-    token = str(client.client_credentials().get("access_token") or "")
-    if not token:
-        raise AuthorizationUnavailable("Keycloak did not issue a Protection API token")
-    return token
-
-
 def _keycloak_user(subject: str) -> dict[str, Any]:
     from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
     result = manager_keycloak_admin_adapter()._get(f"users/{quote(subject, safe='')}")
     if (not isinstance(result, dict) or result.get("id") != subject
             or type(result.get("enabled")) is not bool or not result.get("username")):
         raise LookupError("Keycloak grant subject is unavailable")
+    return result
+
+
+def _keycloak_user_by_identity(identity_id: str) -> dict[str, Any]:
+    from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+    result = manager_keycloak_admin_adapter().user_by_identity_id(identity_id)
+    attrs = result.get("attributes") if isinstance(result, dict) else None
+    if (not isinstance(result, dict) or not result.get("id") or not result.get("username")
+            or type(result.get("enabled")) is not bool or not isinstance(attrs, dict)
+            or attrs.get("tr_identity_id") != [identity_id]):
+        raise LookupError("Research grant identity is unavailable or ambiguous")
     return result
 
 
@@ -331,6 +333,7 @@ class KeycloakResearchGrantManager:
                  token_provider: Callable = _protection_token,
                  request: Callable = _protection_request,
                  user_provider: Callable = _keycloak_user,
+                 user_by_identity: Callable = _keycloak_user_by_identity,
                  ensure_resource: Callable = ensure_keycloak_resource,
                  delete_resource: Callable = delete_keycloak_resource,
                  clear_cache: Callable = clear_authorization_cache) -> None:
@@ -343,6 +346,7 @@ class KeycloakResearchGrantManager:
         self.token_provider = token_provider
         self.request = request
         self.user_provider = user_provider
+        self.user_by_identity = user_by_identity
         self.ensure_resource = ensure_resource
         self.delete_resource = delete_resource
         self.clear_cache = clear_cache
@@ -356,19 +360,7 @@ class KeycloakResearchGrantManager:
 
     def _resource(self, settings: dict[str, str], pat: str, resource_type: str,
                   resource_ref: str) -> dict[str, Any]:
-        resource_name = keycloak_resource_name(resource_type, resource_ref)
-        resource_uri = keycloak_resource_uri(resource_type, resource_ref)
-        query = urlencode({"name": resource_name, "first": 0, "max": 10, "deep": "true"})
-        _, found, _ = self.request(settings, pat, "GET", f"resource_set?{query}")
-        rows = found if isinstance(found, list) else found.get("resources", []) if isinstance(found, dict) else []
-        matches = [row for row in rows if isinstance(row, dict) and row.get("name") == resource_name]
-        if len(matches) != 1:
-            raise AuthorizationUnavailable("Research Keycloak resource is missing or ambiguous")
-        resource_id = str(matches[0].get("_id") or matches[0].get("id") or "")
-        uris = matches[0].get("uris") or ([matches[0].get("uri")] if matches[0].get("uri") else [])
-        if not resource_id or resource_uri not in uris:
-            raise AuthorizationUnavailable("Research Keycloak resource identity changed")
-        return matches[0]
+        return lookup_keycloak_resource(settings, pat, resource_type, resource_ref, request=self.request)
 
     def ensure_profile_resource(self, *, actor: str, research_id: str,
                                 identity_id: str, profile_ref: str) -> str:
@@ -419,6 +411,62 @@ class KeycloakResearchGrantManager:
         if caller is None or not self.may_share(caller.token, resource_type="research",
                                                  resource_ref=research_id, scope="share"):
             raise PermissionError("Keycloak did not authorize Research sharing")
+
+    def require_resource_share(self, *, actor: str, resource_type: str, resource_ref: str) -> None:
+        if resource_type not in {"research", "research_report"}:
+            raise ValueError("unsupported Research sharing target")
+        caller = self.identity_provider(actor)
+        self.clear_cache()
+        if caller is None or not self.may_share(caller.token, resource_type=resource_type,
+                                                 resource_ref=resource_ref, scope="share"):
+            raise PermissionError("Keycloak did not authorize sharing this resource")
+
+    def list_user_grants(self, *, actor: str, resource_type: str, resource_ref: str) -> list[dict[str, Any]]:
+        """List explicit user grants from Keycloak, not the old ACL column."""
+        self.require_resource_share(actor=actor, resource_type=resource_type, resource_ref=resource_ref)
+        settings = self.settings_provider()
+        pat = self.token_provider(settings)
+        resource = self._resource(settings, pat, resource_type, resource_ref)
+        resource_id = str(resource.get("_id") or resource.get("id"))
+        resource_name = keycloak_resource_name(resource_type, resource_ref)
+        result, seen = [], set()
+        for policy in self._resource_policies(settings, pat, resource_id):
+            try:
+                description = json.loads(policy.get("description") or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(description, dict) or description.get("schema") != "tr-research-grant-v1" or description.get("source") != "explicit":
+                continue
+            stable = str(description.get("identity_id") or "").strip()
+            if not stable or stable in seen:
+                raise AuthorizationUnavailable("Research explicit grants are invalid or ambiguous")
+            expected_hash = hashlib.sha256(json.dumps(["explicit", stable], ensure_ascii=False,
+                                                     separators=(",", ":")).encode()).hexdigest()
+            user = self.user_by_identity(stable)
+            scopes, users = policy.get("scopes"), policy.get("users")
+            if (policy.get("name") != f"{resource_name}:grant:{expected_hash}"
+                    or not isinstance(scopes, list) or any(scope not in _USER_GRANT_SCOPES for scope in scopes)
+                    or not isinstance(users, list) or len(users) != 1
+                    or users[0] not in {str(user.get("id") or ""), str(user.get("username") or "")}
+                    or any(policy.get(key) for key in ("roles", "groups", "clients"))
+                    or str(policy.get("logic") or "POSITIVE") != "POSITIVE"):
+                raise AuthorizationUnavailable("Research explicit grant conflicts with Keycloak")
+            seen.add(stable)
+            result.append({"identity_id": stable, "subject": str(user["id"]),
+                           "username": str(user["username"]), "enabled": bool(user["enabled"]),
+                           "scopes": sorted(set(scopes))})
+        return sorted(result, key=lambda row: (row["username"].casefold(), row["identity_id"]))
+
+    def _resource_policies(self, settings, pat, resource_id):
+        rows = []
+        for offset in range(0, 5000, 100):
+            query = urlencode({"resource": resource_id, "first": offset, "max": 100})
+            _, result, _ = self.request(settings, pat, "GET", f"uma-policy?{query}")
+            page = self._rows(result)
+            rows.extend(page)
+            if len(page) < 100:
+                return rows
+        raise AuthorizationUnavailable("Research policy list exceeds its budget")
 
     def report_registration_identity(self, *, actor: str, research_id: str) -> ResearchRequestIdentity:
         """Require a live Research sharing decision and the real request identity."""
@@ -506,16 +554,8 @@ class KeycloakResearchGrantManager:
                                  sort_keys=True, separators=(",", ":"))
 
         def matching_policies() -> list[dict[str, Any]]:
-            found_rows: list[dict[str, Any]] = []
-            for offset in range(0, 5000, 100):
-                query = urlencode({"resource": resource_id, "first": offset, "max": 100})
-                _, result, _ = self.request(settings, pat, "GET", f"uma-policy?{query}")
-                page = self._rows(result)
-                found_rows.extend(row for row in page if row.get("name") == policy_name)
-                if len(page) < 100:
-                    break
-            else:
-                raise AuthorizationUnavailable("Research policy list exceeds its budget")
+            found_rows = [row for row in self._resource_policies(settings, pat, resource_id)
+                          if row.get("name") == policy_name]
             if len(found_rows) > 1:
                 raise AuthorizationUnavailable("duplicate Research Keycloak grants")
             return found_rows

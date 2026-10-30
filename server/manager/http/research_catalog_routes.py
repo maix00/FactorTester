@@ -38,9 +38,12 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         return value
 
     def _research_catalog_error(self, exc: Exception) -> None:
-        if isinstance(exc, PermissionError):
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        if isinstance(exc, AuthorizationUnavailable):
+            status = 503
+        elif isinstance(exc, PermissionError):
             status = 403
-        elif isinstance(exc, KeyError):
+        elif isinstance(exc, LookupError):
             status = 404
         elif isinstance(exc, (TypeError, ValueError)):
             status = 400
@@ -186,9 +189,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                             research_id, actor=viewer,
                         ),
                     }
+                elif child == "grants":
+                    payload = {"grants": service.list_explicit_grants(
+                        research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
+                        report_id=str(query.get("report_id", [""])[0]))}
                 else:
                     raise KeyError("research route not found")
-        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+        except (LookupError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
             self._research_catalog_error(exc)
             return True
         json_response(self, {"success": True, **payload})
@@ -366,6 +373,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 )
                 json_response(self, {"success": True, "share_link": value}, 201)
                 return True
+            if child == "grants":
+                value = service.set_explicit_grant(research_id, actor=actor,
+                    principal_ref=data.get("principal_ref"), scopes=data.get("scopes"),
+                    target_kind=str(data.get("target_kind") or "research"),
+                    report_id=str(data.get("report_id") or ""))
+                json_response(self, {"success": True, "grant": value})
+                return True
             if child == "evidence":
                 value = service.link_evidence(
                     research_id,
@@ -381,7 +395,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {"success": True, "evidence_link": value}, 201)
                 return True
             raise KeyError("research route not found")
-        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+        except (LookupError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
             self._research_catalog_error(exc)
             return True
 
@@ -591,7 +605,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:
         match = re.fullmatch(
-            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links|collaboration-branches))?",
+            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links|grants|collaboration-branches))?",
             path,
         )
         if not match:
