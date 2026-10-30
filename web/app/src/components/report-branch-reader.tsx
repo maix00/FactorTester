@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty, Select, Spin } from "antd";
 import DOMPurify from "dompurify";
 import { useTranslation } from "react-i18next";
@@ -17,8 +17,9 @@ import { DetailsPanel } from "./details-panel.tsx";
 import "./report-branch-reader.css";
 
 type Row = Record<string, any>;
+type ImageResolver = (href:string) => {url:string | null} | null;
 
-function Markdown({ value, onOpen }: { value: string; onOpen: (reference:ReportReference,label:string) => void }): React.ReactElement {
+function Markdown({ value, onOpen, resolveImage }: { value: string; onOpen: (reference:ReportReference,label:string) => void; resolveImage:ImageResolver }): React.ReactElement {
   const [engine,setEngine] = useState<FormulaRenderer | null>(null);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -39,11 +40,11 @@ function Markdown({ value, onOpen }: { value: string; onOpen: (reference:ReportR
       const reference = reportReference(href);
       if (!reference) return null;
       const id = `${nonce}-${links.size}`; links.set(id,{reference,label}); return id;
-    }), {
+    },resolveImage), {
       FORBID_TAGS:["style","iframe","object","embed","form"], FORBID_ATTR:["style"],
     });
     return {html,formulas,links};
-  }, [value,engine]);
+  }, [value,engine,resolveImage]);
   useLayoutEffect(() => {
     if (!engine || !root.current) return;
     for (const node of root.current.querySelectorAll<HTMLElement>("[data-tr-formula]")) {
@@ -60,23 +61,23 @@ function Markdown({ value, onOpen }: { value: string; onOpen: (reference:ReportR
   }} dangerouslySetInnerHTML={{__html:prepared.html}} />;
 }
 
-function ReportCell({ value, field = "", parent = {}, onOpen }: { value:unknown; field?:string; parent?:Row; onOpen:(reference:ReportReference,label:string) => void }): React.ReactElement {
+function ReportCell({ value, field = "", parent = {}, onOpen, resolveImage }: { value:unknown; field?:string; parent?:Row; onOpen:(reference:ReportReference,label:string) => void; resolveImage:ImageResolver }): React.ReactElement {
   if (value && typeof value === "object") {
     const item = value as Row, target = String(item.target || item.href || item.url || item.reference || ""), label = String(item.label || item.title || item.text || item.filename || target);
     const reference = reportReference(target);
     if (reference) return <button type="button" className="tr-table-link tr-object-reference" onClick={() => onOpen(reference,label)}>{label}</button>;
     if (/^https?:\/\//i.test(target)) return <a href={target} target="_blank" rel="noopener noreferrer">{label}</a>;
-    if (!target && typeof item.text === "string") return <ReportCell value={item.text} onOpen={onOpen} />;
+    if (!target && typeof item.text === "string") return <ReportCell value={item.text} onOpen={onOpen} resolveImage={resolveImage} />;
     return <ResultView value={value} />;
   }
   const reference = referenceForField(field,value,parent);
   if (reference?.kind === "product") return <button type="button" className="tr-table-link tr-object-reference" onClick={() => onOpen({kind:"product",ref:reference.ref},reference.label || reference.ref)}>{reference.label || reference.ref}</button>;
   if (reference) return <ObjectReference value={reference} />;
-  if (typeof value === "string" && /\[[^\]]+\]\(|\$|\\[([]/.test(value)) return <Markdown value={value} onOpen={onOpen} />;
+  if (typeof value === "string" && /\[[^\]]+\]\(|\$|\\[([]/.test(value)) return <Markdown value={value} onOpen={onOpen} resolveImage={resolveImage} />;
   return <>{String(value ?? "—")}</>;
 }
 
-function ReportTable({ value, onOpen }: { value: unknown; onOpen:(reference:ReportReference,label:string) => void }): React.ReactElement {
+function ReportTable({ value, onOpen, resolveImage }: { value: unknown; onOpen:(reference:ReportReference,label:string) => void; resolveImage:ImageResolver }): React.ReactElement {
   const [page,setPage] = useState(1), [size,setSize] = useState(20);
   const content = value && typeof value === "object" ? value as Row : {};
   const rows: unknown[] = Array.isArray(value) ? value : Array.isArray(content.rows) ? content.rows : [];
@@ -89,7 +90,7 @@ function ReportTable({ value, onOpen }: { value: unknown; onOpen:(reference:Repo
     render:(_:unknown,item:{index:number;row:unknown}) => {
       const row = item.row as any;
       const cell = Array.isArray(row) ? row[index] : Array.isArray(row?.cells) ? row.cells[index] : row?.[typeof column === "object" ? column.key : column];
-      return <ReportCell value={cell} field={String(typeof column === "object" ? column.key || "" : column)} parent={row && !Array.isArray(row) && typeof row === "object" ? row : {}} onOpen={onOpen} />;
+      return <ReportCell value={cell} field={String(typeof column === "object" ? column.key || "" : column)} parent={row && !Array.isArray(row) && typeof row === "object" ? row : {}} onOpen={onOpen} resolveImage={resolveImage} />;
     },
   }))} />;
 }
@@ -105,6 +106,20 @@ function ReportBlock({ component, assets, bindings, resources, target }: { compo
   const assetURL = assetID ? reportResourceURL(target,["assets",assetID]) : null;
   const entries: any[] = Array.isArray(content) ? content : Array.isArray(content?.items) ? content.items : Array.isArray(content?.rows) ? content.rows : [];
   const title = String(component.title || "");
+  const resolveImage = useCallback<ImageResolver>((href) => {
+    const reference = reportReference(href);
+    if (reference?.kind === "local_resource") {
+      const resource = resources.find(item => item.resource_id === reference.ref);
+      return {url:resource ? reportResourceURL(target,["local-resources",reference.ref],{inline:"1"}) : null};
+    }
+    const source = assets.find(item => [item.asset_id,item.asset_ref,item.external_ref,item.filename].some(value => value === href));
+    if (source) {
+      const id = String(source.asset_id || source.asset_ref || "");
+      return {url:id ? reportResourceURL(target,["assets",id]) : null};
+    }
+    if (/^(?:https?:|data:|blob:)/i.test(href)) return null;
+    return {url:null};
+  },[assets,resources,target.publication_id,target.source_ref,target.source_kind,target.owner_ref,target.profile_ref,target.profile_id,target.report_workspace_id,target.branch_id]);
   const openReference = (reference:ReportReference,label:string): void => {
     if (pending.current) return;
     const binding = bindings.find(item => String(item.kind || "").replaceAll("-","_") === reference.kind && String(item.target_ref || "") === reference.ref);
@@ -140,14 +155,14 @@ function ReportBlock({ component, assets, bindings, resources, target }: { compo
   };
   return <section className={`tr-report-reading-block tr-report-reading-${kind}`}>
     {title && !["chapter"].includes(kind) ? <h3>{title}</h3> : null}
-    {body && kind !== "math" && component.display_kind !== "display_math" ? <Markdown value={body} onOpen={openReference} /> : null}
+    {body && kind !== "math" && component.display_kind !== "display_math" ? <Markdown value={body} onOpen={openReference} resolveImage={resolveImage} /> : null}
     {kind === "image" && assetURL ? <img className="tr-report-reading-image" loading="lazy" src={assetURL} alt={title || t("report.image")} />
       : kind === "image" ? <span>{t("report.imageUnavailable")}</span>
       : kind === "math" || component.display_kind === "display_math" ? <Formula latex={String(content?.latex || content?.formula || content || body)} />
-      : kind === "table" ? <ReportTable value={content} onOpen={openReference} />
-      : kind === "list" ? <ul>{entries.map((item,index) => <li key={index}><ReportCell value={item} onOpen={openReference} /></li>)}</ul>
+      : kind === "table" ? <ReportTable value={content} onOpen={openReference} resolveImage={resolveImage} />
+      : kind === "list" ? <ul>{entries.map((item,index) => <li key={index}><ReportCell value={item} onOpen={openReference} resolveImage={resolveImage} /></li>)}</ul>
       : kind === "code" || kind === "json" ? <pre>{typeof content === "string" ? content : JSON.stringify(content, null, 2)}</pre>
-      : !body && content != null && kind !== "chapter" ? typeof content === "string" ? <Markdown value={content} onOpen={openReference} /> : <ResultView value={content} /> : null}
+      : !body && content != null && kind !== "chapter" ? typeof content === "string" ? <Markdown value={content} onOpen={openReference} resolveImage={resolveImage} /> : <ResultView value={content} /> : null}
     {bindings.length ? <details className="tr-report-reading-references"><summary>{t("report.references", {count:bindings.length})}</summary>{bindings.map((binding,index) => {
       const ref = String(binding.target_ref || ""), kind = String(binding.kind || "").replaceAll("-","_"), label = String(binding.label || ref || kind);
       return <div key={String(binding.binding_id || index)}>{ref ? <button type="button" className="tr-table-link tr-object-reference" aria-label={t("objectReference.open",{name:label})} onClick={() => openReference({kind,ref},label)}>{label}</button> : <span>{label}</span>}</div>;

@@ -17,3 +17,11 @@ test("report links can become safe buttons without changing ordinary links", () 
   assert.match(html,/<button[^>]*>因子<\/button>/);
   assert.match(html,/<a href="https:\/\/example.com">external<\/a>/);
 });
+
+test("report images use the authorized resource URL and keep unavailable content inert", () => {
+  const html = reportMarkdown('![本地图片](factortester-local://a) ![缺失](factortester-local://b) ![外部](https://example.com/a.png)',null,undefined,
+    href => href.endsWith('//a') ? {url:'/api/image?owner=one&inline=1'} : href.endsWith('//b') ? {url:null} : null);
+  assert.match(html,/<img src="\/api\/image\?owner=one&amp;inline=1" alt="本地图片" loading="lazy">/);
+  assert.match(html,/<span>缺失<\/span>/);
+  assert.match(html,/<img src="https:\/\/example.com\/a.png" alt="外部">/);
+});
