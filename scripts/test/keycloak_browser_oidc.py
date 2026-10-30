@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
@@ -58,9 +58,18 @@ def main() -> int:
                                              "no_manager_session"]}))
                 return 0
             page.wait_for_url(re.compile(re.escape(manager) + r"/app(?:[?#].*)?$"), timeout=30000)
+            error = parse_qs(urlsplit(page.url).query).get("auth_error", [""])[0]
+            if error:
+                safe_error = error if error in {"provider", "invalid", "unverified", "public_login_denied", "device"} else "unknown"
+                raise SystemExit(f"Manager OIDC callback rejected ({safe_error})")
             response = context.request.get(manager + "/api/session")
             if response.status != 200:
-                raise SystemExit(f"Manager session verification failed (HTTP {response.status})")
+                has_session = any(c["name"] == "ft-manager-session" for c in context.cookies(manager))
+                browser_status = page.evaluate("fetch('/api/session').then(r => r.status)")
+                from server.identity.user_session import keycloak_session, may_login_public_server
+                token = next((c["value"] for c in context.cookies(manager) if c["name"] == "ft-manager-session"), "")
+                identity = keycloak_session(token)
+                raise SystemExit(f"Manager session verification failed (HTTP {response.status}, browser_http={browser_status}, cookie_present={has_session}, token_bytes={len(token)}, introspection_valid={identity is not None}, public_allowed={may_login_public_server(identity)})")
             session = response.json()
             if (session.get("username") != username or not session.get("keycloak_subject")
                     or not session.get("keycloak_issuer") or session.get("visitor_login")):

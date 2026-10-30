@@ -816,6 +816,11 @@ class RequestSecurityMixin:
         device_gate_required = (
             self.state.require_device_auth
             and not self._is_loopback_client()
+            # A completed Keycloak login already authenticates this user.
+            # Device approval governs automatic sign-in, not the ability to
+            # sign in interactively on a new browser. This identity comes
+            # only from state.session's live token verification.
+            and not bool(session and session.get("keycloak_subject"))
         )
         local_agent = self._is_local_agent_request()
         if (
