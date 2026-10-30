@@ -35,9 +35,13 @@ class ResearchCatalog(ResearchBranchesMixin):
         db_path: str | Path,
         *,
         account_provider: Callable[[], list[dict[str, Any]]] | None = None,
+        profile_authorizer=None,
     ) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
         self._account_provider = account_provider
+        # A runtime may supply this only after the Profile migration proof has
+        # passed. Until then legacy Profile semantics remain the authority.
+        self._profile_authorizer = profile_authorizer
         self._synchronizer = None
         self._schedule_refresh = None
         self.ensure_schema()

@@ -39,16 +39,27 @@ def _identifier(value, field):
 
 
 class ResearchBranchesMixin:
-    def _branch_member(self, conn, report, actor: str, profile_ref: str):
+    def _branch_profile_decision(self, report, actor: str, profile_ref: str):
+        """Ask Keycloak before acquiring SQLite's writer lock, when enabled."""
+        authorizer = self._profile_authorizer
+        if authorizer is None:
+            return None
+        return bool(authorizer.may_write_profile(
+            research_id=str(report['research_id']), viewer=actor, profile_ref=profile_ref,
+        ))
+
+    def _branch_member(self, conn, report, actor: str, profile_ref: str, profile_decision=None):
         current = conn.execute('SELECT status FROM research_catalog_reports WHERE report_id=?',
                                (report['report_id'],)).fetchone()
         research = conn.execute('SELECT status FROM research_catalog_researches WHERE research_id=?',
                                 (report['research_id'],)).fetchone()
-        member = conn.execute('''SELECT role FROM research_catalog_memberships
-            WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active' ''',
-            (report['research_id'], actor, profile_ref)).fetchone()
+        if self._profile_authorizer is None:
+            member = conn.execute('''SELECT role FROM research_catalog_memberships
+                WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active' ''',
+                (report['research_id'], actor, profile_ref)).fetchone()
+            profile_decision = member is not None and member['role'] in {'owner', 'editor', 'contributor'}
         if (current is None or current['status'] != 'active' or research is None or research['status'] != 'active'
-                or member is None or member['role'] not in {'owner', 'editor', 'contributor'}):
+                or profile_decision is not True):
             raise PermissionError('this exact Profile is not an active report editor')
         workspace = conn.execute('''SELECT workspace_id FROM research_catalog_workspaces
             WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active' ''',
@@ -66,8 +77,9 @@ class ResearchBranchesMixin:
         if not isinstance(title, str) or len(title) > 256:
             raise ValueError('branch title is invalid')
         report = self._report_row(report_id)
+        profile_decision = self._branch_profile_decision(report, actor, profile_ref)
         with self._write(report['research_id']) as conn:
-            workspace = self._branch_member(conn, report, actor, profile_ref)
+            workspace = self._branch_member(conn, report, actor, profile_ref, profile_decision)
             previous = conn.execute('SELECT * FROM research_catalog_branches WHERE report_id=? AND branch_id=?',
                                     (report_id, branch_id)).fetchone()
             identity = (actor, profile_ref, workspace, source_branch_id, source_generation, source_revision)
@@ -104,8 +116,9 @@ class ResearchBranchesMixin:
                 or not isinstance(storage_server_id, str) or not storage_server_id.strip()):
             raise ValueError('published branch version or byte location is invalid')
         report = self._report_row(report_id)
+        profile_decision = self._branch_profile_decision(report, actor, profile_ref)
         with self._write(report['research_id']) as conn:
-            self._branch_member(conn, report, actor, profile_ref)
+            self._branch_member(conn, report, actor, profile_ref, profile_decision)
             row = conn.execute('SELECT * FROM research_catalog_branches WHERE report_id=? AND branch_id=?',
                                (report_id, branch_id)).fetchone()
             if row is None:
