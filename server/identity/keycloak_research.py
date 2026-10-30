@@ -405,6 +405,34 @@ class KeycloakResearchGrantManager:
                                                  resource_ref=research_id, scope="share"):
             raise PermissionError("Keycloak did not authorize Research sharing")
 
+    def report_registration_identity(self, *, actor: str, research_id: str) -> ResearchRequestIdentity:
+        """Require a live Research sharing decision and the real request identity."""
+        caller = self.identity_provider(actor)
+        self.require_membership_manager(actor=actor, research_id=research_id)
+        if caller is None:
+            raise PermissionError("report registration requires a verified Keycloak identity")
+        return caller
+
+    def ensure_new_report_resource(self, *, actor: str, research_id: str, report_id: str,
+                                   creation_intent: str) -> ResearchRequestIdentity:
+        """Resume only the exact pending creation; never adopt a foreign resource."""
+        caller = self.report_registration_identity(actor=actor, research_id=research_id)
+        self.ensure_resource(resource_type="research_report", resource_ref=report_id,
+                             owner_subject=caller.subject, creation_intent=creation_intent)
+        return caller
+
+    def require_report_resource(self, *, actor: str, research_id: str, report_id: str) -> None:
+        """Existing reports must already have an authorized, matching resource."""
+        caller = self.report_registration_identity(actor=actor, research_id=research_id)
+        settings = self.settings_provider()
+        resource = self._resource(settings, self.token_provider(settings), "research_report", report_id)
+        if (resource.get("attributes") or {}).get("traderesearch_owner_subject") != [caller.subject]:
+            raise AuthorizationUnavailable("Research report Keycloak owner does not match")
+        self.clear_cache()
+        if not self.may_share(caller.token, resource_type="research_report", resource_ref=report_id,
+                              scope="manage"):
+            raise PermissionError("Keycloak did not authorize Research report management")
+
     def set_user_grant(self, *, actor: str, resource_type: str, resource_ref: str,
                        source: str, identity_id: str, subject: str,
                        scopes: Iterable[str]) -> bool:

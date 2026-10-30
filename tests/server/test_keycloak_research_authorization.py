@@ -57,6 +57,38 @@ def test_failed_new_research_registration_cleans_up_only_the_checked_owner():
                         "owner_subject": "subject-a"}]
 
 
+def test_report_registration_requires_verified_research_and_report_authority():
+    calls, allowed = [], {("research", "share"), ("research_report", "manage")}
+    def decision(_token, *, resource_type, resource_ref, scope):
+        calls.append((resource_type, resource_ref, scope))
+        return (resource_type, scope) in allowed
+    resources = []
+    manager = KeycloakResearchGrantManager(identity_provider=_identity, may_share=decision,
+        settings_provider=lambda: {}, token_provider=lambda _s: "pat", clear_cache=lambda: None,
+        request=lambda *_args: (200, [{"_id": "r", "name": authz_name,
+            "uris": [keycloak_resource_uri("research_report", "report")],
+            "attributes": {"traderesearch_owner_subject": ["subject-a"]}}], ""),
+        ensure_resource=lambda **kwargs: resources.append(kwargs) or "r")
+    from server.identity.keycloak_authorization import keycloak_resource_name
+    authz_name = keycloak_resource_name("research_report", "report")
+    manager.ensure_new_report_resource(actor="alice", research_id="research", report_id="report",
+                                       creation_intent="a" * 64)
+    assert resources == [{"resource_type": "research_report", "resource_ref": "report",
+                          "owner_subject": "subject-a", "creation_intent": "a" * 64}]
+    manager.require_report_resource(actor="alice", research_id="research", report_id="report")
+    assert ("research_report", "report", "manage") in calls
+    allowed.remove(("research_report", "manage"))
+    with pytest.raises(PermissionError, match="report management"):
+        manager.require_report_resource(actor="alice", research_id="research", report_id="report")
+    allowed.remove(("research", "share"))
+    with pytest.raises(PermissionError, match="Research sharing"):
+        manager.ensure_new_report_resource(actor="alice", research_id="research", report_id="other",
+                                           creation_intent="b" * 64)
+    with pytest.raises(PermissionError, match="Research sharing"):
+        manager.report_registration_identity(actor="mallory", research_id="research")
+    assert len(resources) == 1
+
+
 def test_keycloak_decisions_have_no_owner_or_username_bypass():
     calls = []
     provider = KeycloakResearchAuthorization(identity_provider=_identity,

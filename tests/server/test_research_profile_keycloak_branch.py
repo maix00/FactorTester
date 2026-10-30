@@ -238,7 +238,14 @@ def test_report_registration_checks_owners_exact_keycloak_profile(tmp_path):
     auth = KeycloakResearchAuthorization(authorize_many=lambda _t, *, permissions: {
         (resource, scope): (resource, scope) in allowed for resource, _name, scope in permissions
     })
-    catalog = ResearchCatalog(path, profile_authorizer=auth)
+    class Grants:
+        def report_registration_identity(self, **_kwargs):
+            return ResearchRequestIdentity("token", "issuer", "alice-subject", "alice", "alice-id")
+        def ensure_new_report_resource(self, **_kwargs):
+            pass
+        def require_report_resource(self, **_kwargs):
+            pass
+    catalog = ResearchCatalog(path, profile_authorizer=auth, profile_grant_manager=Grants())
     alice = {"username": "alice", "keycloak_subject": "alice-subject", "tr_identity_id": "alice-id",
              "keycloak_issuer": "https://identity.example/realms/trade"}
     with identity_request():
@@ -247,6 +254,103 @@ def test_report_registration_checks_owners_exact_keycloak_profile(tmp_path):
         allowed.clear()
         with pytest.raises(PermissionError, match="Profile write"):
             catalog.register_report(research_id, actor="alice", report_id="b", profile_ref="self")
+
+
+def test_report_registration_recovers_remote_failure_without_adopting_or_deleting(tmp_path):
+    path = tmp_path / "research.sqlite"
+    old = ResearchCatalog(path)
+    research_id = old.create_research(owner_ref="alice", title="Research")["research_id"]
+    other_id = old.create_research(owner_ref="alice", title="Other")["research_id"]
+    class Authorization:
+        def profile_membership_access_many(self, **_kwargs):
+            return {}
+        def may_write_profile(self, **_kwargs):
+            return True
+    class Grants:
+        def __init__(self):
+            self.resource = None
+            self.fail = True
+            self.checked = []
+        def report_registration_identity(self, **_kwargs):
+            return ResearchRequestIdentity("token", "issuer", "alice-subject", "alice", "alice-id")
+        def ensure_new_report_resource(self, *, report_id, creation_intent, **_kwargs):
+            if self.resource is None:
+                self.resource = (report_id, creation_intent)
+            elif self.resource != (report_id, creation_intent):
+                raise AuthorizationUnavailable("foreign creation intent")
+            if self.fail:
+                self.fail = False
+                raise AuthorizationUnavailable("response lost after creation")
+        def require_report_resource(self, *, report_id, **_kwargs):
+            self.checked.append(report_id)
+            if self.resource is None or self.resource[0] != report_id:
+                raise AuthorizationUnavailable("Keycloak report is missing")
+    grants = Grants()
+    catalog = ResearchCatalog(path, profile_authorizer=Authorization(), profile_grant_manager=grants)
+    def register(research=research_id, **kwargs):
+        return catalog.register_report(research, actor="alice", report_id="report", profile_ref="self", **kwargs)
+    with pytest.raises(AuthorizationUnavailable, match="response lost"):
+        register()
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_catalog_reports WHERE report_id='report'").fetchone()[0] == 0
+        pending = db.execute("SELECT research_id,creation_intent FROM research_report_policy_pending").fetchone()
+    assert pending == (research_id, grants.resource[1])
+    with pytest.raises(RuntimeError, match="another report registration"):
+        register(other_id)
+    assert register(title="Recovered")["title"] == "Recovered"
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_report_policy_pending").fetchone()[0] == 0
+    assert register(title="Renamed")["title"] == "Renamed"
+    assert grants.checked == ["report"]
+    grants.resource = None
+    with pytest.raises(AuthorizationUnavailable, match="missing"):
+        register(title="Must not save")
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT title FROM research_catalog_reports WHERE report_id='report'").fetchone()[0] == "Renamed"
+    with pytest.raises(RuntimeError, match="sharing requires"):
+        catalog.register_report(research_id, actor="alice", report_id="public", visibility="public")
+    with pytest.raises(RuntimeError, match="sharing requires"):
+        catalog.update_report(research_id, "report", actor="alice", authorized_users=["bob"])
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_report_policy_pending").fetchone()[0] == 0
+
+
+def test_same_report_registration_serializes_and_does_not_lock_sqlite_during_keycloak(tmp_path):
+    path = tmp_path / "research.sqlite"
+    old = ResearchCatalog(path)
+    research_id = old.create_research(owner_ref="alice", title="Research")["research_id"]
+    entered, release = threading.Event(), threading.Event()
+    class Authorization:
+        def profile_membership_access_many(self, **_kwargs):
+            return {}
+    class Grants:
+        creations, checks = 0, 0
+        def report_registration_identity(self, **_kwargs):
+            return ResearchRequestIdentity("token", "issuer", "alice-subject", "alice", "alice-id")
+        def ensure_new_report_resource(self, **_kwargs):
+            self.creations += 1
+            with sqlite3.connect(path, timeout=0.1) as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.rollback()
+            entered.set()
+            assert release.wait(timeout=5)
+        def require_report_resource(self, **_kwargs):
+            self.checks += 1
+    grants = Grants()
+    catalog = ResearchCatalog(path, profile_authorizer=Authorization(), profile_grant_manager=grants)
+    def register(title):
+        return catalog.register_report(research_id, actor="alice", report_id="same", title=title)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(register, "first")
+        assert entered.wait(timeout=5)
+        second = pool.submit(register, "second")
+        assert grants.creations == 1
+        release.set()
+        assert first.result(timeout=5)["title"] == "first"
+        assert second.result(timeout=5)["title"] == "second"
+    assert (grants.creations, grants.checks) == (1, 1)
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_report_policy_pending").fetchone()[0] == 0
 
 
 def test_new_research_registers_owner_profiles_and_cleans_up_failed_registration(tmp_path):

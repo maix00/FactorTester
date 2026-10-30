@@ -337,6 +337,7 @@ def _protection_request(settings: dict[str, str], token: str, method: str,
 def ensure_keycloak_resource(
     *, resource_type: str, resource_ref: str, owner_subject: str,
     owner_scopes: tuple[str, ...] | None = None,
+    creation_intent: str | None = None,
 ) -> str:
     """Idempotently register a user-authorized object in Keycloak.
 
@@ -348,6 +349,9 @@ def ensure_keycloak_resource(
     owner_subject = str(owner_subject or "").strip()
     if not owner_subject or len(owner_subject) > 255:
         raise ValueError("Keycloak resource owner subject is required")
+    if creation_intent is not None and (not isinstance(creation_intent, str)
+            or len(creation_intent) != 64 or any(ch not in "0123456789abcdef" for ch in creation_intent)):
+        raise ValueError("invalid Keycloak resource creation intent")
     selected_scopes = _RESOURCE_SCOPES if owner_scopes is None else tuple(owner_scopes)
     if (not selected_scopes or len(set(selected_scopes)) != len(selected_scopes)
             or any(scope not in _RESOURCE_SCOPES for scope in selected_scopes)):
@@ -368,15 +372,26 @@ def ensure_keycloak_resource(
     except Exception as exc:
         raise AuthorizationUnavailable("Keycloak resource lookup failed") from exc
     rows = result if isinstance(result, list) else result.get("resources", []) if isinstance(result, dict) else []
+    if creation_intent is not None:
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise AuthorizationUnavailable("invalid Keycloak resource search")
+        matches = [row for row in rows if str(row.get("name") or "") == resource_name]
+        if len(matches) > 1:
+            raise AuthorizationUnavailable("duplicate Keycloak resources")
     if isinstance(rows, list):
         for row in rows:
             if not isinstance(row, dict) or str(row.get("name") or "") != resource_name:
                 continue
             resource_id = str(row.get("_id") or row.get("id") or "").strip()
             if not resource_id:
+                if creation_intent is not None:
+                    raise AuthorizationUnavailable("Keycloak resource has no identity")
                 continue
-            if row.get("attributes", {}).get("traderesearch_owner_subject") != [owner_subject]:
+            attributes = row.get("attributes")
+            if not isinstance(attributes, dict) or attributes.get("traderesearch_owner_subject") != [owner_subject]:
                 raise AuthorizationUnavailable("Keycloak resource is owned by a different subject")
+            if (creation_intent is not None and attributes.get("traderesearch_creation_intent") != [creation_intent]):
+                raise AuthorizationUnavailable("Keycloak resource belongs to another creation intent")
             uris = row.get("uris") or ([row.get("uri")] if row.get("uri") else [])
             if resource_uri not in {str(uri) for uri in uris if uri}:
                 body = {
@@ -388,7 +403,8 @@ def ensure_keycloak_resource(
                     "resource_scopes": list(_RESOURCE_SCOPES),
                     "attributes": {"traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
                         str(resource_ref).encode("utf-8")
-                    ).hexdigest()]},
+                    ).hexdigest()], **({"traderesearch_creation_intent": [creation_intent]}
+                                       if creation_intent is not None else {})},
                 }
                 try:
                     _protection_request(
@@ -407,6 +423,9 @@ def ensure_keycloak_resource(
                 )
                 if resource_uri not in {str(uri) for uri in confirmed_uris if uri}:
                     raise AuthorizationUnavailable("Keycloak resource URI update did not persist")
+                if (creation_intent is not None and confirmed.get("attributes", {}).get(
+                        "traderesearch_creation_intent") != [creation_intent]):
+                    raise AuthorizationUnavailable("Keycloak creation intent was not confirmed")
             _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject, selected_scopes)
             return resource_id
 
@@ -418,7 +437,8 @@ def ensure_keycloak_resource(
         "resource_scopes": list(_RESOURCE_SCOPES),
         "attributes": {"traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
             str(resource_ref).encode("utf-8")
-        ).hexdigest()]},
+        ).hexdigest()], **({"traderesearch_creation_intent": [creation_intent]}
+                           if creation_intent is not None else {})},
     }
     try:
         _, result, location = _protection_request(settings, pat, "POST", "resource_set", body)
@@ -440,6 +460,20 @@ def ensure_keycloak_resource(
                             and str(row.get("name") or "") == resource_name), "")
     if not resource_id:
         raise AuthorizationUnavailable("Keycloak resource registration returned no identity")
+    if creation_intent is not None:
+        try:
+            _, confirmed, _ = _protection_request(settings, pat, "GET", f"resource_set/{resource_id}")
+        except Exception as exc:
+            raise AuthorizationUnavailable("Keycloak creation intent could not be verified") from exc
+        if not isinstance(confirmed, dict):
+            raise AuthorizationUnavailable("invalid Keycloak resource confirmation")
+        attributes = confirmed.get("attributes")
+        uris = confirmed.get("uris") or ([confirmed.get("uri")] if confirmed.get("uri") else [])
+        if (not isinstance(attributes, dict)
+                or attributes.get("traderesearch_owner_subject") != [owner_subject]
+                or attributes.get("traderesearch_creation_intent") != [creation_intent]
+                or resource_uri not in uris):
+            raise AuthorizationUnavailable("Keycloak creation intent was not confirmed")
     _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject, selected_scopes)
     return resource_id
 

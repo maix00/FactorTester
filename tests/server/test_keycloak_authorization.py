@@ -184,6 +184,66 @@ def test_invalid_owner_scopes_are_rejected_before_accessing_keycloak():
                                        owner_subject="subject", owner_scopes=())
 
 
+def test_creation_intent_recovers_lost_response_but_rejects_foreign_resource(monkeypatch):
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+        def client_credentials(self):
+            return {"access_token": "pat"}
+    monkeypatch.setattr(authz, "oidc_settings", lambda: {
+        "authz_client_id": "tr-api", "authz_client_secret": "secret",
+        "base_url": "https://id.example", "realm": "research",
+    })
+    monkeypatch.setattr(authz, "ServiceOIDCClient", Client)
+    monkeypatch.setattr(authz, "_ensure_owner_policy", lambda *_args: None)
+    state = {"resource": None, "fail": True, "posts": 0}
+    def protection(_settings, _token, method, path, body=None):
+        if method == "GET" and path.startswith("resource_set?"):
+            return 200, [state["resource"]] if state["resource"] else [], ""
+        if method == "POST" and path == "resource_set":
+            state["posts"] += 1
+            state["resource"] = {**body, "_id": "kc-report"}
+            if state["fail"]:
+                state["fail"] = False
+                raise OSError("response lost after registration")
+            return 201, state["resource"], ""
+        if method == "GET" and path == "resource_set/kc-report":
+            return 200, state["resource"], ""
+        raise AssertionError((method, path))
+    monkeypatch.setattr(authz, "_protection_request", protection)
+    args = dict(resource_type="research_report", resource_ref="report", owner_subject="subject-alice")
+    intent = "a" * 64
+    with pytest.raises(authz.AuthorizationUnavailable, match="registration failed"):
+        authz.ensure_keycloak_resource(**args, creation_intent=intent)
+    assert authz.ensure_keycloak_resource(**args, creation_intent=intent) == "kc-report"
+    assert state["posts"] == 1
+    with pytest.raises(authz.AuthorizationUnavailable, match="another creation intent"):
+        authz.ensure_keycloak_resource(**args, creation_intent="b" * 64)
+    assert state["posts"] == 1
+    with pytest.raises(ValueError, match="creation intent"):
+        authz.ensure_keycloak_resource(**args, creation_intent="bad")
+
+
+def test_creation_intent_requires_confirmed_resource_attributes(monkeypatch):
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+        def client_credentials(self):
+            return {"access_token": "pat"}
+    monkeypatch.setattr(authz, "oidc_settings", lambda: {
+        "authz_client_id": "tr-api", "authz_client_secret": "secret",
+        "base_url": "https://id.example", "realm": "research",
+    })
+    monkeypatch.setattr(authz, "ServiceOIDCClient", Client)
+    monkeypatch.setattr(authz, "_protection_request", lambda _s, _t, method, path, body=None:
+        (200, [], "") if method == "GET" and path.startswith("resource_set?") else
+        (201, {"_id": "kc-report"}, "") if method == "POST" else
+        (200, {"attributes": {"traderesearch_owner_subject": ["subject-alice"]}}, ""))
+    with pytest.raises(authz.AuthorizationUnavailable, match="creation intent was not confirmed"):
+        authz.ensure_keycloak_resource(resource_type="research_report", resource_ref="report",
+                                       owner_subject="subject-alice", creation_intent="a" * 64)
+
+
 def test_authorize_many_batches_and_returns_only_explicit_grants(monkeypatch):
     from urllib.parse import parse_qs
 

@@ -68,6 +68,10 @@ class ResearchCatalog(ResearchBranchesMixin):
                 revision INTEGER NOT NULL,
                 PRIMARY KEY(research_id, principal_ref, profile_ref)
             )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS research_report_policy_pending (
+                report_id TEXT PRIMARY KEY, research_id TEXT NOT NULL, actor_ref TEXT NOT NULL,
+                owner_subject TEXT NOT NULL, creation_intent TEXT NOT NULL, created_at REAL NOT NULL
+            )""")
 
     def set_synchronizer(self, synchronizer, schedule_refresh=None) -> None:
         if synchronizer.local.path.resolve() != self.db_path:
@@ -319,6 +323,63 @@ class ResearchCatalog(ResearchBranchesMixin):
 
     # ------------------------------------------------------------------
     # Research, membership, workspace, and report records
+
+    @contextmanager
+    def _report_registration_policy(self, *, research_id: str, report_id: str,
+                                    actor: str, owner: str):
+        """Make a new report's Keycloak resource recoverable before publishing it.
+
+        The journal is an operation intent, never a permission. No report row
+        is exposed while creation is incomplete. Replays must use the original
+        verified subject and opaque intent; existing resources are not adopted
+        or deleted based on a caller-supplied report ID.
+        """
+        if self._profile_authorizer is None:
+            yield None
+            return
+        manager = self._profile_grant_manager
+        if manager is None:
+            raise RuntimeError("Keycloak report registration is not configured")
+        from tools.cli.release.research_reporting.generation import report_workspace_lock
+        with report_workspace_lock(self.db_path.parent / ".research-report-policy"):
+            caller = manager.report_registration_identity(actor=actor, research_id=research_id)
+            if actor != owner or caller.username != owner:
+                raise PermissionError("report owner requires a verified Keycloak identity")
+            with connect_sqlite(self.db_path) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute(
+                    "SELECT research_id FROM research_catalog_reports WHERE report_id=?", (report_id,),
+                ).fetchone()
+                pending = conn.execute(
+                    "SELECT * FROM research_report_policy_pending WHERE report_id=?", (report_id,),
+                ).fetchone()
+                if current is not None:
+                    if str(current["research_id"]) != research_id:
+                        raise ValueError("report is already linked to another research")
+                    if pending is not None:
+                        raise RuntimeError("report registration needs recovery")
+                    intent = None
+                else:
+                    if pending is not None:
+                        if (str(pending["research_id"]) != research_id or str(pending["actor_ref"]) != actor
+                                or str(pending["owner_subject"]) != caller.subject):
+                            raise RuntimeError("another report registration is pending")
+                        intent = str(pending["creation_intent"])
+                    else:
+                        intent = secrets.token_hex(32)
+                        conn.execute("""INSERT INTO research_report_policy_pending
+                            (report_id,research_id,actor_ref,owner_subject,creation_intent,created_at)
+                            VALUES (?,?,?,?,?,?)""",
+                            (report_id, research_id, actor, caller.subject, intent, time.time()))
+            if intent is None:
+                manager.require_report_resource(actor=actor, research_id=research_id, report_id=report_id)
+            else:
+                manager.ensure_new_report_resource(actor=actor, research_id=research_id,
+                                                   report_id=report_id, creation_intent=intent)
+            # A slow Keycloak registration must not preserve a stale share
+            # decision if the caller was revoked while the request ran.
+            manager.report_registration_identity(actor=actor, research_id=research_id)
+            yield intent
 
     @contextmanager
     def _new_research_policy(self, *, owner: str, research_id: str, profiles: list[str]):
@@ -1253,6 +1314,8 @@ class ResearchCatalog(ResearchBranchesMixin):
         )
         clean_visibility = _visibility(visibility)
         users = _authorized_users(authorized_users, str(row["owner_ref"]))
+        if self._profile_authorizer is not None and (clean_visibility != "private" or users):
+            raise RuntimeError("report sharing requires the Keycloak sharing migration")
         clean_profile = _optional_profile(profile_ref)
         clean_workspace = str(workspace_id or "").strip()
         checked_profile = clean_profile
@@ -1276,7 +1339,9 @@ class ResearchCatalog(ResearchBranchesMixin):
                         research_id=research_id, viewer=actor, profile_ref=checked_profile)):
                 raise PermissionError("report Profile write is not authorized")
         now = time.time()
-        with self._write(research_id) as conn:
+        with self._report_registration_policy(research_id=research_id, report_id=report,
+                                              actor=actor, owner=str(row["owner_ref"])) as report_intent, \
+                self._write(research_id) as conn:
             if clean_workspace:
                 workspace = conn.execute(
                     """SELECT workspace_id, research_id, principal_ref, profile_ref, status
@@ -1315,6 +1380,8 @@ class ResearchCatalog(ResearchBranchesMixin):
                 "SELECT * FROM research_catalog_reports WHERE report_id=?",
                 (report,),
             ).fetchone()
+            if report_intent is not None and existing is not None:
+                raise RuntimeError("report appeared during Keycloak registration")
             if existing is not None and str(existing["research_id"]) != research_id:
                 raise ValueError("report is already linked to another research")
             conn.execute(
@@ -1341,6 +1408,12 @@ class ResearchCatalog(ResearchBranchesMixin):
                     now, now,
                 ),
             )
+            if report_intent is not None:
+                deleted = conn.execute("""DELETE FROM research_report_policy_pending
+                    WHERE report_id=? AND research_id=? AND actor_ref=? AND creation_intent=?""",
+                    (report, research_id, actor, report_intent))
+                if deleted.rowcount != 1:
+                    raise RuntimeError("report registration intent changed; retry")
             value = conn.execute(
                 "SELECT * FROM research_catalog_reports WHERE report_id=?",
                 (report,),
@@ -1409,6 +1482,8 @@ class ResearchCatalog(ResearchBranchesMixin):
         row = self._report_row(report_id)
         if str(row["research_id"]) != research_id:
             raise ValueError("report does not belong to research")
+        if self._profile_authorizer is not None and (visibility is not None or authorized_users is not None):
+            raise RuntimeError("report sharing requires the Keycloak sharing migration")
         values: dict[str, Any] = {}
         if visibility is not None:
             values["visibility"] = _visibility(visibility)
