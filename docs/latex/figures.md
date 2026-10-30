@@ -20,64 +20,15 @@
 
 ## Manager、执行节点、数据节点与桌面本机节点
 
-<figure>
+\begin{figure}[htbp]
 \centering
-\begin{tikzpicture}[font=\scriptsize,>=Stealth]
-  % Manager hosts
-  \draw[trHost] (-7.8,2.0) rectangle (-1.7,6.4);
-  \node[font=\small\bfseries,text=trInk] at (-4.75,6.08) {公网 Manager 主机};
-  \node[trManager] (pubmgr) at (-5.7,4.95) {Manager\\登录会话、RunSpec、Job 与调度};
-  \node[trIdentity] (pubid) at (-2.9,4.95) {Keycloak\\公网登录与角色};
-  \node[trStore] (pubstore) at (-4.3,3.15) {PostgreSQL · CouchDB · RabbitMQ\\控制记录、Job 对象、任务队列};
-  \draw[trControl] (pubmgr) -- (pubstore);
-  \draw[trControl] (pubmgr) -- (pubid);
-
-  \draw[trHost] (1.7,2.0) rectangle (7.8,6.4);
-  \node[font=\small\bfseries,text=trInk] at (4.75,6.08) {机构内网 Manager 主机};
-  \node[trManager] (orgmgr) at (2.9,4.95) {Manager\\本地登录、RunSpec、Job 与调度};
-  \node[trIdentity] (orgid) at (5.7,4.95) {Keycloak\\机构用户与层级组};
-  \node[trStore] (orgstore) at (4.3,3.15) {本地控制库 · Job 对象 · 队列\\离线时继续本地认证和管理};
-  \draw[trControl] (orgmgr) -- (orgstore);
-  \draw[trControl] (orgmgr) -- (orgid);
-  \draw[trFederation] (pubmgr.south east) to[bend left=16] node[above,sloped,text=trViolet] {经授权的身份/能力互联} (orgmgr.south west);
-
-  % Managed execution and data services
-  \draw[trHost] (-7.8,-2.15) rectangle (-1.7,1.35);
-  \node[font=\small\bfseries,text=trInk] at (-4.75,1.02) {Manager 管理的执行主机};
-  \node[trCompute] (worker) at (-5.7,.05) {Nautilus worker\\消费该 Manager 的冻结任务};
-  \node[trData] (workerio) at (-2.9,.05) {Data I/O\\有界 Arrow 缓存};
-  \node[trData] (bundle) at (-4.3,-1.42) {数据 Bundle\\留在数据所在主机};
-  \draw[trDataFlow] (worker) -- (workerio);
-  \draw[trDataFlow] (workerio) -- (bundle);
-  \draw[trControl] (pubmgr.south) -- node[left,text=trBlue] {Job} (worker.north);
-
-  \draw[trHost] (1.7,-2.15) rectangle (7.8,1.35);
-  \node[font=\small\bfseries,text=trInk] at (4.75,1.02) {数据专用主机（可选）};
-  \node[trData] (dataio) at (3.0,.05) {Data I/O\\Arrow 列式缓存};
-  \node[trData] (databundle) at (6.0,.05) {Bundle 与本地文件};
-  \node[font=\scriptsize,text=trInk,align=center] at (4.5,-1.25) {不安装 Manager 或 Nautilus worker};
-  \draw[trDataFlow] (dataio) -- (databundle);
-  \draw[trPlanned] (workerio.east) -- node[above,text=trAmber] {跨主机 Arrow Flight 尚未接通} (dataio.west);
-
-  % User-owned desktop runtime, deliberately outside Manager dispatch.
-  \draw[trHost,dashed,draw=trAmber] (-3.1,-6.35) rectangle (3.1,-2.85);
-  \node[font=\small\bfseries,text=trAmber] at (0,-3.15) {桌面用户的个人电脑};
-  \node[trClient] (desktop) at (-1.55,-4.25) {桌面客户端\\用户发起本机运行};
-  \node[trClient] (localruntime) at (1.55,-4.25) {本机 Nautilus\\仅供该用户使用};
-  \node[trData] (localdata) at (0,-5.65) {本机数据与有界缓存};
-  \draw[trControl] (desktop) -- (localruntime);
-  \draw[trDataFlow] (localruntime) -- (localdata);
-  \draw[trPlanned] (pubmgr.south west) to[bend right=14] node[left,text=trAmber,align=center] {仅登录授权\\与签名包下载} (desktop.north west);
-  \draw[trBlocked] (0.12,-2.05) -- (0.72,-2.65);
-  \draw[trBlocked] (0.72,-2.05) -- (0.12,-2.65);
-  \node[font=\scriptsize\bfseries,text=trRed,align=center] at (1.45,-2.38) {Manager 不得调用或调度本机节点};
-\end{tikzpicture}
-\caption{控制面、执行面、数据面和个人本机运行时的边界。桌面本机节点不在 Manager 的执行节点目录或任务队列中。跨主机 Arrow Flight 标为待实现；图中 Manager 间互联也必须按目标 Manager 的授权策略处理。}
+\resizebox{\textwidth}{!}{\input{docs/latex/network-topology.tex}}
+\caption{控制面、执行面、数据面和个人本机运行时的目标边界。箭头旁的编号对应图内详细说明；虚线表示规划中或尚未端到端验收。桌面本机节点不接受 Manager 调度；跨主机 Arrow Flight 和身份懒同步尚待完成。}
 \end{figure}
 
 ## Keycloak 身份、机构层级与授权范围
 
-<figure>
+\begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[font=\small,>=Stealth]
   \node[trIdentity,text width=5.3cm,minimum height=.9cm] (realm) at (0,4.1) {当前 Manager 的 Keycloak Realm};
@@ -103,7 +54,7 @@
 
 ## RunSpec 到 Nautilus Job 的数据与执行链路
 
-<figure>
+\begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[font=\scriptsize,>=Stealth]
   \node[trClient,text width=2.55cm] (client) at (-6.0,2.0) {React / CLI\\选测试、Bundle 与策略};
@@ -133,7 +84,7 @@
 
 ## 因子定义到交易与审计结果
 
-<figure>
+\begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[font=\scriptsize,>=Stealth]
   \node[trIdentity,text width=3.0cm] (family) at (-6.0,1.3) {因子家族\\固定源码与版本};

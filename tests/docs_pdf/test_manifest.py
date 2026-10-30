@@ -18,6 +18,21 @@ BUILDER = ROOT / "scripts" / "docs" / "build_project_pdf.py"
 
 
 class ProjectPdfManifestTests(unittest.TestCase):
+    def test_figures_use_latex_floats_and_the_shared_topology_source(self) -> None:
+        figures = (ROOT / "docs/latex/figures.md").read_text(encoding="utf-8")
+        self.assertEqual(figures.count(r"\begin{figure}"), figures.count(r"\end{figure}"))
+        self.assertEqual(figures.count(r"\caption{"), figures.count(r"\begin{figure}"))
+        self.assertIn(r"\input{docs/latex/network-topology.tex}", figures)
+        self.assertNotIn("<figure>", figures)
+
+    def test_localized_topology_assets_are_served_as_static_svg(self) -> None:
+        from server.manager.web.assets import static_file
+
+        for language in ("zh", "en"):
+            image, content_type = static_file(f"vendor/web-app/network-topology.{language}.svg")
+            self.assertEqual(content_type, "image/svg+xml")
+            self.assertIn(b"<svg", image[:512])
+
     def test_curated_manifest_and_current_implementation_paths_validate(self) -> None:
         result = subprocess.run(
             [sys.executable, str(BUILDER), "--check"],

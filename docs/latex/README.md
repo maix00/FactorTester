@@ -37,9 +37,12 @@ python scripts/docs/build_project_pdf.py
 
 ## 图示与图例
 
-`figures.md` 是图示的权威源，使用 XeLaTeX/TikZ 绘制网络拓扑、身份层级、RunSpec
-执行链路和因子到交易结果的流程。每张图均带图注与图例；实线、虚线、颜色和禁用
-符号在合集内保持一致。图中虚线标为规划或待验收，不能当作当前已部署能力。
+`figures.md` 收录身份层级、RunSpec 执行链路和因子到交易结果的图。网络拓扑的唯一
+图源为 `network-topology.tex`：PDF 直接引用该图源，网页使用同一图源生成的静态 SVG
+（中、英文各一张）。修改拓扑后运行 `python scripts/docs/build_network_topology.py`
+更新网页图片；需要 XeLaTeX、Poppler 的 pdftocairo、TikZ、ctex 和 Font Awesome 5。
+如 `pdftocairo` 不在 PATH 中，可通过环境变量 `PDFTOCAIRO` 指定可执行文件。每张图均带图注
+与图例；虚线标为规划或待验收，不能当作当前已部署能力。
 
 ## 章节组成
 
