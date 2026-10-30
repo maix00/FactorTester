@@ -77,21 +77,21 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             elif parsed.path == "/api/research/principals":
                 needle = str(query.get("q", [""])[0]).strip().casefold()
                 relation = str(query.get("relation", [""])[0]).strip()
-                superior_refs = set(
-                    self._research_catalog_superior_refs(viewer)
-                    if relation == "superiors" else []
-                )
-                from server.identity.keycloak_directory import managed_users_for_verified_request
-
+                if relation == "superiors":
+                    # These labels come directly from this verified Keycloak
+                    # session, not from a browser-provided username.
+                    candidates = [{"username": ref} for ref in self._research_catalog_superior_refs(viewer)]
+                else:
+                    try:
+                        candidates = self._subordinate_users(session)
+                    except PermissionError:
+                        # A non-administrator has no managed directory scope.
+                        candidates = []
                 values = []
-                candidates = managed_users_for_verified_request(
-                    viewer, include_self=True,
-                )
                 for item in candidates:
                     username = str(item.get("username") or "").strip()
                     if (
                         not username or username == viewer
-                        or (relation == "superiors" and username not in superior_refs)
                         or (needle and needle not in username.casefold())
                     ):
                         continue
@@ -516,9 +516,10 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         ]
 
     def _research_catalog_superior_refs(self, viewer: str) -> list[str]:
-        from flask import g, has_request_context
-
-        identity = getattr(g, "keycloak_user_session", None) if has_request_context() else None
+        # The Manager uses a native HTTP handler, not Flask's request-local g.
+        # This currently projects the direct parent claim; deeper traversal
+        # requires migrated parent stable identities in Keycloak.
+        identity = self._session()
         if not isinstance(identity, dict) or str(identity.get("username") or "") != str(viewer):
             return []
         parent = str(identity.get("parent_username") or "").strip()
