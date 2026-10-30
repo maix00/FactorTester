@@ -147,6 +147,16 @@ old_revision="$(
   echo "Current production revision is invalid: $old_revision" >&2
   exit 1
 }
+# A stale env revision selects the wrong dependency cache and rollback image.
+# Refuse before building or stopping anything; reconcile deployment state first.
+current_container="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+  bash "$public_script" container-id factortester-public)"
+[[ -n "$current_container" ]] || { echo "current application container is missing" >&2; exit 1; }
+current_image="$(sudo docker inspect --format '{{.Config.Image}}' "$current_container")"
+[[ "$current_image" == *":$old_revision" ]] || {
+  echo "configured revision does not match running application; reconcile before release" >&2
+  exit 1
+}
 if sudo grep -q '^FACTORTESTER_PUBLIC_CACHE_FROM=' "$next_env"; then
   sudo sed -i \
     "s|^FACTORTESTER_PUBLIC_CACHE_FROM=.*|FACTORTESTER_PUBLIC_CACHE_FROM=factortester-public:$old_revision|" \
