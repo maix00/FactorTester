@@ -65,7 +65,9 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState("");
+  const savingOperation = useRef(false), runningOperation = useRef(false);
+  const [schemaError, setSchemaError] = useState(""), [workspaceError, setWorkspaceError] = useState("");
+  const [schemaRevision, setSchemaRevision] = useState(0);
   const [conflict, setConflict] = useState(false);
   const [discard, setDiscard] = useState<{ workspace?: string; reload?: boolean } | null>(null);
   const [reload, setReload] = useState(0);
@@ -101,20 +103,21 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
 
   useEffect(() => {
     const controller = new AbortController();
+    setSchemaError("");
     request(`/api/test-authoring/configuration-schema?locale=${encodeURIComponent(i18n.language)}`, { signal: controller.signal })
-      .then(setContract).catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
+      .then(value => { if (!controller.signal.aborted) setContract(value); }).catch((reason: Error) => { if (!controller.signal.aborted) setSchemaError(reason.message); });
     return () => controller.abort();
-  }, [i18n.language]);
+  }, [i18n.language, schemaRevision]);
 
   useEffect(() => {
-    if (!workspace) { setDraft(null); return; }
+    if (!workspace) { setDraft(null); setWorkspaceError(""); return; }
     const controller = new AbortController();
-    setLoading(true); setError(""); setConflict(false); setDraft(null);
+    setLoading(true); setWorkspaceError(""); setConflict(false); setDraft(null);
     request(`/api/test-authoring/workspaces/${encodeURIComponent(workspace)}/configuration`, { signal: controller.signal })
       .then((value: { configuration: Configuration }) => {
         if (!controller.signal.aborted) setPlanDraft(createDraft(value.configuration.execution_plan || planFromConfiguration(value.configuration.payload), value.configuration.revision));
       })
-      .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); })
+      .catch((reason: Error) => { if (!controller.signal.aborted) setWorkspaceError(reason.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [workspace, reload]);
@@ -137,7 +140,7 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
     try {
       const text = writePath(draft.text, path, value);
       setDraft((current) => current ? { ...current, text, source: "form" } : current);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    } catch (reason) { notify({code:"configuration.edit.failed",type:"error",message:t("configuration.editFailed"),description:reason instanceof Error ? reason.message : String(reason)}); }
   };
   const creating=useRef(false);
   const create = async (): Promise<void> => {
@@ -152,12 +155,12 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
     finally { creating.current=false;setLoading(false); }
   };
   const save = async (): Promise<void> => {
-    if (!draft || !contract || !parsed.value || saving || strategy.busy || strategy.invalid) return;
+    if (!draft || !contract || !parsed.value || savingOperation.current || strategy.busy || strategy.invalid) return;
     const errors = validator.validateFormData(planValue.value, planSchema(contract.schema) as RJSFSchema).errors;
-    if (errors.length) { setError(t("configuration.fixErrors")); return; }
+    if (errors.length) { notify({code:"configuration.validation",type:"error",message:t("configuration.fixErrors")}); return; }
     const submitted = planDraft!.text;
     const savingWorkspace = workspace;
-    setSaving(true); setError("");
+    savingOperation.current = true; setSaving(true);
     try {
       const result = await request(`/api/test-authoring/workspaces/${encodeURIComponent(workspace)}/configuration`, {
         method: "PUT", body: JSON.stringify({ expected_revision: draft.revision, execution_plan: planValue.value }),
@@ -170,12 +173,12 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
       if (activeWorkspace.current !== savingWorkspace) return;
       if ((reason as { status?: number }).status === 409) setConflict(true);
       else notify({ code: "configuration.save.failed", type: "error", message: t("configuration.saveFailed"), description: reason instanceof Error ? reason.message : String(reason) });
-    } finally { setSaving(false); }
+    } finally { savingOperation.current = false; setSaving(false); }
   };
 
   const execute=async():Promise<void>=>{
-    if(!draft||!planDraft||dirty||resolving||resolutionError||!executionChoice.resolved||running||strategy.busy||strategy.invalid)return;
-    const currentWorkspace=workspace;setRunning(true);setError("");
+    if(!draft||!planDraft||dirty||resolving||resolutionError||!executionChoice.resolved||runningOperation.current||strategy.busy||strategy.invalid)return;
+    const currentWorkspace=workspace;runningOperation.current=true;setRunning(true);
     try{
       const value=await request(`/api/runs?server_id=${encodeURIComponent(executionChoice.manager_id)}`,{method:"POST",body:JSON.stringify({...runRequest(workspace,draft,analysis),expected_execution_binding_ref:executionChoice.resolved_ref})});
       if(activeWorkspace.current!==currentWorkspace)return;
@@ -185,7 +188,7 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
       notify({code:"configuration.run.failed",type:"error",message:t("configuration.runFailed"),description:reason instanceof Error?reason.message:String(reason)});
       if((reason as {code?:string}).code==='execution_binding_changed')setResolutionEpoch(value=>value+1);
     }}
-    finally{setRunning(false);}
+    finally{runningOperation.current=false;setRunning(false);}
   };
 
   const strategy = useStrategyEditor({ scope: `${workspace}:${reload}`, text: draft?.text || "{}", view, navigate: (next) => {
@@ -256,7 +259,8 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
     </header>
     {conflict ? <Alert type="warning" showIcon message={t("configuration.conflict")} /> : null}
     {planDraft && availableTypes.length > 0 && !supportedAnalysis ? <Alert type="warning" showIcon message={t("configuration.unsupportedTestType")} /> : null}
-    {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError("")} /> : null}
+    {schemaError ? <Alert type="error" showIcon message={t("configuration.schemaLoadFailed")} description={schemaError} action={<Button onClick={() => setSchemaRevision(value => value + 1)}>{t("retry")}</Button>} /> : null}
+    {workspaceError ? <Alert type="error" showIcon message={t("configuration.workspaceLoadFailed")} description={workspaceError} action={<Button onClick={() => setReload(value => value + 1)}>{t("retry")}</Button>} /> : null}
     {loading ? <p className="tr-config-loading" role="status">{t("configuration.loading")}</p> : null}
     <Tabs activeKey={tab} onChange={setTab} items={[
       {key:"execution",label:t("executionTopology.tab")},
