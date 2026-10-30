@@ -50,14 +50,35 @@ def test_canonical_environment_selects_one_state_authority(monkeypatch, tmp_path
 
 
 def test_existing_credentials_are_not_moved_or_copied(monkeypatch, tmp_path):
-    monkeypatch.setattr(http, 'DEFAULT_HOME', tmp_path / '.factortester')
-    home = http.DEFAULT_HOME; home.mkdir()
+    monkeypatch.setattr(http, 'DEFAULT_HOME', tmp_path / '.traderesearch')
+    monkeypatch.setattr(http, 'LEGACY_HOME', tmp_path / '.factortester')
+    home = http.LEGACY_HOME; home.mkdir()
     path = home / 'cookies.lwp'; path.write_text('old cookie state')
     before = path.stat().st_ino
     assert http.cookie_path() == path and path.stat().st_ino == before
     assert not (tmp_path / '.traderesearch').exists()
     with pytest.raises(FileNotFoundError, match='TradeResearch.*traderesearch configure'):
         http.load_config()
+
+
+def test_cli_home_new_install_alias_and_conflict(monkeypatch, tmp_path):
+    from tools.cli.manager.config import manager_config_path
+    canonical = tmp_path / '.traderesearch'
+    legacy = tmp_path / '.factortester'
+    monkeypatch.setattr(http, 'DEFAULT_HOME', canonical)
+    monkeypatch.setattr(http, 'LEGACY_HOME', legacy)
+    assert http.cookie_path() == canonical / 'cookies.lwp'
+    assert manager_config_path() == canonical / 'manager.json'
+    canonical.mkdir()
+    legacy.symlink_to(canonical, target_is_directory=True)
+    assert http.cookie_path() == canonical / 'cookies.lwp'
+    assert manager_config_path() == canonical / 'manager.json'
+    legacy.unlink()
+    legacy.mkdir()
+    with pytest.raises(RuntimeError, match='directories conflict'):
+        http.cookie_path()
+    with pytest.raises(RuntimeError, match='directories conflict'):
+        manager_config_path()
 
 
 def test_stream_timeout_new_name_has_precedence(monkeypatch):

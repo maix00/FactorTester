@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import time
 from typing import Any
+from tools.cli.local_paths import documents_root
 
 
 _JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -18,11 +19,11 @@ _MANIFEST = ".artifacts.json"
 
 
 def default_job_cache_root() -> Path:
-    configured = os.environ.get(_ROOT_ENV)
+    configured = os.environ.get("TRADERESEARCH_JOB_CACHE_ROOT") or os.environ.get(_ROOT_ENV)
     root = (
         Path(configured).expanduser()
         if configured
-        else Path.home() / "Documents" / "FactorTester" / "jobs"
+        else documents_root() / "jobs"
     )
     return root.resolve()
 

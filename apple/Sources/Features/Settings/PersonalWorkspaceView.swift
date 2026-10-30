@@ -125,16 +125,13 @@ struct PersonalWorkspaceView: View {
 
     private var userRoot: String {
         let principal = session.user?.username ?? "<principal>"
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester/users")
-            .appendingPathComponent(principal).path
+        return PersonalWorkspaceAccessStore.expectedRoot(for: principal)?.path ?? "—"
     }
 
     private var defaultFactorLibraryRoot: String {
         let principal = session.user?.username ?? "<principal>"
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester/users")
-            .appendingPathComponent(principal)
+        guard let root = PersonalWorkspaceAccessStore.expectedRoot(for: principal) else { return "—" }
+        return root
             .appendingPathComponent("personal-workspace/factor-library").path
     }
 

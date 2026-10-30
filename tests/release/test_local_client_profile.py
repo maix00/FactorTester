@@ -117,7 +117,7 @@ def test_client_cli_exposes_generic_profile_and_adapter_commands(
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["profile"]["profile_id"] == "research-a"
     workspace = (
-        tmp_path / "Documents/FactorTester/users/18717974771"
+        tmp_path / "Documents/TradeResearch/users/18717974771"
         / "profiles/research-a"
     )
     assert workspace.is_dir()

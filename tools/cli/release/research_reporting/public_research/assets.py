@@ -6,6 +6,7 @@ import hashlib
 import re
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from tools.cli.release.job_cache import default_job_cache_root
 
 
 MAX_ASSET_BYTES = 32 * 1024 * 1024
@@ -44,7 +45,7 @@ def asset_path(package_root: Path, asset: dict) -> Path:
         and external.netloc == "jobs" and len(parts) == 2
         and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", parts[0])
     ):
-        return Path.home() / "Documents" / "FactorTester" / "jobs" / parts[0] / filename
+        return default_job_cache_root() / parts[0] / filename
     return package_root / "assets" / filename
 
 

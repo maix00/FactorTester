@@ -113,6 +113,53 @@ register_strategy_profile_commands(client_profile)
 register_profile_revision_commands(client_profile)
 
 
+@client.group("local-paths")
+def client_local_paths() -> None:
+    """Review and migrate local CLI or shared Documents paths."""
+
+
+@client_local_paths.command("plan")
+@click.option("--kind", type=click.Choice(["cli", "documents"]), required=True)
+@friendly_errors
+def local_paths_plan(kind: str) -> None:
+    """Inventory metadata without reading credentials or modifying user data."""
+    from tools.cli.release.local_path_migration import plan
+    click.echo(json.dumps(plan(kind), ensure_ascii=False, indent=2))
+
+
+@client_local_paths.command("apply")
+@click.option("--kind", type=click.Choice(["cli", "documents"]), required=True)
+@click.option("--plan-sha256", required=True)
+@click.option("--receipt", type=click.Path(path_type=Path, dir_okay=False), required=True)
+@click.option("--quiesced", is_flag=True, help="Clients and services using this directory are closed.")
+@friendly_errors
+def local_paths_apply(kind: str, plan_sha256: str, receipt: Path, quiesced: bool) -> None:
+    """Move the reviewed directory in place and retain a temporary old-path link."""
+    from tools.cli.release.local_path_migration import apply
+    click.echo(json.dumps(apply(kind, expected_sha256=plan_sha256, receipt=receipt,
+                                quiesced=quiesced), ensure_ascii=False))
+
+
+@client_local_paths.command("recover")
+@click.option("--receipt", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
+@click.option("--quiesced", is_flag=True, help="Clients and services using this directory are closed.")
+@friendly_errors
+def local_paths_recover(receipt: Path, quiesced: bool) -> None:
+    """Complete an interrupted compatibility-link operation."""
+    from tools.cli.release.local_path_migration import recover
+    click.echo(json.dumps(recover(receipt=receipt, quiesced=quiesced), ensure_ascii=False))
+
+
+@client_local_paths.command("rollback")
+@click.option("--receipt", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
+@click.option("--quiesced", is_flag=True, help="Clients and services using this directory are closed.")
+@friendly_errors
+def local_paths_rollback(receipt: Path, quiesced: bool) -> None:
+    """Move the original inode back while preserving a new-path link."""
+    from tools.cli.release.local_path_migration import rollback
+    click.echo(json.dumps(rollback(receipt=receipt, quiesced=quiesced), ensure_ascii=False))
+
+
 @client.group("storage", hidden=True)
 def client_storage() -> None:
     """Maintain the native client's embedded storage."""

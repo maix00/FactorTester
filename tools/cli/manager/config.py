@@ -12,7 +12,7 @@ import platform
 import subprocess
 from urllib.parse import urlparse
 
-from tools.cli.http import DEFAULT_HOME, HOME_ENV, config_env
+from tools.cli.http import _home_dir, config_env
 
 
 MANAGER_CONFIG_ENV = "TRADERESEARCH_MANAGER_CONFIG"
@@ -41,8 +41,7 @@ def manager_config_path() -> Path:
     configured = config_env(MANAGER_CONFIG_ENV)
     if configured:
         return Path(configured).expanduser()
-    home = Path(config_env(HOME_ENV) or str(DEFAULT_HOME)).expanduser()
-    return home / "manager.json"
+    return _home_dir() / "manager.json"
 
 
 def save_manager_config(

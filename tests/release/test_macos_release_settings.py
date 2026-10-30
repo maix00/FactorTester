@@ -52,7 +52,7 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert 'X-FactorTester-Client-Access' in web_page
     assert '"ftclient"' in web_page
     assert "approval" not in view.lower()
-    assert 'Window("FTClient", id: "main")' in app
+    assert 'Window("TradeResearch", id: "main")' in app
     assert "WindowGroup" in app
 
 
@@ -325,7 +325,7 @@ def test_macos_profiles_use_principal_scoped_default_workspace() -> None:
     )
     assert 'json["workspaces"]' in model
     assert 'json["owner_ref"]' in model
-    assert "Documents/FactorTester/users" in view
+    assert "PersonalWorkspaceAccessStore.expectedRoot" in view
     assert "LocalProfileForm" not in view
     assert "可见工作区" in view
     assert "Owner:" in view
@@ -347,7 +347,7 @@ def test_macos_settings_show_only_active_unified_workspace() -> None:
     assert "LocalProfilesView()" not in hub
     workspace_view = view + (SOURCES / "Features" / "Profiles" / "ProfileWorkspaceView.swift").read_text(encoding="utf-8")
     assert "Profile 与独立研究报告工作区" in workspace_view
-    assert "Documents/FactorTester/users" in view
+    assert "PersonalWorkspaceAccessStore.expectedRoot" in view
     assert "personal-workspace/factor-library" in view
     assert "各个研究现场的独立 worktree" in view
     assert "本地 canonical 因子库" in view

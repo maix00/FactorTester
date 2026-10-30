@@ -30,8 +30,8 @@ enum ResearchDocumentJobTableReader {
                 of: #"^[A-Za-z0-9._-]{1,128}$"#,
                 options: .regularExpression
               ) != nil else { throw ReaderError.invalidSource }
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester/jobs", isDirectory: true)
+        return try LocalDocumentsRoot.resolve()
+            .appendingPathComponent("jobs", isDirectory: true)
             .appendingPathComponent(source.jobID, isDirectory: true)
             .appendingPathComponent(source.filename, isDirectory: false)
     }
