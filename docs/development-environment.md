@@ -129,3 +129,15 @@ FactorTester Docker runner；必须原生运行时，才根据 Job/Worktree 的�
 创建独立的 runner Conda/venv。这样升级 CLI 不会改变既有测试环境。
 
 本机 Cargo 操作从仓库根运行，复用根 `.cargo/config.toml` 的单一 host target，避免在 alpha、Nautilus、runtime 各自产生一套依赖编译产物。Linux 发布容器使用单独的有界 target，不能与 macOS 架构混用。运行时构建回执放在 `.artifacts/runtime-receipts`，不放进可删除的 Cargo target。清理前确认无 Cargo/rustc/maturin 进程且已安装扩展不是 target 内符号链接；使用 `cargo clean --target-dir <明确的生成目录>`，不得清理源码、数据、数据库或用户备份。缓存被淘汰后重编译是正常代价，不虚报为增量命中。
+
+## 公网镜像构建资源
+
+公网发布使用持久化的 `tr-public-bounded` Docker BuildKit builder。它限制两个 CPU、
+2 GiB 内存且不额外使用 swap，单次只执行一个构建步骤；可复用缓存目标上限为 2 GB。
+Linux 主机构建前必须至少有 2.5 GiB 的 `MemAvailable`，不足时拒绝构建，不停止现有服务。
+脚本验证容器实际资源配置，已有 builder 不符合限制时拒绝使用，不自动删除重建。
+Manager 的默认内存上限为 3 GiB；Nautilus 执行节点仍使用独立的 worker 限额。
+
+构建资源限制不覆盖 Docker daemon 导入镜像时的全部开销，也不代替整机容量规划。
+首次切换独立 builder 可能无法复用 Docker 默认 builder 的层缓存；之后保留其有界缓存。
+原生 wheel 继续按构建身份和校验和复用，不因 Python 或前端源码变化重新编译。

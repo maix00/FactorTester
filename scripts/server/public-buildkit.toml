@@ -1,0 +1,7 @@
+# One build step at a time; keep the reusable dependency cache bounded.
+[worker.oci]
+  max-parallelism = 1
+  gc = true
+  reservedSpace = "512MB"
+  maxUsedSpace = "2GB"
+  minFreeSpace = "10GB"

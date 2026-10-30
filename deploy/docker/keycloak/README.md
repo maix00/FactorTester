@@ -28,3 +28,9 @@ Run with `docker compose --env-file <protected-env> -f compose.yaml up -d`.
 Use the same arguments plus `ps` and inspect the readiness health check. A
 healthy Keycloak is not a successful Manager cutover. Complete browser login
 through `scripts/test/keycloak_browser_oidc.py`, not a direct token request.
+
+Set `TR_IDENTITY_MANAGER_IPV4` to a reserved free address in the Manager network,
+excluding its gateway and the static addresses of Manager, databases and brokers.
+Keycloak must not dynamically acquire a stopped Manager's fixed address during
+host restart. Record the reservation in the protected per-host environment file;
+recreate only Keycloak after changing it, preserving the identity database volume.
