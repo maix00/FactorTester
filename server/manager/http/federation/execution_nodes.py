@@ -3,12 +3,25 @@ from server.jobs.dispatch.node_service import ExecutionNodeService
 from server.jobs.repository.sqlite import JobRepository
 from server.identity.service_access import authenticate_service
 from server.manager.http.responses import json_response
+from server.manager.http.request_security import read_json_object
 
 
 class ExecutionNodeRoutesMixin:
+    def _dispatch_execution_node(self, path):
+        operation = {
+            "/api/federation/execution/register": "register",
+            "/api/federation/execution/job": "operation",
+            "/api/federation/execution/result-file": "report_file",
+            "/api/federation/execution/report": "publish_report",
+        }.get(path)
+        if operation is None:
+            return False
+        self._execution_node_operation(operation)
+        return True
+
     def _execution_node_operation(self, operation):
         try:
-            body, payload = self._node_json_body(1024*1024)
+            body, payload = read_json_object(self, 1024*1024)
             identity = authenticate_service(self, required_scope="tr:execution:node")
             if not identity.node_id:
                 raise PermissionError("token is not bound to an execution node")

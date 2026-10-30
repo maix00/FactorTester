@@ -3,6 +3,7 @@ name: traderesearch-data-node
 services:
   data-io:
     image: ${TR_DATA_IO_IMAGE:?set a tested TradeResearch data-I/O image}
+    entrypoint: []
     restart: unless-stopped
     mem_limit: ${TR_DATA_IO_MEMORY:-1g}
     cpus: ${TR_DATA_IO_CPUS:-2}

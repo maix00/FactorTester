@@ -22,8 +22,8 @@ from server.identity.service_access import ServiceHTTPClient, ServiceTokenVerifi
 from tests.server.test_execution_data_binding import _offer, _requirement, _target
 
 
-@pytest.fixture
-def transport(tmp_path, monkeypatch):
+@pytest.fixture(params=["peer", "manager"])
+def transport(tmp_path, monkeypatch, request):
     monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     repo = JobRepository(tmp_path / "manager.sqlite")
     import time
@@ -37,8 +37,21 @@ def transport(tmp_path, monkeypatch):
     identity=IdentityFixture()
     state=SimpleNamespace(session=lambda _token:None,server_id="manager-a",job_repository=repo,
         execution_token_verifier=ServiceTokenVerifier(identity,issuer="https://identity.invalid/realms/test",audience="manager-a"))
-    class Handler(PeerControlHandler):
-        pass
+    if request.param == "manager":
+        from server.manager.http.write_routes import WriteRoutesMixin
+        from server.manager.http.federation.execution_nodes import ExecutionNodeRoutesMixin
+        from http.server import BaseHTTPRequestHandler
+
+        class Handler(WriteRoutesMixin, ExecutionNodeRoutesMixin, BaseHTTPRequestHandler):
+            def _redirect_plain_http_to_https(self):
+                return False
+            def _proxy_keycloak(self, *_args, **_kwargs):
+                return False
+            def _public_login_gate(self, *_args, **_kwargs):
+                raise AssertionError("node must use scoped service authentication")
+    else:
+        class Handler(PeerControlHandler):
+            pass
     Handler.state = state
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
@@ -59,6 +72,7 @@ def transport(tmp_path, monkeypatch):
 def _job(repo, binding):
     run_spec = {"data_requirements": [asdict(_requirement())]}
     repo.create(JobRecord(job_id="node-test", run_id="run", owner="alice", workspace_id="ws",
+        owner_issuer="https://identity.invalid/realms/transport", owner_subject="subject-alice",
         kind="backtest", status=JobStatus.SUBMITTED, deployment_id=binding["route_id"],
         service_port=8000, source_revision="test-build", job_spec={"run_spec":run_spec, "execution_binding": binding},
         run_spec_hash=canonical_hash(run_spec)))

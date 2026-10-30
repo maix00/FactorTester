@@ -8,6 +8,7 @@ def test_data_only_compose_has_no_manager_or_execution_worker() -> None:
     compose = yaml.safe_load((root / "deploy/docker/data-node/compose.yaml").read_text())
     assert set(compose["services"]) == {"data-io"}
     service = compose["services"]["data-io"]
+    assert service["entrypoint"] == []
     assert service["command"] == ["python", "-m", "server.data_io.service"]
     assert service["environment"]["TR_DATA_CACHE_AUTHORITY"] == "${TR_DATA_NODE_ID:?set stable data-node cache authority}"
     assert service["environment"]["TR_DATA_IO_ALLOWED_ROOTS"] == "/data"

@@ -524,7 +524,11 @@ class ManagerState(
         """Centralize the port-availability seam used by Manager state."""
         return port_in_use(port)
 
+from server.manager.http.federation.execution_nodes import ExecutionNodeRoutesMixin
+
+
 class Handler(
+    ExecutionNodeRoutesMixin,
     RequestSecurityMixin,
     KeycloakProxyRoutesMixin,
     AccountAdministrationRoutesMixin,
