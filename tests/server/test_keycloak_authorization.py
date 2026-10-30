@@ -39,6 +39,31 @@ def test_authorization_is_cached_for_short_bounded_window(monkeypatch):
     authz.clear_authorization_cache()
 
 
+def test_uncached_mutation_check_observes_revocation_and_invalidates_local_entry(monkeypatch):
+    authz.clear_authorization_cache()
+    state, calls = {"allow": True}, []
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+        def authorize_many(self, _token, *, permissions, **_kwargs):
+            calls.append(len(permissions))
+            return {(uri, scope) for uri, _name, scope in permissions} if state["allow"] else set()
+    monkeypatch.setattr(authz, "oidc_settings", lambda: {
+        "authz_client_id": "tr-api", "authz_client_secret": "secret",
+        "base_url": "https://id.example", "realm": "research",
+    })
+    monkeypatch.setattr(authz, "ServiceOIDCClient", Client)
+    uri = authz.keycloak_resource_uri("research_profile", "p")
+    permissions = [(uri, "name", "write")]
+    assert authz.keycloak_authorized_many("token", permissions=permissions)[(uri, "write")]
+    state["allow"] = False
+    assert authz.keycloak_authorized_many("token", permissions=permissions)[(uri, "write")]
+    assert not authz.keycloak_authorized_many("token", permissions=permissions, use_cache=False)[(uri, "write")]
+    assert not authz.keycloak_authorized_many("token", permissions=permissions)[(uri, "write")]
+    assert calls == [1, 1, 1]
+    authz.clear_authorization_cache()
+
+
 def test_resource_creation_reuses_registered_resource(monkeypatch):
     policy = {}
     from server.identity import federation_identity_sync

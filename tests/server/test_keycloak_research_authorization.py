@@ -56,6 +56,21 @@ def test_profile_writing_is_per_stable_identity_and_exact_profile():
     assert profile_resource_ref("r", "identity-a", "work") != profile_resource_ref("r", "identity-b", "work")
 
 
+def test_profile_membership_is_batched_and_cannot_use_another_users_profile():
+    calls = []
+    first = keycloak_resource_uri("research_profile", profile_resource_ref("r", "identity-a", "one"))
+    def authorize(_token, *, permissions):
+        calls.append(len(permissions))
+        return {(uri, scope): uri == first for uri, _name, scope in permissions}
+    provider = KeycloakResearchAuthorization(identity_provider=_identity, authorize_many=authorize)
+    profiles = [("r", "one"), ("r", "two"), *(("r", str(i)) for i in range(128))]
+    result = provider.profile_membership_access_many(viewer="alice", profiles=profiles)
+    assert result[("r", "one")] == {"can_view": True, "can_download": True}
+    assert result[("r", "two")] == {"can_view": False, "can_download": False}
+    assert calls == [256, 4]
+    assert not provider.profile_membership_access_many(viewer="mallory", profiles=[("r", "one")])[("r", "one")]["can_view"]
+
+
 def test_checks_are_batched_and_authorization_outage_is_not_a_denial():
     calls = []
     def authorize(_token, *, permissions):

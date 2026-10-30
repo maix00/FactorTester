@@ -86,12 +86,14 @@ def keycloak_authorized_many(
     token: str,
     *,
     permissions: list[tuple[str, str, str]],
+    use_cache: bool = True,
 ) -> dict[tuple[str, str], bool]:
     """Batch-check ``(resource URI, resource name, scope)`` with Keycloak.
 
     Results are cached per caller token and resource scope for a short bounded
     interval. Missing resources/scopes are explicit denials; a Keycloak outage
     raises so callers can distinguish unavailable authorization from denial.
+    Mutating operations may bypass the cache to observe revocation promptly.
     """
     if not token:
         return {(str(uri), str(scope)): False for uri, _name, scope in permissions}
@@ -118,7 +120,9 @@ def keycloak_authorized_many(
     with _CACHE_LOCK:
         for uri, name, scope in normalized:
             key = (token_digest, client_id, uri, scope)
-            cached = _CACHE.get(key)
+            if not use_cache:
+                _CACHE.pop(key, None)
+            cached = _CACHE.get(key) if use_cache else None
             if cached is not None and cached[0] > now:
                 _CACHE.move_to_end(key)
                 result[(uri, scope)] = cached[1]
@@ -142,13 +146,14 @@ def keycloak_authorized_many(
             (uri, scope): (uri, scope) in granted
             for uri, _name, scope in missing
         }
-        with _CACHE_LOCK:
-            while len(_CACHE) + len(missing_results) > _CACHE_LIMIT:
-                _CACHE.popitem(last=False)
-            expires = time.monotonic() + _CACHE_TTL_SECONDS
-            for (uri, scope), allowed in missing_results.items():
-                _CACHE[(token_digest, client_id, uri, scope)] = (expires, allowed)
-                result[(uri, scope)] = allowed
+        if use_cache:
+            with _CACHE_LOCK:
+                while len(_CACHE) + len(missing_results) > _CACHE_LIMIT:
+                    _CACHE.popitem(last=False)
+                expires = time.monotonic() + _CACHE_TTL_SECONDS
+                for (uri, scope), allowed in missing_results.items():
+                    _CACHE[(token_digest, client_id, uri, scope)] = (expires, allowed)
+        result.update(missing_results)
     return result
 
 

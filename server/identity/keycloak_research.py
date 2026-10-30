@@ -128,7 +128,8 @@ class KeycloakResearchAuthorization:
         return self._decisions_for(identity, resources)
 
     def _decisions_for(self, identity: ResearchRequestIdentity,
-                       resources: Iterable[tuple[str, str, tuple[str, ...]]]) -> dict[tuple[str, str, str], bool]:
+                       resources: Iterable[tuple[str, str, tuple[str, ...]]], *,
+                       fresh: bool = False) -> dict[tuple[str, str, str], bool]:
         permissions = []
         for kind, ref, scopes in resources:
             uri, name = keycloak_resource_uri(kind, ref), keycloak_resource_name(kind, ref)
@@ -136,7 +137,10 @@ class KeycloakResearchAuthorization:
         result: dict[tuple[str, str, str], bool] = {}
         for offset in range(0, len(permissions), 256):
             batch = permissions[offset:offset + 256]
-            allowed = self._authorize_many(identity.token, permissions=batch)
+            if fresh and self._authorize_many is keycloak_authorized_many:
+                allowed = self._authorize_many(identity.token, permissions=batch, use_cache=False)
+            else:
+                allowed = self._authorize_many(identity.token, permissions=batch)
             for uri, _name, scope in batch:
                 result[(uri, scope, identity.subject)] = bool(allowed.get((uri, scope), False))
         return result
@@ -189,8 +193,46 @@ class KeycloakResearchAuthorization:
             return False
         ref = profile_resource_ref(research_id, identity.identity_id, profile_ref)
         uri = keycloak_resource_uri("research_profile", ref)
-        values = self._decisions_for(identity, [("research_profile", ref, ("write",))])
+        values = self._decisions_for(identity, [("research_profile", ref, ("write",))], fresh=True)
         return values.get((uri, "write", identity.subject), False)
+
+    def profile_membership_access_many(
+        self, *, viewer: str | None, profiles: Iterable[tuple[str, str]],
+    ) -> dict[tuple[str, str], dict[str, bool]]:
+        """Evaluate the caller's exact Profiles with one bounded batch stream.
+
+        Membership grants live on the Profile resource itself, independently
+        of explicit Research shares and public/ancestor policies. The caller's
+        verified stable ID is always used in the resource reference; supplied
+        display names cannot select another user's Profile.
+        """
+        pairs = list(dict.fromkeys((str(research), str(profile)) for research, profile in profiles))
+        identity = self._identity_provider(viewer)
+        if identity is None:
+            return {pair: {"can_view": False, "can_download": False} for pair in pairs}
+        refs = {pair: profile_resource_ref(pair[0], identity.identity_id, pair[1]) for pair in pairs}
+        values = self._decisions_for(identity, [
+            ("research_profile", ref, ("read", "use")) for ref in refs.values()
+        ])
+        result = {}
+        for pair, ref in refs.items():
+            uri = keycloak_resource_uri("research_profile", ref)
+            read = values.get((uri, "read", identity.subject), False)
+            use = values.get((uri, "use", identity.subject), False)
+            result[pair] = {"can_view": bool(read), "can_download": bool(read and use)}
+        return result
+
+    def may_write_any_profile(self, *, research_id: str, viewer: str | None,
+                              profile_refs: Iterable[str]) -> bool:
+        """Batch-check exact Profiles when authoring is not tied to one tab."""
+        identity = self._identity_provider(viewer)
+        if identity is None:
+            return False
+        refs = list(dict.fromkeys(profile_resource_ref(research_id, identity.identity_id, str(profile))
+                                  for profile in profile_refs))
+        values = self._decisions_for(identity, [("research_profile", ref, ("write",)) for ref in refs], fresh=True)
+        return any(values.get((keycloak_resource_uri("research_profile", ref), "write", identity.subject), False)
+                   for ref in refs)
 
 
 _USER_GRANT_SCOPES = frozenset({"read", "use", "write"})
@@ -211,7 +253,7 @@ def _keycloak_user(subject: str) -> dict[str, Any]:
     from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
     result = manager_keycloak_admin_adapter()._get(f"users/{quote(subject, safe='')}")
     if (not isinstance(result, dict) or result.get("id") != subject
-            or result.get("enabled") is not True or not result.get("username")):
+            or type(result.get("enabled")) is not bool or not result.get("username")):
         raise LookupError("Keycloak grant subject is unavailable")
     return result
 
@@ -272,11 +314,7 @@ class KeycloakResearchGrantManager:
                                 identity_id: str, profile_ref: str) -> str:
         """Create a Profile's scope without granting its research owner write."""
         ref = profile_resource_ref(research_id, identity_id, profile_ref)
-        caller = self.identity_provider(actor)
-        self.clear_cache()
-        if caller is None or not self.may_share(caller.token, resource_type="research",
-                                                 resource_ref=research_id, scope="share"):
-            raise PermissionError("Keycloak did not authorize Research sharing")
+        self.require_membership_manager(actor=actor, research_id=research_id)
         settings = self.settings_provider()
         resource = self._resource(settings, self.token_provider(settings), "research", research_id)
         owners = (resource.get("attributes") or {}).get("traderesearch_owner_subject")
@@ -284,6 +322,14 @@ class KeycloakResearchGrantManager:
             raise AuthorizationUnavailable("Research Keycloak owner is unavailable")
         return self.ensure_resource(resource_type="research_profile", resource_ref=ref,
                                     owner_subject=owners[0], owner_scopes=("share",))
+
+    def require_membership_manager(self, *, actor: str, research_id: str) -> None:
+        """Require current Research share permission before creating an intent."""
+        caller = self.identity_provider(actor)
+        self.clear_cache()
+        if caller is None or not self.may_share(caller.token, resource_type="research",
+                                                 resource_ref=research_id, scope="share"):
+            raise PermissionError("Keycloak did not authorize Research sharing")
 
     def set_user_grant(self, *, actor: str, resource_type: str, resource_ref: str,
                        source: str, identity_id: str, subject: str,
@@ -308,8 +354,9 @@ class KeycloakResearchGrantManager:
         # return either representation in a policy. Never infer a subject from
         # a display name or legacy owner reference.
         user = self.user_provider(subject)
-        attributes = user.get("attributes")
-        if (str(user.get("id") or "") != subject or not user.get("username") or user.get("enabled") is not True
+        attributes = user.get("attributes") if isinstance(user, dict) else None
+        if (not isinstance(user, dict) or str(user.get("id") or "") != subject or not user.get("username")
+                or (bool(normalized_scopes) and user.get("enabled") is not True)
                 or not isinstance(attributes, dict) or attributes.get("tr_identity_id") != [identity_id]):
             raise LookupError("Keycloak grant subject is unavailable")
         labels = {subject, str(user["username"])}
@@ -380,3 +427,24 @@ class KeycloakResearchGrantManager:
             raise AuthorizationUnavailable("Research Keycloak grant revocation was not confirmed")
         self.clear_cache()
         return True
+
+    def set_profile_membership(self, *, actor: str, research_id: str,
+                               identity_id: str, subject: str, profile_ref: str,
+                               role: str, status: str) -> bool:
+        """Update exactly one Profile membership policy; no Research grant copy."""
+        if role not in {"owner", "editor", "contributor", "viewer"}:
+            raise ValueError("invalid Research Profile role")
+        if status not in {"active", "invited", "revoked"}:
+            raise ValueError("invalid Research Profile status")
+        scopes = []
+        if status == "active":
+            scopes = ["read", "use"]
+            if role in {"owner", "editor", "contributor"}:
+                scopes.append("write")
+        self.ensure_profile_resource(actor=actor, research_id=research_id,
+                                     identity_id=identity_id, profile_ref=profile_ref)
+        return self.set_user_grant(
+            actor=actor, resource_type="research_profile",
+            resource_ref=profile_resource_ref(research_id, identity_id, profile_ref),
+            source="membership", identity_id=identity_id, subject=subject, scopes=scopes,
+        )

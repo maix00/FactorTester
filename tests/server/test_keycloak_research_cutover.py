@@ -185,12 +185,12 @@ def test_profile_parity_covers_every_user_and_rejects_an_extra_writer(legacy_cat
     evaluator = AuditEvaluator()
     extra = set()
     def evaluate(identity, *, candidates):
-        return {(kind, ref, "write"): (json.loads(ref)[1] == identity or identity in extra)
-                for kind, ref, _scopes in candidates}
+        return {(kind, ref, scope): (json.loads(ref)[1] == identity or identity in extra)
+                for kind, ref, scopes in candidates for scope in scopes}
     evaluator.evaluate = evaluate
     args = {"database": legacy_catalog, "source_sha256": legacy_authorization_snapshot_sha256(legacy_catalog),
             "identity_by_principal": {"alice": "a", "bob": "b"}, "evaluator": evaluator}
-    assert verify_live_profile_policy_parity(**args) == {"principals": 3, "profiles": 1, "decisions": 3}
+    assert verify_live_profile_policy_parity(**args) == {"principals": 3, "profiles": 1, "decisions": 9}
     extra.add("new-user")
     with pytest.raises(AuthorizationUnavailable, match="decisions differ"):
         verify_live_profile_policy_parity(**args)
@@ -199,7 +199,8 @@ def test_profile_parity_covers_every_user_and_rejects_an_extra_writer(legacy_cat
 def test_profile_parity_rejects_revoked_write_and_identity_collapse(legacy_catalog):
     evaluator = AuditEvaluator()
     evaluator.evaluate = lambda identity, *, candidates: {
-        (kind, ref, "write"): json.loads(ref)[1] == identity for kind, ref, _scopes in candidates
+        (kind, ref, scope): json.loads(ref)[1] == identity
+        for kind, ref, scopes in candidates for scope in scopes
     }
     with sqlite3.connect(legacy_catalog) as db:
         db.execute("UPDATE research_catalog_memberships SET status='revoked'")

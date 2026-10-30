@@ -277,7 +277,7 @@ def _active_human_subjects(adapter) -> dict[str, str]:
 def verify_live_profile_policy_parity(*, database: str | Path, source_sha256: str,
                                       identity_by_principal: dict[str, str],
                                       evaluator: KeycloakResearchPolicyEvaluator) -> dict[str, int]:
-    """Compare every old Profile writer to live Keycloak, including denials.
+    """Compare every old Profile member to live Keycloak, including denials.
 
     This is one necessary migration check, not a cutover receipt: Research
     reads, links, hierarchy, visitors and transfer paths require independent
@@ -293,9 +293,9 @@ def verify_live_profile_policy_parity(*, database: str | Path, source_sha256: st
     # Validates owner/explicit/member mappings as well; no unknown legacy
     # principal may silently disappear when a Profile is migrated.
     universe = research_candidate_universe(database, identity_by_principal=identity_by_principal)
-    candidates = [(kind, ref, ("write",)) for kind, ref, _scopes in universe
+    candidates = [(kind, ref, ("read", "use", "write")) for kind, ref, _scopes in universe
                   if kind == "research_profile"]
-    writers: set[tuple[str, str]] = set()
+    memberships: dict[tuple[str, str], set[str]] = {}
     uri = Path(database).expanduser().resolve().as_uri() + "?mode=ro"
     with sqlite3.connect(uri, uri=True) as db:
         db.execute("BEGIN")
@@ -307,14 +307,22 @@ def verify_live_profile_policy_parity(*, database: str | Path, source_sha256: st
             identity = identity_by_principal.get(str(principal))
             if not identity:
                 raise AuthorizationUnavailable("unmapped Research Profile principal blocks verification")
-            if status == "active" and role in {"owner", "editor", "contributor"}:
-                writers.add((profile_resource_ref(str(research), identity, str(profile)), identity))
+            ref = profile_resource_ref(str(research), identity, str(profile))
+            if (ref, identity) in memberships:
+                raise AuthorizationUnavailable("duplicate legacy Research Profile membership")
+            scopes: set[str] = set()
+            if status == "active":
+                scopes.update({"read", "use"})
+                if role in {"owner", "editor", "contributor"}:
+                    scopes.add("write")
+            memberships[(ref, identity)] = scopes
     subjects = _active_human_subjects(evaluator.adapter)
     if not subjects:
         raise AuthorizationUnavailable("Keycloak has no active Research audit identities")
     checked = 0
     for identity in sorted(subjects):
-        expected = {(kind, ref, "write"): (ref, identity) in writers for kind, ref, _scopes in candidates}
+        expected = {(kind, ref, scope): scope in memberships.get((ref, identity), set())
+                    for kind, ref, scopes in candidates for scope in scopes}
         actual = evaluator.evaluate(identity, candidates=candidates)
         compare_research_decisions(expected, actual)
         checked += len(actual)
