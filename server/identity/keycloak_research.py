@@ -383,7 +383,18 @@ class KeycloakResearchGrantManager:
             raise AuthorizationUnavailable("invalid Keycloak Research resource search")
         if any(row.get("name") == name for row in rows):
             raise AuthorizationUnavailable("new Research identity already exists in Keycloak")
-        self.ensure_resource(resource_type="research", resource_ref=research_id, owner_subject=caller.subject)
+        try:
+            self.ensure_resource(resource_type="research", resource_ref=research_id, owner_subject=caller.subject)
+        except Exception as exc:
+            # The create request may have succeeded before an owner-policy
+            # response failed. The exact random resource was verified absent
+            # above; remove only a matching resource owned by this subject.
+            try:
+                self.delete_resource(resource_type="research", resource_ref=research_id,
+                                     owner_subject=caller.subject)
+            except Exception:
+                raise RuntimeError(f"Research Keycloak resource needs cleanup: {research_id}") from exc
+            raise
         return caller
 
     def require_membership_manager(self, *, actor: str, research_id: str) -> None:

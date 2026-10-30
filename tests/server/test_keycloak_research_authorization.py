@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from server.identity.keycloak_authorization import keycloak_resource_uri
+from server.identity.keycloak_authorization import AuthorizationUnavailable, keycloak_resource_uri
 from server.identity.keycloak_research import (
     KeycloakResearchAuthorization,
     KeycloakResearchGrantManager,
@@ -41,6 +41,20 @@ def test_member_lookup_requires_exact_effective_name_and_unique_stable_identity(
     monkeypatch.setattr(federation_identity_sync, "manager_keycloak_admin_adapter", Duplicate)
     with pytest.raises(LookupError, match="missing or ambiguous"):
         resolve_keycloak_research_member("Alice")
+
+
+def test_failed_new_research_registration_cleans_up_only_the_checked_owner():
+    removed = []
+    def fail_create(**_kwargs):
+        raise AuthorizationUnavailable("owner policy registration failed")
+    manager = KeycloakResearchGrantManager(identity_provider=_identity,
+        settings_provider=lambda: {}, token_provider=lambda _s: "pat",
+        request=lambda *_args: (200, [], ""), ensure_resource=fail_create,
+        delete_resource=lambda **kwargs: removed.append(kwargs))
+    with pytest.raises(AuthorizationUnavailable):
+        manager.create_research_resource(actor="alice", research_id="research:random")
+    assert removed == [{"resource_type": "research", "resource_ref": "research:random",
+                        "owner_subject": "subject-a"}]
 
 
 def test_keycloak_decisions_have_no_owner_or_username_bypass():
