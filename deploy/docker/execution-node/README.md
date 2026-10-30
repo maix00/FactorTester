@@ -51,7 +51,11 @@ physical pages. Memory limits (2 GiB worker + 512 MiB market by default) do not
 replace aggregate host capacity admission; budget Manager, broker, identity,
 databases and OS headroom separately before enabling more nodes.
 
-Only a desktop user with explicit install permission may request local node
-installation. This operator Compose does not auto-download or enable a local
-node for web/mobile users. Distribution uses the existing signed adapter path;
-this file is not evidence that a downloadable node package has been published.
+The desktop user's local runtime is a different, private execution option. It
+is started by the signed-in desktop user on that user's computer; it does not
+register through this Compose, appear in Manager node discovery, or accept jobs
+from this or another Manager. The Manager may authorize and serve its signed
+download package, but it does not invoke the user's local runtime. This
+operator Compose is only for Manager-managed execution nodes and does not
+auto-download or enable the desktop runtime. No local-runtime package is
+published until a signed catalog entry and matching artifact are installed.

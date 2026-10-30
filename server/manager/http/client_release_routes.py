@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from urllib.parse import parse_qs, urlparse
 
 from server.manager.http.responses import json_response
 from server.manager.objects.models import TransferObjectKind
@@ -11,12 +12,17 @@ from server.services.client_release_channels import (
     load_beta_sparkle_appcast,
     load_client_release_channel,
 )
+from server.services.local_node_releases import (
+    DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE,
+    LocalNodeReleaseCatalog,
+)
 
 
 class ClientReleaseRoutesMixin:
     """Serve verified release metadata and immutable ranged downloads."""
 
     _CLIENT_RELEASE_UPLOAD_PATH = "/api/client/releases/beta/upload-access"
+    _LOCAL_NODE_CATALOG_PATH = "/api/local-node/releases"
 
     def _issue_client_release_upload_access(self, parsed) -> bool:
         """Issue a 7997 upload capability only to a Manager principal."""
@@ -86,6 +92,9 @@ class ClientReleaseRoutesMixin:
         }, 201)
         return True
     def _serve_client_release(self, path: str) -> bool:
+        if (path == self._LOCAL_NODE_CATALOG_PATH
+                or path.startswith("/api/local-node/releases/assets/")):
+            return self._serve_local_node_release(urlparse(self.path))
         public_key = (
             self.state.runtime_source_root
             / "tools/cli/release/trusted-beta-release-public.pem"
@@ -117,6 +126,111 @@ class ClientReleaseRoutesMixin:
             json_response(self, {"success": False, "error": "release unavailable"}, 503)
             return True
         return False
+
+    def _serve_local_node_release(self, parsed) -> bool:
+        """Serve a user-owned desktop package; this is not worker registration."""
+        path = parsed.path
+        asset_match = re.fullmatch(
+            r"/api/local-node/releases/assets/(macos-arm64|windows-x86_64|linux-x86_64)/([0-9a-f]{64})\.tar\.zst",
+            path,
+        )
+        if path != self._LOCAL_NODE_CATALOG_PATH and asset_match is None:
+            return False
+        session = self._session()
+        roles = session.get("keycloak_roles", ()) if session else ()
+        if not session:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        if DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE not in roles:
+            json_response(self, {
+                "success": False,
+                "error": f"Keycloak permission {DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE} is required",
+            }, 403)
+            return True
+        key = self.state.runtime_source_root / "tools/cli/release/trusted-beta-release-public.pem"
+        catalog = LocalNodeReleaseCatalog(self.state.release_root, key)
+        try:
+            if path == self._LOCAL_NODE_CATALOG_PATH:
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                platform = str(query.get("platform", [""])[0] or "")
+                package = catalog.package(platform)
+                if package is None:
+                    json_response(self, {
+                        "success": True, "authorized": True, "available": False,
+                        "platform": platform, "reason": "not-published",
+                    }, headers={"Cache-Control": "no-store"})
+                    return True
+                digest = package["sha256"]
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "private, no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                body = json.dumps({
+                    "success": True, "authorized": True, "available": True,
+                    **package,
+                    "download_url": f"/api/local-node/releases/assets/{platform}/{digest}.tar.zst",
+                }, ensure_ascii=False).encode("utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+                return True
+            assert asset_match is not None
+            platform, digest = asset_match.groups()
+            asset = catalog.asset(platform, digest)
+            self._stream_local_node_asset(asset, digest)
+        except FileNotFoundError:
+            json_response(self, {"success": False, "error": "local node package not found"}, 404)
+        except (OSError, ValueError):
+            json_response(self, {"success": False, "error": "local node package unavailable"}, 503)
+        return True
+
+    def _stream_local_node_asset(self, asset, digest: str) -> None:
+        """Stream a verified immutable local runtime package with byte ranges."""
+        size = asset.stat().st_size
+        start, end, status = 0, size - 1, 200
+        header = self.headers.get("Range", "")
+        if header:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", header.strip())
+            if not match or (not match.group(1) and not match.group(2)):
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            if match.group(1):
+                start = int(match.group(1))
+                end = int(match.group(2) or end)
+            else:
+                start = max(0, size - int(match.group(2)))
+            if start > end or start >= size:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            end = min(end, size - 1)
+            status = 206
+        self.send_response(status)
+        self.send_header("Content-Type", "application/zstd")
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Content-Disposition", 'attachment; filename="traderesearch-local-node.tar.zst"')
+        self.send_header("ETag", f'"{digest}"')
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "private, max-age=31536000, immutable")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        if self.command == "HEAD":
+            return
+        with asset.open("rb") as stream:
+            stream.seek(start)
+            remaining = end - start + 1
+            while remaining:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def _release_bytes(self, raw: bytes, content_type: str, etag: str) -> None:
         if self.headers.get("If-None-Match", "").strip('"') == etag:

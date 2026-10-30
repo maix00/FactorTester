@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import { useTranslation } from "react-i18next";
-import { DocsSettings } from "./docs-settings.tsx";
 import { ProfileSettings } from "./profile-settings.tsx";
 import { DeviceSettings } from "./device-settings.tsx";
 import { AccountActions } from "./account-actions.tsx";
@@ -34,7 +33,6 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
       controlDatabase: "/api/control-database/config",
       manager: "/api/worktrees",
       mihomo: "/api/admin/mihomo",
-      federation: "/api/federation/config",
       quota: "/api/jobs/storage",
       updates: "/api/client/releases/beta.json",
     };
@@ -74,7 +72,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
             <div className="tr-settings-card">
               {serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
             </div>
-          ) : section === "profiles" ? <ProfileSettings/> : section === "docs" ? <DocsSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "federation", "quota", "updates", "manager", "mihomo"].includes(section) ? (
+          ) : section === "profiles" ? <ProfileSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
               {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} onRefresh={() => setReload(value => value + 1)} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>

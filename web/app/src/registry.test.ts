@@ -6,9 +6,11 @@ test("builtin pages preserve desktop/mobile scopes", () => {
   for (const page of BUILTIN_PAGES) registerPage(page);
   assert.equal(getPage("more")?.scope, "mobile");
   const desktop = pagesForScope("desktop").filter((page) => page.sidebarVisible !== false);
-  assert.ok(["products", "factors", "strategies", "jobs"].every((id) => desktop.some((page) => page.id === id)));
+  assert.ok(["products", "factors", "strategies", "test-bench"].every((id) => desktop.some((page) => page.id === id)));
+  assert.ok(!desktop.some((page) => ["configuration", "jobs"].includes(page.id)));
+  assert.ok(desktop.some((page) => page.id === "technical-docs"));
   assert.ok(!desktop.some((page) => page.id === "account" || page.id === "settings"));
-  assert.deepEqual(pagesForScope("mobile").filter((page) => page.mobileTab).map((page) => page.id), ["research", "configuration", "trading", "more"]);
+  assert.deepEqual(pagesForScope("mobile").filter((page) => page.mobileTab).map((page) => page.id), ["research", "test-bench", "trading", "more"]);
 });
 
 test("duplicate page ids are rejected", () => {
@@ -20,6 +22,10 @@ test("admin-only pages are hidden until the matching Keycloak capability is pres
   assert.ok(!pagesForAdminCapabilities("mobile", ["admin_console:read"]).some((page) => page.id === "admin"));
   assert.ok(pagesForAdminCapabilities("desktop", ["admin_console:manage"]).some((page) => page.id === "admin"));
   assert.ok(pagesForAdminCapabilities("mobile", ["admin_console:manage"]).some((page) => page.id === "admin"));
+  assert.ok(pagesForAdminCapabilities("desktop", ["federation:manage"]).some((page) => page.id === "admin"));
+  assert.ok(pagesForAdminCapabilities("mobile", ["federation:manage"]).some((page) => page.id === "admin"));
+  assert.ok(pagesForAdminCapabilities("desktop", ["identity:manage"]).some((page) => page.id === "admin"));
+  assert.ok(pagesForAdminCapabilities("mobile", ["identity:manage"]).some((page) => page.id === "admin"));
 });
 
 test("every registered page has a title, icon and route", () => {
@@ -31,4 +37,5 @@ test("every registered page has a title, icon and route", () => {
   }
   assert.ok(pagesForScope("mobile").some((page) => page.id === "settings"));
   assert.ok(!pagesForScope("desktop").some((page) => page.id === "account"));
+  assert.equal(getPage("technical-docs")?.route, "/docs");
 });
