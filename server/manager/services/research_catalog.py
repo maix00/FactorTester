@@ -19,6 +19,7 @@ from typing import Any
 
 from tools.data.sqlite.db import connect_sqlite
 from .research_branches import BRANCH_SCHEMA, ResearchBranchesMixin
+from .research_share_links import ResearchShareLinksMixin
 
 VISIBILITIES = frozenset({"private", "superiors", "authorized", "public"})
 RESEARCH_STATUSES = frozenset({"active", "archived"})
@@ -27,7 +28,7 @@ MEMBER_STATUSES = frozenset({"active", "invited", "revoked"})
 RESEARCH_SCOPES = frozenset({"all", "mine", "subordinates", "shared"})
 
 
-class ResearchCatalog(ResearchBranchesMixin):
+class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
     """Persist Research relationships in the Manager-owned SQLite database."""
 
     def __init__(
@@ -78,6 +79,16 @@ class ResearchCatalog(ResearchBranchesMixin):
             conn.execute("""CREATE TABLE IF NOT EXISTS research_report_policy_pending (
                 report_id TEXT PRIMARY KEY, research_id TEXT NOT NULL, actor_ref TEXT NOT NULL,
                 owner_subject TEXT NOT NULL, creation_intent TEXT NOT NULL, created_at REAL NOT NULL
+            )""")
+            # Link metadata and recovery intents are not permission decisions.
+            # The link's actual user grant remains exclusively in Keycloak.
+            conn.execute("""CREATE TABLE IF NOT EXISTS research_share_link_issuers (
+                link_id TEXT PRIMARY KEY, identity_id TEXT NOT NULL, subject TEXT NOT NULL
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS research_share_link_claims (
+                link_id TEXT NOT NULL, identity_id TEXT NOT NULL, subject TEXT NOT NULL,
+                status TEXT NOT NULL, created_at REAL NOT NULL,
+                PRIMARY KEY(link_id,identity_id)
             )""")
 
     def set_synchronizer(self, synchronizer, schedule_refresh=None) -> None:
@@ -1625,7 +1636,9 @@ class ResearchCatalog(ResearchBranchesMixin):
         expires_at: float = 0,
     ) -> dict[str, Any]:
         if self._research_authorizer is not None:
-            raise RuntimeError("Research links require Keycloak grant migration")
+            return self._create_keycloak_share_link(target_kind=target_kind,
+                research_id=research_id, report_id=report_id, actor=actor,
+                mode=mode, expires_at=expires_at)
         if target_kind not in {"research", "report"}:
             raise ValueError("target_kind must be research or report")
         if mode not in {"one_time", "permanent"}:
@@ -1685,6 +1698,9 @@ class ResearchCatalog(ResearchBranchesMixin):
         if not self._research_access(research, actor)["can_manage"]:
             raise PermissionError("research sharing is not authorized")
         with connect_sqlite(self.db_path) as conn:
+            if self._research_authorizer is not None:
+                # Serialize with an in-flight Keycloak grant for this link.
+                conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 """SELECT * FROM research_catalog_share_links
                    WHERE research_id=? AND link_id=?""",
@@ -1692,6 +1708,9 @@ class ResearchCatalog(ResearchBranchesMixin):
             ).fetchone()
             if row is None:
                 raise KeyError("share link not found")
+            if self._research_authorizer is not None:
+                kind, target, _scopes = self._link_target(row)
+                self._share_manager().require_resource_share(actor=actor, resource_type=kind, resource_ref=target)
             conn.execute(
                 "UPDATE research_catalog_share_links SET revoked_at=? WHERE link_id=?",
                 (time.time(), link_id),
@@ -1704,7 +1723,7 @@ class ResearchCatalog(ResearchBranchesMixin):
 
     def redeem_share_link(self, token: str, *, actor: str) -> dict[str, Any]:
         if self._research_authorizer is not None:
-            raise RuntimeError("Research links require Keycloak grant migration")
+            return self._redeem_keycloak_share_link(token, actor=actor)
         clean_token = _text(token, "token", maximum=512)
         digest = hashlib.sha256(clean_token.encode("utf-8")).hexdigest()
         now = time.time()

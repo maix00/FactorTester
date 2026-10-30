@@ -11,6 +11,7 @@ import json
 import secrets
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -19,6 +20,7 @@ from urllib.parse import urlencode
 from scripts.test.keycloak_cross_realm_smoke import Sandbox
 from server.identity.keycloak import ServiceOIDCClient
 from server.identity.keycloak_authorization import ensure_keycloak_resource
+from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
 from server.identity.keycloak_research import KeycloakResearchAuthorization, KeycloakResearchGrantManager
 from server.identity.request_context import bind_verified_identity, identity_request
 from server.manager.services.research_catalog import ResearchCatalog
@@ -53,13 +55,13 @@ def run(sandbox):
         "name": "client-audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
         "config": {"included.client.audience": client_id, "access.token.claim": "true"},
     })
-    for name in ("owner", "member"):
+    for name in ("owner", "member", "late"):
         sandbox.api("POST", realm, "users", {"username": name, "enabled": True, "emailVerified": True,
             "firstName": "Temporary", "lastName": "User", "email": name + "@example.invalid",
             "attributes": {"tr_identity_id": ["stable-" + name]},
             "credentials": [{"type": "password", "value": password, "temporary": False}]})
     users = {name: sandbox.find(realm, "users?" + urlencode({"username": name, "exact": "true"}),
-                                name, field="username") for name in ("owner", "member")}
+                                name, field="username") for name in ("owner", "member", "late")}
     client = ServiceOIDCClient(sandbox.base, realm, client_id, client_secret=secret)
     issuer = "http://localhost:8080/realms/" + realm
     sessions = {}
@@ -88,9 +90,14 @@ def run(sandbox):
             return sandbox.api("GET", realm, path)
         def user_by_identity_id(self, stable):
             return by_identity(stable)
+    def evaluator():
+        return KeycloakPolicyEvaluator(allowed_kinds={"research", "research_report"},
+            allowed_scopes={"read", "manage", "share"}, adapter=Directory(), settings=settings,
+            request=lambda _adapter, client_uuid, body: sandbox.api("POST", realm,
+                f"clients/{client_uuid}/authz/resource-server/policy/evaluate", body))
     manager = KeycloakResearchGrantManager(settings_provider=lambda: settings,
         user_provider=lambda subject: sandbox.api("GET", realm, "users/" + subject),
-        user_by_identity=by_identity)
+        user_by_identity=by_identity, link_policy_evaluator=evaluator)
     resolver = lambda name: {"identity_id": "stable-" + name, "subject": users[name]["id"]}
     with tempfile.TemporaryDirectory(prefix="tr-research-grants-") as root, \
             patch("server.identity.keycloak_authorization.oidc_settings", lambda: settings), \
@@ -158,10 +165,55 @@ def run(sandbox):
                     path="/api/client/profile-agent/assistance",
                     query=urlencode({"profile_id": "self", "workspace_id": workspace_id})))
                 assert replies[-1][1] == 200 and replies[-1][0]["page"] is None
+        with identity_request():
+            bind_verified_identity(*sessions["owner"])
+            link = catalog.create_share_link(target_kind="research", research_id=ref, actor="owner")
+        with identity_request():
+            bind_verified_identity(*sessions["member"])
+            started = time.perf_counter()
+            assert catalog.redeem_share_link(link["token"], actor="member")["research_id"] == ref
+            redemption_seconds = time.perf_counter() - started
+            assert len(catalog.list_researches(viewer="member")) == 1
+
+        # Remove the issuer's Keycloak share scope without changing the link.
+        # The next claimant must fail under a live Policy Evaluation decision.
+        pat = manager.token_provider(settings)
+        resource = manager._resource(settings, pat, "research", ref)
+        resource_id = str(resource.get("_id") or resource.get("id"))
+        owners = [row for row in manager._resource_policies(settings, pat, resource_id)
+                  if str(row.get("name") or "").endswith(":owner")]
+        assert len(owners) == 1 and "share" in owners[0]["scopes"]
+        owner_policy = owners[0]
+        original = {"name": owner_policy["name"], "description": owner_policy["description"],
+                    "users": [users["owner"]["id"]], "scopes": owner_policy["scopes"], "logic": "POSITIVE"}
+        without_share = {**original, "scopes": [scope for scope in original["scopes"] if scope != "share"]}
+        manager.request(settings, pat, "PUT", "uma-policy/" + owner_policy["id"], without_share)
+        with identity_request():
+            bind_verified_identity(*sessions["late"])
+            try:
+                catalog.redeem_share_link(link["token"], actor="late")
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError("revoked issuer share scope allowed link redemption")
+        manager.request(settings, pat, "PUT", "uma-policy/" + owner_policy["id"], original)
+        with identity_request():
+            bind_verified_identity(*sessions["owner"])
+            catalog.revoke_share_link(ref, link["link_id"], actor="owner")
+        with identity_request():
+            bind_verified_identity(*sessions["late"])
+            try:
+                catalog.redeem_share_link(link["token"], actor="late")
+            except KeyError:
+                pass
+            else:
+                raise AssertionError("revoked link was redeemed")
         with sqlite3.connect(database) as db:
             assert db.execute("SELECT authorized_users_json FROM research_catalog_researches").fetchone()[0] == "[]"
     return {"real_keycloak": True, "real_catalog": True, "same_token_revocation": True,
-            "revoked_page_context_removed": True, "legacy_acl_written": False,
+            "revoked_page_context_removed": True, "real_link_redemption": True,
+            "issuer_and_link_revocation": True, "legacy_acl_written": False,
+            "local_redeem_seconds": round(redemption_seconds, 3),
             "profile_membership_provider": "denial-only test double", "agent_runtime_admission": "test double"}
 
 

@@ -334,6 +334,7 @@ class KeycloakResearchGrantManager:
                  request: Callable = _protection_request,
                  user_provider: Callable = _keycloak_user,
                  user_by_identity: Callable = _keycloak_user_by_identity,
+                 link_policy_evaluator: Callable | None = None,
                  ensure_resource: Callable = ensure_keycloak_resource,
                  delete_resource: Callable = delete_keycloak_resource,
                  clear_cache: Callable = clear_authorization_cache) -> None:
@@ -347,6 +348,7 @@ class KeycloakResearchGrantManager:
         self.request = request
         self.user_provider = user_provider
         self.user_by_identity = user_by_identity
+        self.link_policy_evaluator = link_policy_evaluator
         self.ensure_resource = ensure_resource
         self.delete_resource = delete_resource
         self.clear_cache = clear_cache
@@ -420,6 +422,47 @@ class KeycloakResearchGrantManager:
         if caller is None or not self.may_share(caller.token, resource_type=resource_type,
                                                  resource_ref=resource_ref, scope="share"):
             raise PermissionError("Keycloak did not authorize sharing this resource")
+
+    def require_link_issuer_share(self, *, identity_id: str, subject: str,
+                                  research_id: str, resource_type: str, resource_ref: str) -> None:
+        """Evaluate a link issuer's *current* share scope in its home realm.
+
+        The link carries the stable identity and exact subject recorded when a
+        verified user created it. This is an administrative evaluation of that
+        principal, not an end-user session or a username-based impersonation.
+        """
+        if resource_type not in {"research", "research_report"}:
+            raise ValueError("unsupported Research sharing target")
+        try:
+            user = self.user_by_identity(identity_id)
+        except (LookupError, AuthorizationUnavailable):
+            raise
+        except Exception as exc:
+            raise AuthorizationUnavailable("Research link issuer lookup is unavailable") from exc
+        attrs = user.get("attributes") if isinstance(user, dict) else None
+        if (not isinstance(user, dict) or user.get("enabled") is not True
+                or user.get("id") != subject or not isinstance(attrs, dict)
+                or attrs.get("tr_identity_id") != [identity_id]):
+            raise PermissionError("Research link issuer identity is unavailable")
+        try:
+            if self.link_policy_evaluator is None:
+                from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
+                evaluator = KeycloakPolicyEvaluator(allowed_kinds={"research", "research_report"},
+                                                    allowed_scopes={"read", "manage", "share"})
+            else:
+                evaluator = self.link_policy_evaluator()
+            decisions = evaluator.evaluate(identity_id, candidates=[
+                ("research", research_id, ("read", "manage")),
+                (resource_type, resource_ref, ("share",)),
+            ])
+        except (LookupError, ValueError, AuthorizationUnavailable):
+            raise
+        except Exception as exc:
+            raise AuthorizationUnavailable("Research link issuer authorization is unavailable") from exc
+        if any(decisions.get(candidate) is not True for candidate in (
+                ("research", research_id, "read"), ("research", research_id, "manage"),
+                (resource_type, resource_ref, "share"))):
+            raise PermissionError("Keycloak no longer authorizes the Research link issuer")
 
     def list_user_grants(self, *, actor: str, resource_type: str, resource_ref: str) -> list[dict[str, Any]]:
         """List explicit user grants from Keycloak, not the old ACL column."""
