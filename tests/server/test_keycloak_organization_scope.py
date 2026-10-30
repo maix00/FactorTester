@@ -26,3 +26,11 @@ def test_manager_organization_scope_uses_only_explicit_deployment_ids() -> None:
     ) == ("org-a", "org-b")
 
 
+def test_new_organization_setting_does_not_fall_back_when_explicitly_empty() -> None:
+    assert configured_managed_organizations(
+        public_server=False, server_role="feat",
+        environment={"TRADERESEARCH_MANAGED_ORGANIZATIONS": "",
+                     "FACTORTESTER_MANAGED_ORGANIZATIONS": "old-org"},
+    ) == ()
+
+

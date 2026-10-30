@@ -56,7 +56,8 @@ def configured_managed_organizations(
     else:
         environ = os.environ if environment is None else environment
         raw = str(environ.get("TRADERESEARCH_MANAGED_ORGANIZATIONS")
-                  or environ.get("FACTORTESTER_MANAGED_ORGANIZATIONS") or "")
+                  if "TRADERESEARCH_MANAGED_ORGANIZATIONS" in environ
+                  else environ.get("FACTORTESTER_MANAGED_ORGANIZATIONS") or "")
         result = normalize_managed_organizations(raw)
     del public_server, server_role
     return result

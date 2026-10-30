@@ -139,6 +139,33 @@ def test_unavailable_keycloak_fails_closed_after_cache_expiry(auth):
     assert admission.server_admission(session, state=internal) == (False, "server_authorization_unavailable")
 
 
+def test_conflicting_old_and_new_environment_flags_fail_closed(auth, monkeypatch):
+    _, session, internal, _ = auth
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv("TRADERESEARCH_PUBLIC_SERVER", "0")
+    assert admission.server_admission(session, state=internal) == (False, "server_authorization_unavailable")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "false")
+    assert admission.server_admission(session, state=internal) == (True, "")
+
+
+def test_manager_and_flask_deployment_id_must_match(auth, monkeypatch):
+    _, session, internal, _ = auth
+    monkeypatch.setenv("TRADERESEARCH_SERVER_ID", "other-server")
+    assert admission.server_admission(session, state=internal) == (False, "server_authorization_unavailable")
+    monkeypatch.setenv("TRADERESEARCH_SERVER_ID", SERVER)
+    monkeypatch.setenv("TRADERESEARCH_MANAGED_ORGANIZATIONS", "other")
+    assert admission.server_admission(session, state=internal) == (False, "server_authorization_unavailable")
+
+
+def test_new_environment_names_are_shared_with_flask(auth, monkeypatch):
+    _, session, internal, _ = auth
+    monkeypatch.setenv("TRADERESEARCH_PUBLIC_SERVER", "0")
+    monkeypatch.setenv("TRADERESEARCH_SERVER_ID", SERVER)
+    monkeypatch.setenv("TRADERESEARCH_MANAGED_ORGANIZATIONS", ORG)
+    assert admission.server_admission(session, state=internal) == (True, "")
+    assert admission.server_admission(session) == (True, "")
+
+
 def test_both_session_entry_points_use_the_same_policy(auth, monkeypatch):
     from server.manager.state.sessions import SessionStateMixin
     import server.identity.user_session as session_module

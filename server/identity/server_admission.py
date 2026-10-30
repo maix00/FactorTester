@@ -9,6 +9,7 @@ admission. Visitor and machine-service capabilities have separate policies.
 from __future__ import annotations
 
 from collections import OrderedDict
+import os
 import threading
 import time
 from urllib.parse import quote, urlencode
@@ -132,17 +133,43 @@ def _public_user(adapter, subject, client_id, issuer):
     return any(isinstance(row, dict) and row.get("name") == "public_server:login" for row in rows)
 
 
-def _context(state):
-    if state is not None:
-        return (bool(getattr(state, "public_server", False)),
-                str(getattr(state, "server_id", "") or "").strip(),
-                tuple(getattr(state, "managed_organizations", ()) or ()))
-    from server import branding
-    from server.manager.domain.organization_scope import configured_managed_organizations
+def _environment_value(name, convert):
+    newer = os.environ.get("TRADERESEARCH_" + name)
+    older = os.environ.get("FACTORTESTER_" + name)
+    if newer is not None and older is not None and convert(newer) != convert(older):
+        raise ValueError("conflicting Manager deployment configuration")
+    value = newer if newer is not None else older
+    return (convert(value), True) if value is not None else (None, False)
 
-    public = branding.env_flag("PUBLIC_SERVER", branding.env_flag("REQUIRE_DEVICE_AUTH"))
-    return (public, branding.env("SERVER_ID").strip(),
-            configured_managed_organizations(public_server=public, server_role=""))
+
+def _boolean(value):
+    selected = str(value or "").strip().lower()
+    if selected in {"1", "true", "yes", "on"}:
+        return True
+    if selected in {"0", "false", "no", "off", ""}:
+        return False
+    raise ValueError("invalid Manager deployment flag")
+
+
+def _context(state):
+    from server.manager.domain.organization_scope import normalize_managed_organizations
+
+    public, public_set = _environment_value("PUBLIC_SERVER", _boolean)
+    device, device_set = _environment_value("REQUIRE_DEVICE_AUTH", _boolean)
+    server_id, server_set = _environment_value("SERVER_ID", lambda value: str(value).strip())
+    organizations, org_set = _environment_value("MANAGED_ORGANIZATIONS", normalize_managed_organizations)
+    if not public_set:
+        public, public_set = (device, True) if device_set else (False, False)
+    if state is None:
+        return bool(public), str(server_id or ""), tuple(organizations or ())
+    state_public = bool(getattr(state, "public_server", False))
+    state_server = str(getattr(state, "server_id", "") or "").strip()
+    state_orgs = tuple(getattr(state, "managed_organizations", ()) or ())
+    if ((public_set and public != state_public)
+            or (server_set and server_id != state_server)
+            or (org_set and organizations != state_orgs)):
+        raise ValueError("Manager and service deployment configuration disagree")
+    return state_public, state_server, state_orgs
 
 
 def server_admission(session, *, state=None):

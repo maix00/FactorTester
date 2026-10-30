@@ -215,14 +215,11 @@ class ManagerState(
         )
         self.vibe_trading_root = VIBE_TRADING_ROOT
         self.python = python
-        self.server_role = str(
-            server_role or os.environ.get("FACTORTESTER_SERVER_ROLE") or "feat"
-        ).strip().lower()
+        from server import branding
+        self.server_role = str(server_role or branding.env("SERVER_ROLE") or "feat").strip().lower()
         if self.server_role not in {"main", "feat"}:
             raise ValueError("server_role must be main or feat")
-        self.server_id = str(
-            server_id or os.environ.get("FACTORTESTER_SERVER_ID") or "local"
-        ).strip()
+        self.server_id = str(server_id or branding.env("SERVER_ID") or "local").strip()
         if not self.server_id:
             raise ValueError("server_id is required")
         raw_fixed_port = fixed_port
@@ -268,12 +265,8 @@ class ManagerState(
         self.require_login_for_ui = _env_bool(
             "FACTORTESTER_REQUIRE_LOGIN_FOR_UI", False,
         )
-        self.require_device_auth = _env_bool(
-            "FACTORTESTER_REQUIRE_DEVICE_AUTH", False,
-        )
-        self.public_server = _env_bool(
-            "FACTORTESTER_PUBLIC_SERVER", self.require_device_auth,
-        )
+        self.require_device_auth = branding.env_flag("REQUIRE_DEVICE_AUTH")
+        self.public_server = branding.env_flag("PUBLIC_SERVER", self.require_device_auth)
         # This is an expected deployment identity, not permission by itself.
         # Login requires a matching reciprocal Keycloak Realm Group binding.
         from server.manager.domain.organization_scope import configured_managed_organizations
