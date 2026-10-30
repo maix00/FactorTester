@@ -19,7 +19,7 @@
   pending/.style={-{Stealth[length=2.2mm]},draw=orange!75!black,dashed,line width=1pt},
   number/.style={circle,fill=white,draw=black!35,inner sep=1.2pt,font=\footnotesize\bfseries},
   heading/.style={font=\bfseries,anchor=west,text=black!80},
-  note/.style={font=\small,anchor=north west,align=left,text width=9.3cm,text=black!80},
+  note/.style={font=\normalsize,anchor=north west,align=left,text width=9.3cm,text=black!80},
 ]
   % A single public Manager host, outside the organizations.
   \draw[host] (2.3,26.2) rectangle (18.9,30.4);
@@ -28,7 +28,7 @@
   \node[service,text width=1.5cm] (publicmanager) at (3.65,28.1) {{\Large\faServer}\\Manager};
   \node[service,text width=1.5cm] (publickeycloak) at (6,28.1) {{\Large\faKey}\\Keycloak};
   \node[data,text width=2.05cm] (publicstore) at (8.35,28.1) {{\Large\faDatabase}\\PostgreSQL\\CouchDB};
-  \node[service,text width=1.65cm] (publicqueue) at (10.7,28.1) {{\Large\faRandom}\\RabbitMQ};
+  \node[service,text width=1.8cm] (publicqueue) at (10.7,28.1) {{\Large\faRandom}\\RabbitMQ};
   \draw[optional] (11.85,27.2) rectangle (16.6,29.25);
   \node[font=\footnotesize,text=orange!75!black] at (14.23,29.03) {\TRlabel{可选 · 同机执行节点}{Optional co-hosted execution}};
   \node[service,text width=1.5cm] (publicworker) at (13.05,28.1) {{\Large\faCogs}\\Nautilus};
@@ -69,10 +69,10 @@
   \node[service] (am) at (1.75,17.25) {{\Large\faServer}\\Manager};
   \node[service] (ak) at (4.8,17.25) {{\Large\faKey}\\Keycloak};
   \node[data] (as) at (7.85,17.25) {{\Large\faDatabase}\\PostgreSQL\\CouchDB};
-  \node[service,text width=1.65cm] (aq) at (1.35,14.95) {{\Large\faRandom}\\RabbitMQ};
+  \node[service,text width=1.8cm] (aq) at (1.35,14.95) {{\Large\faRandom}\\RabbitMQ};
   \draw[optional] (2.5,13.9) rectangle (7.0,16.0);
   \node[font=\footnotesize,text=orange!75!black] at (4.75,15.75) {\TRlabel{可选 · 同机执行节点}{Optional co-hosted execution}};
-  \node[service,text width=1.35cm] (aw) at (3.65,14.95) {{\Large\faCogs}\\Nautilus};
+  \node[service,text width=1.45cm] (aw) at (3.65,14.95) {{\Large\faCogs}\\Nautilus};
   \node[service,text width=1.35cm] (aa) at (5.95,14.95) {{\Large\faChartLine}\\Alpha};
   \draw[optional] (7.1,13.9) rectangle (9.2,16.0);
   \node[font=\footnotesize,text=orange!75!black] at (8.15,15.75) {\TRlabel{可选 · 数据}{Optional data}};
@@ -189,7 +189,7 @@
 
   % Detailed edge annotations are included in the same static figure.
   \node[heading,font=\small\bfseries] at (10.3,11.75) {\TRlabel{连线说明}{Connections}};
-  \node[note] at (10.3,11.4) {\textbf{1}\enspace\TRlabel{仅访问所属机构内网；公网需授权。校验待验收。}{Own intranet; public needs permission. Checks pending.}};
+  \node[note] at (10.3,11.4) {\textbf{1}\enspace\TRlabel{仅访问所属机构内网；公网需授权。校验待验收。}{Own intranet; public needs permission. Pending.}};
   \node[note] at (10.3,10.92) {\textbf{2}\enspace\TRlabel{联邦：能力、任务与结果；身份同步待验收。}{Federation: discovery, jobs, results; sync pending.}};
   \node[note] at (10.3,10.44) {\textbf{3}\enspace\TRlabel{Celery / RabbitMQ 收发任务；跨主机待验收。}{Celery / RabbitMQ: jobs; remote tests pending.}};
   \node[note] at (10.3,9.96) {\textbf{4}\enspace\TRlabel{Nautilus、Alpha 读取行情；bridge 提供因子。}{Nautilus + Alpha share data; bridge supplies factors.}};
