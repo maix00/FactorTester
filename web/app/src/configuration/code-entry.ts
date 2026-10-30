@@ -1,4 +1,5 @@
 /** Independent bundle: Monaco and workers never enter desktop/mobile startup. */
+import { assetURL } from "../assets.ts";
 import * as monaco from "monaco-editor";
 import { parseTree, findNodeAtLocation } from "jsonc-parser";
 import type { CodeFactory } from "./code-loader.ts";
@@ -6,7 +7,8 @@ import type { CodeFactory } from "./code-loader.ts";
 let modelSequence = 0;
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = {
-  getWorkerUrl: (_module: string, label: string) => `/research-static/vendor/web-app/${label === "json" ? "configuration-json-worker" : "configuration-editor-worker"}.js`,
+  // Supplying the Worker directly bypasses Monaco's blob bootstrap under script-src self.
+  getWorker: (_module: string, label: string) => new Worker(assetURL(`/research-static/vendor/web-app/${label === "json" ? "configuration-json-worker" : "configuration-editor-worker"}.js`), { name: label, type: "module" }),
 };
 
 const mount: CodeFactory = (element, text, schema, onChange) => {

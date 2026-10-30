@@ -90,7 +90,7 @@ class LocalProfileStore:
         del profile_id, server_url
         raise ValueError(
             "client Profile has no server endpoint; configure the client "
-            "connection with `factortester configure`"
+            "connection with `traderesearch configure`"
         )
 
     def upsert_workspace(

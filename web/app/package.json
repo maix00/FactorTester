@@ -9,12 +9,13 @@
     "build": "npm run build:desktop && npm run build:mobile && npm run build:loader && npm run build:configuration-code",
     "build:desktop": "esbuild src/desktop-entry.tsx --bundle --minify --format=iife --target=es2020 --outfile=../../static/vendor/web-app/desktop.js",
     "build:mobile": "esbuild src/mobile-entry.tsx --bundle --minify --format=iife --target=es2020 --outfile=../../static/vendor/web-app/mobile.js",
-    "build:loader": "esbuild src/loader.ts --minify --format=iife --target=es2020 --outfile=../../static/vendor/web-app/loader.js",
+    "build:loader": "esbuild src/loader.ts --bundle --minify --format=iife --target=es2020 --outfile=../../static/vendor/web-app/loader.js",
     "build:configuration-code": "esbuild src/configuration/code-entry.ts --bundle --minify --format=iife --target=es2020 --loader:.ttf=dataurl --outfile=../../static/vendor/web-app/configuration-code.js && esbuild node_modules/monaco-editor/esm/vs/editor/editor.worker.js --bundle --minify --format=iife --outfile=../../static/vendor/web-app/configuration-editor-worker.js && esbuild node_modules/monaco-editor/esm/vs/language/json/json.worker.js --bundle --minify --format=iife --outfile=../../static/vendor/web-app/configuration-json-worker.js",
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.4",
+    "@cfworker/json-schema": "4.1.1",
     "@ionic/react": "9.0.9",
     "@ionic/react-router": "9.0.9",
     "@rjsf/antd": "6.11.0",

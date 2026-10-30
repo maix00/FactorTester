@@ -210,6 +210,11 @@ class AgentAppServerProcess:
         deadline = time.monotonic() + max(0.1, float(timeout))
         with self._condition:
             while identifier not in self._responses:
+                process = self._process
+                if process is None or process.poll() is not None:
+                    raise AgentAppServerProcessError(
+                        f"app-server exited before responding: {method}"
+                    )
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise AgentAppServerProcessError(
@@ -282,5 +287,6 @@ class AgentAppServerProcess:
                 except OSError:
                     pass
         with self._condition:
+            if self._process is process:
+                self._process = None
             self._condition.notify_all()
-        self._process = None

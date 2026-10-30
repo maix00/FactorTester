@@ -9,7 +9,7 @@ from server.services.strategy_source_inspection import inspect_source, normalize
 from server.services.factor_strategy_templates import normalize_factor_bindings
 
 from .model import normalize_text, normalize_visibility
-from .permissions import access_for, subordinate_principals
+from .permissions import access_for, access_many, subordinate_principals
 from .store import StrategyLibraryStore
 
 
@@ -40,11 +40,7 @@ class StrategyLibraryService:
         subordinate_users: set[str] | None = None,
         explicitly_shared: bool | None = None,
     ) -> dict[str, bool]:
-        shares = (
-            {principal} if explicitly_shared
-            else set() if explicitly_shared is not None
-            else set(self.store.shares(str(entry["strategy_ref"])))
-        )
+        shares = set()
         return access_for(
             entry,
             principal=principal,
@@ -64,6 +60,7 @@ class StrategyLibraryService:
         subordinate_users: set[str] | None = None,
         revision: dict[str, Any] | None = None,
         explicitly_shared: bool | None = None,
+        access: dict[str, bool] | None = None,
     ) -> dict[str, Any]:
         revision = revision or self.store.get_revision(
             str(entry["current_revision_ref"]), include_source=False,
@@ -77,7 +74,7 @@ class StrategyLibraryService:
             key: value for key, value in revision.items()
             if key != "source_code"
         }
-        item["access"] = self._access(
+        item["access"] = access if access is not None else self._access(
             entry, principal, subordinate_users=subordinate_users,
             explicitly_shared=explicitly_shared,
         )
@@ -98,17 +95,31 @@ class StrategyLibraryService:
         page = max(1, int(page))
         limit = min(100, max(1, int(limit)))
         subordinate_users = subordinate_principals(principal, self.account_provider)
-        visible, total = self.store.list_visible_entries(
-            principal=principal, scope=scope,
-            subordinate_users=subordinate_users, query=query,
-            page=page, limit=limit,
-        )
-        rows = [self._summary(
-            value["entry"], principal,
-            subordinate_users=subordinate_users,
-            revision=value["revision"],
-            explicitly_shared=value["explicitly_shared"],
-        ) for value in visible]
+        rows, total, scan_page = [], 0, 1
+        lower, upper = (page - 1) * limit, page * limit
+        # Page metadata, never source. Authorize before counting/pagination;
+        # a denied local share must not leak a row or inflate the visible total.
+        while True:
+            candidates, candidate_total = self.store.list_visible_entries(
+                principal=principal, scope=scope,
+                subordinate_users=subordinate_users, query=query,
+                page=scan_page, limit=100,
+            )
+            access = access_many([v["entry"] for v in candidates],
+                                 principal=principal, subordinate_users=subordinate_users)
+            for value in candidates:
+                decision = access[str(value["entry"]["strategy_ref"])]
+                if not decision["can_view"]:
+                    continue
+                if lower <= total < upper:
+                    rows.append(self._summary(
+                        value["entry"], principal, subordinate_users=subordinate_users,
+                        revision=value["revision"], access=decision,
+                    ))
+                total += 1
+            if not candidates or scan_page * 100 >= candidate_total:
+                break
+            scan_page += 1
         return {
             "success": True,
             "scope": scope,
@@ -138,7 +149,8 @@ class StrategyLibraryService:
         item["library_scope"] = "user_custom"
         item["library_kind"] = "nautilus_strategy_source"
         item["access"] = access
-        item["shares"] = self.store.shares(strategy_ref) if access["can_share"] else []
+        item["shares"] = []
+        item["permissions_managed_by"] = "keycloak"
         item["current_revision"] = revision
         item["revisions"] = self.store.list_revisions(strategy_ref)
         return {"success": True, "strategy": item}
@@ -180,6 +192,12 @@ class StrategyLibraryService:
         return revision
 
     def create(self, payload: dict[str, Any], *, principal: str) -> dict[str, Any]:
+        from server.identity.keycloak_authorization import (
+            keycloak_request_identity, ensure_keycloak_resource,
+        )
+        identity = keycloak_request_identity()
+        if identity is None or identity.username != principal:
+            raise PermissionError("Strategy creation requires a verified Keycloak identity")
         name = normalize_text(payload.get("name"), field="strategy name", limit=160)
         if not name:
             raise ValueError("strategy name is required")
@@ -202,6 +220,16 @@ class StrategyLibraryService:
             requirements=requirements,
             created_by=principal,
         )
+        try:
+            ensure_keycloak_resource(
+                resource_type="strategy", resource_ref=refs["strategy_ref"],
+                owner_subject=identity.subject,
+            )
+        except Exception:
+            # Preserve the revision for audit, but do not expose a half-created
+            # active strategy when its authoritative permission could not bind.
+            self.store.delete(refs["strategy_ref"])
+            raise
         return self.get(
             refs["strategy_ref"], principal=principal, include_source=False,
         )
@@ -276,28 +304,14 @@ class StrategyLibraryService:
             raise KeyError("strategy not found")
         if not self._access(entry, principal)["can_share"]:
             raise PermissionError("无权管理该策略共享")
-        return {"success": True, "strategy_ref": strategy_ref, "shares": self.store.shares(strategy_ref)}
+        return {"success": True, "strategy_ref": strategy_ref, "shares": [],
+                "managed_externally": True, "identity_provider": "keycloak"}
 
     def grant(self, strategy_ref: str, target: str, *, principal: str) -> dict[str, Any]:
-        entry = self.store.get_entry(strategy_ref)
-        if entry is None:
-            raise KeyError("strategy not found")
-        if not self._access(entry, principal)["can_share"]:
-            raise PermissionError("无权管理该策略共享")
-        target = str(target or "").strip()
-        if not target or len(target) > 160:
-            raise ValueError("shared principal is required")
-        self.store.grant(strategy_ref, target)
-        return self.shares(strategy_ref, principal=principal)
+        raise PermissionError("Strategy grants are managed in Keycloak")
 
     def revoke(self, strategy_ref: str, target: str, *, principal: str) -> dict[str, Any]:
-        entry = self.store.get_entry(strategy_ref)
-        if entry is None:
-            raise KeyError("strategy not found")
-        if not self._access(entry, principal)["can_share"]:
-            raise PermissionError("无权管理该策略共享")
-        self.store.revoke(strategy_ref, str(target or "").strip())
-        return self.shares(strategy_ref, principal=principal)
+        raise PermissionError("Strategy grants are managed in Keycloak")
 
 
 def _normalize_requirements(value: dict[str, Any]) -> dict[str, Any]:

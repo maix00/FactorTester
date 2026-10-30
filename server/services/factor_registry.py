@@ -32,7 +32,6 @@ from typing import TYPE_CHECKING
 from flask import has_request_context, session
 
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
-from tools.data.account_manage import can_view_user_scope
 from tools.data.factor_workspace.storage import (
     load_factor_source,
     load_public_factor_source,
@@ -447,33 +446,32 @@ def _public_factor_source_exists(factor_id: str) -> bool:
     )
 
 
-def _is_registered_shared_factor(
-    owner_username: str,
-    factor_id: str,
+def _keycloak_factor_source_use_allowed(
+    active_user: str | None, owner: str, factor_id: str,
 ) -> bool:
-    """Return whether an owner explicitly registered a factor for research."""
-    try:
-        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-            row = conn.execute(
-                """
-                SELECT 1 FROM account_factor_param_configs
-                WHERE username=? AND ff_alias=?
-                LIMIT 1
-                """,
-                (owner_username, factor_id),
-            ).fetchone()
-    except (OSError, sqlite3.Error):
+    """Check cross-owner factor use with the verified request's Keycloak token."""
+    if not active_user or not has_request_context():
         return False
-    return row is not None
+    from server.identity.keycloak_authorization import (
+        keycloak_factor_source_permission,
+        keycloak_request_credentials,
+    )
+
+    credentials = keycloak_request_credentials()
+    if credentials is None or credentials[2] != active_user:
+        return False
+    return keycloak_factor_source_permission(
+        credentials[0], owner_username=owner, factor_id=factor_id, scope="use",
+    )
 
 
 def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[str, str, str, str]:
     """Resolve an optional owner-qualified factor family reference.
 
-    Long-lived custom sources remain owner-qualified. Another visible account
-    may execute one only after the owner has explicitly registered that factor
-    family in the factor library. Page UUIDs remain a cache, never an authority
-    for source identity or sharing.
+    Long-lived custom sources remain owner-qualified. Cross-owner use is
+    authorized by the Keycloak ``use`` scope; local account hierarchy and
+    factor-library rows are not authorization authorities. Page UUIDs remain
+    a cache, never an authority for source identity or sharing.
     """
     owner, factor_id = _split_factor_owner_ref(module_name)
     session_user = session.get("username") if has_request_context() else ""
@@ -483,26 +481,20 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
     if owner:
         if _active_run_source("custom", owner, factor_id):
             return "custom", owner, factor_id, f"{owner}:{factor_id}"
-        owner_visible = bool(
-            active_user
-            and (
-                owner == active_user
-                or owner in _authorized_factor_source_owners.get()
-                or can_view_user_scope(active_user, owner)
+        if owner == active_user:
+            owner_visible = True
+        elif has_request_context():
+            owner_visible = _keycloak_factor_source_use_allowed(
+                active_user, owner, factor_id,
             )
-        )
+        else:
+            # This context is populated only by trusted Manager preparation
+            # code after request-bound authorization. It carries no user-tree
+            # or local account role decisions.
+            owner_visible = owner in _authorized_factor_source_owners.get()
         visible_shared_factor = bool(
-            owner != active_user
-            and owner_visible
-            and (
-                _is_registered_shared_factor(owner, factor_id)
-                # A federated Manager persists an authorized 7997 hydration
-                # before retrying RunSpec freeze.  That canonical local copy
-                # is sufficient authority for the same visible owner; do not
-                # require an unrelated factor-library row to have arrived in
-                # the account-domain mirror first.
-                or load_factor_source(owner, factor_id)
-            )
+            owner != active_user and owner_visible
+            and load_factor_source(owner, factor_id)
         )
         if owner != active_user and not visible_shared_factor:
             if owner_visible:

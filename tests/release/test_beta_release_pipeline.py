@@ -14,7 +14,7 @@ def _runtime_repo(root: Path) -> Path:
     for relative in (
         "tools/cli/pyproject.toml",
         "tools/cli/tools/app.py",
-        "skills/factortester-research-skill/SKILL.md",
+        "skills/traderesearch-research-skill/SKILL.md",
     ):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,11 +84,11 @@ def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
 
 def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     source = (Path(__file__).resolve().parents[2] / "scripts/release/assets.py").read_text()
-    assert "RUNTIME_CACHE_SCHEMA = 8" in source
-    assert "FACTORTESTER_ENTRYPOINT" in source
+    assert "RUNTIME_CACHE_SCHEMA = 9" in source
+    assert "TRADERESEARCH_ENTRYPOINT" in source
     assert '"--collect-data",\n                "tools.cli.release"' in source
     assert "manager_launcher.write_text" in source
-    assert "shutil.copy2(\n            bin_dir / \"factortester\"" not in source
+    assert 'shutil.copy2(frozen_binary, bin_dir / "traderesearch")' in source
 
 
 def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
@@ -101,22 +101,22 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     key = assets.runtime_input_digest(
         repo, client_sources_root=sources, client_adapters_root=adapters,
     )
-    frozen = cache / key / "bin/factortester"
+    frozen = cache / key / "bin/traderesearch"
     frozen.parent.mkdir(parents=True)
     frozen.write_bytes(b"cached executable")
     frozen.chmod(0o755)
-    manager = cache / key / "bin/factortester-manager"
+    manager = cache / key / "bin/traderesearch-manager"
     manager.write_bytes(b"cached executable")
     manager.chmod(0o755)
-    renderer = cache / key / "bin/factortester-report-renderer"
+    renderer = cache / key / "bin/traderesearch-report-renderer"
     renderer.write_bytes(b"cached executable")
     renderer.chmod(0o755)
     adapter = cache / key / "adapters/vibe-trading-adapter.zip"
     adapter.parent.mkdir()
     adapter.write_bytes(b"cached adapter")
-    skill = cache / key / "skills/factortester-research-skill/SKILL.md"
+    skill = cache / key / "skills/traderesearch-research-skill/SKILL.md"
     skill.parent.mkdir(parents=True)
-    skill.write_text("---\nname: factortester-research-skill\n---\n")
+    skill.write_text("---\nname: traderesearch-research-skill\n---\n")
     cached_source = cache / key / "sources/Tiger/source.json"
     cached_source.parent.mkdir(parents=True)
     cached_source.write_text('{"source_id":"tiger-test"}\n', encoding="utf-8")
@@ -137,7 +137,7 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     assert value["runtime_input_sha256"] == key
     assert value["source_revision"] == "a" * 40
     assert (
-        app / "Contents/Resources/FactorTester/bin/factortester"
+        app / "Contents/Resources/FactorTester/bin/traderesearch"
     ).read_bytes() == b"cached executable"
 
 
@@ -217,14 +217,14 @@ def test_cli_has_no_second_application_updater() -> None:
 
 def test_incomplete_or_corrupt_runtime_cache_is_rejected(tmp_path: Path) -> None:
     cached = tmp_path / "cache"
-    cli = cached / "bin/factortester"
+    cli = cached / "bin/traderesearch"
     cli.parent.mkdir(parents=True)
     cli.write_bytes(b"only one executable")
     assert assets._valid_runtime_cache(cached, "a" * 64) is False
-    manager = cached / "bin/factortester-manager"
+    manager = cached / "bin/traderesearch-manager"
     manager.write_bytes(b"manager")
     manager.chmod(0o755)
-    renderer = cached / "bin/factortester-report-renderer"
+    renderer = cached / "bin/traderesearch-report-renderer"
     renderer.write_bytes(b"renderer")
     adapter = cached / "adapters/vibe-trading-adapter.zip"
     adapter.parent.mkdir()

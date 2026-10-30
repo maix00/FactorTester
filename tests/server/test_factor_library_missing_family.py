@@ -21,6 +21,7 @@ def _view():
 
 def test_missing_family_returns_404(monkeypatch):
     monkeypatch.setattr(routes, "_username", lambda: "alice")
+    monkeypatch.setattr(routes, "_authorize_factor_library", lambda *_args: None)
     if hasattr(routes, "get_user_file_lock"):
         monkeypatch.setattr(routes, "get_user_file_lock", lambda u: contextlib.nullcontext())
 

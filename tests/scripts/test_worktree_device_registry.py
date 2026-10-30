@@ -112,12 +112,12 @@ def test_existing_device_snapshot_is_migrated_to_allowlist_policy(tmp_path) -> N
     registry = DeviceRegistry(path, server_id="public-main", public_server=True)
     record = registry.list(username="alice@default")[0]
 
-    assert record["public_access"] is True
-    assert record["quota_exempt"] is True
+    assert "public_access" not in record
+    assert "quota_exempt" not in record
     persisted = json.loads(path.read_text(encoding="utf-8"))
     migrated = persisted["devices"]["device-legacy-123456"]
-    assert migrated["public_access"] is True
-    assert migrated["quota_exempt"] is True
+    assert "public_access" not in migrated
+    assert "quota_exempt" not in migrated
 
 
 def test_public_server_accepts_all_allowlisted_devices(tmp_path) -> None:
@@ -158,7 +158,7 @@ def test_all_enrolled_devices_are_allowlisted_devices(tmp_path) -> None:
             device_id=f"device-auto-{index:06d}",
             public_key=public_key,
         )
-        assert record["quota_exempt"] is True
+        assert "quota_exempt" not in record
 
     assert registry.public_device_count(username="alice@default") == 5
     assert registry.public_device_total_count(username="alice@default") == 5

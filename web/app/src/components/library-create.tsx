@@ -2,14 +2,14 @@ import React, { useEffect, useState } from "react";
 import { Alert, Button, Form, Input, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
-import { DetailsPanel } from "./details-panel.tsx";
+import { DetailsCancelButton, DetailsPanel } from "./details-panel.tsx";
 import { useCompactLayout } from "../configuration/layout.ts";
 import type { JSONObject } from "../configuration/draft.ts";
 
 export function LibraryCreate({ kind, onCreated, onCancel, strategy }: { strategy?: JSONObject; kind: "factor" | "strategy"; onCreated: (value: JSONObject) => void; onCancel: () => void }): React.ReactElement {
   const { t } = useTranslation();
   const mobile = useCompactLayout();
-  const finish = (value: JSONObject): void => { if (mobile && history.state?.trDetail) history.back(); onCreated(value); };
+  const finish = (value: JSONObject): void => { if (mobile && !strategy && history.state?.trDetail) history.back(); onCreated(value); };
   const [families, setFamilies] = useState<JSONObject[]>([]), [family, setFamily] = useState("");
   const initialRevision = (strategy?.current_revision || {}) as JSONObject;
   const [name, setName] = useState(String(strategy?.name || "")), [source, setSource] = useState(String(initialRevision.source_code || "")), [entry, setEntry] = useState(String(initialRevision.entrypoint || "Strategy")), [params, setParams] = useState(JSON.stringify(initialRevision.requirements || {}, null, 2));
@@ -47,7 +47,7 @@ export function LibraryCreate({ kind, onCreated, onCancel, strategy }: { strateg
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
   };
-  const content = <div className="tr-library-create">{!mobile ? <div className="tr-inline-editor-heading"><h2>{t(strategy ? "strategyDetail.edit" : kind === "factor" ? "editor.newFactor" : "editor.newStrategy")}</h2><Button type="text" onClick={onCancel}>{t("configuration.cancel")}</Button></div> : null}
+  const content = <div className="tr-library-create">{strategy ? <div className="tr-inline-editor-heading"><h2>{t("strategyDetail.edit")}</h2></div> : null}
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       {kind === "factor" ? <><Form.Item label={t("editor.newFamily")}><Switch checked={newFamily} disabled={!!createdFamily} onChange={setNewFamily} /></Form.Item>
@@ -57,8 +57,8 @@ export function LibraryCreate({ kind, onCreated, onCancel, strategy }: { strateg
         <Form.Item label={t("editor.source")}><Input.TextArea aria-label={t("editor.source")} className="tr-source-input" autoSize={{ minRows: 10 }} value={source} disabled={!!createdFamily} onChange={(event) => setSource(event.target.value)} /></Form.Item></> : null}
       {kind === "strategy" ? <><Form.Item label={t("library.description")}><Input.TextArea aria-label={t("library.description")} value={description} onChange={(event) => setDescription(event.target.value)} /></Form.Item><Form.Item label={t("library.visibility")}><Select aria-label={t("library.visibility")} value={visibility} onChange={setVisibility} options={["private", "shared", "public"].map((value) => ({ value, label: t(`strategyDetail.visibility.${value}`) }))} /></Form.Item></> : null}
       <Form.Item label={t(kind === "strategy" ? "editor.requirements" : "editor.parameters")}><Input.TextArea aria-label={t("editor.parameters")} className="tr-source-input" autoSize={{ minRows: 5 }} value={params} onChange={(event) => setParams(event.target.value)} /></Form.Item>
-      <Button type="primary" loading={busy} disabled={kind === "strategy" ? !name || !source : newFamily ? !name || !source : !family} onClick={() => void save()}>{t("configuration.save")}</Button>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={kind === "strategy" ? !name || !source : newFamily ? !name || !source : !family} onClick={() => void save()}>{t("configuration.save")}</Button><DetailsCancelButton disabled={busy} closePanel={mobile && !strategy} onCancel={onCancel}/></div>
     </Form>
   </div>;
-  return mobile ? <DetailsPanel title={t(strategy ? "strategyDetail.edit" : kind === "factor" ? "editor.newFactor" : "editor.newStrategy")} onClose={onCancel}>{content}</DetailsPanel> : content;
+  return mobile && !strategy ? <DetailsPanel title={t(kind === "factor" ? "editor.newFactor" : "editor.newStrategy")} onClose={onCancel}>{content}</DetailsPanel> : content;
 }

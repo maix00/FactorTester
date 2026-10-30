@@ -1,0 +1,34 @@
+name: traderesearch-data-node
+
+services:
+  data-io:
+    image: ${TR_DATA_IO_IMAGE:?set a tested TradeResearch data-I/O image}
+    restart: unless-stopped
+    mem_limit: ${TR_DATA_IO_MEMORY:-1g}
+    cpus: ${TR_DATA_IO_CPUS:-2}
+    environment:
+      TR_DATA_CACHE_AUTHORITY: ${TR_DATA_NODE_ID:?set stable data-node cache authority}
+      TR_DATA_HOST_ROLE: server
+      TR_DATA_DEVICE_REF: ${TR_SHARED_STORAGE_ID:?set actual kernel and storage domain}
+      TR_DATA_OWNER_REF: ${TR_DATA_OWNER_REF:-platform}
+      TR_SHARED_DATA_CACHE_ROOT: /shared-cache
+      TR_SHARED_DATA_CACHE_BYTES: ${TR_SHARED_DATA_CACHE_BYTES:-536870912}
+      TR_SHARED_DATA_ENTRY_BYTES: ${TR_SHARED_DATA_ENTRY_BYTES:-67108864}
+      TR_DATA_QUERY_CONCURRENCY: ${TR_DATA_QUERY_CONCURRENCY:-2}
+      TR_DATA_IO_SOCKET_PATH: /data-io/data.sock
+      TR_DATA_IO_ALLOWED_ROOTS: /data
+    volumes:
+      - ${TR_DATA_ROOT:?set this data node's Bundle directory}:/data:ro
+      - ${TR_SHARED_CACHE_ROOT:?set a host-local cache directory}:/shared-cache
+      - ${TR_DATA_IO_SOCKET_ROOT:?set a host-local socket directory}:/data-io
+    healthcheck:
+      test: [CMD, python, -c, "from server.data_io.client import DataIOClient; assert DataIOClient('/data-io/data.sock', timeout=2).ping()"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    command: [python, -m, server.data_io.service]

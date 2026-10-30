@@ -1,9 +1,10 @@
 import React from "react";
-import { pagesForScope } from "../registry.ts";
+import { pagesForAdminCapabilities } from "../registry.ts";
 import { useTranslation } from "react-i18next";
 import { usePageInstance } from "../page-instance.ts";
 import { AccountMenu } from "../components/account-actions.tsx";
 import { PageIcon } from "../icon.tsx";
+import { useAuth } from "../auth.tsx";
 
 const RECENT_KEY = "tr.mobile.recent";
 
@@ -19,9 +20,10 @@ function recentIds(): string[] {
 export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): React.ReactElement {
   const { t } = useTranslation();
   const instance = usePageInstance();
+  const { session } = useAuth();
   const recent = recentIds();
-  const pages = pagesForScope("mobile")
-    .filter((page) => !page.mobileTab && (page.sidebarVisible !== false || page.id === "settings"))
+  const pages = pagesForAdminCapabilities("mobile", session?.admin_capabilities || [])
+    .filter((page) => !page.mobileTab && page.sidebarVisible !== false)
     .sort((a, b) => {
       const ai = recent.indexOf(a.id);
       const bi = recent.indexOf(b.id);
@@ -30,10 +32,7 @@ export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): Re
   return (
     <section className="tr-mobile-workspace">
       <header className="tr-mobile-workspace-header">
-        <div>
-          <h1>{t("nav.more")}</h1>
-        </div>
-        <AccountMenu/>
+        <AccountMenu onOpenSettings={() => instance.open("settings")}/>
       </header>
       <div className="tr-mobile-open-list">
         {pages.map((page) => (

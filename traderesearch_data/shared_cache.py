@@ -353,7 +353,8 @@ def host_input_cache(*, expected_role: str | None = None):
     if expected_role is not None and role != expected_role:
         raise ValueError("data host role does not match caller")
     owner = os.environ.get("TR_DATA_OWNER_REF", "platform" if role == "server" else "")
-    scope = CacheScope(role, os.environ.get("FACTORTESTER_SERVER_ID") or socket.gethostname(),
+    scope = CacheScope(role, os.environ.get("TR_DATA_CACHE_AUTHORITY")
+                       or os.environ.get("FACTORTESTER_SERVER_ID") or socket.gethostname(),
                        owner, os.environ.get("TR_DATA_DEVICE_REF") or socket.gethostname())
     return _host_cache(str(Path(os.environ.get("TR_SHARED_DATA_CACHE_ROOT",
                        Path.home() / ".cache/traderesearch/columnar"))), scope,

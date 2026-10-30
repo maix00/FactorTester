@@ -29,7 +29,7 @@ from tools.factors import factor_tester_tasks as _tasks
 from tools.factors.factor_tester_state import FactorTesterState
 
 if TYPE_CHECKING:
-    from tools.data.account_manage import User
+    from server.identity.principal import Principal
     from tools.data.types import DataTime
     from tools.factors.FactorTester import FactorTester
     from tools.products.Product import Product
@@ -142,7 +142,7 @@ class FactorTester(UniqueNameObject):
     def __init__(
         self, products: Sequence["Product"], alias: Optional[str] = None,
         start_dt: Optional["DataTime"] = None, end_dt: Optional["DataTime"] = None,
-        group_calendar_freq: Optional[Any] = None, user: Optional["User"] = None,
+        group_calendar_freq: Optional[Any] = None, user: Optional["Principal"] = None,
     ):
         if not hasattr(self, '_initialized'):
             super().__init__(name=self.name, alias=alias)

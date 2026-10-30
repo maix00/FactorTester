@@ -1,7 +1,7 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Modal, Pagination, Select, Switch, Tabs } from "antd";
 import Form from "@rjsf/antd";
-import validator from "@rjsf/validator-ajv8";
+import validator from "../configuration/validator.ts";
 import type { RJSFSchema } from "@rjsf/utils";
 import { useTranslation } from "react-i18next";
 import { notify } from "../notifications/core.ts";
@@ -154,8 +154,10 @@ export function TestConfigurationPage(): React.ReactElement {
       setDraft((current) => current ? { ...current, text, source: "form" } : current);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
+  const creating=useRef(false);
   const create = async (): Promise<void> => {
-    setLoading(true);
+    if(creating.current)return;
+    creating.current=true;setLoading(true);
     try {
       const value = await request("/api/test-authoring/workspaces", { method: "POST",
         body: JSON.stringify({ title: t("configuration.newTitle"), factors: [] }) });
@@ -163,7 +165,7 @@ export function TestConfigurationPage(): React.ReactElement {
       setWorkspaces((current) => [row, ...current]);
       setWorkspace(row.workspace_id);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setLoading(false); }
+    finally { creating.current=false;setLoading(false); }
   };
   const save = async (): Promise<void> => {
     if (!draft || !contract || !parsed.value || saving || strategy.busy || strategy.invalid) return;
@@ -253,7 +255,7 @@ export function TestConfigurationPage(): React.ReactElement {
         <Select aria-label={t("configuration.workspace")} placeholder={t("configuration.workspace")} value={workspace || undefined}
           options={workspaces.map((row) => ({ value: row.workspace_id, label: row.title || row.workspace_id }))}
           onChange={(value: string) => dirty ? setDiscard({ workspace: value }) : setWorkspace(value)} disabled={saving || strategy.busy} />
-        <Button type="text" icon={<PlusOutlined />} aria-label={t("configuration.create")} onClick={() => dirty ? setDiscard({ workspace: "" }) : void create()} disabled={saving} />
+        <Button type="text" icon={<PlusOutlined />} aria-label={t("configuration.create")} onClick={() => dirty ? setDiscard({ workspace: "" }) : void create()} disabled={saving || loading} >{!mobile ? t("configuration.create") : null}</Button>
         <Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => dirty ? setDiscard({ reload: true }) : setReload((value) => value + 1)} disabled={!workspace || saving} />
         <span className={`tr-config-status ${dirty ? "is-dirty" : ""}`} role="status" aria-label={dirty ? t("configuration.unsaved") : t("configuration.savedState")} title={dirty ? t("configuration.unsaved") : t("configuration.savedState")} />
       </div> : null}
@@ -268,7 +270,7 @@ export function TestConfigurationPage(): React.ReactElement {
       {key:"configuration",label:t("configuration.setup"),disabled:!availableTypes.length},
       {key:"results",label:t("jobs.results"),disabled:!jobs.length},
     ]} />
-    <div hidden={tab !== "execution"}><ExecutionTargetPicker value={executionChoice} onChange={changeExecution} onCapabilities={changeCapabilities} onRefresh={()=>setResolutionEpoch(value=>value+1)} resolving={resolving} error={resolutionError} /></div>
+    <div hidden={tab !== "execution"}>{!planDraft && !loading ? <Alert type="info" showIcon message={t("executionTopology.createFirst")} action={<Button onClick={()=>void create()}>{t("configuration.create")}</Button>} /> : null}<ExecutionTargetPicker initialize={planDraft?.source==="load"} disabled={!planDraft || !!planValue.error || loading || saving} value={executionChoice} onChange={changeExecution} onCapabilities={changeCapabilities} onRefresh={()=>setResolutionEpoch(value=>value+1)} resolving={resolving} error={resolutionError} /></div>
     {tab === "execution" ? null : tab === "results" ? <div className="tr-config-results">{jobs.length > 1 ? <Select value={selectedJob} options={jobs.map((job, index) => ({ value: index, label: job.task_name || job.job_id }))} onChange={setSelectedJob} /> : null}{jobs[selectedJob] ? <JobDetail job={jobs[selectedJob]} /> : null}</div> :
      !draft ? !loading ? <Empty description={false} /> : null : !contract ? <p role="status">{t("configuration.loading")}</p> : <div className="tr-config-layout">
       <aside className="tr-config-sidebar" hidden={mobile && detail}>

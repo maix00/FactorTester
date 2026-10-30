@@ -21,11 +21,22 @@ from tools.data.account_manage import (
     direct_subordinate_accounts_for,
     get_account,
     is_super_admin_account,
-    load_accounts,
 )
 
 READ_ONLY_SCOPES = {"subordinates", "servers"}
 PROFILE_DIRECTORY_PRINCIPAL = "__profile_directory__"
+
+
+def _verified_request_username() -> str:
+    try:
+        from flask import g, has_request_context
+
+        if not has_request_context():
+            return ""
+        identity = getattr(g, "keycloak_user_session", None)
+        return str(identity.get("username") or "").strip() if isinstance(identity, dict) else ""
+    except ImportError:
+        return ""
 
 
 class ProfileDirectoryError(ValueError):
@@ -69,18 +80,17 @@ class ProfileDirectoryService:
 
     @staticmethod
     def _account_names() -> list[str]:
+        from server.identity.keycloak_directory import managed_users_for_verified_request
+
+        principal = _verified_request_username()
+        if not principal:
+            return []
         try:
-            accounts = load_accounts()
-        except (OSError, RuntimeError, TypeError, ValueError):
-            accounts = []
-        result = {
-            str(item.get("username") or "").strip()
-            for item in accounts
-            if isinstance(item, dict)
-            and item.get("active", True)
-            and str(item.get("username") or "").strip()
-        }
-        return sorted(result)
+            users = managed_users_for_verified_request(principal, include_self=True)
+        except PermissionError:
+            return []
+        return sorted({str(item.get("username") or "").strip()
+                       for item in users if str(item.get("username") or "").strip()})
 
     @staticmethod
     def _account_label(owner: str) -> str:
@@ -90,9 +100,6 @@ class ProfileDirectoryService:
             account = None
         if isinstance(account, dict):
             return str(account.get("alias") or account.get("username") or owner)
-        parts = owner.split("@")
-        if len(parts) == 3 and parts[1]:
-            return parts[1]
         return owner
 
     @staticmethod

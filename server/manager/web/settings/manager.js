@@ -237,6 +237,7 @@
 
   async function show(context, selected = "services") {
     clearDispatchRefresh();
+    if (!["services", "dispatch"].includes(selected)) selected = "services";
     context.activeNav("manager");
     context.setHeading(context.t("服务器管理"), "Manager 7998");
     const wrapper = document.createElement("div");
@@ -246,9 +247,6 @@
     const options = [
       ["services", "服务"],
       ["dispatch", "任务队列"],
-      ["allowlist", "公网访客白名单"],
-      ["devices", "已认证设备"],
-      ["accounts", "用户与机构"],
     ];
     options.forEach(([value, label]) => {
       const tab = document.createElement("button");
@@ -265,12 +263,6 @@
     context.content.replaceChildren(wrapper);
     if (selected === "dispatch") {
       await dispatchView(context, body);
-    } else if (selected === "allowlist" || selected === "devices") {
-      await window.FTStaticLoader?.loadGroups?.(["manager-access"]);
-      await FTManagerAccessControl.show(context, body, selected);
-    } else if (selected === "accounts") {
-      await window.FTStaticLoader?.loadGroups?.(["manager-accounts"]);
-      await FTManagerAccounts.show(context, body);
     } else {
       await serviceView(context, body);
     }

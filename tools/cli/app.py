@@ -39,7 +39,7 @@ def cli(ports: tuple[int, ...]) -> None:
     \b
     常用路径:
       traderesearch configure --base-url https://manager.example:7998
-      traderesearch login --username <username>
+      traderesearch login
       traderesearch doctor
       traderesearch factor-plan --factor-family SgCCS --configuration-file research-config.json
       # agent 因子研究：安装/使用 longbridge-quant、quantitative-research，并阅读 tools/cli/docs/factor-research-cli.md

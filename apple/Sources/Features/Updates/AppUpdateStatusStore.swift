@@ -2,7 +2,7 @@ import Foundation
 
 enum AppUpdateStatusStore {
     static let filename = "app-update-status.json"
-    static let clientRootEnvironmentKey = "FACTORTESTER_CLIENT_ROOT"
+    static let clientRootEnvironmentKey = "TRADERESEARCH_CLIENT_ROOT"
 
     static func write(
         state: String,
@@ -53,15 +53,28 @@ enum AppUpdateStatusStore {
                 .standardizedFileURL
         }
         #if DEBUG
-        return applicationSupportURL.appendingPathComponent(
+        let canonical = applicationSupportURL.appendingPathComponent(
+            "TradeResearch-Debug",
+            isDirectory: true
+        )
+        let legacy = applicationSupportURL.appendingPathComponent(
             "FactorTester-Debug",
             isDirectory: true
         )
         #else
-        return applicationSupportURL.appendingPathComponent(
+        let canonical = applicationSupportURL.appendingPathComponent(
+            "TradeResearch",
+            isDirectory: true
+        )
+        let legacy = applicationSupportURL.appendingPathComponent(
             "FactorTester",
             isDirectory: true
         )
         #endif
+        if !FileManager.default.fileExists(atPath: canonical.path),
+           FileManager.default.fileExists(atPath: legacy.path) {
+            return legacy
+        }
+        return canonical
     }
 }

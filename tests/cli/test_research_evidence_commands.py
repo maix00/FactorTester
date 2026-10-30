@@ -99,7 +99,7 @@ def test_guide_returns_machine_executable_next_action():
     payload = json.loads(result.output)
     assert payload["topic"] == "fragment"
     assert payload["next_actions"][0]["argv"][:3] == [
-        "factortester", "research", "evidence",
+        "traderesearch", "research", "evidence",
     ]
 
 

@@ -35,7 +35,7 @@ def test_skill_catalog_only_exposes_profile_audience_and_hides_paths():
 
     definitions = catalog.definitions("server")
     assert [item["skill_id"] for item in definitions] == [
-        "factortester-research",
+        "traderesearch-research",
     ]
     public = catalog.public_definitions("server")
     assert all("path" not in item for item in public)
@@ -50,10 +50,10 @@ def test_skill_catalog_supports_client_and_server_runtime_boundaries():
 
     assert catalog.definitions("client") == []
     assert [item["label"] for item in catalog.public_definitions("server")] == [
-        "FactorTester 研究",
+        "TradeResearch 研究",
     ]
     assert [item["name"] for item in catalog.definitions("server")] == [
-        "factortester-research-skill",
+        "traderesearch-research-skill",
     ]
 
 
@@ -66,12 +66,12 @@ def test_profile_codex_runtime_projects_only_selected_skills(tmp_path):
     runtime = AgentSkillRuntime(tmp_path / "workspace")
     state = runtime.sync([definitions[0]])
 
-    projection = runtime.skills_root / "factortester-research"
+    projection = runtime.skills_root / "traderesearch-research"
     assert projection.is_symlink()
     assert projection.resolve() == Path(definitions[0]["path"]).resolve()
     assert not (runtime.skills_root / "research-obligation-cycle").exists()
     assert [item["skill_id"] for item in state["skills"]] == [
-        "factortester-research",
+        "traderesearch-research",
     ]
     assert runtime.command("/usr/local/bin/codex") == [
         "/usr/local/bin/codex",
@@ -106,7 +106,7 @@ def test_profile_codex_runtime_updates_owned_links_without_touching_unknown_file
     unknown_file.write_text("user data", encoding="utf-8")
 
     runtime.sync([])
-    assert not (runtime.skills_root / "factortester-research").exists()
+    assert not (runtime.skills_root / "traderesearch-research").exists()
     assert not (runtime.skills_root / "research-obligation-cycle").exists()
     assert unknown_file.read_text(encoding="utf-8") == "user data"
 
@@ -128,14 +128,14 @@ def test_profile_codex_runtime_rejects_projection_collision(tmp_path):
 
 def test_profile_codex_runtime_repoints_only_its_manifest_owned_link(tmp_path):
     runtime = AgentSkillRuntime(tmp_path / "workspace")
-    old_source = tmp_path / "release-old" / "factortester-research-skill"
-    new_source = tmp_path / "release-new" / "factortester-research-skill"
+    old_source = tmp_path / "release-old" / "traderesearch-research-skill"
+    new_source = tmp_path / "release-new" / "traderesearch-research-skill"
     for source in (old_source, new_source):
         source.mkdir(parents=True)
         (source / "SKILL.md").write_text("research skill", encoding="utf-8")
     binding = {
-        "skill_id": "factortester-research",
-        "name": "factortester-research-skill",
+        "skill_id": "traderesearch-research",
+        "name": "traderesearch-research-skill",
         "path": str(old_source),
     }
     runtime.sync([binding])
@@ -159,8 +159,8 @@ def test_profile_codex_runtime_does_not_repoint_tampered_link(tmp_path):
         source.mkdir()
         (source / "SKILL.md").write_text("research skill", encoding="utf-8")
     binding = {
-        "skill_id": "factortester-research",
-        "name": "factortester-research-skill",
+        "skill_id": "traderesearch-research",
+        "name": "traderesearch-research-skill",
         "path": str(sources[0]),
     }
     runtime.sync([binding])
@@ -277,9 +277,9 @@ def test_profile_codex_skill_protocol_disables_unselected_and_builds_turn_input(
             "result": {"data": [{"cwd": "/tmp", "skills": [{"name": "one"}]}]},
         }
     ) == [{"name": "one"}]
-    turn_input = protocol.turn_skill_input("factortester-research")
+    turn_input = protocol.turn_skill_input("traderesearch-research")
     assert turn_input["type"] == "skill"
-    assert turn_input["name"] == "factortester-research-skill"
+    assert turn_input["name"] == "traderesearch-research-skill"
     assert Path(turn_input["path"]) == selected_path
 
     with pytest.raises(ValueError, match="not selected"):
@@ -313,10 +313,10 @@ def test_profile_skill_selection_is_local_and_validated(tmp_path):
             ["research-obligation-cycle"],
         )
     saved = service.set_profile_skills(
-        PRINCIPAL, PROFILE_ID, ["factortester-research"],
+        PRINCIPAL, PROFILE_ID, ["traderesearch-research"],
     )
     assert saved["selected_skill_ids"] == [
-        "factortester-research",
+        "traderesearch-research",
     ]
     bindings = service.selected_skill_bindings(PRINCIPAL, PROFILE_ID)
     assert [item["skill_id"] for item in bindings] == saved["selected_skill_ids"]
@@ -324,7 +324,7 @@ def test_profile_skill_selection_is_local_and_validated(tmp_path):
     workspace = (
         tmp_path / "data" / profile_workspace_relative_path(PRINCIPAL, PROFILE_ID)
     )
-    assert (workspace / ".codex/skills/factortester-research").is_symlink()
+    assert (workspace / ".codex/skills/traderesearch-research").is_symlink()
     assert not (workspace / ".codex/skills/research-obligation-cycle").exists()
 
     provider = service.save_provider(
@@ -454,7 +454,7 @@ class _Handler(AgentRoutesMixin):
         self.wfile = io.BytesIO()
 
     def _session(self):
-        return {"username": PRINCIPAL}
+        return {"username": PRINCIPAL, "keycloak_roles": ["agent_assistant:use"]}
 
     def _json_body(self, _maximum):
         return self._payload
@@ -511,12 +511,12 @@ def test_profile_skill_routes_read_and_replace_selection(tmp_path):
         service,
         payload={
             "profile_id": PROFILE_ID,
-            "skill_ids": ["factortester-research"],
+            "skill_ids": ["traderesearch-research"],
         },
     )
     assert handler._post_agent_routes(urlparse("/api/client/profile-skills")) is True
     assert handler.response_status == 200
-    assert _body(handler)["selected_skill_ids"] == ["factortester-research"]
+    assert _body(handler)["selected_skill_ids"] == ["traderesearch-research"]
 
 
 def test_profile_workspace_route_lists_only_safe_entries(tmp_path):

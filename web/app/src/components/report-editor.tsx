@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { Alert, Button, Form, Input, Select } from "antd";
+import { ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { request } from "../configuration/api.ts";
 import { notify } from "../notifications/core.ts";
 
 type Component = { component_id?: string; kind?: string; title?: string; body?: string; parent_id?: string };
@@ -12,40 +15,53 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
   const [projection, setProjection] = useState<Projection | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [chapterChoice, setChapterChoice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [needsReview, setNeedsReview] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const operationPending = useRef(false);
+  const operationRequest = useRef<AbortController | null>(null);
+  const activePublication = useRef(publicationID); activePublication.current = publicationID;
+  const loadRevision = useRef(0);
   const [attachments, setAttachments] = useState<Record<string, unknown>[]>([]);
 
-  const load = (): void => {
-    Promise.all([
-      fetch(`/api/research-reports/${encodeURIComponent(publicationID)}`, { credentials: "same-origin" }).then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-      fetch(`/api/research-reports/${encodeURIComponent(publicationID)}/projection`, { credentials: "same-origin" }).then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-      fetch(`/api/research-reports/${encodeURIComponent(publicationID)}/attachments`, { credentials: "same-origin" }).then((r) => r.ok ? r.json() : { attachments: [] }),
+  const load = async (signal?: AbortSignal): Promise<boolean> => {
+    const revision = ++loadRevision.current;
+    return Promise.all([
+      request(`/api/research-reports/${encodeURIComponent(publicationID)}`, { signal }),
+      request(`/api/research-reports/${encodeURIComponent(publicationID)}/projection`, { signal }),
+      request(`/api/research-reports/${encodeURIComponent(publicationID)}/attachments`, { signal }),
     ]).then(([doc, proj, files]) => {
+      if (signal?.aborted || revision !== loadRevision.current || activePublication.current !== publicationID) return false;
       setDocument(doc.document ?? doc);
       setProjection(proj.projection ?? proj);
       setAttachments(files.attachments ?? files.items ?? []);
-    }).catch((error: Error) => notify({ code: "report.load", type: "error", message: t("loadFailed"), description: error.message }));
+      setLoadError(""); return true;
+    }).catch((error: Error) => { if (!signal?.aborted && revision === loadRevision.current && activePublication.current === publicationID) { setLoadError(error.message); notify({ code: "report.load", type: "error", message: t("loadFailed"), description: error.message }); } return false; });
   };
-  useEffect(load, [publicationID]);
+  useEffect(() => { const controller = new AbortController(); setDocument(null); setLoadError(""); setNeedsReview(false); setProjection(null); setAttachments([]); setSelected([]); setTitle(""); setBody(""); setChapterChoice(""); setBusy(false); operationPending.current = false; operationRequest.current = null; void load(controller.signal); return () => { controller.abort(); operationRequest.current?.abort(); ++loadRevision.current; }; }, [publicationID]);
 
-  const apply = (operation: Record<string, unknown>): void => {
-    if (!document?._rev) return;
-    setBusy(true);
-    fetch(`/api/research-reports/${encodeURIComponent(publicationID)}/operations`, {
-      method: "POST", credentials: "same-origin",
+  const apply = async (operation: Record<string, unknown>): Promise<boolean> => {
+    if (!document?._rev || loadError || needsReview || operationPending.current) return false;
+    operationPending.current = true; setBusy(true);
+    const controller = new AbortController(); operationRequest.current = controller;
+    return request(`/api/research-reports/${encodeURIComponent(publicationID)}/operations`, {
+      method: "POST", credentials: "same-origin", signal: controller.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ base_rev: document._rev, operation }),
-    }).then(async (response) => {
-      const value = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
-      load();
-    }).catch((error: Error) => notify({ code: "report.operation", type: "error", message: t("report.operationFailed"), description: error.message }))
-      .finally(() => setBusy(false));
+    }).then(async () => {
+      if (activePublication.current !== publicationID) return false;
+      const refreshed = await load(controller.signal);
+      if (!refreshed && !controller.signal.aborted && activePublication.current === publicationID) setNeedsReview(true);
+      return refreshed;
+    }).catch((error: Error & { status?: number }) => { if (!controller.signal.aborted && activePublication.current === publicationID) { if (!error.status || error.status === 409) { setLoadError(error.message); setNeedsReview(true); } notify({ code: "report.operation", type: "error", message: t("report.operationFailed"), description: error.message }); } return false; })
+      .finally(() => { if (operationRequest.current === controller) { operationRequest.current = null; operationPending.current = false; if (activePublication.current === publicationID) setBusy(false); } });
   };
 
   const chapters = projection?.chapters ?? [];
-  const firstChapter = chapters[0]?.chapter_id ?? chapters[0]?.component_id ?? "";
+  const chapterOptions = chapters.map(chapter => ({ value: String(chapter.chapter_id ?? chapter.component_id ?? ""), label: chapter.title || String(chapter.chapter_id ?? chapter.component_id ?? "") })).filter(item => item.value);
+  const targetChapter = chapterChoice ? (chapterOptions.some(item => item.value === chapterChoice) ? chapterChoice : "") : chapterOptions[0]?.value || "";
   const batchDelete = (): void => {
     const operations = chapters.flatMap((chapter) => {
       const chapterID = String(chapter.chapter_id ?? chapter.component_id ?? "");
@@ -55,20 +71,22 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
           op: "remove_component", chapter_id: chapterID, component_id: component.component_id,
         }));
     });
-    if (operations.length) { apply({ op: "batch", operations }); setSelected([]); }
+    if (operations.length) { void apply({ op: "batch", operations }).then(saved => { if (saved) setSelected([]); }); }
   };
 
   return (
     <div className="tr-report-editor">
-      <div className="tr-report-add">
-        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("report.paragraphTitle")} />
-        <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder={t("report.paragraphBody")} />
-        <button type="button" className="tr-toolbar-button" disabled={busy || !firstChapter || !body.trim()} onClick={() => {
-          apply({ op: "insert_component", chapter_id: firstChapter, component: { kind: "paragraph", title, body } });
-          setTitle(""); setBody("");
-        }}>{t("report.addParagraph")}</button>
-      </div>
-      {selected.length ? <button type="button" className="tr-toolbar-button" disabled={busy} onClick={batchDelete}>{t("report.removeSelected", { count: selected.length })}</button> : null}
+      {loadError ? <Alert type="error" showIcon message={t("report.reloadRequired")} description={loadError} action={<Button onClick={() => void load()}>{t("retry")}</Button>} /> : null}
+      {needsReview && !loadError ? <Alert type="warning" showIcon message={t("report.reviewAfterReload")} action={<Button onClick={() => setNeedsReview(false)}>{t("report.reviewed")}</Button>} /> : null}
+      <Form layout="vertical" className="tr-report-add">
+        <Form.Item label={t("report.targetChapter")}><Select aria-label={t("report.targetChapter")} disabled={busy || !!loadError || needsReview || !chapterOptions.length} value={targetChapter || undefined} options={chapterOptions} onChange={setChapterChoice} /></Form.Item>
+        <Form.Item label={t("report.paragraphTitle")}><Input aria-label={t("report.paragraphTitle")} disabled={busy || !!loadError || needsReview} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("report.paragraphTitle")} /></Form.Item>
+        <Form.Item label={t("report.paragraphBody")}><Input.TextArea aria-label={t("report.paragraphBody")} disabled={busy || !!loadError || needsReview} autoSize={{ minRows: 4, maxRows: 12 }} value={body} onChange={(event) => setBody(event.target.value)} placeholder={t("report.paragraphBody")} /></Form.Item>
+        <Button aria-label={t("report.addParagraph")} type="primary" loading={busy} disabled={busy || !!loadError || needsReview || !targetChapter || !body.trim()} onClick={() => {
+          void apply({ op: "insert_component", chapter_id: targetChapter, component: { kind: "paragraph", title, body } }).then(saved => { if (saved) { setTitle(""); setBody(""); } });
+        }}>{t("report.addParagraph")}</Button>
+      </Form>
+      {selected.length ? <Button danger disabled={busy || !!loadError || needsReview} onClick={batchDelete}>{t("report.removeSelected", { count: selected.length })}</Button> : null}
       {attachments.length ? (
         <section className="tr-report-chapter">
           <h3>{t("report.attachments")}</h3>
@@ -85,8 +103,8 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
             <h3>
               {chapter.title || chapterID}
               <span className="tr-report-chapter-actions">
-                {chapterIndex > 0 ? <button type="button" disabled={busy} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapterIndex > 1 ? String(chapters[chapterIndex - 2].chapter_id ?? chapters[chapterIndex - 2].component_id ?? "") : null })}>↑</button> : null}
-                {chapterIndex < chapters.length - 1 ? <button type="button" disabled={busy} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapters[chapterIndex + 1].chapter_id ?? chapters[chapterIndex + 1].component_id ?? "" })}>↓</button> : null}
+                {chapterIndex > 0 ? <Button size="small" disabled={busy || !!loadError || needsReview} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapterIndex > 1 ? String(chapters[chapterIndex - 2].chapter_id ?? chapters[chapterIndex - 2].component_id ?? "") : null })} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} /> : null}
+                {chapterIndex < chapters.length - 1 ? <Button size="small" disabled={busy || !!loadError || needsReview} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapters[chapterIndex + 1].chapter_id ?? chapters[chapterIndex + 1].component_id ?? "" })} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} /> : null}
               </span>
             </h3>
             {(chapter.components ?? []).map((component, index, list) => (
@@ -97,22 +115,22 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
                 </div>
                 <div className="tr-report-component-actions">
                   {component.component_id && index > 0 ? (
-                    <button type="button" disabled={busy} onClick={() => apply({
+                    <Button size="small" disabled={busy || !!loadError || needsReview} onClick={() => apply({
                       op: "move_component", chapter_id: chapterID, component_id: component.component_id,
                       parent_id: component.parent_id || "root",
                       after_component_id: index > 1 ? list[index - 2]?.component_id || "" : "",
-                    })}>↑</button>
+                    })} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} />
                   ) : null}
                   {component.component_id && index < list.length - 1 ? (
-                    <button type="button" disabled={busy} onClick={() => apply({
+                    <Button size="small" disabled={busy || !!loadError || needsReview} onClick={() => apply({
                       op: "move_component", chapter_id: chapterID, component_id: component.component_id,
                       parent_id: component.parent_id || "root",
                       after_component_id: list[index + 1]?.component_id || "",
-                    })}>↓</button>
+                    })} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} />
                   ) : null}
-                  {component.component_id ? <button type="button" disabled={busy} onClick={() => apply({
+                  {component.component_id ? <Button size="small" disabled={busy || !!loadError || needsReview} onClick={() => apply({
                     op: "remove_component", chapter_id: chapterID, component_id: component.component_id,
-                  })}>{t("report.remove")}</button> : null}
+                  })}>{t("report.remove")}</Button> : null}
                 </div>
               </div>
             ))}

@@ -25,10 +25,10 @@ def ensure_client_runtime(
         raise ValueError("runtime source revision must be a full 40-character Git revision")
     resources = app / "Contents" / "Resources" / "FactorTester"
     receipt_path = resources / "bundle-receipt.json"
-    cli_path = resources / "bin" / "factortester"
-    manager_cli_path = resources / "bin" / "factortester-manager"
+    cli_path = resources / "bin" / "traderesearch"
+    manager_cli_path = resources / "bin" / "traderesearch-manager"
     report_renderer_path = (
-        resources / "bin" / "factortester-report-renderer"
+        resources / "bin" / "traderesearch-report-renderer"
     )
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))

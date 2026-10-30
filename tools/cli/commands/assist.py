@@ -137,7 +137,7 @@ def _inspect_summary(page: object) -> object:
         **({"configuration_collection": configuration_collection}
            if configuration_collection else {}),
         "usage": {
-            "inspect_node": "factortester assist inspect --node <node-id>",
+            "inspect_node": "traderesearch assist inspect --node <node-id>",
             "candidate_lookup": (
                 "use the candidate_source command registered by the selected field"
             ),

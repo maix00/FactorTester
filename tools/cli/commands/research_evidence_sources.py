@@ -58,7 +58,7 @@ def capture_job(
         "next_actions": [{
             "action": "select_fragment",
             "argv": [
-                "factortester", "research", "evidence", "fragment", "add",
+                "traderesearch", "research", "evidence", "fragment", "add",
                 value["source_ref"], "--profile-id", profile_id, "--help",
             ],
         }],
@@ -136,7 +136,7 @@ def capture_terminal(
         "next_actions": [{
             "action": "create_output_fragment",
             "argv": [
-                "factortester", "research", "evidence", "fragment", "add",
+                "traderesearch", "research", "evidence", "fragment", "add",
                 value["source_ref"], "--profile-id", profile_id,
                 "--selector-file", "<selector.json>",
                 "--fragment-file", "<stdout-or-stderr-file>",
@@ -230,7 +230,7 @@ def capture_url(
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise click.ClickException("URL must use http or https")
-    request = Request(url, headers={"User-Agent": "FactorTester-CLI/1"})
+    request = Request(url, headers={"User-Agent": "TradeResearch-CLI/1"})
     try:
         with urlopen(request, timeout=30) as response:
             content = response.read(_MAX_SOURCE_BYTES + 1)
@@ -325,7 +325,7 @@ def add_fragment(
         "next_actions": [{
             "action": "create_evidence",
             "argv": [
-                "factortester", "research", "evidence", "create",
+                "traderesearch", "research", "evidence", "create",
                 "--profile-id", profile_id,
                 "--metadata-file", "<evidence.json>",
             ],

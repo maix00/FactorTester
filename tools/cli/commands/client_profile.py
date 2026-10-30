@@ -447,7 +447,7 @@ def bootstrap_profile(
     profile = store.load(profile_id)
     control_profile_sync = _sync_profile(profile, manager_url=manager_url)
     claim_command = (
-        f"factortester client profile claim {profile_id} {agent_id}"
+        f"traderesearch client profile claim {profile_id} {agent_id}"
     )
     click.echo(_json({
         "schema_version": 1,

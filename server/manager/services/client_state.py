@@ -43,12 +43,10 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         control_store: object | None = None,
         profile_cache_root: Path | None = None,
         account_domain_sync: object | None = None,
-        local_account_store: object | None = None,
     ) -> None:
         self.client_root = (client_root or default_client_root()).resolve()
         self.control_store = control_store
         self.account_domain_sync = account_domain_sync
-        self.local_account_store = local_account_store
         self.profile_cache = (
             ProfileProjectionCache(profile_cache_root)
             if profile_cache_root is not None else None
@@ -122,7 +120,7 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
             )
 
             subordinate_rows = direct_subordinate_accounts(
-                owner, self.local_account_store,
+                owner,
             )
             owners.extend(
                 str(row.get("username") or "").strip()
@@ -202,42 +200,20 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
                                                for report in reports.values()) else "incomplete",
                     "reports": reports}
 
-    def _local_account_rows(self) -> list[dict[str, Any]]:
-        from tools.data.sqlite.db import connect_sqlite
-        database = getattr(getattr(self.account_domain_sync, 'local', None), 'path', None)
-        if database is None:
-            return []
-        with connect_sqlite(database, readonly=True) as conn:
-            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='accounts'").fetchone() is None:
-                return []
-            return [dict(row) for row in conn.execute('SELECT username, parent_username FROM accounts')]
-
     def _local_account(self, principal: str) -> dict[str, Any]:
-        """Read the account projection from this Manager's SQLite first.
-
-        Catalog pages must remain usable while PostgreSQL is unavailable.  In
-        particular, resolving an owner alias is presentation metadata and
-        must never open a remote connection just to render a family heading.
-        """
+        """Resolve display metadata from the verified Keycloak directory only."""
         owner = str(principal or "").strip()
-        store = self.local_account_store
-        if store is None:
-            try:
-                from server.manager.storage.local_accounts import LocalAccountStore
+        from tools.data.account_manage import get_account
 
-                store = LocalAccountStore()
-            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
-                store = None
-        if store is not None:
-            try:
-                rows = store.load_accounts()
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                rows = []
-            for row in rows:
-                if isinstance(row, dict) and str(row.get("username") or "") == owner:
-                    return dict(row)
-        # The canonical username grammar keeps a useful display alias even
-        # when an old/partial SQLite projection has not been restored yet.
+        own = get_account(owner)
+        if isinstance(own, dict):
+            return dict(own)
+        from server.identity.keycloak_directory import managed_users_for_verified_request
+
+        for row in managed_users_for_verified_request(owner):
+            if str(row.get("username") or "").strip() == owner:
+                return dict(row)
+        # Display fallback only; authorization remains at the FGAP boundary.
         parts = owner.split("@")
         alias = parts[1] if len(parts) == 3 and parts[2].isdigit() else owner
         organization = parts[0] if len(parts) == 3 else ""

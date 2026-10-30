@@ -167,9 +167,9 @@ verify_install() {
     echo "refusing to install an older client build: $source_build < $installed_build" >&2
     return 1
   fi
-  local cli="Contents/Resources/FactorTester/bin/factortester"
-  local manager_cli="Contents/Resources/FactorTester/bin/factortester-manager"
-  local report_renderer="Contents/Resources/FactorTester/bin/factortester-report-renderer"
+  local cli="Contents/Resources/FactorTester/bin/traderesearch"
+  local manager_cli="Contents/Resources/FactorTester/bin/traderesearch-manager"
+  local report_renderer="Contents/Resources/FactorTester/bin/traderesearch-report-renderer"
   local receipt="Contents/Resources/FactorTester/bundle-receipt.json"
   test -x "$installed/$cli"
   test -x "$installed/$manager_cli"
@@ -188,17 +188,17 @@ import re
 app = pathlib.Path(sys.argv[1])
 root = app / "Contents/Resources/FactorTester"
 receipt = json.loads((root / "bundle-receipt.json").read_text())
-cli = root / "bin/factortester"
-manager_cli = root / "bin/factortester-manager"
-renderer = root / "bin/factortester-report-renderer"
-assert hashlib.sha256(cli.read_bytes()).hexdigest() == receipt["files"]["bin/factortester"]
-assert hashlib.sha256(manager_cli.read_bytes()).hexdigest() == receipt["files"]["bin/factortester-manager"]
-assert hashlib.sha256(renderer.read_bytes()).hexdigest() == receipt["files"]["bin/factortester-report-renderer"]
+cli = root / "bin/traderesearch"
+manager_cli = root / "bin/traderesearch-manager"
+renderer = root / "bin/traderesearch-report-renderer"
+assert hashlib.sha256(cli.read_bytes()).hexdigest() == receipt["files"]["bin/traderesearch"]
+assert hashlib.sha256(manager_cli.read_bytes()).hexdigest() == receipt["files"]["bin/traderesearch-manager"]
+assert hashlib.sha256(renderer.read_bytes()).hexdigest() == receipt["files"]["bin/traderesearch-report-renderer"]
 assert re.fullmatch(r"[0-9a-f]{40}", str(receipt["source_revision"]))
 PY
   "$installed/$cli" --help >/dev/null
   "$installed/$manager_cli" --help >/dev/null
-  "$installed/$research_cli" --help >/dev/null
+  "$installed/$cli" research --help >/dev/null
   "$installed/$report_renderer" --help >/dev/null
   require_same_identity "$source" "$installed"
 }

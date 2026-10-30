@@ -173,7 +173,7 @@ Each numbered batch must be independently tested and committed before the next:
    - assert forbidden package prefixes and absolute private paths are absent
      from built wheels.
 2. **Maintenance authority gate**
-   - add `factortester-server-maintenance` Agent instructions;
+   - add `traderesearch-server-maintenance` Agent instructions;
    - distinguish client anomaly reporting from server code authority;
    - test that ordinary sessions cannot reach maintenance operations.
 3. **Release manifest and updater gate**

@@ -20,7 +20,7 @@ class ControlDatabaseStateMixin:
         candidate = PostgresControlStore(config)
         # Verify credentials, network policy, TLS mode, and schema before the
         # new secret replaces a working configuration.
-        candidate.load_accounts()
+        candidate.ensure_schema()
         self.control_database_settings.save(config)
         self.control_store = candidate
         if hasattr(self, "account_domain_sync"):

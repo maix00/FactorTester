@@ -1,0 +1,68 @@
+# One persistent identity authority per Manager; never reuse a test realm.
+name: ${TR_IDENTITY_PROJECT:?set per-Manager identity project}
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start", "--import-realm"]
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: ${TR_IDENTITY_DB_URL:?set dedicated Keycloak database JDBC URL}
+      KC_DB_USERNAME: ${TR_IDENTITY_DB_USER:?set Keycloak database role}
+      KC_DB_PASSWORD: ${TR_IDENTITY_DB_PASSWORD:?set Keycloak database password}
+      KC_HOSTNAME: ${TR_IDENTITY_PUBLIC_URL:?set canonical Manager URL ending in /identity}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /identity
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${TR_IDENTITY_BOOTSTRAP_USER:?set bootstrap administrator}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${TR_IDENTITY_BOOTSTRAP_PASSWORD:?set bootstrap password}
+      JAVA_OPTS_KC_HEAP: -Xms128m -Xmx512m
+    ports:
+      - "127.0.0.1:${TR_IDENTITY_LOOPBACK_PORT:-8099}:8080"
+    volumes:
+      - type: bind
+        source: ${TR_IDENTITY_IMPORT_DIR:?set owner-only realm import directory}
+        target: /opt/keycloak/data/import
+        read_only: true
+    networks:
+      manager:
+        aliases: [tr-keycloak]
+      database: {}
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /identity/health/ready HTTP/1.0\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 16
+      start_period: 60s
+    security_opt: [no-new-privileges:true]
+  # Optional dedicated identity PostgreSQL, including public installations
+  # where reusing the control database would require unrelated TLS/HBA changes.
+  identity-db:
+    profiles: [bundled-db]
+    image: postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      POSTGRES_DB: ${TR_IDENTITY_DB_NAME:-tr_identity}
+      POSTGRES_USER: ${TR_IDENTITY_DB_USER:?set Keycloak database role}
+      POSTGRES_PASSWORD: ${TR_IDENTITY_DB_PASSWORD:?set Keycloak database password}
+    volumes:
+      - identity-db:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    security_opt: [no-new-privileges:true]
+networks:
+  manager:
+    external: true
+    name: ${TR_MANAGER_DOCKER_NETWORK:?set existing Manager private Docker network}
+  database:
+    internal: true
+volumes:
+  identity-db: {}

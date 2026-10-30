@@ -144,7 +144,7 @@ def _request(url: str, bearer: str) -> Request:
         headers={
             "Accept": "application/octet-stream",
             "Authorization": f"Bearer {bearer}",
-            "User-Agent": "FactorTester-CLI/1",
+            "User-Agent": "TradeResearch-CLI/1",
             "X-FactorTester-Client": "cli-data-plane",
         },
         method="GET",

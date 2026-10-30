@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button, Input, Pagination, Select, Spin } from "antd";
 import Form from "@rjsf/antd";
-import validator from "@rjsf/validator-ajv8";
+import validator from "./validator.ts";
 import type { RJSFSchema, WidgetProps } from "@rjsf/utils";
 import { useTranslation } from "react-i18next";
 import { request } from "./api.ts";

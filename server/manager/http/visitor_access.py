@@ -48,12 +48,13 @@ def visitor_principal(visitor_id: object) -> str:
 
 @dataclass(frozen=True)
 class VisitorMode:
-    """The single anonymous capability set exposed by the public entry."""
+    """A pseudonymous public session with capabilities sourced from Keycloak."""
 
     visitor_id: str = ""
     max_server_jobs: int = 20
     can_download_artifacts: bool = False
     can_submit: bool = True
+    keycloak_subject: str = ""
 
     @property
     def principal(self) -> str:
@@ -113,30 +114,6 @@ def configured_visitor_origins(raw: str | None = None) -> tuple[str, ...]:
         if normalized and normalized not in origins:
             origins.append(normalized)
     return tuple(origins)
-
-
-def configured_public_visitor_login_allowlist(
-    raw: str | None = None,
-) -> tuple[str, ...]:
-    """Return the case-sensitive account references allowed from visitors.
-
-    The value is deliberately an explicit deployment setting rather than a
-    built-in username.  Each item may be a canonical username, an
-    ``organization@alias`` reference, or an alias.  Resolution against the
-    current account rows happens in the session state, so a stale or
-    ambiguous alias never authorizes a login.
-    """
-    value = raw
-    if value is None:
-        import os
-
-        value = os.environ.get("FACTORTESTER_PUBLIC_VISITOR_LOGIN_ALLOWLIST", "")
-    references: list[str] = []
-    for item in str(value or "").split(","):
-        reference = str(item or "").strip()
-        if reference and reference not in references:
-            references.append(reference)
-    return tuple(references)
 
 
 def configured_manager_endpoint(raw: str | None = None) -> str:

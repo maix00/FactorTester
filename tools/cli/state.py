@@ -1,4 +1,4 @@
-"""Persistent local navigation state for the FactorTester CLI."""
+"""Persistent local navigation state for the TradeResearch CLI."""
 
 from __future__ import annotations
 

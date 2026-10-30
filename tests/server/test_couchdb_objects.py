@@ -14,6 +14,7 @@ def test_factor_version_document_round_trip():
     obj = VersionedObject(
         ref="factor:v2:" + "a" * 43, kind="factor_version", owner="alice",
         payload={"alias": "Mm|H:HA|L:LA|$F:1m"},
+        keycloak_resource_id="kc-resource-1",
     )
     put_object(store, obj)
     assert get_object(store, obj.ref)["payload"]["alias"].startswith("Mm|")

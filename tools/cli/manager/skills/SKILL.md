@@ -1,11 +1,11 @@
 ---
-name: cli-anything-factortester-manager
-description: 使用 FactorTester Manager CLI 检查和操作已授权的应用、Job、生成物、存储、Research 工作区与服务实例；已授权的部署使用现有脚本。
+name: cli-anything-traderesearch-manager
+description: 使用 TradeResearch Manager CLI 检查和操作已授权的应用、Job、生成物、存储、研究工作区与服务实例。
 ---
 
-# FactorTester Manager CLI
+# TradeResearch Manager CLI
 
-使用已安装的 `factortester-manager` 执行 Click 单次命令。它通过认证后的 Manager API 操作应用，不是主机管理终端。
+使用已安装的 `traderesearch-manager` 执行 Click 单次命令。它通过认证后的 Manager API 操作应用，不是主机管理终端。
 
 ## 登录与任务边界
 
@@ -13,7 +13,7 @@ Manager CLI 由用户登录。可以使用已有的有效会话，不索取、�
 未登录时仅暂缓依赖认证的运行时操作，继续代码实现、本地测试，以及独立授权的部署；不得因为 CLI 登录阻塞实现。
 
 ```bash
-factortester-manager status --json
+traderesearch-manager status --json
 ```
 
 会话绑定完整 Manager URL，存储在系统凭据库中，不能跨服务器复用。
@@ -41,6 +41,8 @@ Manager 会话、研究 CLI 会话、浏览器会话和主机凭据不能互相�
 | `server health\|network\|federation\|database` | 查看运行状态及脱敏的网络、联合与数据库状态 |
 | `client release` | 构建并发布已授权的客户端版本 |
 | `client release-upload` | 向明确指定的 Manager 发布已构建签名包 |
+
+登录只复用已经由 TradeResearch 网页或桌面端通过 Keycloak 建立、并保存在当前端点的会话。CLI 不收集本地密码，也不创建用户、机构、Realm Group 或权限。首次登录请在应用中完成 Keycloak 登录，再运行 `traderesearch-manager login` 验证会话。
 
 `client release --channel beta` 省略 `--version`、`--build`（或使用 `auto`）时，根据可达服务器 Beta 清单分配下一版本。
 不可达服务器会跳过；可达但清单无效则报错。
@@ -71,10 +73,10 @@ CLI 不提供主机重启、容器生命周期、SSH、隧道变更或源码传�
 ## 常用检查
 
 ```bash
-factortester-manager server inspect --json
-factortester-manager server access --json
-factortester-manager jobs list --scope server --limit 20 --json
-factortester-manager storage usage --json
-factortester-manager server health --json
-factortester-manager transfers metrics --json
+traderesearch-manager server inspect --json
+traderesearch-manager server access --json
+traderesearch-manager jobs list --scope server --limit 20 --json
+traderesearch-manager storage usage --json
+traderesearch-manager server health --json
+traderesearch-manager transfers metrics --json
 ```

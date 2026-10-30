@@ -17,6 +17,7 @@ from server.manager.storage.profile_runtime_store import (
     ProfileClaimConflict,
     ProfileRuntimeError,
 )
+from server.permissions.agent_assistant import can_use_agent_assistant
 
 PROFILE_ID_PATTERN = r"[^/]+"
 PROVIDER_ID_PATTERN = r"[^/]+"
@@ -40,6 +41,26 @@ class AgentRoutesMixin:
             {"success": False, "error": "login required"},
             401,
             headers={"WWW-Authenticate": "Bearer"},
+        )
+        return None
+
+    def _agent_use_session(self) -> dict[str, object] | None:
+        """Require the platform Agent Assistant permission for Agent APIs."""
+        session = self._agent_session()
+        if session is None:
+            return None
+        principal = str(session.get("username") or "").strip()
+        role = str(session.get("role") or "")
+        if can_use_agent_assistant(principal, role, session.get("keycloak_roles", ())):
+            return session
+        json_response(
+            self,
+            {
+                "success": False,
+                "error": "Agent Assistant use is not permitted",
+                "code": "permission_denied",
+            },
+            403,
         )
         return None
 
@@ -84,7 +105,7 @@ class AgentRoutesMixin:
 
     def _get_agent_routes(self, parsed) -> bool:
         if parsed.path == "/api/client/agent-skills":
-            session = self._agent_session()
+            session = self._agent_use_session()
             if session is None:
                 return True
             try:
@@ -122,7 +143,7 @@ class AgentRoutesMixin:
             return True
 
         if parsed.path == "/api/client/profile-skills":
-            session = self._agent_session()
+            session = self._agent_use_session()
             if session is None:
                 return True
             try:
@@ -159,7 +180,7 @@ class AgentRoutesMixin:
             return True
 
         if parsed.path == "/api/client/profile-workspace":
-            session = self._agent_session()
+            session = self._agent_use_session()
             if session is None:
                 return True
             try:
@@ -190,7 +211,7 @@ class AgentRoutesMixin:
             return True
 
         if parsed.path == "/api/client/agent-models":
-            session = self._agent_session()
+            session = self._agent_use_session()
             if session is None:
                 return True
             try:
@@ -234,7 +255,7 @@ class AgentRoutesMixin:
             return True
 
         if parsed.path == "/api/client/agent-runtime":
-            session = self._agent_session()
+            session = self._agent_use_session()
             if session is None:
                 return True
             try:
@@ -267,7 +288,7 @@ class AgentRoutesMixin:
             return True
 
         if parsed.path == "/api/client/profile-claims":
-            session = self._agent_session()
+            session = self._agent_use_session()
             if session is None:
                 return True
             try:
@@ -295,7 +316,7 @@ class AgentRoutesMixin:
 
     def _post_agent_routes(self, parsed) -> bool:
         if parsed.path == "/api/client/profile-workspace/upload":
-            session = self._agent_session()
+            session = self._agent_use_session()
             if session is None:
                 return True
             try:
@@ -343,7 +364,7 @@ class AgentRoutesMixin:
             and duplicate_match is None
         ):
             return False
-        session = self._agent_session()
+        session = self._agent_use_session()
         if session is None:
             return True
         try:
@@ -507,7 +528,7 @@ class AgentRoutesMixin:
 
     def _delete_agent_routes(self, parsed) -> bool:
         if parsed.path == "/api/client/profile-workspace":
-            session = self._agent_session()
+            session = self._agent_use_session()
             if session is None:
                 return True
             try:
@@ -533,7 +554,7 @@ class AgentRoutesMixin:
         )
         if not match:
             return False
-        session = self._agent_session()
+        session = self._agent_use_session()
         if session is None:
             return True
         try:

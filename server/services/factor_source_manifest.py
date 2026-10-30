@@ -5,9 +5,12 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from server.modules.custom_factors.catalog import _load_factor_family_from_source
-from tools.data.account_manage import can_view_user_scope
-from tools.data.sqlite.factor_source_store import list_factor_sources
+from server.identity.keycloak_authorization import keycloak_authorized_factor_sources
+from tools.data.factor_workspace.storage import (
+    load_factor_source,
+    load_public_factor_source,
+)
+from tools.data.sqlite.factor_metadata import list_factor_summaries
 
 
 class FactorSourceManifest:
@@ -33,6 +36,7 @@ class FactorSourceManifest:
         factor_id: str,
         factor_name: str,
         source_code: str,
+        family_formula_fingerprint: str,
         writable: bool,
         updated_at: float | None,
         chinese_name: str,
@@ -42,16 +46,13 @@ class FactorSourceManifest:
         server_id: str,
     ) -> dict[str, Any]:
         raw = source_code.encode("utf-8")
-        factor_cls, _ = _load_factor_family_from_source(
-            source_code, f"_sync_formula_{factor_id}",
-        )
-        if factor_cls is None:
+        fingerprint = str(family_formula_fingerprint or "").strip()
+        if not fingerprint:
             raise ValueError(
-                f"factor family formula cannot be synchronized: {factor_id}"
+                f"factor family catalog metadata is incomplete: {factor_id}"
             )
-        family = factor_cls()
         scope = "public" if kind == "public" else (
-            "own" if owner == principal else "subordinate"
+            "own" if owner == principal else "shared"
         )
         return {
             "source_kind": kind,
@@ -65,7 +66,7 @@ class FactorSourceManifest:
             "path": cls._source_path(kind, owner, factor_id, principal),
             "scope": scope,
             "writable": bool(writable),
-            "family_formula_fingerprint": family.expr.semantic_fingerprint(),
+            "family_formula_fingerprint": fingerprint,
             "source_sha256": hashlib.sha256(raw).hexdigest(),
             "source_bytes": len(raw),
             "updated_at": updated_at,
@@ -81,26 +82,49 @@ class FactorSourceManifest:
         principal: str,
         *,
         server_id: str,
+        access_token: str,
         include_subordinates: bool = True,
     ) -> dict[str, Any]:
         owner_principal = str(principal or "").strip()
         storage_server = str(server_id or "local").strip() or "local"
         items: list[dict[str, Any]] = []
-        for row in list_factor_sources("public"):
+        public_rows = list_factor_summaries("public")
+        custom_rows = list_factor_summaries("custom", None)
+        candidates = [
+            row for row in custom_rows
+            if include_subordinates
+            or str(row.get("owner_username") or "").strip() == owner_principal
+        ]
+        allowed = keycloak_authorized_factor_sources(
+            access_token,
+            refs=[
+                (str(row.get("owner_username") or "").strip(),
+                 str(row.get("factor_id") or row.get("id") or "").strip())
+                for row in candidates
+            ],
+            scope="read",
+        )
+        # Load executable source only after Keycloak has authorized the
+        # metadata-only candidate. This endpoint is an explicit workspace
+        # transfer, not a catalog list operation.
+        for row in public_rows:
+            factor_id = str(row.get("factor_id") or row.get("id") or "").strip()
+            source_code = load_public_factor_source(factor_id) or ""
             self._append(
-                items, row,
+                items, row, source_code=source_code,
                 kind="public", owner="public", principal=owner_principal,
                 server_id=storage_server, writable=False,
             )
-        for row in list_factor_sources("custom"):
+        for row in candidates:
             owner = str(row.get("owner_username") or "").strip()
-            if not owner or owner != owner_principal and (
-                not include_subordinates
-                or not can_view_user_scope(owner_principal, owner)
-            ):
+            factor_id = str(row.get("factor_id") or row.get("id") or "").strip()
+            if (owner, factor_id) not in allowed:
+                continue
+            source_code = load_factor_source(owner, factor_id) or ""
+            if not source_code:
                 continue
             self._append(
-                items, row,
+                items, row, source_code=source_code,
                 kind="custom", owner=owner, principal=owner_principal,
                 server_id=storage_server, writable=owner == owner_principal,
             )
@@ -123,14 +147,15 @@ class FactorSourceManifest:
         items: list[dict[str, Any]],
         row: dict[str, Any],
         *,
+        source_code: str,
         kind: str,
         owner: str,
         principal: str,
         server_id: str,
         writable: bool,
     ) -> None:
-        factor_id = str(row.get("factor_id") or "").strip()
-        source = str(row.get("source_code") or "")
+        factor_id = str(row.get("factor_id") or row.get("id") or "").strip()
+        source = str(source_code or "")
         if not factor_id or not source:
             return
         items.append(cls._item(
@@ -139,6 +164,7 @@ class FactorSourceManifest:
             factor_id=factor_id,
             factor_name=str(row.get("factor_name") or factor_id),
             source_code=source,
+            family_formula_fingerprint=str(row.get("family_formula_fingerprint") or ""),
             writable=writable,
             updated_at=float(row.get("updated_at") or 0.0),
             chinese_name=str(row.get("chinese_name") or ""),

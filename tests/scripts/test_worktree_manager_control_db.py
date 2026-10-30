@@ -19,21 +19,21 @@ from server.manager.storage.control_database_settings import (
 )
 
 
-def test_control_schema_keeps_organization_and_level_relations_central() -> None:
+def test_control_schema_leaves_identity_and_permissions_to_keycloak() -> None:
     schema = "\n".join(CONTROL_SCHEMA)
 
-    assert "control_organizations" in schema
-    assert "control_levels" in schema
-    assert "organization_id" in schema
-    assert "parent_level_id" in schema
-    assert "control_users" in schema
-    assert "control_public_visitor_allowlist" in schema
+    assert "control_organizations" not in schema
+    assert "control_levels" not in schema
+    assert "control_users" not in schema
+    assert "control_public_visitor_allowlist" not in schema
     assert "control_devices" in schema
     assert "control_user_preferences" in schema
     assert "preferred_language" in schema
     assert "public_key" in schema
-    assert "public_access" in schema
-    assert "quota_exempt" in schema
+    assert "public_access BOOLEAN" not in schema
+    assert "quota_exempt BOOLEAN" not in schema
+    assert "DROP COLUMN IF EXISTS public_access" in schema
+    assert "DROP COLUMN IF EXISTS quota_exempt" in schema
     assert "last_seen_at" in schema
     assert "source_versions" in schema
     assert "control_account_domain_entities" in schema
@@ -41,7 +41,7 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "client_type" in schema
     assert "enrollment_ip" in schema
     assert "last_seen_ip" in schema
-    assert CONTROL_DATABASE_SCHEMA_VERSION == 10
+    assert CONTROL_DATABASE_SCHEMA_VERSION == 11
 
 
 def test_git_source_version_requires_an_immutable_commit_and_content_identity() -> None:
@@ -153,44 +153,14 @@ def test_control_database_uses_remote_postgres_default_port_and_tls() -> None:
     assert "control.example:5432" in config.redacted_url
 
 
-def test_control_store_organization_loader_is_bound_to_the_store() -> None:
-    from contextlib import contextmanager
-
+def test_control_store_has_no_legacy_identity_directory_api() -> None:
     from server.manager.storage.control_db import PostgresControlStore
 
-    class _Cursor:
-        def execute(self, statement):
-            assert "FROM control_organizations" in statement
-            return self
-
-        def fetchall(self):
-            return [("GTHT", "GTHT", "", None)]
-
-    class _Connection:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def execute(self, statement):
-            return _Cursor().execute(statement)
-
-    store = object.__new__(PostgresControlStore)
-    store.ensure_schema = lambda: None
-
-    @contextmanager
-    def connection():
-        yield _Connection()
-
-    store._connection = connection
-
-    assert store.load_organizations() == [{
-        "id": "GTHT",
-        "name": "GTHT",
-        "description": "",
-        "updated_at": None,
-    }]
+    for legacy_method in (
+        "load_organizations", "replace_organizations", "load_levels",
+        "replace_levels", "load_accounts", "replace_accounts",
+    ):
+        assert not hasattr(PostgresControlStore, legacy_method)
 
 
 def test_control_database_accepts_explicit_port_and_verify_full() -> None:
@@ -269,9 +239,8 @@ def test_manager_switches_control_database_only_after_connection_succeeds(
         def __init__(self, config):
             self.config = config
 
-        def load_accounts(self):
+        def ensure_schema(self):
             connected.append(self.config.redacted_url)
-            return []
 
     monkeypatch.setattr(state_module, "PostgresControlStore", _Store)
     state = manager.ManagerState(

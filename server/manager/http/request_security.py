@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
+import json
 import os
 import socket
 import ssl
@@ -52,8 +53,28 @@ CLIENT_ACCESS_HEADER = "X-FactorTester-Client-Access"
 CLIENT_ACCESS_VALUE = "ftclient"
 VISITOR_ID_HEADER = "X-FactorTester-Visitor-ID"
 
+
+def read_json_object(handler, maximum: int) -> tuple[bytes, dict[str, object]]:
+    """Read one bounded JSON object for Manager and peer HTTP handlers."""
+    try:
+        length = int(handler.headers.get("Content-Length", "0"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("request body length is invalid") from exc
+    if length <= 0 or length > int(maximum):
+        raise ValueError("request body is invalid")
+    body = handler.rfile.read(length)
+    if len(body) != length:
+        raise ValueError("request body is incomplete")
+    value = json.loads(body.decode("utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("request body must be an object")
+    return body, value
+
 class RequestSecurityMixin:
     """Define the public/private HTTP boundary before route dispatch."""
+
+    def _json_body(self, maximum: int) -> dict[str, object]:
+        return read_json_object(self, maximum)[1]
 
     def setup(self) -> None:
         """Negotiate TLS per worker when this listener also accepts HTTP."""
@@ -405,7 +426,7 @@ class RequestSecurityMixin:
         return rewritten
 
     def _visitor_mode(self) -> VisitorMode | None:
-        """Return the public anonymous capability set for this origin.
+        """Return a Keycloak-authorized low-privilege visitor session.
 
         An account session always takes precedence over the anonymous visitor
         cookie.  The login response expires that cookie, but a browser can
@@ -417,6 +438,8 @@ class RequestSecurityMixin:
         expires, the remaining visitor cookie naturally falls back to the
         bounded anonymous capability.
         """
+        from server.identity.auth_mode import keycloak_enabled
+
         if not (
             getattr(self.state, "require_login_for_ui", False)
             and getattr(self.state, "public_server", False)
@@ -435,7 +458,27 @@ class RequestSecurityMixin:
         )
         if not visitor_id:
             return None
+        if keycloak_enabled():
+            policy = self._keycloak_visitor_policy()
+            if policy is None or not policy.can_access:
+                return None
+            return VisitorMode(
+                visitor_id=visitor_id,
+                can_submit=policy.can_submit,
+                can_download_artifacts=policy.can_download_artifacts,
+                keycloak_subject=policy.subject,
+            )
         return VisitorMode(visitor_id=visitor_id)
+
+    @staticmethod
+    def _keycloak_visitor_policy():
+        """Resolve the shared guest service-account policy; fail closed."""
+        try:
+            from server.identity.keycloak_visitor import keycloak_visitor_policy
+
+            return keycloak_visitor_policy()
+        except (ImportError, OSError, TypeError, ValueError):
+            return None
 
     def _anonymous_ui_allowed(self) -> bool:
         return (
@@ -486,11 +529,13 @@ class RequestSecurityMixin:
         )
         return True
 
-    def _send_redirect(self, location: str, *, cookie: str = "") -> None:
+    def _send_redirect(self, location: str, *, cookie: str | list[str] = "") -> None:
         self.send_response(303)
         self.send_header("Location", location)
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
+        cookies = [cookie] if isinstance(cookie, str) else cookie
+        for value in cookies:
+            if value:
+                self.send_header("Set-Cookie", value)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Length", "0")
@@ -501,6 +546,20 @@ class RequestSecurityMixin:
             "next", ["/"]
         )[0]
         next_path = manager_safe_login_next(str(requested or "/"))
+        from server.identity.auth_mode import keycloak_enabled
+
+        if keycloak_enabled():
+            policy = self._keycloak_visitor_policy()
+            if (
+                policy is None
+                or not policy.can_access
+                or not getattr(self.state, "require_login_for_ui", False)
+                or not getattr(self.state, "public_server", False)
+            ):
+                self._send_redirect(
+                    "/compliance?next=" + quote(next_path, safe="/?=&%")
+                )
+                return
         current_origin = self._request_origin()
         target_origin = self._visitor_redirect_target()
         store = getattr(self.state, "visitor_access", None)
@@ -511,14 +570,10 @@ class RequestSecurityMixin:
             and current_origin in tuple(
                 getattr(self.state, "visitor_entry_origins", ())
             )
+            and current_origin != target_origin
         ):
-            grant = store.issue_grant(target_origin)
             self._send_redirect(
-                target_visitor_url(
-                    target_origin,
-                    grant=grant,
-                    next_path=next_path,
-                )
+                "/compliance?next=" + quote(next_path, safe="/?=&%")
             )
             return
 
@@ -534,34 +589,16 @@ class RequestSecurityMixin:
                 )
                 return
 
-            if self._client_access_allowed():
-                client_access_token = self._cookie_value(CLIENT_ACCESS_COOKIE)
-                visitor_id = store.client_access_visitor_id(
-                    client_access_token,
-                    target_origin=target_origin,
-                )
-                if not visitor_id and self._client_access_header_allowed():
-                    visitor_id = normalize_visitor_id(
-                        self.headers.get(VISITOR_ID_HEADER, "")
-                    )
-                self._send_redirect(
-                    next_path,
-                    cookie=visitor_cookie(
-                        store.issue_session(
-                            target_origin,
-                            visitor_id=visitor_id,
-                        ),
-                        secure=True,
-                    ),
-                )
-                return
-
         self._send_redirect(
             "/compliance?next=" + quote(next_path, safe="/?=&%")
         )
 
     def _session(self) -> dict[str, object] | None:
-        return self.state.session(self._bearer_token())
+        from server.identity.request_context import bind_verified_identity
+        token = self._bearer_token()
+        session = self.state.session(token)
+        bind_verified_identity(token, session)
+        return session
 
     def _serve_login_page(self, parsed) -> None:
         requested = parse_qs(parsed.query, keep_blank_values=True).get(
@@ -607,11 +644,21 @@ class RequestSecurityMixin:
         show_visitor_entry: bool | None = None,
         visitor_grant: str = "",
     ) -> None:
+        from server.identity.auth_mode import keycloak_enabled
+
+        keycloak_only = keycloak_enabled()
         if show_visitor_entry is None:
             show_visitor_entry = (
                 self._visitor_mode() is None
                 and self._visitor_entry_origin_allowed()
             )
+        visitor_policy = (
+            self._keycloak_visitor_policy() if keycloak_only else None
+        )
+        keycloak_visitor_allowed = bool(
+            not keycloak_only
+            or (visitor_policy is not None and visitor_policy.can_access)
+        )
         visitor_grant = str(visitor_grant or "").strip()
         current_origin = self._request_origin()
         target_origin = self._visitor_redirect_target()
@@ -627,11 +674,20 @@ class RequestSecurityMixin:
             )
         )
         client_access_cookie = self._issue_client_access_cookie()
+        can_issue_entry_grant = bool(
+            store is not None
+            and target_origin
+            and current_origin == target_origin
+        )
         show_visitor_entry = bool(
-            show_visitor_entry
-            or grant_is_valid
-            or self._client_access_allowed()
-            or bool(client_access_cookie)
+            keycloak_visitor_allowed
+            and can_issue_entry_grant
+            and (
+                show_visitor_entry
+                or grant_is_valid
+                or self._client_access_allowed()
+                or bool(client_access_cookie)
+            )
         )
         visitor_entry_href = ""
         if show_visitor_entry:
@@ -639,19 +695,22 @@ class RequestSecurityMixin:
                 manager_safe_login_next(next_path),
                 safe="/?=&%",
             )
-            if grant_is_valid:
-                visitor_entry_href = (
-                    "/visitor?grant="
-                    + quote(visitor_grant, safe="")
-                    + "&next="
-                    + safe_next
-                )
-            else:
-                visitor_entry_href = "/visitor?next=" + safe_next
+            entry_grant = (
+                visitor_grant
+                if grant_is_valid
+                else store.issue_grant(target_origin)
+            )
+            visitor_entry_href = (
+                "/visitor?grant="
+                + quote(entry_grant, safe="")
+                + "&next="
+                + safe_next
+            )
         body = manager_compliance_page(
             next_path,
             accept_language=self.headers.get("Accept-Language", ""),
             visitor_entry_href=visitor_entry_href,
+            public_server=bool(getattr(self.state, "public_server", False)),
         )
         self._send_html(body, cookie=client_access_cookie)
 

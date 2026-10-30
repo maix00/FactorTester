@@ -240,9 +240,53 @@ def test_react_shell_assets_are_served_and_manifest_gated():
         assert body
         assert content_type
     sw, sw_type = static_file("sw.js")
-    assert b"tr-shell-v2" in sw
+    assert b"tr-shell-" in sw
     assert b"/research-static/vendor/web-app/desktop.js" in sw
     assert "javascript" in sw_type
     manifest, manifest_type = static_file("vendor/web-app/manifest.webmanifest")
     assert json.loads(manifest)["start_url"] == "/app"
     assert manifest_type == "application/manifest+json"
+
+
+def test_react_shell_and_lazy_assets_share_declared_content_versions():
+    import html
+    import re
+    versions = assets.web_app_asset_versions()
+    for name in ["loader.js", "desktop.js", "desktop.css", "configuration-code.js", "configuration-code.css", "configuration-editor-worker.js", "configuration-json-worker.js", "artifact-frame.js"]:
+        assert versions[name]
+        assert static_file("vendor/web-app/" + name)[0]
+    body = assets.web_app_shell_bytes().decode()
+    assert f'loader.js?v={versions["loader.js"]}' in body
+    data = re.search(r'data-tr-asset-versions="([^"]+)"', body).group(1)
+    assert json.loads(html.unescape(data)) == versions
+    assert f'artifact-frame.js?v={versions["artifact-frame.js"]}' in assets.web_app_frame_bytes().decode()
+
+
+def test_react_versions_reuse_unchanged_files_when_one_asset_changes(tmp_path, monkeypatch):
+    root = tmp_path / "web-app"; root.mkdir()
+    for name in ["desktop.js", "configuration-code.js"]:
+        (root / name).write_text(name)
+    monkeypatch.setattr(assets, "VENDOR_ROOT", tmp_path)
+    monkeypatch.setattr(assets, "_module_manifest", lambda: {"vendor_assets": ["vendor/web-app/desktop.js", "vendor/web-app/configuration-code.js"]})
+    assets._web_app_digest.cache_clear()
+    first = assets.web_app_asset_versions()
+    before = assets._web_app_digest.cache_info()
+    assert assets.web_app_asset_versions() == first
+    assert assets._web_app_digest.cache_info().misses == before.misses
+    (root / "desktop.js").write_text("changed desktop")
+    second = assets.web_app_asset_versions()
+    assert first["desktop.js"] != second["desktop.js"]
+    assert first["configuration-code.js"] == second["configuration-code.js"]
+    assert assets._web_app_digest.cache_info().misses == before.misses + 1
+
+
+def test_react_unversioned_assets_revalidate_but_versioned_assets_reuse_cache():
+    for name in ["desktop.css", "configuration-code.js", "configuration-json-worker.js", "artifact-frame.js"]:
+        path = "/research-static/vendor/web-app/" + name
+        handler = _BundleHandler("")
+        assert handler._get_entry_routes(urlparse(path))
+        assert handler.status == 200
+        assert handler.header("Cache-Control") == "no-cache"
+        handler = _BundleHandler("")
+        assert handler._get_entry_routes(urlparse(path + "?v=" + assets.web_app_asset_versions()[name]))
+        assert handler.header("Cache-Control") == "public, max-age=31536000, immutable"

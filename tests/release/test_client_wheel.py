@@ -52,7 +52,7 @@ def _build_wheel(output_dir: Path) -> Path:
         capture_output=True,
         text=True,
     )
-    wheels = list(output_dir.glob("factortester-*.whl"))
+    wheels = list(output_dir.glob("traderesearch-*.whl"))
     assert len(wheels) == 1
     return wheels[0]
 

@@ -1,4 +1,4 @@
-# FactorTester CLI Research Jobs
+# TradeResearch CLI Research Jobs
 
 The CLI is a remote HTTP client. Research execution has one lifecycle:
 
@@ -11,10 +11,10 @@ Inside a page-bound Profile Agent runtime, inspect and atomically fill the
 currently assisted page with one registered structured document:
 
 ```bash
-factortester assist inspect
-factortester assist drafts create --file assistance.json
-factortester assist drafts validate <draft-id>
-factortester assist drafts apply <draft-id>
+traderesearch assist inspect
+traderesearch assist drafts create --file assistance.json
+traderesearch assist drafts validate <draft-id>
+traderesearch assist drafts apply <draft-id>
 # create also accepts --stdin; the Manager retains the resulting draft.
 ```
 
@@ -24,74 +24,74 @@ custom-analysis pages expose their own registered draft schemas. Apply is
 all-or-nothing and fails if the person edited the page after inspection.
 
 ```bash
-factortester workspace create \
+traderesearch workspace create \
   --factor-family SgCCS \
   --factor-family MmRet \
   --factor 'SgCCS=SgCCS|P:CA|N:10d'
-factortester workspace templates
-factortester workspace load-template <configuration_id>
+traderesearch workspace templates
+traderesearch workspace load-template <configuration_id>
 # Or replace the active configuration from a complete JSON object:
-factortester workspace update --file research-configuration.json
+traderesearch workspace update --file research-configuration.json
 
 # Inspect policy roles, then configure one strategy atomically.
-factortester strategy intent describe
-factortester strategy intent show --group A1 --json
-factortester strategy intent configure A1 \
+traderesearch strategy intent describe
+traderesearch strategy intent show --group A1 --json
+traderesearch strategy intent configure A1 \
   --role screen=LiquidityGate --screen-rule gte --screen-lower 1 \
   --role sizing=InverseRisk --allocation-policy factor_sizing \
   --sizing-transform inverse --json
 
 # Public strategy entry: templates and custom Strategy Actor specs.
 # StrategyPlan is produced internally after validation; it is not a user-written template.
-factortester strategy list --json
-factortester strategy template show group_quantile --json
-factortester strategy validate --spec strategy.yaml --json
+traderesearch strategy list --json
+traderesearch strategy template show group_quantile --json
+traderesearch strategy validate --spec strategy.yaml --json
 
 # 持久策略库：策略带不可变源码版本，可按权限共享。
-factortester strategy-library list --scope mine --json
-factortester strategy-library show strategy:<owner>/<name> --json
-factortester strategy-library revisions list strategy:<owner>/<name> --json
-factortester strategy-library revisions show strategy:<owner>/<name> <revision-ref> --json
+traderesearch strategy-library list --scope mine --json
+traderesearch strategy-library show strategy:<owner>/<name> --json
+traderesearch strategy-library revisions list strategy:<owner>/<name> --json
+traderesearch strategy-library revisions show strategy:<owner>/<name> <revision-ref> --json
 
 # 当前测试配置中的临时策略：只随 ResearchConfiguration 保存，绝不写入策略库。
-factortester workspace strategy list
-factortester workspace strategy add-inline \
+traderesearch workspace strategy list
+traderesearch workspace strategy add-inline \
   --name "盘中反转" --source-file strategy.py \
   --entrypoint IntradayReversal --target-strategy-id group-1
-factortester workspace strategy update-inline <binding-id> \
+traderesearch workspace strategy update-inline <binding-id> \
   --source-file strategy-v2.py
-factortester workspace strategy bind-library \
+traderesearch workspace strategy bind-library \
   --strategy-ref strategy:<owner>/<name> \
   --revision-ref <revision-ref> --target-strategy-id group-2
-factortester workspace strategy show <binding-id> --json
-factortester workspace strategy unbind <binding-id>
+traderesearch workspace strategy show <binding-id> --json
+traderesearch workspace strategy unbind <binding-id>
 
 # Validate the full panel through GTHT and freeze its id/hashes in this workspace:
-factortester external-factor validate \
+traderesearch external-factor validate \
   /path/to/gtht_handoff.json \
   --attach
 
-factortester run submit \
+traderesearch run submit \
   --analysis ic \
   --analysis factor_evaluation \
   --analysis factor_type_analysis \
   --analysis backtest
 
-factortester job list
-factortester job watch <job_id>
-factortester job orders <job_id>
-factortester job order <job_id> <order_group_id>
-factortester job status <job_id>
-factortester job config <job_id>
-factortester job progress <job_id>
-factortester job output-capabilities --json
-factortester job artifacts <job_id> --json
-factortester job artifact <job_id> <name>
-factortester job download-all <job_id>
-factortester job generate <job_id> --output fee_detail --output margin_detail
-factortester job cancel <job_id>
-factortester job retry <job_id>
-factortester job continue <job_id> --end
+traderesearch job list
+traderesearch job watch <job_id>
+traderesearch job orders <job_id>
+traderesearch job order <job_id> <order_group_id>
+traderesearch job status <job_id>
+traderesearch job config <job_id>
+traderesearch job progress <job_id>
+traderesearch job output-capabilities --json
+traderesearch job artifacts <job_id> --json
+traderesearch job artifact <job_id> <name>
+traderesearch job download-all <job_id>
+traderesearch job generate <job_id> --output fee_detail --output margin_detail
+traderesearch job cancel <job_id>
+traderesearch job retry <job_id>
+traderesearch job continue <job_id> --end
 ```
 
 For IC jobs, forward horizons and diagnostic fields are configurable in the
@@ -100,15 +100,15 @@ projection defaults to all fields.  To retain only selected diagnostic groups
 or fields in subsequent results, use for example:
 
 ```bash
-factortester workspace ic-horizons --sampling scale_aware
-factortester workspace ic-metrics \
+traderesearch workspace ic-horizons --sampling scale_aware
+traderesearch workspace ic-metrics \
   --metric core --metric holding_half_life --exclude persistence
 ```
 
 The normalized `ic_metric_selection` is stored in the result and report
 artifacts.  Selecting a holding-period half-life implicitly retains
 `mean_ic`, its fit dependency, and records that dependency in the metadata.
-Use `factortester workspace ic-metrics --all` to restore the complete default.
+Use `traderesearch workspace ic-metrics --all` to restore the complete default.
 
 Saved templates use the same open ResearchConfiguration schema as a workspace. Loading one updates the active configuration and restores the Web registry snapshot; a submitted RunSpec freezes the selected configuration revision and provenance.
 
@@ -138,10 +138,10 @@ The server is the authority for output names, Chinese descriptions, supported
 formats, and source prerequisites. CLI and UI use the same HTTP contract:
 
 ```bash
-factortester job output-capabilities --json
-factortester run preview --analysis backtest \
+traderesearch job output-capabilities --json
+traderesearch run preview --analysis backtest \
   --output equity_curve --output fee_detail --output margin_detail
-factortester run submit --analysis backtest --retain-full \
+traderesearch run submit --analysis backtest --retain-full \
   --output returns_over_time --output metrics_over_time
 ```
 
@@ -163,7 +163,7 @@ requests only that scope; availability must never widen it through an implicit
 provider fallback.
 
 ```bash
-factortester product-library availability \
+traderesearch product-library availability \
   --product A.DCE \
   --source Local \
   --frequency MIN1 \
@@ -197,7 +197,7 @@ from factor or backtest results. The cutoff prevents the screen from silently
 inspecting later data:
 
 ```bash
-factortester product-library liquidity \
+traderesearch product-library liquidity \
   --product A.DCE \
   --product RB.SHF \
   --source LocalCNFuturesDAY1 \
@@ -224,7 +224,7 @@ Open validation declares intended use without claiming one-time protection:
 {"schema_version":1,"purpose":"validation","protection":"open"}
 ```
 
-Submit it with `factortester run submit --sample-use-file sample-use.json`.
+Submit it with `traderesearch run submit --sample-use-file sample-use.json`.
 For a sealed comparison, use `protection: "sealed"`, a stable `comparison_id`,
 and the complete, frozen set of candidate RunSpec SHA-256 hashes in
 `member_run_spec_hashes`; submit the same contract for each member. Every

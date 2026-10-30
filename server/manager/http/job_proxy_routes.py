@@ -450,11 +450,17 @@ class JobProxyRoutesMixin:
                         raise PermissionError('需要超级管理员权限')
                 sync = getattr(getattr(self.state, 'client_state', None), 'account_domain_sync', None)
                 if sync is not None:
-                    store = getattr(self.state.client_state, 'local_account_store', None)
-                    accounts = store.load_accounts() if store is not None else []
                     principals = {str(session['username']), '__public__'}
                     if changing_family.group(1) == 'public':
-                        principals.update(str(row['username']) for row in accounts if row.get('username'))
+                        from server.identity.keycloak_directory import managed_users_for_verified_request
+
+                        principals.update(
+                            str(row.get('username') or '').strip()
+                            for row in managed_users_for_verified_request(
+                                str(session['username']), include_self=True,
+                            )
+                            if str(row.get('username') or '').strip()
+                        )
                     for user in sorted(principals):
                         for _ in range(100):
                             state = sync.pull(principal=user, limit=1000)
@@ -466,7 +472,8 @@ class JobProxyRoutesMixin:
                             raise RuntimeError('依赖尚未同步完整，请稍后重试')
                 from server.manager.services.factor_family_current import ensure_current_family
                 if not ensure_current_family(self.state, changing_family.group(1), unquote(changing_family.group(2)),
-                    principal=str(session['username'])):
+                    principal=str(session['username']),
+                    access_token=self._bearer_token()):
                     raise ValueError('家族已删除或源码尚不可用')
             family_match = re.fullmatch(r'families/(custom|public)/([^/]+)', suffix)
             if prefix == '/api/factor-library/' and family_match and method in {'GET', 'PUT', 'DELETE'}:
@@ -475,6 +482,7 @@ class JobProxyRoutesMixin:
                     self.state, family_match.group(1), unquote(family_match.group(2)),
                     principal=str(session['username']),
                     owner=str(query_values.get('owner_username', [''])[0]) if method == 'GET' else '',
+                    access_token=self._bearer_token(),
                 ) and method != 'DELETE':
                     # A retry must reach the delete route to clear residual
                     # mirrored registrations after the family head was deleted.

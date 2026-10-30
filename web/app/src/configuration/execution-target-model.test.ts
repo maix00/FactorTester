@@ -7,3 +7,10 @@ test("RunSpec requirements exclude node identity while execution selection binds
 test("invalid target, duplicate product and incomplete dates never produce a run request",()=>{assert.throws(()=>executionRequest({...target,online:false},[offer],"2024-01-01","2025-01-01","backtest"));assert.throws(()=>executionRequest(target,[offer,offer],"2024-01-01","2025-01-01","backtest"));assert.throws(()=>executionRequest(target,[offer],"","","backtest"));});
 
 test("automatic selection freezes requirements without selecting a physical source",async()=>{const {automaticExecutionRequest,selectionManager}=await import("./execution-target-model.ts");const request=automaticExecutionRequest([offer],"2024-01-01","2025-01-01","backtest","a");assert.equal(selectionManager(request),"a");assert.equal("sources" in request.execution_selection,false);assert.equal("target" in request.execution_selection,false);});
+
+test("ordinary research users discover Manager IDs without administrative peer access",async()=>{
+ const {executionManagerIDs}=await import('./execution-target-model.ts');
+ assert.deepEqual(executionManagerIDs({server_id:'local',internal_server_targets:[{server_id:'local',online:true}],public_server_targets:[{server_id:'public',online:true},{server_id:'offline',online:false},{server_id:''},null]}),['local','public']);
+ assert.deepEqual(executionManagerIDs({server_id:'local',public_server_targets:'invalid'}),['local']);
+ assert.deepEqual(executionManagerIDs({}),[]);
+});

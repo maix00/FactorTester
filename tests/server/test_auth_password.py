@@ -1,31 +1,26 @@
 from __future__ import annotations
 
-from copy import deepcopy
-
-from flask import Flask
+from flask import Flask, g
 
 from server import auth
-from tools.data.account_manage import hash_password, verify_password
 
 
-def _client(monkeypatch):
-    salt = "old-salt"
-    accounts = [{
-        "username": "default$MaxA@1",
-        "alias": "MaxA",
-        "salt": salt,
-        "hash": hash_password("old-password", salt),
-    }]
-    saved = []
-    monkeypatch.setattr(auth, "load_accounts", lambda: deepcopy(accounts))
-    monkeypatch.setattr(auth, "save_accounts", lambda value: saved.append(deepcopy(value)))
+def _client(monkeypatch, *, identity=None):
+    identity = identity or {
+        "username": "alice",
+        "alias": "Alice",
+        "role": "user",
+        "keycloak_roles": (),
+        "keycloak_subject": "subject-alice",
+    }
+    monkeypatch.setattr(
+        "server.services.session_runtime._keycloak_request_session",
+        lambda: (g.__setattr__("keycloak_user_session", identity) or identity),
+    )
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(auth.auth_bp)
-    client = app.test_client()
-    with client.session_transaction() as current:
-        current["username"] = "default$MaxA@1"
-    return client, saved
+    return app.test_client()
 
 
 def _unauthenticated_client():
@@ -40,17 +35,16 @@ def _unauthenticated_client():
     return app.test_client()
 
 
-def test_unauthenticated_api_get_returns_json_instead_of_login_html() -> None:
+def test_unauthenticated_api_get_returns_keycloak_login_required() -> None:
     response = _unauthenticated_client().get(
-        "/api/private-probe",
-        headers={"Accept": "application/json"},
+        "/api/private-probe", headers={"Accept": "application/json"},
     )
 
     assert response.status_code == 401
     assert response.content_type == "application/json"
     assert response.get_json() == {
         "success": False,
-        "error": "请先登录",
+        "error": "请先通过 Keycloak 登录",
         "login_required": True,
     }
 
@@ -63,90 +57,45 @@ def test_unauthenticated_browser_get_is_json_without_service_page_redirect() -> 
     assert response.get_json()["login_required"] is True
 
 
-def test_login_applies_explicit_persistent_session_atomically(
+def test_local_password_and_registration_routes_are_retired() -> None:
+    client = _unauthenticated_client()
+    requests = (
+        client.post("/login", json={"username": "alice", "password": "password"}),
+        client.post("/register", json={"username": "intruder", "password": "password"}),
+        client.post("/api/account/password", json={
+            "current_password": "password", "new_password": "new-password",
+        }),
+        client.get("/api/organizations"),
+        client.post("/api/keep_login", json={"keep_login": True}),
+    )
+
+    assert all(response.status_code == 410 for response in requests)
+    assert all(
+        response.get_json()["code"] == "keycloak_managed_identity"
+        for response in requests
+    )
+
+
+def test_api_me_returns_verified_keycloak_claims_without_local_account_lookup(
     monkeypatch,
 ) -> None:
-    salt = "login-salt"
-    accounts = [{
-        "username": "default$MaxA@1",
-        "alias": "MaxA",
-        "salt": salt,
-        "hash": hash_password("password", salt),
-    }]
-    monkeypatch.setattr(auth, "load_accounts", lambda: deepcopy(accounts))
-    app = Flask(__name__)
-    app.secret_key = "test"
-    app.register_blueprint(auth.auth_bp)
-    client = app.test_client()
+    client = _client(monkeypatch, identity={
+        "username": "alice",
+        "alias": "Alice",
+        "role": "super_admin",
+        "keycloak_roles": ("admin_console:manage",),
+        "keycloak_subject": "subject-alice",
+    })
 
-    response = client.post(
-        "/login",
-        json={
-            "username": "MaxA",
-            "password": "password",
-            "keep_login": True,
-        },
-    )
+    response = client.get("/api/me")
 
     assert response.status_code == 200
-    assert client.get("/api/me").get_json()["keep_login"] is True
-
-
-def test_login_without_explicit_persistence_remains_temporary(
-    monkeypatch,
-) -> None:
-    salt = "login-salt"
-    accounts = [{
-        "username": "default$MaxA@1",
-        "alias": "MaxA",
-        "salt": salt,
-        "hash": hash_password("password", salt),
-    }]
-    monkeypatch.setattr(auth, "load_accounts", lambda: deepcopy(accounts))
-    app = Flask(__name__)
-    app.secret_key = "test"
-    app.register_blueprint(auth.auth_bp)
-    client = app.test_client()
-
-    response = client.post(
-        "/login",
-        json={"username": "MaxA", "password": "password"},
-    )
-
-    assert response.status_code == 200
-    assert client.get("/api/me").get_json()["keep_login"] is False
-
-
-def test_current_account_can_change_password(monkeypatch) -> None:
-    client, saved = _client(monkeypatch)
-
-    response = client.post(
-        "/api/account/password",
-        json={
-            "current_password": "old-password",
-            "new_password": "new-password",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.get_json() == {"success": True}
-    assert len(saved) == 1
-    account = saved[0][0]
-    assert verify_password("new-password", account["salt"], account["hash"])
-    assert not verify_password("old-password", account["salt"], account["hash"])
-
-
-def test_change_password_rejects_wrong_current_password(monkeypatch) -> None:
-    client, saved = _client(monkeypatch)
-
-    response = client.post(
-        "/api/account/password",
-        json={
-            "current_password": "wrong-password",
-            "new_password": "new-password",
-        },
-    )
-
-    assert response.status_code == 400
-    assert response.get_json()["error"] == "当前密码错误"
-    assert saved == []
+    assert response.get_json() == {
+        "username": "alice",
+        "alias": "Alice",
+        "role": "super_admin",
+        "keycloak_roles": ["admin_console:manage"],
+        "is_admin": True,
+        "is_developer": False,
+        "keep_login": False,
+    }

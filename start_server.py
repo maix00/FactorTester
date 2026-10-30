@@ -18,7 +18,7 @@ except Exception:
 from flask import request, jsonify, session
 from waitress import serve
 from server import create_app
-from tools.data.account_manage import accounts_lock, load_accounts
+from tools.data.account_manage import get_account, is_super_admin_account
 from server.services.session_runtime import current_user
 from tools.data.cache.IdleResourceManager import IdleResourceManager
 import settings
@@ -135,10 +135,7 @@ def shutdown():
     username = current_user()
     if not username:
         return jsonify({'success': False, 'error': '请先登录'}), 401
-    with accounts_lock:
-        accounts = load_accounts()
-    acct = next((a for a in accounts if a['username'] == username), None)
-    if not acct or not acct.get('is_admin', False):
+    if not is_super_admin_account(get_account(username)):
         return jsonify({'success': False, 'error': '无权限'}), 403
     # waitress 没有内置 shutdown 机制，直接退出进程
     threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()

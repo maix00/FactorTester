@@ -39,12 +39,64 @@ from server.services.factor_registry import (
 )
 from tools.data.account_manage import (
     account_display_name,
-    direct_subordinate_accounts_for,
     get_account,
 )
 from tools.factors.factor_param_resolution import factor_param_resolver_scope
 from tools.factors.formula_identity import freeze_factor_identity
 from tools.parameters import FactorParam
+
+
+def authorized_factor_library_owners(
+    current_username: str, *, include_shared: bool, scope: str,
+) -> set[str]:
+    """Resolve visible factor-library owners from Keycloak grants only.
+
+    Outside an HTTP request, internal callers are deliberately limited to the
+    submitting user's own library. Cross-owner access requires a verified
+    request token or an explicit frozen authorization context elsewhere.
+    """
+    from flask import has_request_context
+    from server.identity.keycloak_authorization import (
+        AuthorizationUnavailable,
+        ensure_keycloak_resource,
+        keycloak_authorized_objects,
+        keycloak_request_credentials,
+    )
+    from server.modules.custom_factors.factor_library_store import (
+        list_factor_param_config_refs,
+    )
+
+    username = str(current_username or "").strip()
+    if not username:
+        return set()
+    credentials = keycloak_request_credentials()
+    if credentials is None:
+        if has_request_context():
+            raise PermissionError("verified Keycloak credentials are required")
+        return {username}
+    if credentials[2] != username:
+        raise PermissionError("Keycloak principal does not match the request owner")
+
+    owners = {username}
+    if include_shared:
+        owners.update(
+            owner for owner, _family, _product_group
+            in list_factor_param_config_refs()
+            if owner
+        )
+    ensure_keycloak_resource(
+        resource_type="factor_library", resource_ref=f"custom:{username}",
+        owner_subject=credentials[1],
+    )
+    try:
+        allowed = keycloak_authorized_objects(
+            credentials[0], resource_type="factor_library",
+            refs=[(f"custom:{owner}", owner) for owner in sorted(owners)],
+            scope=scope,
+        )
+    except AuthorizationUnavailable:
+        raise
+    return {str(owner) for owner in allowed}
 
 
 def _freeze_alias_factor_param_rows(username, factor_family, params_list: list) -> list:
@@ -316,16 +368,24 @@ def build_factor_library_overview(
     *,
     account: dict | None = None,
     include_scope_catalog: bool = True,
+    authorized_owners: set[str] | None = None,
+    can_filter_organization: bool = False,
 ) -> dict:
     product_group = normalize_product_group(product_group) if product_group else None
-    current = account or get_account(current_username) or {
-        'username': current_username,
-    }
-    accounts = [current]
-    if include_subordinates:
-        accounts.extend(direct_subordinate_accounts_for(current_username))
-    current_account = account or get_account(current_username) or {}
-    can_filter_organization = bool(current_account.get('role') == 'super_admin' or current_account.get('is_admin'))
+    # Account hierarchy is no longer an authorization source. HTTP callers
+    # pass owners whose factor-library Keycloak resource grants the requested
+    # scope; trusted non-request callers default to their own library only.
+    allowed_owners = (
+        set(authorized_owners)
+        if authorized_owners is not None else {current_username}
+    )
+    if not include_subordinates:
+        allowed_owners.intersection_update({current_username})
+    accounts = [
+        (account if owner == current_username and account else None)
+        or get_account(owner) or {'username': owner}
+        for owner in sorted(allowed_owners)
+    ]
     public_by_alias = alias_map(list_public_factors())
 
     items = []
@@ -398,14 +458,25 @@ def build_factor_library_overview(
     }
 
 
-def list_factor_library_config_users(current_username: str, ff_alias: str, product_group: str = DEFAULT_SCOPE_KEY) -> dict:
+def list_factor_library_config_users(
+    current_username: str,
+    ff_alias: str,
+    product_group: str = DEFAULT_SCOPE_KEY,
+    *,
+    authorized_owners: set[str] | None = None,
+    can_filter_organization: bool = False,
+) -> dict:
     product_group = normalize_product_group(product_group)
+    # The old account tree only discovers display rows. Access is decided by
+    # the caller against Keycloak before this helper loads any config payload.
+    allowed_owners = (
+        set(authorized_owners)
+        if authorized_owners is not None else {current_username}
+    )
     accounts = [
-        get_account(current_username) or {'username': current_username},
-        *direct_subordinate_accounts_for(current_username),
+        get_account(owner) or {'username': owner}
+        for owner in sorted(allowed_owners)
     ]
-    current_account = get_account(current_username) or {}
-    can_filter_organization = bool(current_account.get('role') == 'super_admin' or current_account.get('is_admin'))
     public_by_alias = alias_map(list_public_factors())
 
     users = []

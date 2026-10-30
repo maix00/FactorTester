@@ -1,8 +1,8 @@
-# FactorTester Manager CLI
+# TradeResearch Manager CLI
 
-`factortester-manager` is the CLI-Anything-style application client for an
-authenticated FactorTester Manager. It calls the real Manager HTTP API and
-7997 capability data plane; it does not reimplement FactorTester behavior or
+`traderesearch-manager` is the CLI-Anything-style application client for an
+authenticated TradeResearch Manager. It calls the real Manager HTTP API and
+7997 capability data plane; it does not reimplement platform behavior or
 administer the host.
 
 ## Command groups
@@ -13,10 +13,10 @@ Use `--help` at each boundary and `--json` for automation:
 - `server access check|script download` — check local operator readiness or
   download a server-declared, digest-checked connection script without running
   it;
-- `server health|network|federation|database` — inspect FactorTester runtime,
+- `server health|network|federation|database` — inspect TradeResearch runtime,
   federation, and redacted control-database status;
 - `jobs list|ports|show|cancel|retry|continue|approve` — inspect or explicitly
-  act on FactorTester Jobs;
+  act on TradeResearch Jobs;
 - `artifacts list|download|delete` — inspect, transfer, or explicitly delete
   retained Job artifacts;
 - `storage usage` — read storage usage;
@@ -24,8 +24,8 @@ Use `--help` at each boundary and `--json` for automation:
 - `devices list|summary|revoke` — inspect or explicitly revoke public-access
   devices;
 - `services list|start|stop|restart-api|restart-bundle|force-stop` — control
-  Manager-owned FactorTester services;
-- `client release` — build and publish an authorized FactorTester client release.
+  Manager-owned TradeResearch services;
+- `client release` — build and publish an authorized TradeResearch client release.
 - `client release-upload` — send an already-built signed Beta package to one
   or more explicit Manager targets through 7998/7997.
 
@@ -41,8 +41,8 @@ authenticated server-to-server capability; this CLI does not manage peers,
 keys, routes, or tunnel lifecycle.
 
 Manager sessions are stored in the platform credential store under a hash of
-the complete Manager URL. The same administrator may use this CLI against
-multiple servers, but each URL needs its own session; a token from one server
-is never sent to another. After an account-name migration, log in to the
-affected URL with the current full username; the existing URL entry is
-replaced and no username-derived hash is used.
+the complete Manager URL. This CLI reuses the Keycloak session established in
+the TradeResearch web or desktop client; it never accepts a local username or
+password. The same administrator may use this CLI against multiple servers,
+but each URL needs its own session; a token from one server is never sent to
+another.

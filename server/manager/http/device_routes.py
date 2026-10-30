@@ -7,7 +7,6 @@ import json
 import sys
 from typing import Any
 
-from server.manager.config import MANAGER_SESSION_TTL_SECONDS
 from server.manager.domain.device_clients import describe_client, observed_ip
 from server.manager.domain.devices import (
     DeviceRegistryError,
@@ -92,6 +91,12 @@ class DeviceNetworkRoutesMixin:
             "public_device_total_count": public_device_total_count,
             "public_user_count": public_user_count,
             "server_id": self.state.server_id,
+            "public_server": bool(getattr(self.state, "public_server", False)),
+            "device_policy": (
+                "public_auto_login_allowlist"
+                if bool(getattr(self.state, "public_server", False))
+                else "organization_device_auto_login"
+            ),
             **self.state.device_registry.backend_status(),
         })
 
@@ -138,13 +143,11 @@ class DeviceNetworkRoutesMixin:
                 "error": "device enrollment requires HTTPS outside private LAN",
             }, 400)
             return
-        if not self._is_allowlisted_visitor_session(session):
+        if not self._may_enroll_device(session):
             json_response(self, {
                 "success": False,
-                "error": (
-                    "device enrollment is available only after public allowlist "
-                    "visitor login"
-                ),
+                "error": "Keycloak public-server login permission is required to enroll this device",
+                "code": "public_server_login_required",
             }, 403)
             return
         try:
@@ -172,25 +175,14 @@ class DeviceNetworkRoutesMixin:
             "sync": self.state.device_registry.backend_status(),
         }, 201)
 
-    def _is_allowlisted_visitor_session(self, session: dict[str, object]) -> bool:
-        """Allow enrollment only for a live public allowlist visitor session.
-
-        The browser cannot select an enrollment policy. The server derives
-        permission from the private session authentication method and a fresh
-        allowlist check, so an internal or ordinary password session cannot
-        manufacture a device record.
-        """
+    def _may_enroll_device(self, session: dict[str, object]) -> bool:
+        """Keep public login permission separate from internal device policy."""
         if not bool(getattr(self.state, "public_server", False)):
-            return False
-        reader = getattr(self.state, "session_authentication", None)
-        if not callable(reader) or reader(self._bearer_token()) != "visitor-password":
-            return False
-        try:
-            return self.state.public_visitor_login_account(
-                str(session.get("username") or "")
-            ) is not None
-        except ControlDatabaseError:
-            return False
+            # Organization-internal Managers do not inherit the public
+            # server's role gate or its per-user auto-login allowlist.
+            return True
+        from server.identity.user_session import may_login_public_server
+        return may_login_public_server(session)
 
     def _device_revoke(self) -> None:
         session = self._session()
@@ -264,10 +256,25 @@ class DeviceNetworkRoutesMixin:
                 signature=payload.get("signature"),
                 last_seen_ip=observed_ip(self._client_ip()),
             )
-            token, principal, role = self.state.login_device(
-                str(record.get("username") or ""),
+            ticket = self.state.device_challenges.issue_device_login_ticket(
+                username=str(record.get("username") or ""),
+                device_id=str(record.get("device_id") or ""),
                 origin=self._request_origin(),
             )
+            from server.identity.manager_oidc import _safe_next_path
+            from urllib.parse import urlencode
+            next_path = _safe_next_path(str(payload.get("next") or "/app"))
+            login_url = "/auth/oidc/start?" + urlencode({
+                "next": next_path,
+                "device_ticket": ticket,
+            })
+            json_response(self, {
+                "success": True,
+                "requires_keycloak": True,
+                "login_url": login_url,
+                "device_id": record.get("device_id"),
+            }, headers={"Cache-Control": "no-store"})
+            return
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device verification failed: {exc}\n")
             json_response(self, {
@@ -290,17 +297,3 @@ class DeviceNetworkRoutesMixin:
                 "error": "device is not approved",
             }, 403)
             return
-        session = self.state.session(token) or {}
-        json_response(self, {
-            "success": True,
-            "username": principal,
-            "alias": session.get("alias") or principal,
-            "role": role,
-            "capabilities": {
-                "manager": role == "super_admin",
-                "research": True,
-            },
-            "token": token,
-            "expires_in": MANAGER_SESSION_TTL_SECONDS,
-            "device_id": record.get("device_id"),
-        }, headers={"Set-Cookie": self._session_cookie(token)})

@@ -46,3 +46,13 @@ test("re-resolving the saved binding with a different key order stays saved",()=
  const resolved=applyResolution(pending,key,{binding:{target:{node_id:'n',service_id:'s'},inputs:[]},binding_ref:'same'})!;
  assert.equal(resolved.text,draft.savedText);
 });
+
+test("Manager initialization is explicit and never overwrites manual JSON choices",async()=>{
+ const {initializeManagerChoice}=await import('./plan-document.ts');
+ const value={mode:'auto' as const,manager_id:'',bundles:[{bundle_id:'CN',owner:'alice'}]};
+ assert.equal(initializeManagerChoice(value,['local'],false),undefined);
+ const selected=initializeManagerChoice(value,['local'],true)!;
+ assert.equal(selected.manager_id,'local');assert.equal(selected.bundles,value.bundles);assert.equal(value.manager_id,'');
+ assert.equal(initializeManagerChoice({...value,manager_id:'remote'},['local'],true),undefined);
+ assert.equal(initializeManagerChoice({...value,target:{manager_id:'remote'}},['local'],true),undefined);
+});

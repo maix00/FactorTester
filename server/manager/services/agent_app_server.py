@@ -5,6 +5,7 @@ from __future__ import annotations
 from server.manager.services.provider_rollout_history import enrich_turns
 
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -48,6 +49,9 @@ class AgentAppServerSupervisor:
         cc_switch_binary: str = "cc-switch",
         proxy_url_provider: Callable[[], str] | None = None,
         heartbeat_interval: float = 30.0,
+        max_active_sessions: int | None = None,
+        idle_timeout_seconds: float | None = None,
+        reaper_interval_seconds: float | None = None,
     ) -> None:
         self.profile_service = profile_service
         self.codex_binary = str(codex_binary or "codex").strip() or "codex"
@@ -56,12 +60,34 @@ class AgentAppServerSupervisor:
         )
         self.proxy_url_provider = proxy_url_provider
         self.heartbeat_interval = max(0.1, float(heartbeat_interval))
+        self.max_active_sessions = self._positive_int_setting(
+            max_active_sessions, "TRADERESEARCH_AGENT_MAX_ACTIVE_SESSIONS", 2, 1, 32,
+        )
+        self.idle_timeout_seconds = self._positive_float_setting(
+            idle_timeout_seconds, "TRADERESEARCH_AGENT_IDLE_TIMEOUT_SECONDS",
+            900.0, 30.0, 86_400.0,
+        )
+        default_reaper_interval = min(30.0, self.idle_timeout_seconds / 4)
+        self.reaper_interval_seconds = self._positive_float_setting(
+            reaper_interval_seconds, "TRADERESEARCH_AGENT_REAPER_INTERVAL_SECONDS",
+            default_reaper_interval, 1.0, 300.0,
+        )
         self._sessions: dict[tuple[str, str], AgentAppServerSession] = {}
         self._agent_session_tokens: dict[tuple[str, str], str] = {}
         self._heartbeat_controls: dict[tuple[str, str], threading.Event] = {}
         self._model_catalog_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._processing_turns: dict[tuple[str, str], dict[str, Any]] = {}
+        self._inflight_requests: dict[tuple[str, str], int] = {}
         self._lock = threading.RLock()
+        self._condition = threading.Condition(self._lock)
+        self._starting: set[tuple[str, str]] = set()
+        self._cancelled_starts: set[tuple[str, str]] = set()
+        self._starting_sessions: dict[tuple[str, str], AgentAppServerSession] = {}
+        self._starting_tokens: dict[tuple[str, str], str] = {}
+        self._last_activity: dict[tuple[str, str], float] = {}
+        self._shutting_down = False
+        self._reaper_stop = threading.Event()
+        self._reaper_thread: threading.Thread | None = None
         self.thread_reader = AgentProviderThreadReader(
             profile_service,
             codex_binary=self.codex_binary,
@@ -77,36 +103,147 @@ class AgentAppServerSupervisor:
             raise AgentAppServerError("principal and profile_id are required")
         return owner, profile
 
+    @staticmethod
+    def _positive_int_setting(
+        explicit: int | None, env_name: str, default: int, minimum: int, maximum: int,
+    ) -> int:
+        raw = explicit if explicit is not None else os.environ.get(env_name, default)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = default
+        return min(maximum, max(minimum, value))
+
+    @staticmethod
+    def _positive_float_setting(
+        explicit: float | None, env_name: str, default: float,
+        minimum: float, maximum: float,
+    ) -> float:
+        raw = explicit if explicit is not None else os.environ.get(env_name, default)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = default
+        if not value > 0:
+            value = default
+        return min(maximum, max(minimum, value))
+
+    def _ensure_reaper(self) -> None:
+        with self._lock:
+            if self._shutting_down or (
+                self._reaper_thread is not None
+                and self._reaper_thread.is_alive()
+            ):
+                return
+            self._reaper_stop.clear()
+            self._reaper_thread = threading.Thread(
+                target=self._reap_idle_sessions,
+                name="factor-manager-agent-session-reaper",
+                daemon=True,
+            )
+            self._reaper_thread.start()
+
+    def _reap_idle_sessions(self) -> None:
+        while not self._reaper_stop.wait(self.reaper_interval_seconds):
+            self._reap_idle_sessions_once()
+
+    def _reap_idle_sessions_once(self, *, now: float | None = None) -> None:
+        cutoff = (time.monotonic() if now is None else now) - self.idle_timeout_seconds
+        with self._lock:
+            idle = [
+                key for key, last_activity in self._last_activity.items()
+                if last_activity <= cutoff
+                and key in self._sessions
+                and key not in self._processing_turns
+                and key not in self._inflight_requests
+                and key not in self._starting
+            ]
+        for key in idle:
+            try:
+                self.stop(*key)
+            except Exception:
+                LOGGER.exception("Idle Agent session cleanup failed profile=%s", key[1])
+
+    def _touch(self, key: tuple[str, str]) -> None:
+        with self._lock:
+            if key in self._sessions:
+                self._last_activity[key] = time.monotonic()
+
+    def _ensure_start_active(self, key: tuple[str, str]) -> None:
+        with self._lock:
+            if self._shutting_down or key in self._cancelled_starts:
+                raise AgentAppServerError(
+                    "Agent startup was cancelled",
+                    code="start_cancelled",
+                )
+
     def start(self, principal: str, profile_id: str) -> dict[str, Any]:
         key = self._key(principal, profile_id)
-        self._model_catalog_cache.pop(key, None)
+        with self._lock:
+            self._model_catalog_cache.pop(key, None)
         # A lifecycle Agent and a history-only app-server must never share one
         # Profile state directory concurrently.
         self.thread_reader.close(*key)
+        stale_session: AgentAppServerSession | None = None
+        stale_token = ""
         with self._lock:
+            if self._shutting_down:
+                raise AgentAppServerError("Agent supervisor is shutting down")
             existing = self._sessions.get(key)
             if existing is not None:
                 existing_status = existing.status()
             else:
                 existing_status = {}
             if existing is not None and existing_status.get("ready") and existing_status.get("running"):
+                self._last_activity[key] = time.monotonic()
                 return existing.status()
             if existing is not None:
                 self._sessions.pop(key, None)
                 self._processing_turns.pop(key, None)
                 self._stop_heartbeat(key)
-                existing.stop()
-                self.profile_service.revoke_agent_session(
-                    self._agent_session_tokens.pop(key, ""),
+                self._last_activity.pop(key, None)
+                stale_session = existing
+                stale_token = self._agent_session_tokens.pop(key, "")
+            if key in self._starting:
+                raise AgentAppServerError(
+                    "Agent startup is already in progress",
+                    code="start_in_progress",
                 )
+            active_sessions = sum(
+                1 for current in self._sessions.values()
+                if current.status().get("running")
+            )
+            if active_sessions + len(self._starting) >= self.max_active_sessions:
+                raise AgentAppServerError(
+                    "Agent session capacity is reached; stop an idle session and retry",
+                    code="capacity_reached",
+                )
+            self._starting.add(key)
+            self._cancelled_starts.discard(key)
+        session: AgentAppServerSession | None = None
+        context: Mapping[str, Any] | None = None
+        auth: Mapping[str, Any] = {}
+        try:
+            if stale_session is not None:
+                stale_session.stop()
+                self.profile_service.revoke_agent_session(stale_token)
                 self.profile_service.pause_server_agent(*key)
+            self._ensure_start_active(key)
             context = self.profile_service.server_agent_context(*key)
+            self._ensure_start_active(key)
             claim = context["claim"]
             self.profile_service.heartbeat(
                 key[0],
                 str(claim["claim_id"]),
                 str(claim["agent_id"]),
             )
+            self._ensure_start_active(key)
+            auth = context.get("factor_tester_auth") or {}
+            token = str(auth.get("token") or "")
+            with self._lock:
+                if not self._shutting_down and key not in self._cancelled_starts:
+                    self._starting_tokens[key] = token
+            self._ensure_start_active(key)
             try:
                 proxy_url = resolve_provider_proxy(
                     context["provider"],
@@ -114,6 +251,7 @@ class AgentAppServerSupervisor:
                 )
             except AgentProviderProxyUnavailable as exc:
                 raise AgentAppServerError(str(exc), code=exc.code) from exc
+            self._ensure_start_active(key)
             runtime_observer = AgentConversationRuntimeObserver(
                 self.profile_service.conversation_store,
                 key[0],
@@ -130,34 +268,74 @@ class AgentAppServerSupervisor:
                     key, runtime_observer, payload,
                 ),
             )
-            try:
-                session.start()
-            except Exception:
-                session.stop()
-                auth = context.get("factor_tester_auth") or {}
-                self.profile_service.revoke_agent_session(
-                    str(auth.get("token") or ""),
-                )
-                raise
-            self._sessions[key] = session
-            auth = context.get("factor_tester_auth") or {}
-            self._agent_session_tokens[key] = str(auth.get("token") or "")
-            self._start_heartbeat(key, claim)
+            with self._lock:
+                if self._shutting_down or key in self._cancelled_starts:
+                    raise AgentAppServerError(
+                        "Agent startup was cancelled", code="start_cancelled",
+                    )
+                self._starting_sessions[key] = session
+            session.start()
+            with self._lock:
+                if self._shutting_down or key in self._cancelled_starts:
+                    raise AgentAppServerError(
+                        "Agent startup was cancelled", code="start_cancelled",
+                    )
+                self._starting_sessions.pop(key, None)
+                self._starting_tokens.pop(key, None)
+                self._sessions[key] = session
+                self._agent_session_tokens[key] = token
+                self._last_activity[key] = time.monotonic()
+                self._start_heartbeat(key, claim)
+            self._ensure_reaper()
             return session.status()
+        except Exception:
+            if session is not None:
+                session.stop()
+            token = str(auth.get("token") or "")
+            if token:
+                self.profile_service.revoke_agent_session(token)
+            if context is not None:
+                self.profile_service.pause_server_agent(*key)
+            raise
+        finally:
+            with self._condition:
+                self._starting.discard(key)
+                self._starting_sessions.pop(key, None)
+                self._starting_tokens.pop(key, None)
+                self._cancelled_starts.discard(key)
+                self._condition.notify_all()
 
     def stop(self, principal: str, profile_id: str) -> dict[str, Any]:
         key = self._key(principal, profile_id)
-        self._model_catalog_cache.pop(key, None)
-        with self._lock:
+        with self._condition:
+            self._model_catalog_cache.pop(key, None)
+            if key in self._starting:
+                self._cancelled_starts.add(key)
             session = self._sessions.pop(key, None)
+            starting_session = self._starting_sessions.get(key)
             self._processing_turns.pop(key, None)
+            self._last_activity.pop(key, None)
+            active_token = self._agent_session_tokens.pop(key, "")
+            starting_token = self._starting_tokens.get(key, "")
             self._stop_heartbeat(key)
-        if session is not None:
-            session.stop()
-        self.profile_service.revoke_agent_session(
-            self._agent_session_tokens.pop(key, ""),
-        )
+        stopped: set[int] = set()
+        for candidate in (session, starting_session):
+            if candidate is not None and id(candidate) not in stopped:
+                stopped.add(id(candidate))
+                candidate.stop()
+        for token in {active_token, starting_token} - {""}:
+            self.profile_service.revoke_agent_session(token)
         self.profile_service.pause_server_agent(*key)
+        # Starting work checks the cancellation flag before and after every
+        # external startup step. Wait briefly for a subprocess handshake to
+        # observe it, but never hold the supervisor lock while doing so.
+        deadline = time.monotonic() + 6.0
+        with self._condition:
+            while key in self._starting:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._condition.wait(timeout=remaining)
         return {"stopped": True, "running": False}
 
     def status(self, principal: str, profile_id: str) -> dict[str, Any]:
@@ -505,6 +683,9 @@ class AgentAppServerSupervisor:
                     "event_after": event_after,
                 }
         bind_start_to_session()
+        with self._lock:
+            self._inflight_requests[key] = self._inflight_requests.get(key, 0) + 1
+            self._last_activity[key] = time.monotonic()
         try:
             try:
                 response = session.request(method, request_params)
@@ -577,6 +758,15 @@ class AgentAppServerSupervisor:
                 with self._lock:
                     self._processing_turns.pop(key, None)
             raise
+        finally:
+            with self._condition:
+                remaining = self._inflight_requests.get(key, 1) - 1
+                if remaining > 0:
+                    self._inflight_requests[key] = remaining
+                else:
+                    self._inflight_requests.pop(key, None)
+                self._last_activity[key] = time.monotonic()
+                self._condition.notify_all()
         self._save_conversation_state(
             key,
             method,
@@ -752,10 +942,27 @@ class AgentAppServerSupervisor:
         return session.wait_for_events(after, timeout)
 
     def stop_all(self) -> None:
-        with self._lock:
-            keys = list(self._sessions)
+        with self._condition:
+            self._shutting_down = True
+            self._reaper_stop.set()
+            keys = list(set(self._sessions) | set(self._starting))
+            self._cancelled_starts.update(self._starting)
         for principal, profile_id in keys:
             self.stop(principal, profile_id)
+        reaper = self._reaper_thread
+        if reaper is not None and reaper is not threading.current_thread():
+            reaper.join(timeout=2.0)
+        deadline = time.monotonic() + 10.0
+        with self._condition:
+            while self._starting:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    LOGGER.error(
+                        "Agent startup did not finish during Manager shutdown: %d session(s)",
+                        len(self._starting),
+                    )
+                    break
+                self._condition.wait(timeout=remaining)
         self.thread_reader.close_all()
 
     def _start_heartbeat(

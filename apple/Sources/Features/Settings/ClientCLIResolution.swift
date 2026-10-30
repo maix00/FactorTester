@@ -6,9 +6,14 @@ enum ClientCLIResolution {
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default
     ) -> String {
-        let bundled = bundle.resourceURL?
-            .appendingPathComponent("FactorTester/bin/factortester")
-            .path
+        let bundled = firstExecutable([
+            bundle.resourceURL?
+                .appendingPathComponent("FactorTester/bin/traderesearch")
+                .path,
+            bundle.resourceURL?
+                .appendingPathComponent("FactorTester/bin/factortester")
+                .path,
+        ]) { fileManager.isExecutableFile(atPath: $0) }
         return resolve(
             bundledPath: bundled,
             configuredPath: defaults.string(
@@ -23,16 +28,21 @@ enum ClientCLIResolution {
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default
     ) -> String {
-        let bundled = bundle.resourceURL?
-            .appendingPathComponent("FactorTester/bin/factortester-manager")
-            .path
+        let bundled = firstExecutable([
+            bundle.resourceURL?
+                .appendingPathComponent("FactorTester/bin/traderesearch-manager")
+                .path,
+            bundle.resourceURL?
+                .appendingPathComponent("FactorTester/bin/factortester-manager")
+                .path,
+        ]) { fileManager.isExecutableFile(atPath: $0) }
         return resolve(
             bundledPath: bundled,
             configuredPath: defaults.string(
                 forKey: "client.release.managerCLIPath"
             ),
             isExecutable: fileManager.isExecutableFile(atPath:),
-            fallback: "factortester-manager"
+            fallback: "traderesearch-manager"
         )
     }
 
@@ -40,7 +50,7 @@ enum ClientCLIResolution {
         bundledPath: String?,
         configuredPath: String?,
         isExecutable: (String) -> Bool,
-        fallback: String = "factortester"
+        fallback: String = "traderesearch"
     ) -> String {
         if let bundledPath, isExecutable(bundledPath) {
             return bundledPath
@@ -49,5 +59,12 @@ enum ClientCLIResolution {
             return configuredPath
         }
         return fallback
+    }
+
+    static func firstExecutable(
+        _ candidates: [String?],
+        isExecutable: (String) -> Bool
+    ) -> String? {
+        candidates.compactMap { $0 }.first(where: isExecutable)
     }
 }

@@ -402,7 +402,7 @@
       const section = new URLSearchParams(search).get("section") || "services";
       return {
         kind: "manager",
-        section: ["services", "allowlist", "devices", "accounts"].includes(section)
+        section: ["services", "dispatch"].includes(section)
           ? section : "services",
       };
     }

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import base64
 import json
+import secrets
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
+from server.identity.federation_identity_sync import identity_sync_disable_signature
 from server.manager.domain.federation_transport import FederationTransport
 from server.manager.http.gateway import GatewayResponse
 
@@ -116,6 +119,7 @@ class FederatedGateway:
         *,
         requester_server_id: str,
         principal: str,
+        delegated_user_token: str,
         scope: str,
         page: int = 1,
         limit: int = 100,
@@ -135,9 +139,13 @@ class FederatedGateway:
         """
         if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
+        delegated_user_token = str(delegated_user_token or "").strip()
+        if not delegated_user_token or len(delegated_user_token) > 32_768:
+            raise ValueError("verified user session is required for federated job queries")
         payload = {
             "requester_server_id": str(requester_server_id),
             "principal": str(principal),
+            "delegated_user_token": delegated_user_token,
             "scope": str(scope),
             "page": max(1, int(page)),
             "limit": max(1, min(100, int(limit))),
@@ -203,7 +211,10 @@ class FederatedGateway:
         if kind == "execution":
             if not route.remote or not route.online:
                 raise ValueError("remote Manager is unavailable")
-            from server.identity.service_access import ServiceHTTPClient, configured_client
+            from server.identity.service_access import (
+                ServiceHTTPClient,
+                configured_client,
+            )
             clients = getattr(self, "_execution_clients", None)
             if clients is None:
                 self._execution_clients = clients = {}
@@ -362,6 +373,82 @@ class FederatedGateway:
             raise ConnectionError(
                 str(value.get("error") or f"federated control sync returned HTTP {status}")
             )
+        return value
+
+    def check_identity_sync_disable(
+        self,
+        route: ServiceRoute,
+        *,
+        requester_server_id: str,
+        requester_proxy_token: str,
+        group_path: str,
+    ) -> dict[str, object]:
+        """Ask the registered public Manager for one live policy decision.
+
+        The requester proves its registered identity with an HMAC using its
+        own peer token. The token itself is never sent in the request body.
+        This operation is only called when an administrator submits a change;
+        it is not a polling or per-login path.
+        """
+        if not route.remote or not route.online or not route.proxy_token:
+            raise ConnectionError("public Manager is offline or unregistered")
+        requester = str(requester_server_id or "").strip()
+        secret = str(requester_proxy_token or "").strip()
+        selected_group = str(group_path or "").strip()
+        if not requester or not secret or not selected_group:
+            raise ValueError("identity-sync verification request is incomplete")
+        issued_at = int(time.time())
+        request_id = secrets.token_urlsafe(24)
+        payload = {
+            "requester_server_id": requester,
+            "group_path": selected_group,
+            "issued_at": issued_at,
+            "request_id": request_id,
+            "signature": identity_sync_disable_signature(
+                secret,
+                requester_server_id=requester,
+                group_path=selected_group,
+                issued_at=issued_at,
+                request_id=request_id,
+            ),
+        }
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            self._peer_url(route, "/api/federation/identity-sync/check-disable"),
+            data=raw,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with self.transport.open(request, timeout=min(self.timeout, 5.0)) as response:
+                response_body = response.read(64 * 1024)
+                status = response.status
+        except HTTPError as exc:
+            response_body = exc.read(64 * 1024)
+            status = exc.code
+        except (URLError, OSError) as exc:
+            raise ConnectionError("public Manager sync verifier is unavailable") from exc
+        try:
+            value = json.loads(response_body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("public Manager returned an invalid sync decision") from exc
+        if not isinstance(value, dict):
+            raise ConnectionError("public Manager returned an invalid sync decision")
+        if status != 200 or value.get("success") is not True:
+            raise ConnectionError(
+                str(value.get("error") or f"public Manager returned HTTP {status}")
+            )
+        if (
+            value.get("request_id") != request_id
+            or value.get("requester_server_id") != requester
+            or value.get("group_path") != selected_group
+            or type(value.get("allowed")) is not bool
+        ):
+            raise ConnectionError("public Manager returned an unbound sync decision")
         return value
 
     def reconcile_jobs(

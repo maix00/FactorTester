@@ -2,21 +2,21 @@
   "schema_version": 1,
   "skills": [
     {
-      "id": "factortester-research",
-      "label": "FactorTester 研究",
-      "description": "通过 FactorTester CLI 管理研究、报告、Run、Evidence 与因子研究。",
+      "id": "traderesearch-research",
+      "label": "TradeResearch 研究",
+      "description": "通过 TradeResearch CLI 管理研究、报告、Run、Evidence 与因子研究。",
       "version": "1",
-      "path": "skills/factortester-research-skill",
+      "path": "skills/traderesearch-research-skill",
       "runtime_kinds": ["server"],
       "audience": "profile",
       "enabled": true
     },
     {
-      "id": "factortester-manager-maintenance",
-      "label": "FactorTester Manager Maintenance",
-      "description": "服务器维护和 Manager 运维能力，仅供管理员使用。",
+      "id": "traderesearch-server-maintenance",
+      "label": "TradeResearch Server Maintenance",
+      "description": "TradeResearch 服务器维护和 Manager 运维能力，仅供管理员使用。",
       "version": "1",
-      "path": "server/skills/factortester-server-maintenance",
+      "path": "server/skills/traderesearch-server-maintenance",
       "runtime_kinds": ["server"],
       "audience": "manager_only",
       "enabled": true

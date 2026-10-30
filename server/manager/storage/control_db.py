@@ -1,15 +1,8 @@
-"""PostgreSQL control-plane storage for users, profiles, and global quotas.
+"""PostgreSQL control-plane storage for Manager-owned operational metadata.
 
-The execution and artifact databases remain host-local SQLite databases.  This
-module contains only the small pieces of state that must be authoritative when
-more than one Manager can authenticate a user or accept a task: account
-records, profile metadata, quota policies, per-server usage snapshots, and
-short-lived quota reservations.
-
-The driver is intentionally imported lazily.  A developer checkout without a
-``FACTORTESTER_CONTROL_DATABASE_URL`` keeps using the existing SQLite account
-store and local artifact quota, while a deployed node with the URL configured
-uses the remote PostgreSQL database over TCP (5432 by default).
+Keycloak is the sole authority for users, organizations, groups, roles, and
+permissions. This database retains non-identity projections such as profiles,
+quotas, devices, and account-domain objects.
 """
 
 from __future__ import annotations
@@ -28,14 +21,13 @@ from typing import Any, Callable, Iterator, Mapping
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from server.manager.storage.account_domain.remote import AccountDomainControlMixin
-from server.manager.storage.access_control import VisitorAccessControlMixin
 
 
 CONTROL_DATABASE_ENV = "FACTORTESTER_CONTROL_DATABASE_URL"
 DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
-CONTROL_DATABASE_SCHEMA_VERSION = 10
+CONTROL_DATABASE_SCHEMA_VERSION = 11
 CONTROL_DATABASE_ENCODING = "UTF8"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -255,62 +247,6 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS control_organizations (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL DEFAULT '',
-        description TEXT NOT NULL DEFAULT '',
-        active BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS control_levels (
-        id TEXT PRIMARY KEY,
-        organization_id TEXT NOT NULL,
-        name TEXT NOT NULL DEFAULT '',
-        parent_level_id TEXT NOT NULL DEFAULT '',
-        manager_username TEXT NOT NULL DEFAULT '',
-        active BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (organization_id) REFERENCES control_organizations(id)
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS control_levels_organization ON control_levels(organization_id, id)",
-    "CREATE INDEX IF NOT EXISTS control_levels_parent ON control_levels(organization_id, parent_level_id)",
-    """
-    CREATE TABLE IF NOT EXISTS control_users (
-        username TEXT PRIMARY KEY,
-        alias TEXT NOT NULL DEFAULT '',
-        salt TEXT NOT NULL DEFAULT '',
-        password_hash TEXT NOT NULL DEFAULT '',
-        role TEXT NOT NULL DEFAULT 'user',
-        is_admin BOOLEAN NOT NULL DEFAULT FALSE,
-        is_developer BOOLEAN NOT NULL DEFAULT FALSE,
-        organization_id TEXT NOT NULL DEFAULT 'default',
-        organization_name TEXT NOT NULL DEFAULT '',
-        level_id TEXT NOT NULL DEFAULT '',
-        parent_username TEXT NOT NULL DEFAULT '',
-        active BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS control_public_visitor_allowlist (
-        server_id TEXT NOT NULL,
-        username TEXT NOT NULL,
-        enabled BOOLEAN NOT NULL DEFAULT TRUE,
-        created_by TEXT NOT NULL DEFAULT '',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (server_id, username)
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS control_public_visitor_allowlist_user ON control_public_visitor_allowlist(username, enabled)",
-    "CREATE INDEX IF NOT EXISTS control_public_visitor_allowlist_server ON control_public_visitor_allowlist(server_id, enabled, updated_at DESC)",
-    """
     CREATE TABLE IF NOT EXISTS control_devices (
         device_id TEXT PRIMARY KEY,
         public_key JSONB NOT NULL,
@@ -320,8 +256,6 @@ CONTROL_SCHEMA: tuple[str, ...] = (
         client_name TEXT NOT NULL DEFAULT '',
         enrollment_ip TEXT NOT NULL DEFAULT '',
         last_seen_ip TEXT NOT NULL DEFAULT '',
-        public_access BOOLEAN NOT NULL DEFAULT FALSE,
-        quota_exempt BOOLEAN NOT NULL DEFAULT FALSE,
         enabled BOOLEAN NOT NULL DEFAULT TRUE,
         source_server_id TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -329,15 +263,14 @@ CONTROL_SCHEMA: tuple[str, ...] = (
         last_seen_at TIMESTAMPTZ
     )
     """,
-    "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS public_access BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS client_type TEXT NOT NULL DEFAULT 'unknown'",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS client_name TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS enrollment_ip TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS last_seen_ip TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS quota_exempt BOOLEAN NOT NULL DEFAULT FALSE",
-    "UPDATE control_devices SET public_access=TRUE, quota_exempt=TRUE WHERE public_access IS DISTINCT FROM TRUE OR quota_exempt IS DISTINCT FROM TRUE",
     "CREATE INDEX IF NOT EXISTS control_devices_username ON control_devices(username, enabled)",
-    "CREATE INDEX IF NOT EXISTS control_devices_public_username ON control_devices(username, public_access, quota_exempt, enabled)",
+    "DROP INDEX IF EXISTS control_devices_public_username",
+    "ALTER TABLE control_devices DROP COLUMN IF EXISTS public_access",
+    "ALTER TABLE control_devices DROP COLUMN IF EXISTS quota_exempt",
     "CREATE INDEX IF NOT EXISTS control_devices_source ON control_devices(source_server_id, updated_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS control_user_preferences (
@@ -517,7 +450,7 @@ def _row_value(row: object, key: str, index: int = 0, default: object = None) ->
 ConnectFactory = Callable[[ControlDatabaseConfig], Any]
 
 
-class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin):
+class PostgresControlStore(AccountDomainControlMixin):
     """Small PostgreSQL repository with lazy connections and idempotent writes."""
 
     def __init__(
@@ -607,137 +540,8 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                 )
             self._schema_ready = True
 
-    def load_accounts(self) -> list[dict[str, Any]]:
-        self.ensure_schema()
-        with self._connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT username, alias, salt, password_hash AS hash, role,
-                       is_admin, is_developer, organization_id,
-                       organization_name, level_id, parent_username,
-                       updated_at
-                FROM control_users
-                WHERE active=TRUE
-                ORDER BY username
-                """
-            ).fetchall()
-        return [dict(row) if isinstance(row, Mapping) else {
-            "username": _row_value(row, "username", 0, ""),
-            "alias": _row_value(row, "alias", 1, ""),
-            "salt": _row_value(row, "salt", 2, ""),
-            "hash": _row_value(row, "hash", 3, ""),
-            "role": _row_value(row, "role", 4, "user"),
-            "is_admin": _row_value(row, "is_admin", 5, False),
-            "is_developer": _row_value(row, "is_developer", 6, False),
-            "organization_id": _row_value(row, "organization_id", 7, "default"),
-            "organization_name": _row_value(row, "organization_name", 8, ""),
-            "level_id": _row_value(row, "level_id", 9, ""),
-            "parent_username": _row_value(row, "parent_username", 10, ""),
-            "updated_at": _row_value(row, "updated_at", 11, None),
-        } for row in rows]
 
-    def replace_accounts(self, accounts: list[Mapping[str, Any]]) -> None:
-        self.ensure_schema()
-        with self._connection() as connection:
-            connection.execute("UPDATE control_users SET active=FALSE, updated_at=CURRENT_TIMESTAMP")
-            for account in accounts:
-                username = str(account.get("username") or "").strip()
-                if not username:
-                    continue
-                connection.execute(
-                    """
-                    INSERT INTO control_users(
-                        username, alias, salt, password_hash, role,
-                        is_admin, is_developer, organization_id,
-                        organization_name, level_id, parent_username, active,
-                        updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
-                    ON CONFLICT(username) DO UPDATE SET
-                        alias=EXCLUDED.alias, salt=EXCLUDED.salt,
-                        password_hash=EXCLUDED.password_hash,
-                        role=EXCLUDED.role, is_admin=EXCLUDED.is_admin,
-                        is_developer=EXCLUDED.is_developer,
-                        organization_id=EXCLUDED.organization_id,
-                        organization_name=EXCLUDED.organization_name,
-                        level_id=EXCLUDED.level_id,
-                        parent_username=EXCLUDED.parent_username,
-                        active=TRUE, updated_at=CURRENT_TIMESTAMP
-                    """,
-                    (
-                        username,
-                        str(account.get("alias") or ""),
-                        str(account.get("salt") or ""),
-                        str(account.get("hash") or ""),
-                        str(account.get("role") or "user"),
-                        bool(account.get("is_admin")),
-                        bool(account.get("is_developer")),
-                        str(account.get("organization_id") or "default"),
-                        str(account.get("organization_name") or ""),
-                        str(account.get("level_id") or ""),
-                        str(account.get("parent_username") or ""),
-                    ),
-                )
 
-    def create_account(self, account: Mapping[str, Any]) -> None:
-        """Create one account idempotently for the local registration outbox."""
-        self.ensure_schema()
-        username = str(account.get("username") or "").strip()
-        if not username:
-            raise ValueError("account username is required")
-        values = (
-            username,
-            str(account.get("alias") or ""),
-            str(account.get("salt") or ""),
-            str(account.get("hash") or ""),
-            str(account.get("role") or "user"),
-            bool(account.get("is_admin")),
-            bool(account.get("is_developer")),
-            str(account.get("organization_id") or "default"),
-            str(account.get("organization_name") or ""),
-            str(account.get("level_id") or ""),
-            str(account.get("parent_username") or ""),
-        )
-        with self._connection() as connection:
-            existing = connection.execute(
-                """
-                SELECT username, alias, salt, password_hash, role,
-                       is_admin, is_developer, organization_id,
-                       organization_name, level_id, parent_username, active
-                FROM control_users WHERE username=%s
-                """,
-                (username,),
-            ).fetchone()
-            if existing is not None:
-                current = (
-                    str(_row_value(existing, "username", 0, "")),
-                    str(_row_value(existing, "alias", 1, "")),
-                    str(_row_value(existing, "salt", 2, "")),
-                    str(_row_value(existing, "password_hash", 3, "")),
-                    str(_row_value(existing, "role", 4, "user")),
-                    bool(_row_value(existing, "is_admin", 5, False)),
-                    bool(_row_value(existing, "is_developer", 6, False)),
-                    str(_row_value(existing, "organization_id", 7, "default")),
-                    str(_row_value(existing, "organization_name", 8, "")),
-                    str(_row_value(existing, "level_id", 9, "")),
-                    str(_row_value(existing, "parent_username", 10, "")),
-                )
-                if current == values and bool(
-                    _row_value(existing, "active", 11, True)
-                ):
-                    return
-                raise ValueError("username is already registered centrally")
-            connection.execute(
-                """
-                INSERT INTO control_users(
-                    username, alias, salt, password_hash, role,
-                    is_admin, is_developer, organization_id,
-                    organization_name, level_id, parent_username, active,
-                    updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                          TRUE, CURRENT_TIMESTAMP)
-                """,
-                values,
-            )
 
     @staticmethod
     def _device_value(row: object, *, fallback_username: str = "") -> dict[str, Any]:
@@ -750,13 +554,11 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             "client_name": _row_value(row, "client_name", 5, ""),
             "enrollment_ip": _row_value(row, "enrollment_ip", 6, ""),
             "last_seen_ip": _row_value(row, "last_seen_ip", 7, ""),
-            "public_access": True,
-            "quota_exempt": True,
-            "enabled": _row_value(row, "enabled", 10, False),
-            "source_server_id": _row_value(row, "source_server_id", 11, ""),
-            "created_at": _row_value(row, "created_at", 12, None),
-            "updated_at": _row_value(row, "updated_at", 13, None),
-            "last_seen_at": _row_value(row, "last_seen_at", 14, None),
+            "enabled": _row_value(row, "enabled", 8, False),
+            "source_server_id": _row_value(row, "source_server_id", 9, ""),
+            "created_at": _row_value(row, "created_at", 10, None),
+            "updated_at": _row_value(row, "updated_at", 11, None),
+            "last_seen_at": _row_value(row, "last_seen_at", 12, None),
         }
         public_key = value.get("public_key")
         if isinstance(public_key, str):
@@ -765,8 +567,6 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             except (TypeError, ValueError, json.JSONDecodeError):
                 public_key = {}
         value["public_key"] = public_key if isinstance(public_key, dict) else {}
-        value["public_access"] = True
-        value["quota_exempt"] = True
         for key in ("created_at", "updated_at", "last_seen_at"):
             timestamp = value.get(key)
             if hasattr(timestamp, "isoformat"):
@@ -799,13 +599,13 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                 INSERT INTO control_devices(
                     device_id, public_key, username, device_name,
                     client_type, client_name, enrollment_ip, last_seen_ip,
-                    public_access, quota_exempt, enabled, source_server_id, updated_at
+                    enabled, source_server_id, updated_at
                 ) VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s, %s,
-                          %s, %s, TRUE, %s, CURRENT_TIMESTAMP)
+                          TRUE, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(device_id) DO NOTHING
                 RETURNING device_id, public_key, username, device_name,
                           client_type, client_name, enrollment_ip, last_seen_ip,
-                          public_access, quota_exempt, enabled, source_server_id,
+                          enabled, source_server_id,
                           created_at, updated_at, last_seen_at
                 """,
                 (
@@ -815,7 +615,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                     str(client_name or "")[:128],
                     str(enrollment_ip or "")[:45],
                     str(enrollment_ip or "")[:45],
-                    True, True, str(source_server_id),
+                    str(source_server_id),
                 ),
             ).fetchone()
         if row is None:
@@ -829,7 +629,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                 """
                 SELECT device_id, public_key, username, device_name,
                        client_type, client_name, enrollment_ip, last_seen_ip,
-                       public_access, quota_exempt, enabled, source_server_id,
+                       enabled, source_server_id,
                        created_at, updated_at, last_seen_at
                 FROM control_devices WHERE device_id=%s
                 """,
@@ -858,7 +658,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                 f"""
                 SELECT device_id, public_key, username, device_name,
                        client_type, client_name, enrollment_ip, last_seen_ip,
-                       public_access, quota_exempt, enabled, source_server_id,
+                       enabled, source_server_id,
                        created_at, updated_at, last_seen_at
                 FROM control_devices{where}
                 ORDER BY username, device_name, device_id
@@ -877,7 +677,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                 WHERE device_id=%s
                 RETURNING device_id, public_key, username, device_name,
                           client_type, client_name, enrollment_ip, last_seen_ip,
-                          public_access, quota_exempt, enabled, source_server_id,
+                          enabled, source_server_id,
                           created_at, updated_at, last_seen_at
                 """,
                 (str(device_id),),
@@ -904,7 +704,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
 
     def public_device_count(self, *, username: str = "") -> int:
         self.ensure_schema()
-        predicates = ["public_access=TRUE", "enabled=TRUE"]
+        predicates = ["enabled=TRUE"]
         parameters: list[Any] = []
         owner = str(username or "").strip()
         if owner:
@@ -924,7 +724,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                 """
                 SELECT COUNT(DISTINCT username) AS count
                 FROM control_devices
-                WHERE public_access=TRUE AND enabled=TRUE
+                WHERE enabled=TRUE
                 """
             ).fetchone()
         return int(_row_value(row, "count", 0, 0))
@@ -932,7 +732,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
     def public_device_total_count(self, *, username: str = "") -> int:
         """Count all enabled public allowlist devices."""
         self.ensure_schema()
-        predicates = ["public_access=TRUE", "enabled=TRUE"]
+        predicates = ["enabled=TRUE"]
         parameters: list[Any] = []
         owner = str(username or "").strip()
         if owner:
@@ -998,106 +798,9 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             value["updated_at"] = value["updated_at"].isoformat()
         return value
 
-    def load_organizations(self) -> list[dict[str, Any]]:
-        self.ensure_schema()
-        with self._connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, name, description, updated_at
-                FROM control_organizations WHERE active=TRUE ORDER BY id
-                """
-            ).fetchall()
-        return [dict(row) if isinstance(row, Mapping) else {
-            "id": _row_value(row, "id", 0, ""),
-            "name": _row_value(row, "name", 1, ""),
-            "description": _row_value(row, "description", 2, ""),
-            "updated_at": _row_value(row, "updated_at", 3, None),
-        } for row in rows]
 
-    def replace_organizations(
-        self,
-        organizations: list[Mapping[str, Any]],
-    ) -> None:
-        self.ensure_schema()
-        with self._connection() as connection:
-            connection.execute(
-                "UPDATE control_organizations SET active=FALSE, updated_at=CURRENT_TIMESTAMP"
-            )
-            for organization in organizations:
-                organization_id = str(
-                    organization.get("id") or organization.get("organization_id") or ""
-                ).strip()
-                if not organization_id:
-                    continue
-                connection.execute(
-                    """
-                    INSERT INTO control_organizations(id, name, description, active, updated_at)
-                    VALUES (%s, %s, %s, TRUE, CURRENT_TIMESTAMP)
-                    ON CONFLICT(id) DO UPDATE SET
-                        name=EXCLUDED.name,
-                        description=EXCLUDED.description,
-                        active=TRUE,
-                        updated_at=CURRENT_TIMESTAMP
-                    """,
-                    (
-                        organization_id,
-                        str(organization.get("name") or organization.get("organization_name") or ""),
-                        str(organization.get("description") or ""),
-                    ),
-                )
 
-    def load_levels(self) -> list[dict[str, Any]]:
-        self.ensure_schema()
-        with self._connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, organization_id, name, parent_level_id,
-                       manager_username, updated_at
-                FROM control_levels WHERE active=TRUE
-                ORDER BY organization_id, id
-                """
-            ).fetchall()
-        return [dict(row) if isinstance(row, Mapping) else {
-            "id": _row_value(row, "id", 0, ""),
-            "organization_id": _row_value(row, "organization_id", 1, "default"),
-            "name": _row_value(row, "name", 2, ""),
-            "parent_level_id": _row_value(row, "parent_level_id", 3, ""),
-            "manager_username": _row_value(row, "manager_username", 4, ""),
-            "updated_at": _row_value(row, "updated_at", 5, None),
-        } for row in rows]
 
-    def replace_levels(self, levels: list[Mapping[str, Any]]) -> None:
-        self.ensure_schema()
-        with self._connection() as connection:
-            connection.execute(
-                "UPDATE control_levels SET active=FALSE, updated_at=CURRENT_TIMESTAMP"
-            )
-            for level in levels:
-                level_id = str(level.get("id") or "").strip()
-                if not level_id:
-                    continue
-                connection.execute(
-                    """
-                    INSERT INTO control_levels(
-                        id, organization_id, name, parent_level_id,
-                        manager_username, active, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
-                    ON CONFLICT(id) DO UPDATE SET
-                        organization_id=EXCLUDED.organization_id,
-                        name=EXCLUDED.name,
-                        parent_level_id=EXCLUDED.parent_level_id,
-                        manager_username=EXCLUDED.manager_username,
-                        active=TRUE,
-                        updated_at=CURRENT_TIMESTAMP
-                    """,
-                    (
-                        level_id,
-                        str(level.get("organization_id") or "default"),
-                        str(level.get("name") or ""),
-                        str(level.get("parent_level_id") or ""),
-                        str(level.get("manager_username") or ""),
-                    ),
-                )
 
     def upsert_source_version(self, value: Mapping[str, Any]) -> dict[str, Any]:
         normalized = git_source_version(**dict(value))

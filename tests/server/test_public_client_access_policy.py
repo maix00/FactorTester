@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from html import unescape
 import json
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -17,6 +19,8 @@ from server.manager.http.visitor_access import (
     VisitorAccessStore,
     visitor_principal,
 )
+from server.manager.http.request_security import RequestSecurityMixin
+from server.identity.keycloak_visitor import VisitorPolicy
 
 
 @contextmanager
@@ -221,7 +225,7 @@ def test_redeemed_grant_replay_expires(monkeypatch) -> None:
     assert store.redeem_grant(grant, target_origin=target) is None
 
 
-def test_visitor_http_entry_replays_a_duplicate_grant(tmp_path) -> None:
+def test_visitor_http_entry_replays_a_duplicate_grant(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(
         tmp_path,
         "python",
@@ -232,6 +236,11 @@ def test_visitor_http_entry_replays_a_duplicate_grant(tmp_path) -> None:
     state.require_device_auth = True
     state.public_server = True
     state.manager_public_endpoint = "https://101.133.144.27:7998"
+    monkeypatch.setattr(
+        RequestSecurityMixin,
+        "_keycloak_visitor_policy",
+        staticmethod(lambda: VisitorPolicy("guest", frozenset({"access"}))),
+    )
     target = state.manager_public_endpoint
     grant = state.visitor_access.issue_grant(target)
     opener = build_opener(_NoRedirect())
@@ -270,6 +279,11 @@ def test_native_client_entry_does_not_make_direct_ip_browser_entry_public(
         "https://eloquence-drizzly-fencing.ngrok-free.dev",
     )
     state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    monkeypatch.setattr(
+        RequestSecurityMixin,
+        "_keycloak_visitor_policy",
+        staticmethod(lambda: VisitorPolicy("guest", frozenset({"access"}))),
+    )
     monkeypatch.setattr(state, "worktrees", list)
     opener = build_opener(_NoRedirect())
 
@@ -296,9 +310,16 @@ def test_native_client_entry_does_not_make_direct_ip_browser_entry_public(
         assert "device-bridge" not in compliance
         assert "eloquence-drizzly-fencing.ngrok-free.dev" not in compliance
 
+        visitor_link = re.search(
+            r'<p class="visitor-entry"><a href="([^"]+)"', compliance,
+        )
+        assert visitor_link is not None
+        visitor_href = unescape(visitor_link.group(1))
+        assert visitor_href.startswith("/visitor?grant=")
+
         try:
             opener.open(Request(
-                f"{base_url}/visitor?next=%2Fjobs",
+                f"{base_url}{visitor_href}",
                 headers=_headers(cookie=client_cookie),
             ))
         except HTTPError as error:
@@ -398,8 +419,10 @@ def test_public_entry_exposes_compliance_without_a_session(tmp_path) -> None:
     assert value["public_server"] is True
     assert value["require_device_auth"] is True
     assert value["public_registration_enabled"] is False
-    assert "白名单" in value["compliance_notice"]
-    assert "暂不开放自助注册" in value["registration_notice"]
+    assert "本服务用于研究、测试和数据展示" in value["compliance_notice"]
+    assert "Keycloak" not in value["compliance_notice"]
+    assert "角色" not in value["compliance_notice"]
+    assert "已关闭自助注册" in value["registration_notice"]
 
 
 def test_public_shell_is_served_without_a_session_for_the_login_overlay(tmp_path) -> None:

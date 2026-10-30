@@ -3,8 +3,8 @@
 ## Requirements
 
 - macOS 13 or newer for `FTClient.app`;
-- HTTPS access to the public FactorTester client release;
-- a FactorTester server account for remote research.
+- HTTPS access to the public TradeResearch client release;
+- a TradeResearch server account for remote research.
 
 No server source checkout, database driver, or local backtest engine is needed.
 
@@ -12,11 +12,11 @@ No server source checkout, database driver, or local backtest engine is needed.
 
 Release operations intentionally have two authorities:
 
-- Publisher: `factortester-manager client release --channel stable|beta ...` performs
+- Publisher: `traderesearch-manager client release --channel stable|beta ...` performs
   the common clean-checkout, build, runtime embedding, inside-out signing, DMG,
   Sparkle appcast, compatibility manifest, publication, remote read-back, and
   receipt pipeline for the explicitly selected release root. It never logs
-  into, stops, restarts, or restores a FactorTester Manager or test-service
+  into, stops, restarts, or restores a TradeResearch Manager or test-service
   port. Main becomes public only after all GitHub draft assets exist. Beta
   writes immutable assets before switching its appcast and compatibility
   pointers. It never installs an app.
@@ -54,7 +54,7 @@ Release operations intentionally have two authorities:
   Managers through the authenticated application protocol:
 
   ```bash
-  factortester-manager client release-upload \
+  traderesearch-manager client release-upload \
     --target https://public-manager.example:7998 \
     --target http://127.0.0.1:7998 \
     --release-dir /path/to/beta-release-output --json
@@ -73,7 +73,7 @@ Release operations intentionally have two authorities:
 
   The lower-level module entry point has the same client-only behavior; there
   is no implicit server restart hidden inside the publish entry point.
-- Client: FTClient's thin SwiftUI update panel delegates discovery, EdDSA
+- Client: TradeResearch desktop client's thin SwiftUI update panel delegates discovery, EdDSA
   verification, download, extraction, post-exit replacement, and relaunch to
   Sparkle. It displays one primary action at a time: check, download, or restart.
   It never builds, signs, notarizes, or publishes a release.
@@ -82,9 +82,9 @@ There is only one application updater. CLI actions launch or contact FTClient
 through its registered URL scheme; FTClient then delegates to Sparkle:
 
 ```bash
-factortester client app-update check
-factortester client app-update download
-factortester client app-update restart
+traderesearch client app-update check
+traderesearch client app-update download
+traderesearch client app-update restart
 ```
 
 `check` and `download` wait for FTClient/Sparkle to report their result when
@@ -92,9 +92,9 @@ given `--wait`; `restart` asks Sparkle to install the prepared update. A
 typical local Beta acceptance sequence is:
 
 ```bash
-factortester client app-update check --wait 30 --json
-factortester client app-update download --wait 600 --json
-factortester client app-update restart --json
+traderesearch client app-update check --wait 30 --json
+traderesearch client app-update download --wait 600 --json
+traderesearch client app-update restart --json
 ```
 
 The CLI never downloads, mounts, verifies, copies, or replaces the application.
@@ -170,18 +170,18 @@ HTTPS host. The non-selected URL is never requested. GitHub cache ETags are not 
 content digests; the ECDSA signature is the Main authenticity boundary. The
 FactorTester server defines its own ETag as the raw manifest digest in addition
 to the Beta signature.
-`factortester client app-update check --json`
+`traderesearch client app-update check --json`
 returns the verified version, build, channel, DMG URL/SHA256, minimum client,
 mandatory flag, publication time, source, and manifest hash.
 
 ## Login and local profiles
 
-The password is read interactively and is not accepted on the command line:
+Sign in through the TradeResearch web or desktop client with Keycloak before verifying the CLI session:
 
 ```bash
-factortester configure --base-url https://factor.example
-factortester login --username <account> --keep-login
-factortester logout
+traderesearch configure --base-url https://factor.example
+traderesearch login
+traderesearch logout
 ```
 
 One interactive login can persist locally for later Agent processes. Logout
@@ -204,7 +204,7 @@ An Agent can idempotently discover, claim, and register a provider-neutral
 profile in one command:
 
 ```bash
-factortester client profile bootstrap \
+traderesearch client profile bootstrap \
   --profile-id maxa \
   --display-name MaxA \
   --server-url http://127.0.0.1:8000 \
@@ -222,12 +222,12 @@ IDs, Agent IDs, workspace roots, and research records.
 Workspace migration starts with an inventory-only plan:
 
 ```bash
-factortester client profile workspace plan maxa \
+traderesearch client profile workspace plan maxa \
   --workspace maxa-factor-library /path/to/maxa owner 'default$MaxA@1' \
   --workspace shared-187-factor-library /path/to/shared granted '' \
   --output workspace-plan.json
-factortester client profile workspace apply workspace-plan.json
-factortester client profile workspace verify maxa
+traderesearch client profile workspace apply workspace-plan.json
+traderesearch client profile workspace verify maxa
 ```
 
 The plan checks ownership, Git/VS Code/Pyright state, conflicts, and capacity.
@@ -242,10 +242,10 @@ release. Their processes, health checks, and loopback Web URLs are managed
 deterministically:
 
 ```bash
-factortester client adapter list --release-profile client-profile.json
-factortester client adapter start vibe-trading \
+traderesearch client adapter list --release-profile client-profile.json
+traderesearch client adapter start vibe-trading \
   --release-profile client-profile.json --profile-id <agent-profile>
-factortester client adapter stop vibe-trading \
+traderesearch client adapter stop vibe-trading \
   --release-profile client-profile.json --profile-id <agent-profile>
 ```
 

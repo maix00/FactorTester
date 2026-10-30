@@ -2,17 +2,21 @@
 import hashlib
 import settings
 
-from tools.data.account_manage import can_view_user_scope
 from tools.data.sqlite.factor_family_heads import family_head
 from tools.data.sqlite.factor_source_store import load_factor_source, upsert_factor_source
 from server.manager.objects.adapters.factor_source import FactorSourceStore
 from server.manager.services.factor_source_hydration import FactorSourceHydrator
 
 
-def ensure_current_family(state, kind, factor_id, *, principal, owner=''):
+def ensure_current_family(state, kind, factor_id, *, principal, owner='', access_token=''):
     owner = '' if kind == 'public' else owner or principal
-    if kind == 'custom' and owner != principal and not can_view_user_scope(principal, owner):
-        raise PermissionError('factor family is outside your visible scope')
+    if kind == 'custom':
+        from server.identity.keycloak_authorization import keycloak_factor_source_permission
+
+        if not keycloak_factor_source_permission(
+            access_token, owner_username=owner, factor_id=factor_id,
+        ):
+            raise PermissionError('factor family is not authorized by Keycloak')
     head = family_head(kind, owner, factor_id)
     if head and head['deleted']:
         return False

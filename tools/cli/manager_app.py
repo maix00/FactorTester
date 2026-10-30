@@ -6,8 +6,8 @@ import click
 
 from tools.cli.commands.client_release import operator_client
 from tools.cli.manager.commands import register_manager_commands
-from tools.cli.manager.factortester_commands import (
-    register_factor_tester_commands,
+from tools.cli.manager.traderesearch_commands import (
+    register_traderesearch_commands,
 )
 
 
@@ -16,7 +16,7 @@ def manager_cli() -> None:
     """Authenticated TradeResearch application Manager/operator commands."""
 
 
-register_factor_tester_commands()
+register_traderesearch_commands()
 register_manager_commands(manager_cli)
 manager_cli.add_command(operator_client)
 

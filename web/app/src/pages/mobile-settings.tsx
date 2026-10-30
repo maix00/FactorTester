@@ -1,6 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsSection,visibleSettingsSections,type SettingsSectionID } from "../components/settings-section.tsx";
+import { SettingsSection } from "../components/settings-section.tsx";
+import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
 import { useAuth } from "../auth.tsx";
 import { PageIcon } from "../icon.tsx";
 
@@ -8,11 +9,10 @@ export type MobileSettingSection = SettingsSectionID;
 
 export function MobileSettingsPage({ onOpen }: { onOpen: (section: MobileSettingSection) => void }): React.ReactElement {
   const { t } = useTranslation();
-  const {session}=useAuth();const sections=visibleSettingsSections(Boolean(session?.capabilities?.manager)).filter(item=>item.id!=="workspace");
+  const {session}=useAuth();const sections=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"}).filter(item=>item.id!=="workspace");
   return (
     <section className="tr-mobile-workspace">
       <header>
-        <h1>{t("settingsPanel.title")}</h1>
         <p>{t("settingsPanel.mobileHint")}</p>
       </header>
       <div className="tr-mobile-open-list">
@@ -28,16 +28,10 @@ export function MobileSettingsPage({ onOpen }: { onOpen: (section: MobileSetting
   );
 }
 
-export function MobileSettingDetail({ section, onBack }: { section: MobileSettingSection; onBack: () => void }): React.ReactElement {
+export function MobileSettingDetail({ section }: { section: MobileSettingSection }): React.ReactElement {
   const { t } = useTranslation();
   return (
     <div className="tr-mobile-settings-detail">
-      <header className="tr-mobile-page-header">
-        <button type="button" className="tr-mobile-back" aria-label={t("back")} onClick={onBack}>
-          <PageIcon name="back" />
-        </button>
-        <strong>{t(`settingsPanel.sections.${section}`)}</strong>
-      </header>
       <div className="tr-mobile-settings-body">
         <SettingsSection key={section} section={section}/>
       </div>

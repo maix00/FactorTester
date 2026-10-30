@@ -35,7 +35,7 @@ BUILD_DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
-RUNTIME_CACHE_SCHEMA = 8
+RUNTIME_CACHE_SCHEMA = 9
 _SOURCE_REVISION = re.compile(r"^[0-9a-f]{40}$")
 _MACHO_PREFIXES = {
     b"\xcf\xfa\xed\xfe",
@@ -238,10 +238,10 @@ def embed_client_runtime(
 
     bin_dir = resources / "bin"
     bin_dir.mkdir(parents=True)
-    registered_skill = resources / "skills/factortester-research-skill/SKILL.md"
+    registered_skill = resources / "skills/traderesearch-research-skill/SKILL.md"
     registered_skill.parent.mkdir(parents=True)
     shutil.copy2(
-        repo / "skills/factortester-research-skill/SKILL.md",
+        repo / "skills/traderesearch-research-skill/SKILL.md",
         registered_skill,
     )
     if client_sources_root is not None:
@@ -299,13 +299,14 @@ def embed_client_runtime(
             check=True,
         )
         node_binary = _nodejs_wheel_binary(environment)
-        bootstrap = root / "factortester_runtime.py"
+        bootstrap = root / "traderesearch_runtime.py"
         bootstrap.write_text(
             "import os\n"
             "from pathlib import Path\n"
             "import sys\n"
-            "entry = os.environ.get(\"FACTORTESTER_ENTRYPOINT\", Path(sys.argv[0]).name)\n"
-            "if entry == 'factortester-manager':\n"
+            "entry = (os.environ.get(\"TRADERESEARCH_ENTRYPOINT\") "
+            "or Path(sys.argv[0]).name)\n"
+            "if entry == 'traderesearch-manager':\n"
             "    from tools.cli.manager_app import manager_cli as cli\n"
             "else:\n"
             "    from tools.cli.app import cli\n"
@@ -319,7 +320,7 @@ def embed_client_runtime(
                 "--noconfirm",
                 "--onefile",
                 "--name",
-                "factortester",
+                "traderesearch",
                 "--collect-all",
                 "pyright",
                 "--collect-data",
@@ -338,19 +339,19 @@ def embed_client_runtime(
             ],
             check=True,
         )
-        frozen_binary = root / "dist" / "factortester"
+        frozen_binary = root / "dist" / "traderesearch"
         _smoke_test_frozen_runtime(frozen_binary)
-        shutil.copy2(frozen_binary, bin_dir / "factortester")
+        shutil.copy2(frozen_binary, bin_dir / "traderesearch")
         _build_native_report_renderer(
             repo,
-            bin_dir / "factortester-report-renderer",
+            bin_dir / "traderesearch-report-renderer",
         )
-        manager_launcher = bin_dir / "factortester-manager"
+        manager_launcher = bin_dir / "traderesearch-manager"
         manager_launcher.write_text(
             "#!/bin/sh\n"
             "set -eu\n"
             "script_dir=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n"
-            "FACTORTESTER_ENTRYPOINT=factortester-manager \\\nexec \"$script_dir/factortester\" \"$@\"\n",
+            "TRADERESEARCH_ENTRYPOINT=traderesearch-manager \\\nexec \"$script_dir/traderesearch\" \"$@\"\n",
             encoding="utf-8",
         )
         manager_launcher.chmod(0o755)
@@ -399,7 +400,7 @@ def _smoke_test_frozen_runtime(binary: Path) -> None:
     for command in ("branch-fork", "branch-upload", "branch-diff", "copy-preview", "copy-apply"):
         _run_frozen_help(binary, arguments=["research", "reports", command, "--help"])
     manager_env = os.environ.copy()
-    manager_env["FACTORTESTER_ENTRYPOINT"] = "factortester-manager"
+    manager_env["TRADERESEARCH_ENTRYPOINT"] = "traderesearch-manager"
     _run_frozen_help(binary, env=manager_env)
 
 
@@ -547,9 +548,9 @@ def _valid_runtime_cache(
     expect_adapters: bool = False,
 ) -> bool:
     required = [
-        resources / "bin/factortester",
-        resources / "bin/factortester-manager",
-        resources / "bin/factortester-report-renderer",
+        resources / "bin/traderesearch",
+        resources / "bin/traderesearch-manager",
+        resources / "bin/traderesearch-report-renderer",
         resources / ".runtime-cache.json",
     ]
     if expect_adapters:
@@ -581,14 +582,14 @@ def _valid_runtime_cache(
     if not valid:
         return False
     try:
-        _smoke_test_frozen_runtime(resources / "bin/factortester")
+        _smoke_test_frozen_runtime(resources / "bin/traderesearch")
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
     return all(
         path.stat().st_mode & 0o111 != 0
         for path in (
-            resources / "bin/factortester-manager",
-            resources / "bin/factortester-report-renderer",
+            resources / "bin/traderesearch-manager",
+            resources / "bin/traderesearch-report-renderer",
         )
     )
 

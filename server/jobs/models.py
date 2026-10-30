@@ -50,6 +50,8 @@ class JobRecord:
     workspace_id: str
     kind: str
     status: JobStatus
+    owner_issuer: str = ""
+    owner_subject: str = field(default="", repr=False)
     job_role: str = "primary"
     parent_job_id: str = ""
     supplemental_kind: str = ""

@@ -37,26 +37,35 @@ def subordinate_principals(
     return result
 
 
-def access_for(
-    entry: dict[str, Any],
-    *,
-    principal: str,
-    shared_principals: set[str],
-    subordinate_users: set[str],
-) -> dict[str, bool]:
-    owner = str(entry.get("owner_ref") or "")
-    visibility = str(entry.get("visibility") or "private")
-    is_owner = owner == principal
-    is_subordinate = owner in subordinate_users
-    explicitly_shared = principal in shared_principals
-    can_view = is_owner or is_subordinate or visibility == "public" or (
-        visibility == "shared" and explicitly_shared
+def access_many(entries: list[dict[str, Any]], *, principal: str,
+                subordinate_users: set[str]) -> dict[str, dict[str, bool]]:
+    from server.identity.keycloak_authorization import (
+        keycloak_request_identity, keycloak_authorized_many,
+        keycloak_resource_uri, keycloak_resource_name,
     )
-    return {
-        "can_view": can_view,
-        "can_edit": is_owner,
-        "can_delete": is_owner,
-        "can_share": is_owner,
-        "is_owner": is_owner,
-        "is_subordinate": is_subordinate,
-    }
+    identity = keycloak_request_identity()
+    scopes = {"can_view": "read", "can_edit": "write",
+              "can_delete": "delete", "can_share": "share"}
+    refs = {str(e["strategy_ref"]) for e in entries}
+    uris = {ref: keycloak_resource_uri("strategy", ref) for ref in refs}
+    decisions = {}
+    if identity and identity.username == principal:
+        permissions = [(uris[ref], keycloak_resource_name("strategy", ref), scope)
+                       for ref in sorted(refs) for scope in scopes.values()]
+        for offset in range(0, len(permissions), 256):
+            decisions.update(keycloak_authorized_many(
+                identity.token, permissions=permissions[offset:offset + 256],
+            ))
+    # Metadata labels never override the authoritative Keycloak decision.
+    return {str(e["strategy_ref"]): {
+        **{key: bool(decisions.get((uris[str(e["strategy_ref"])], scope)))
+           for key, scope in scopes.items()},
+        "is_owner": str(e.get("owner_ref") or "") == principal,
+        "is_subordinate": str(e.get("owner_ref") or "") in subordinate_users,
+    } for e in entries}
+
+
+def access_for(entry: dict[str, Any], *, principal: str,
+               shared_principals: set[str], subordinate_users: set[str]) -> dict[str, bool]:
+    return access_many([entry], principal=principal,
+                       subordinate_users=subordinate_users)[str(entry["strategy_ref"])]

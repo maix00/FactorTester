@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
-from click.testing import CliRunner
 
-from tools.cli.commands.client_catalog import (
-    catalog_migration,
-)
 from tools.data.catalog import LocalCatalogStore
 from tools.factors.factor_set_identity import freeze_factor_set_identity
 from tools.factors.formula_identity import freeze_factor_identity
@@ -147,45 +142,3 @@ def test_factor_identities_are_formula_frozen_and_git_is_optional_provenance(tmp
     assert factor_set[0] == 1
     assert factor_set[1]
     assert member[0] == factor_record["ref"]
-
-
-def test_catalog_cli_preflight_is_read_only_and_reports_category_paths(tmp_path) -> None:
-    legacy = tmp_path / "legacy.sqlite"
-    connection = sqlite3.connect(legacy)
-    connection.execute(
-        "CREATE TABLE account_product_groups ("
-        "username TEXT, group_name TEXT, sort_index INTEGER, "
-        "payload_json TEXT, updated_at TEXT)"
-    )
-    connection.execute(
-        "INSERT INTO account_product_groups VALUES (?, ?, ?, ?, ?)",
-        (
-            "alice", "日盘", 0,
-            '{"id":"pg-day","paths":["Product/Futures/CNFutures/日盘/_products/AP.CZC"]}',
-            "2026-08-04",
-        ),
-    )
-    connection.commit()
-    connection.close()
-
-    profile = tmp_path / "profile.json"
-    profile.write_text(
-        '{"schema_version":1,"release":{"install_root":"%s"}}'
-        % (tmp_path / "client"),
-        encoding="utf-8",
-    )
-    result = CliRunner().invoke(
-        catalog_migration,
-        [
-            "preflight", "--username", "alice",
-            "--legacy-db", str(legacy), "--release-profile", str(profile),
-            "--json",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    value = json.loads(result.output)
-    assert value["mode"] == "read_only"
-    assert value["safe_to_migrate"] is False
-    assert value["groups"][0]["migration_status"] == "category_paths_need_snapshot"
-    assert not (tmp_path / "client/catalog/catalog.sqlite").exists()

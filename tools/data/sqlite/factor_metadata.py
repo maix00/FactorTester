@@ -17,15 +17,11 @@ from typing import Any
 import settings as Settings
 from tools.data.sqlite.factor_source_store import list_factor_sources
 from tools.data.sqlite.db import connect_sqlite
-from tools.data.account_manage import account_display_name, load_accounts
+from tools.data.account_manage import account_display_name
 from tools.factors import FactorFamily
 
 CATALOG_TABLE = "factor_family_catalog"
 CATALOG_PARAMS_TABLE = "factor_family_catalog_params"
-
-
-def _load_accounts() -> list[dict[str, Any]]:
-    return load_accounts()
 
 
 def _account_display_name(account: dict[str, Any]) -> str:
@@ -113,13 +109,26 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def _account_map() -> dict[str, str]:
+    """Build presentation labels from authored custom-source owners.
+
+    A metadata indexer must not enumerate Keycloak accounts; it only needs the
+    owner refs already present in the factor-source registry.
+    """
     result: dict[str, str] = {}
     try:
-        for account in _load_accounts():
-            username = str(account.get("username") or "").strip()
-            if not username:
-                continue
-            result[username] = _account_display_name(account)
+        with connect_sqlite(Settings.CACHE_DB_PATH, readonly=True) as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='factor_family_sources'"
+            ).fetchone()
+            if exists is not None:
+                owners = conn.execute(
+                    "SELECT DISTINCT owner_username FROM factor_family_sources "
+                    "WHERE source_kind='custom' AND owner_username<>''"
+                ).fetchall()
+                for row in owners:
+                    username = str(row[0] or '').strip()
+                    if username:
+                        result[username] = _account_display_name({"username": username})
     except Exception:
         pass
     return result
@@ -325,14 +334,9 @@ def sync_factor_metadata_sqlite_store() -> str:
     """Sync public and custom factor metadata into the unified SQLite store."""
     now = time.time()
     owner_alias_by_username = _account_map()
-    accounts = _load_accounts()
-
     public_factors = _load_public_factors()
     custom_factors_by_owner: dict[str, list[dict[str, Any]]] = {}
-    for account in accounts:
-        owner_username = str(account.get("username") or "").strip()
-        if not owner_username:
-            continue
+    for owner_username in owner_alias_by_username:
         try:
             custom_factors_by_owner[owner_username] = _load_custom_factors(owner_username)
         except Exception:

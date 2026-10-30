@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import threading
 import time
@@ -714,6 +715,7 @@ class JobProjectionStateMixin:
         limit: int = 20,
         source_scope: str = "mine",
         username: str = "",
+        delegated_user_token: str = "",
         object_kind: str = "", object_ref: str = "",
         object_owner_ref: str = "", object_alias: str = "",
     ) -> dict[str, object]:
@@ -733,14 +735,19 @@ class JobProjectionStateMixin:
         source_limit = min(100, bounded * requested_page)
         source_scope = str(source_scope or "mine").strip().lower()
         username = str(username or "").strip()
+        delegated_user_token = str(delegated_user_token or "").strip()
         if source_scope not in {"mine", "subordinates", "visible", "server"}:
             raise ValueError(
                 "cross-server source scope must be mine, subordinates, visible, or server"
             )
         if source_scope == "subordinates" and not username:
             raise ValueError("username is required for subordinate jobs")
+        peer_routes = self._federation_manager_routes()
+        if peer_routes and not delegated_user_token:
+            raise ValueError("verified user session is required for federated job queries")
         cache_key = (
             str(principal), source_scope, username, requested_page, bounded,
+            hashlib.sha256(delegated_user_token.encode("utf-8")).digest(),
             object_kind, object_ref, object_owner_ref, object_alias,
         )
         cached = self._cross_server_cache_get(cache_key)
@@ -795,6 +802,7 @@ class JobProjectionStateMixin:
                 route,
                 requester_server_id=self.server_id,
                 principal=principal,
+                delegated_user_token=delegated_user_token,
                 scope=source_scope,
                 page=1,
                 limit=source_limit,
@@ -802,7 +810,6 @@ class JobProjectionStateMixin:
                 **object_query,
             )
 
-        peer_routes = self._federation_manager_routes()
         for route in peer_routes:
             if not route.online:
                 source_status.append({

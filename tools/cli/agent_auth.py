@@ -1,4 +1,4 @@
-"""Read the short-lived FactorTester capability used by a server Profile Agent."""
+"""Read the short-lived TradeResearch capability used by a server Profile Agent."""
 
 from __future__ import annotations
 
@@ -35,17 +35,17 @@ def load_capability(path: str | Path | None = None) -> AgentCapability | None:
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError("FactorTester Agent capability file is invalid") from exc
+        raise ValueError("TradeResearch Agent capability file is invalid") from exc
     if not isinstance(payload, dict) or payload.get("kind") != AGENT_CAPABILITY_KIND:
-        raise ValueError("FactorTester Agent capability kind is invalid")
+        raise ValueError("TradeResearch Agent capability kind is invalid")
     if payload.get("schema_version") != 1:
-        raise ValueError("FactorTester Agent capability version is unsupported")
+        raise ValueError("TradeResearch Agent capability version is unsupported")
     base_url = str(payload.get("base_url") or "").strip().rstrip("/")
     token = str(payload.get("token") or "").strip()
     profile_id = str(payload.get("profile_id") or "").strip()
     claim_id = str(payload.get("claim_id") or "").strip()
     if not base_url or not token or not profile_id or not claim_id:
-        raise ValueError("FactorTester Agent capability is incomplete")
+        raise ValueError("TradeResearch Agent capability is incomplete")
     return AgentCapability(
         base_url=base_url,
         token=token,

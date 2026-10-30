@@ -4,20 +4,6 @@ import pytest
 
 from server.services import factor_source_catalog
 from server.services.factor_source_catalog import FactorSourceCatalog
-from tools.data.account_manage import can_view_user_scope
-
-
-def test_can_view_user_scope_own_scope_survives_empty_catalog(
-    monkeypatch,
-) -> None:
-    """One's own scope is visible even when the account store is empty."""
-    monkeypatch.setattr(
-        "tools.data.account_manage.visible_usernames_for",
-        lambda *_args, **_kwargs: [],
-    )
-    assert can_view_user_scope("user@one", "user@one") is True
-    assert can_view_user_scope("user@one", "user@two") is False
-    assert can_view_user_scope(None, None) is False
 
 
 def _detail(_source: str, _factor_id: str, _metadata: dict) -> dict:
@@ -36,17 +22,10 @@ def test_historical_version_does_not_need_current_body_or_display_metadata(monke
     monkeypatch.setattr(factor_source_catalog, 'load_factor_formula_version', lambda *args:{'source_code':'source'})
     monkeypatch.setattr(FactorSourceCatalog, '_detail', staticmethod(_detail))
     assert FactorSourceCatalog().version('alice','custom','History','a'*64)['success']
-    monkeypatch.setattr(factor_source_catalog, 'can_view_user_scope', lambda *args:False)
-    with pytest.raises(PermissionError):
-        FactorSourceCatalog().version('bob','custom','History','a'*64,owner_username='alice')
 
 
-def test_custom_source_versions_enforce_scope_and_bound_limit(monkeypatch) -> None:
+def test_custom_source_catalog_reads_metadata_and_bounds_limit(monkeypatch) -> None:
     calls = []
-    monkeypatch.setattr(
-        factor_source_catalog, "can_view_user_scope",
-        lambda principal, owner: (principal, owner) == ("parent", "child"),
-    )
     monkeypatch.setattr(
         factor_source_catalog, "load_factor_source",
         lambda owner, factor_id: "source"
@@ -71,32 +50,14 @@ def test_custom_source_versions_enforce_scope_and_bound_limit(monkeypatch) -> No
     assert calls[0][1]["limit"] == 500
 
 
-def test_custom_source_rejects_unreadable_owner(monkeypatch) -> None:
-    monkeypatch.setattr(
-        factor_source_catalog, "can_view_user_scope", lambda *_args: False,
-    )
-
-    with pytest.raises(PermissionError):
-        FactorSourceCatalog().version(
-            "reader", "custom", "Secret", "current",
-            owner_username="owner",
-        )
+def test_storage_catalog_does_not_use_local_account_permissions() -> None:
+    assert not hasattr(factor_source_catalog, "can_view_user_scope")
 
 
-def test_custom_source_own_owner_reads_even_when_scope_catalog_fails(
+def test_custom_source_reads_only_after_http_keycloak_boundary(
     monkeypatch,
 ) -> None:
-    """A principal must never be locked out of its own source.
-
-    The account catalog may transiently fail (control-db fallback to an empty
-    local store) and answer ``False`` for every pair — saving a factor whose
-    frozen FactorParam dependency points back at the same user surfaced
-    ``PermissionError: 无权查看该用户因子源码``.  Own-source reads need no
-    cross-account grant and must bypass the catalog.
-    """
-    monkeypatch.setattr(
-        factor_source_catalog, "can_view_user_scope", lambda *_args: False,
-    )
+    """The adapter locates bytes; its HTTP callers enforce Keycloak grants."""
     loaded = []
     monkeypatch.setattr(
         factor_source_catalog, "load_factor_source",

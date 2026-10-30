@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "title": "FactorTester 技术文档",
+  "title": "TradeResearch 技术文档",
   "visibility": "public",
   "default_page": "getting-started",
   "sections": [
@@ -15,10 +15,14 @@
     {"id": "concepts", "title": "理解平台", "pages": [
       {"slug": "core-objects", "title": "核心对象", "summary": "Workspace、Report、ReportBranch、RunSpec、Job 与 Artifact 的关系。", "kind": "concept", "source": "concepts/core-objects.md", "related": ["runspec-job-artifact"]},
       {"slug": "runspec-job-artifact", "title": "运行配置、任务与生成物", "summary": "区分可复用配置、冻结提交、执行记录和输出。", "kind": "concept", "source": "concepts/runspec-job-artifact.md", "related": ["run-tests", "test-execution", "api-cli-reference"]},
-      {"slug": "research-model", "title": "研究、报告与证据", "summary": "理解 Research、Research Workspace、Report、Evidence 与 Profile 的边界。", "kind": "concept", "source": "concepts/research-model.md", "related": ["research-workflow", "research-reports"]}
+      {"slug": "research-model", "title": "研究、报告与证据", "summary": "理解 Research、Research Workspace、Report、Evidence 与 Profile 的边界。", "kind": "concept", "source": "concepts/research-model.md", "related": ["research-workflow", "research-reports"]},
+      {"slug": "network-topology", "title": "网络拓扑", "summary": "区分 Manager、执行节点、数据专用节点和用户电脑本机运行时。", "kind": "concept", "source": "concepts/network-topology.md", "related": ["identity-permissions", "backtest-trading"]},
+      {"slug": "identity-permissions", "title": "用户与权限", "summary": "说明 Keycloak 身份、组织层级、设备和跨 Manager 权限边界。", "kind": "concept", "source": "concepts/identity-permissions.md", "related": ["network-topology"]},
+      {"slug": "backtest-trading", "title": "回测与交易", "summary": "说明 RunSpec、Manager 调度、Nautilus 执行节点与交易模式。", "kind": "concept", "source": "concepts/backtest-trading.md", "related": ["runspec-job-artifact", "network-topology"]},
+      {"slug": "factor-representation", "title": "因子表示", "summary": "说明因子表达式、Rust 计算计划、策略信号与结果证据的关系。", "kind": "concept", "source": "concepts/factor-representation.md", "related": ["backtest-trading"]}
     ]},
     {"id": "reference", "title": "接口与参考", "pages": [
-      {"slug": "api-cli-reference", "title": "API 与 CLI 参考", "summary": "按业务域查找当前公开 Manager API 与 FactorTester CLI 入口。", "kind": "reference", "source": "reference/api-cli-reference.md", "related": ["automation-and-cli", "runspec-job-artifact", "system-overview"]},
+      {"slug": "api-cli-reference", "title": "API 与 CLI 参考", "summary": "按业务域查找当前公开 Manager API 与 TradeResearch CLI 入口。", "kind": "reference", "source": "reference/api-cli-reference.md", "related": ["automation-and-cli", "runspec-job-artifact", "system-overview"]},
       {"slug": "test-fields", "title": "测试字段参考", "summary": "从后端注册表生成各测试类型的字段、类型、默认值和适用范围。", "kind": "reference", "source": "reference/test-fields.md", "related": ["compliance-architecture", "run-tests", "documentation-contract"]},
       {"slug": "documentation-contract", "title": "技术文档发布契约", "summary": "说明文档如何登记、编译、公开读取和进行安全校验。", "kind": "reference", "source": "reference/documentation-contract.md", "related": ["system-overview", "compliance-architecture"]}
     ]},
@@ -30,7 +34,7 @@
       {"slug": "technical-docs", "title": "技术文档实现", "summary": "公开文档清单、启动时编译、受限渲染与懒加载阅读器。", "kind": "implementation", "source": "implementation/technical-docs.md", "canonical_paths": ["product_docs/", "server/manager/services/technical_docs.py", "server/manager/http/technical_docs_routes.py", "server/manager/http/request_security.py", "server/manager/web/docs/source.js", "server/manager/web/docs/field-catalog.js", "server/manager/web/docs/reader.js", "server/manager/web/styles/docs.css", "tools/testers/settings/registry.py", "tools/testers/settings/applications.py"], "related": ["documentation-contract", "compliance-architecture"]}
     ]},
     {"id": "compliance", "title": "合规与安全", "pages": [
-      {"slug": "compliance-architecture", "title": "代码架构与合规控制", "summary": "把身份、权限、数据边界、审计、变更、依赖和恢复控制映射到实际架构。", "kind": "implementation", "source": "implementation/compliance-architecture.md", "canonical_paths": ["server/manager/services/test_authoring.py", "server/manager/http/request_security.py", "server/manager/http/access_control_routes.py", "server/manager/http/account_admin_routes.py", "server/manager/http/job_list_routes.py", "server/manager/http/job_transfer_routes.py", "server/manager/storage/job_index.py", "server/jobs/repository/", "server/manager/services/technical_docs.py", "docs/adr"], "related": ["system-overview", "test-execution", "technical-docs", "job-failures"]}
+      {"slug": "compliance-architecture", "title": "代码架构与合规控制", "summary": "把身份、权限、数据边界、审计、变更、依赖和恢复控制映射到实际架构。", "kind": "implementation", "source": "implementation/compliance-architecture.md", "canonical_paths": ["server/manager/services/test_authoring.py", "server/manager/http/request_security.py", "server/manager/http/auth_routes.py", "server/manager/http/account_admin_routes.py", "server/manager/http/job_list_routes.py", "server/manager/http/job_transfer_routes.py", "server/manager/storage/job_index.py", "server/jobs/repository/", "server/manager/services/technical_docs.py", "docs/adr"], "related": ["system-overview", "test-execution", "technical-docs", "job-failures"]}
     ]},
     {"id": "help", "title": "排查问题", "pages": [
       {"slug": "job-failures", "title": "任务失败排查", "summary": "区分配置、数据、执行与展示问题。", "kind": "troubleshooting", "source": "troubleshooting/job-failures.md", "related": ["read-results", "test-execution"]}

@@ -33,3 +33,10 @@ export function automaticExecutionRequest(offers: BarOffer[], start: string, end
 export function selectionManager(selection: ExecutionSelection): string {
   return "target" in selection.execution_selection ? selection.execution_selection.target.manager_id : selection.execution_selection.manager_id;
 }
+
+/** Reuse the public network projection; never read administrative peer metadata. */
+export function executionManagerIDs(info: Record<string, any>): string[] {
+  const candidates = [info.server_id, ...[info.internal_server_targets, info.public_server_targets].flatMap(rows =>
+    Array.isArray(rows) ? rows.filter(row => row && row.online !== false).map(row => row.server_id) : [])];
+  return [...new Set(candidates.filter((value): value is string => typeof value === "string" && !!value.trim()).map(value => value.trim()))];
+}

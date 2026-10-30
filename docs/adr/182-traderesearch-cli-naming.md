@@ -1,13 +1,15 @@
-# ADR-182：TradeResearch CLI 的分阶段命名迁移
+# ADR-182：TradeResearch CLI 命名迁移
 
-状态：分阶段迁移。
+状态：CLI 命令与用户指引迁移完成；发行运行时仅保留读取旧版签名 bundle 的内部兼容。
 
 ## 决策
 
 Python distribution 名为 `traderesearch`；唯一安全启动包名为
-`traderesearch_cli_bootstrap`。traderesearch/traderesearch-manager 是 canonical
-命令，旧 factortester/factortester-manager 暂作同一启动包的别名，没有第二份
-CLI实现或行情/因子状态。release wheel构建也按新distribution查找文件。
+`traderesearch_cli_bootstrap`。公开命令仅为 `traderesearch` 和
+`traderesearch-manager`；wheel 与新的稳定启动器不再安装旧命令别名。
+稳定启动器会在已有且已校验的旧版客户端 runtime 中查找旧物理文件名，确保
+升级后仍可启动旧签名 runtime。激活新版本时，只删除内容与旧生成器完全一致的
+旧别名和旧环境脚本；遇到用户自有同名文件会拒绝覆盖或删除。
 
 CLI（含Manager）优先读取 TRADERESEARCH_CONFIG/HOME/STREAM_TIMEOUT/
 MANAGER_CONFIG/MANAGER_TOKEN，未定义才读对应FACTORTESTER变量。共用一个
@@ -15,10 +17,11 @@ MANAGER_CONFIG/MANAGER_TOKEN，未定义才读对应FACTORTESTER变量。共用�
 未配置新HOME时保留现有`.factortester`默认目录与Keychain service，避免把
 品牌变更变成未经授权的数据迁移。
 
-版本化客户端的稳定命令新增canonical别名，仍指向同一已校验运行时；旧签名
-bundle中的物理bin名不改，不复制新的运行时。wheel中的命令都由同一安全
-bootstrap启动，继续过滤cwd中的旧checkout覆盖。安装构建验收使用仓库外
-临时target，不覆盖当前GTHT的已安装CLI与用户配置。
+新构建的客户端 bundle 和 wheel 只包含 TradeResearch 命令名；稳定启动器优先
+使用新物理文件名，仅为已有且校验通过的旧签名 bundle 回退读取旧物理文件名，
+不复制第二份 runtime。wheel 中的命令由同一安全 bootstrap 启动，继续过滤 cwd
+中的旧 checkout 覆盖。安装构建验收使用仓库外临时 target，不覆盖当前 GTHT
+的已安装 CLI 与用户配置。
 
 ## 当前边界与剩余项
 
@@ -38,10 +41,9 @@ pip把新旧distribution视作两个包，不能把新wheel简单叠装在含旧
 
 ## 验证
 
-GTHT聚焦CLI配置/HTTP/Manager/启动/安装布局/旧bundle激活与后端能力说明
-107项测试通过；未运行全量平台测试。release helper实际构建
-`traderesearch-0.1.2-py3-none-any.whl`并在仓库外临时target安装，四个入口
-均显示canonical Usage且绕过故意构造的旧checkout污染。回执位于
-`/tmp/traderesearch-cli-naming-final-20261027/install-verification.json`。
-不包含真实签名macOS应用打包、公网或用户环境升级验收。回退为revert本次
-提交并重新构建目标release；没有持久化数据需要恢复。
+GTHT 聚焦 CLI、Skill 命名与发行运行时测试 123 项通过；`ClientCLIResolution.swift`
+通过 Swift 类型检查；未运行全量平台测试。测试覆盖新 wheel/bundle 只生成
+canonical 命令、旧生成别名的安全清理、旧签名 bundle 兼容读取，以及拒绝删除
+用户自有同名文件时不推进版本指针。不包含真实签名 macOS 应用打包、公网或用户
+环境升级验收。回退为 revert 本次提交并重新构建目标 release；没有持久化数据
+需要恢复。

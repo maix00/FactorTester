@@ -255,7 +255,7 @@ def test_inspect_lists_mounted_and_unmounted_tabs_only(monkeypatch) -> None:
         },
         "field:factors": {
             "id": "field:factors", "kind": "field", "label": "Factors",
-            "candidate_source": "factortester factors list", "children": [],
+            "candidate_source": "traderesearch factors list", "children": [],
         },
         "configurations": {
             "id": "configurations", "kind": "collection", "label": "Groups",

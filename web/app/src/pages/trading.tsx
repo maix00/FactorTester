@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Card, Collapse, Descriptions, Empty, Spin, Tabs, Tag } from "antd";
+import { Alert, Button, Card, Collapse, Descriptions, Empty, Space, Spin, Tabs, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { FunctionPage } from "../components/function-page.tsx";
 import { ResultView } from "../components/result-view.tsx";
@@ -7,6 +7,7 @@ import { TRDataTable } from "../components/data-table.tsx";
 import { request } from "../configuration/api.ts";
 import { tradingSnapshot, type TradingMode } from "../trading-model.ts";
 import { usePageInstance } from "../page-instance.ts";
+import { LocalNodeAccess } from "../components/local-node-access.tsx";
 export function TradingPage(): React.ReactElement {
   const { t } = useTranslation(), instance = usePageInstance();
   const [mode, setMode] = useState<TradingMode>("paper"), [revision, setRevision] = useState(0);
@@ -21,7 +22,7 @@ export function TradingPage(): React.ReactElement {
     { name: t(mode === "paper" ? "trading.paper" : "trading.live"), status: snapshot.reported ? snapshot.available ? "readOnly" : "unavailable" : "unreported", reason: snapshot.reason },
     { name: t("trading.reconciliation"), status: "unreported", reason: "" },
   ];
-  return <FunctionPage title={t("nav.trading")} actions={<Button loading={loading} onClick={() => setRevision((value) => value + 1)}>{t("configuration.reload")}</Button>}>
+  return <FunctionPage title={t("nav.trading")} actions={<Space>{!instance.mobile ? <LocalNodeAccess /> : null}<Button loading={loading} onClick={() => setRevision((value) => value + 1)}>{t("configuration.reload")}</Button></Space>}>
     <Tabs activeKey={mode} onChange={(value) => setMode(value as TradingMode)} items={[{ key: "paper", label: t("trading.paper") }, { key: "live", label: t("trading.live") }]} />
     {error ? <Alert type="error" message={error} /> : null}<Spin spinning={loading}><div className="tr-trading-grid">
       <Card title={t("trading.runtime")} extra={<Tag color={snapshot.available ? "blue" : "default"}>{error ? t("loadFailed") : t(`trading.${snapshot.available ? "readOnly" : snapshot.reported ? "unavailable" : "unreported"}`)}</Tag>}>
