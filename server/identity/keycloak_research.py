@@ -51,17 +51,22 @@ def legacy_authorization_snapshot_sha256(database: str | Path) -> str:
     The digest is a cutover guard, not an authorization decision or ACL store.
     """
     uri = Path(database).expanduser().resolve().as_uri() + "?mode=ro"
-    digest = hashlib.sha256(b"tr-research-legacy-authorization-snapshot-v1\0")
     with sqlite3.connect(uri, uri=True) as db:
         db.execute("BEGIN")
-        for table, columns, order in _AUTHORIZATION_TABLES:
-            header = json.dumps([table, columns], ensure_ascii=False, separators=(",", ":")).encode()
-            digest.update(len(header).to_bytes(8, "big"))
-            digest.update(header)
-            for row in db.execute(f"SELECT {', '.join(columns)} FROM {table} ORDER BY {order}"):
-                encoded = json.dumps(row, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
-                digest.update(len(encoded).to_bytes(8, "big"))
-                digest.update(encoded)
+        return legacy_authorization_snapshot_digest(db)
+
+
+def legacy_authorization_snapshot_digest(db: sqlite3.Connection) -> str:
+    """Hash the authorization rows inside the caller's existing transaction."""
+    digest = hashlib.sha256(b"tr-research-legacy-authorization-snapshot-v1\0")
+    for table, columns, order in _AUTHORIZATION_TABLES:
+        header = json.dumps([table, columns], ensure_ascii=False, separators=(",", ":")).encode()
+        digest.update(len(header).to_bytes(8, "big"))
+        digest.update(header)
+        for row in db.execute(f"SELECT {', '.join(columns)} FROM {table} ORDER BY {order}"):
+            encoded = json.dumps(tuple(row), ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
     return digest.hexdigest()
 
 
@@ -437,6 +442,21 @@ class KeycloakResearchGrantManager:
                        source: str, identity_id: str, subject: str,
                        scopes: Iterable[str]) -> bool:
         """Create, update or revoke a specific grant; return whether it changed."""
+        normalized_scopes = self._validate_grant(resource_type, source, identity_id, subject, scopes)
+        caller = self.identity_provider(actor)
+        # A grant or revocation is an infrequent administrative action; do
+        # not rely on the short-lived cache when checking the caller's rights.
+        self.clear_cache()
+        if caller is None or not self.may_share(caller.token, resource_type=resource_type,
+                                                 resource_ref=resource_ref, scope="share"):
+            raise PermissionError("Keycloak did not authorize Research sharing")
+        return self._reconcile_user_grant(resource_type=resource_type, resource_ref=resource_ref,
+                                          source=source, identity_id=identity_id, subject=subject,
+                                          scopes=normalized_scopes)
+
+    @staticmethod
+    def _validate_grant(resource_type: str, source: str, identity_id: str, subject: str,
+                        scopes: Iterable[str]) -> list[str]:
         if resource_type not in _RESOURCE_KINDS:
             raise ValueError("unsupported Research resource type")
         source, identity_id, subject = (str(v or "").strip() for v in (source, identity_id, subject))
@@ -445,13 +465,14 @@ class KeycloakResearchGrantManager:
         normalized_scopes = sorted(set(scopes))
         if any(scope not in _USER_GRANT_SCOPES for scope in normalized_scopes):
             raise ValueError("Research user grants cannot delegate administration")
-        caller = self.identity_provider(actor)
-        # A grant or revocation is an infrequent administrative action; do
-        # not rely on the short-lived cache when checking the caller's rights.
-        self.clear_cache()
-        if caller is None or not self.may_share(caller.token, resource_type=resource_type,
-                                                 resource_ref=resource_ref, scope="share"):
-            raise PermissionError("Keycloak did not authorize Research sharing")
+        return normalized_scopes
+
+    def _reconcile_user_grant(self, *, resource_type: str, resource_ref: str,
+                              source: str, identity_id: str, subject: str,
+                              scopes: Iterable[str], require_identical: bool = False) -> bool:
+        """Reconcile a grant after caller authorization or guarded offline migration."""
+        normalized_scopes = self._validate_grant(resource_type, source, identity_id, subject, scopes)
+        source, identity_id, subject = (str(v or "").strip() for v in (source, identity_id, subject))
         # Resolve both local Keycloak subject and its username; Keycloak may
         # return either representation in a policy. Never infer a subject from
         # a display name or legacy owner reference.
@@ -503,6 +524,8 @@ class KeycloakResearchGrantManager:
                 raise AuthorizationUnavailable("Research grant conflicts with existing Keycloak policy")
             if sorted(previous_scopes) == normalized_scopes:
                 return False
+            if require_identical:
+                raise AuthorizationUnavailable("Research migration grant conflicts with existing scopes")
         elif not normalized_scopes:
             return False
         else:

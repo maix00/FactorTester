@@ -1,0 +1,50 @@
+# Research 授权迁移与验收
+
+适用于 ADR-190 的 Research、Report 与 Profile 授权迁移。此文记录准备和验收程序；目前没有完成严格模式切换，也不能仅凭阶段性迁移日志删除旧授权数据。
+
+## 边界
+
+- Keycloak 是目标授权权威；Research SQLite 保留对象、Profile 关联和迁移期间的旧授权输入。迁移日志只记录操作和校验，不提供权限。
+- 旧所有者或成员无法唯一映射到已审核的稳定身份时，所属研究与报告标为 `needs_repair`；保留原始记录，不删除、改绑或默认转给管理员。
+- 旧规则中“上级”表示该所有者当前的真实上级链。Keycloak Group policy 的向下扩展不能直接表达这个反向关系；在父链变更、撤权、跨 Manager 传播均已验证之前，这些对象不进入自动导入。
+- 活跃分享链接、公开访客授权以及归档对象也须先证明等价语义。已撤销或过期的链接不能重新启用；迁移工具不修改链接。
+- 独立 realm 之间以已核验的稳定身份建立唯一映射；不能把源 realm 的 bearer 当作目标 realm token，也不能按同名用户名推断为同一人。用户须具备公网访问权限，且只在其公网登录时懒同步；不能批量同步全部内网用户。
+- 跨 Manager 的对象访问需要受信任节点证明、在线授权与目标 Keycloak 的独立决策；来源不可达或映射不唯一时拒绝。当前 7997 与 Job 的完整跨 realm 委托尚未接通。
+
+## 盘点与备份
+
+1. 分别在每个 Manager 取得受保护的旧库快照和已审核的用户名到 `tr_identity_id` 映射。锁定迁移范围和身份，不在计划中输出源码、凭据或链接令牌。
+2. 暂停所有能修改 Research 权限、层级和 Keycloak 相应策略的写入。仅迁移工具之间的文件锁不能代替应用维护窗口。
+3. 用 SQLite 原生备份获得独立副本，做完整性检查并核对授权行摘要；另外备份目标 Keycloak realm、用户和授权服务配置，在隔离 realm 完成恢复演练。备份与回执应仅由运维账户读取。
+4. 使用与目标 realm 一致的 issuer 生成计划；文件为 0600，存在即拒绝覆盖：
+
+```sh
+python -m scripts.migrations.keycloak_research_stage plan \
+  --database "$RESEARCH_DB" --reviewed-directory "$REVIEWED_DIRECTORY" \
+  --issuer "$KEYCLOAK_ISSUER" --output "$PROTECTED_PLAN"
+```
+
+计划从同一 SQLite 读事务生成原始授权摘要和对象清单；输出只包含汇总和计划摘要。逐项检查 `needs_repair`、对象数量、所有者、成员、显式授权、报告继承与链接状态。即使数量相同，也必须比对引用集合及每一身份的允许和拒绝结果。
+
+## 隔离演练与分批准备
+
+在临时 SQLite 副本和隔离 Keycloak realm 先执行，不触碰真实业务对象：
+
+```sh
+python -m scripts.migrations.keycloak_research_stage stage \
+  --database "$RESEARCH_DB" --backup "$VERIFIED_BACKUP" \
+  --reviewed-directory "$REVIEWED_DIRECTORY" --plan "$PROTECTED_PLAN" \
+  --journal "$PROTECTED_JOURNAL"
+```
+
+工具复算计划和 issuer，检查独立 SQLite 备份，锁定同库的迁移执行，再为 **ready** 的完整研究对象组创建 Keycloak 资源和明确的成员/用户授权。资源创建绑定原始摘要和创建标识；已有不匹配的资源、策略或主体会阻止操作，不会覆盖。日志为 0600，只记录引用摘要；它不能用于跳过实际检查。
+
+对每个对象组，工具使用 Keycloak Policy Evaluation，对 realm 全部活跃用户和全部七个 scope 比较允许与拒绝。写入响应丢失或进程中断后，保留计划、备份和日志，用完全相同的输入重试；重试重新查询策略并重新做对账。源摘要、身份目录、目标 issuer 或计划变化时必须停止并重新盘点。演练应覆盖授权冲突、重复调用、故障中断、并发、身份不匹配、链接撤销和不完整数据。
+
+本机临时 Keycloak 已验证资源与成员授权、远端写成功但响应丢失后的恢复、所有活跃用户逐 scope 对账，以及 7997 同一票据撤权前允许、撤权后拒绝。这不代表真实对象已迁移，也不证明跨服务器行为。
+
+## 实际切换和回退门槛
+
+真实导入前重新生成两端计划并报告受影响对象、明确的 needs_repair 和备份恢复证据。需要先实现并验收动态上级、链接、公开访客、跨 realm 在线委托及所有读取/写入入口；对所有保留身份和对象进行逐项正反对账，并独立验收 Manager、7997 和 Job 请求。当前工具 **不生成切换许可**，`cutover_ready` 固定为 false。
+
+在确保旧写入口停用、源快照未变化、受保护的真实验收回执完整之后，才可一次性切换授权读取并验证两端；在此之前不得删除旧表或旧路径。若准备阶段失败，恢复采用经过验证的 Keycloak/SQLite 备份；或逐个核对计划、创建标识与完整当前策略后，由授权运维人员回退本次新增资源。存在其他写入或策略冲突时停止，不能按名称、缺失数据或失败结果推断可以删除。

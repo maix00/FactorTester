@@ -221,8 +221,12 @@ def test_independent_keycloak_grants_can_be_updated_and_revoked():
     assert not manager.set_user_grant(**common, source="explicit", scopes=["read"])
     assert manager.set_user_grant(**common, source="explicit", scopes=["read", "use"])
     explicit = next(policy for policy in policies.values() if '"source":"explicit"' in policy["description"])
+    with pytest.raises(AuthorizationUnavailable, match="migration grant conflicts"):
+        manager._reconcile_user_grant(resource_type="research", resource_ref="r", source="explicit",
+                                      identity_id="identity-b", subject="subject-b", scopes=["read"],
+                                      require_identical=True)
+    assert sorted(explicit["scopes"]) == ["read", "use"]
     explicit["roles"] = ["unrelated-role"]
-    from server.identity.keycloak_authorization import AuthorizationUnavailable
     with pytest.raises(AuthorizationUnavailable, match="conflicts"):
         manager.set_user_grant(**common, source="explicit", scopes=[])
     del explicit["roles"]
