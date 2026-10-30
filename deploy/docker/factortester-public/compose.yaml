@@ -35,16 +35,9 @@ services:
       - NET_RAW
     devices:
       - /dev/net/tun:/dev/net/tun
-    # Do not cap the application container by default.  A ceiling that is
-    # below a heavy research job's working set makes the kernel OOM-kill the
-    # worker (and the web process) inside the container; the restart policy
-    # then replays the job into the same ceiling, so the host alternates
-    # between dying and restarting and the UI looks hung.  An uncapped
-    # container simply uses the host's spare memory and finishes, which is
-    # how the deployment behaved before the cap existed.  Hosts may still set
-    # FACTORTESTER_PUBLIC_MEMORY_LIMIT explicitly (for example when a swap
-    # file gives the kernel somewhere to page under pressure).
-    mem_limit: ${FACTORTESTER_PUBLIC_MEMORY_LIMIT:-0}
+    # Manager is a bounded control plane. Heavy execution belongs to the
+    # separately limited Nautilus worker; it must not consume the host budget.
+    mem_limit: ${FACTORTESTER_PUBLIC_MEMORY_LIMIT:-3g}
     environment:
       TR_DATA_HOST_ROLE: server
       TR_EXECUTION_NODE_ID: ${TR_EXECUTION_NODE_ID:?set stable execution node identity}
