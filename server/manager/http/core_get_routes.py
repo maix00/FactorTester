@@ -129,14 +129,11 @@ class CoreGetRoutesMixin:
                 next_path=str(requested or "/"),
             ):
                 return True
-            from server.identity.auth_mode import auth_mode
-            if keycloak_enabled():
-                from urllib.parse import quote
-                self._send_redirect(
-                    "/auth/oidc/start?next=" + quote(str(requested or "/app"), safe="/"),
-                )
-                return True
-            self._serve_login_page(parsed)
+            from urllib.parse import quote
+            from server.identity.manager_oidc import _safe_next_path
+            self._send_redirect(
+                "/auth/oidc/start?next=" + quote(_safe_next_path(requested), safe="/"),
+            )
             return True
         if not self._public_login_gate(parsed, method="GET"):
             return True
