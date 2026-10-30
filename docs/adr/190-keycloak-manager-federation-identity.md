@@ -1,4 +1,4 @@
-# ADR-190：联邦 Manager 共用 Keycloak 身份权威
+# ADR-190：联邦 Manager 的本地 Keycloak 与身份权限同步
 
 - 状态：分阶段迁移
 - 日期：2026-10-29
@@ -6,62 +6,72 @@
 
 ## 背景
 
-多个 Manager 需要互相发现计算与数据能力，但它们不应靠复制用户表来建立互信。若每个 Manager 各自创建同名用户，密码、角色、机构关系和撤权时间可能分叉；用户名也不能作为跨 Manager 的稳定身份键。
+多个 Manager 需要互相发现计算与数据能力。公网 Manager 可能离线，而内网 Manager 仍须完成本地登录、机构用户管理和授权变更；内网恢复连接后，还要把新增用户与权限变更同步到公网。因此单一在线 Keycloak 不能是唯一可写节点。
 
-当前旧账号表还被登录、对象 owner、个人设置和同步投影使用。删除账号表前，必须确认登录与授权已由 Keycloak 承担，并为既有对象 owner 建立精确的主体映射。仅证明两边用户名列表相同，不足以证明身份迁移已完成。
+Keycloak 26.8 的 multi-cluster v2 是高可用方案，不是分区期间可独立写入的多主方案：其跨集群数据库必须同步复制，官方建议数据库提交延迟低于 5ms、要求低于 10ms；网络断开会导致请求失败或延迟。公网与内网 Manager 不能依赖这类同步链路来实现离线管理。参见 [Keycloak multi-cluster v2](https://www.keycloak.org/high-availability/multi-cluster-v2/introduction)。
+
+当前旧账号表还被登录、对象 owner、个人设置和同步投影使用。删除账号表前，必须确认登录与授权已由各 Manager 的 Keycloak 承担，并为既有对象 owner 建立精确的稳定主体映射。仅证明两边用户名列表相同，不足以证明身份迁移已完成。
 
 ## 决策
 
-### Keycloak 数据库存储
+### Keycloak 部署与本地可用性
 
-1. Keycloak 使用现有公网 PostgreSQL 服务，单独建立 `traderesearch_keycloak` 数据库和专用最小权限角色；不复用 `factortester_control` 数据库、表、账号或密码。
-2. 现有公网部署定义使用 PostgreSQL 15.18，属于 Keycloak 官方支持的 PostgreSQL 15 系列；只读账户目录读取也验证了 Manager 当前能访问其控制库。复用该 PostgreSQL 服务可避免再运行、备份和监控第二套数据库；Keycloak 的用户/会话查询不会进入回测逐 Bar 热路径。
-3. 当前 PostgreSQL `pg_hba.conf` 仅允许 Manager 固定容器地址访问控制库，并默认拒绝其他连接。因此必须为 Keycloak 容器配置独立固定内网地址、独立 SCRAM 凭据和只允许 `traderesearch_keycloak` 数据库的 TLS 规则，不能放宽为整个 Docker 网段或公网访问。
-4. Keycloak 主机名与 HTTPS 证书独立于 PostgreSQL 选型。公网和浏览器必须使用稳定、证书可信的 HTTPS issuer；不得把数据库 WireGuard 地址、容器地址或自签名测试端点当作 issuer。
+1. 每个 Manager 部署自己的 Keycloak realm 和独立数据库；Manager 的 OIDC 登录、用户管理、Realm Groups、角色、FGAP 和对象授权由本地 Keycloak 提供。一个 Manager 或其 Keycloak 离线，不阻止另一 Manager 继续认证和管理其拥有的用户/权限。
+2. 每份 Keycloak 数据库只供同一 Manager 的 Keycloak 使用。不得让两个 Manager 直接共用 Keycloak 数据库，也不得复制 PostgreSQL 数据目录或 Keycloak 内部表。
+3. 公网 Keycloak 使用稳定且浏览器可信的 HTTPS issuer；内网 Keycloak 使用该内网 Manager 客户端可访问的 issuer。两个 issuer 不同，token 的 `(iss, sub)` 只标识本地 Keycloak 身份，不作为跨 Manager 用户合并键。
+4. Keycloak 连接池与进程资源单独限额，不进入回测逐 Bar 热路径。各部署可使用本机 PostgreSQL 专用数据库/角色；不得复用 Manager 控制库的表、角色或凭据。
 
-部署时让 Keycloak 容器加入公网 Compose 的私有数据库网络，使用固定专属地址；公网 PostgreSQL 当前 HBA 只放行 Manager 地址及受限 WireGuard 地址，并默认拒绝其他连接，因此必须用精确的 Keycloak 地址、数据库和角色规则扩展访问，不能开放数据库公网端口。使用独立凭据文件、限定连接池，并给 Keycloak 进程配置资源上限，避免登录高峰挤占回测资源。
+Keycloak multi-cluster v2 可在满足同步数据库和低延迟条件的高可用环境中用于故障切换，但不用于本系统 Manager 间离线写入。数据库支持矩阵见 [Keycloak 数据库配置](https://www.keycloak.org/server/db) 与 [Keycloak 支持的生产配置](https://www.keycloak.org/server/supported-configurations)。
 
-部署前先对现有 PostgreSQL 做校验备份，再创建专用数据库和角色；回退时仅移除该 Keycloak 数据库、角色及定向 HBA 规则，不影响 `factortester_control`。官方支持矩阵见 [Keycloak 数据库配置](https://www.keycloak.org/server/db) 与 [Keycloak 支持的生产配置](https://www.keycloak.org/server/supported-configurations)。
+### 身份权威、稳定键与写入归属
 
-### 身份权威与稳定键
+1. 每个用户在其所属组织的 home Manager 创建；创建时由该 Manager 的 Keycloak 写入不可变 UUID `tr_identity_id`。该标识在其他 Manager 的 Keycloak 镜像中保持一致，并作为跨 Manager 的稳定用户键和既有对象 owner 映射目标。
+2. 本地 OIDC 的 `(iss, sub)` 仍是验证本地会话的权威键；它不跨 issuer 比较。Manager 将已验证 token 的 `tr_identity_id` 解析为平台主体，同时保留本地 `(iss, sub)` 作为审计来源。缺失或重复的 `tr_identity_id` 必须拒绝跨 Manager 身份解析，不得按用户名、别名或邮箱自动合并。
+3. 组织及其层级、组织用户和 scoped admin group 由该组织登记的 home Manager 唯一写入。其他 Manager 的副本只读；网络恢复后的并发/来源冲突进入人工审计，不采用 last-write-wins。
+4. 全局管理员角色由指定的身份治理 Manager 写入并通过受限同步分发。公网登录许可、设备信任、Manager 本地服务授权和本地访客策略是目标 Manager 的本地权限，不因用户镜像而自动授予或同步。
+5. `username`、别名和邮件仅是 Keycloak 管理的可变资料字段，不用于账号合并、跨 Manager 权限判断或对象 owner 的最终身份键。
+6. 不得因用户名相同而合并账号，也不得复制密码、密码 hash、MFA seed、refresh token 或其他认证凭证。同步创建到目标 Keycloak 的新用户默认禁用或标记为待凭证初始化，并要求通过目标 Manager 的 Keycloak 邀请/凭证流程完成本地登录设置。
 
-1. 一个相互信任的 Manager 联邦域使用一个 canonical Keycloak issuer 与 realm。联邦域内各 Manager 验证同一组签名令牌，并以 `(iss, sub)` 作为主体身份。
-2. `username`、别名和邮件仅是 Keycloak 管理的可变资料字段，不用于账号合并、跨 Manager 权限判断或对象 owner 的最终身份键。
-3. 需要连接不同 Keycloak realm 时，必须通过显式的 identity brokering/link 建立身份关系；不得因用户名相同而合并账号，也不得复制密码、凭证或整套用户目录。
+### 用户/权限同步与离线行为
 
-### 注册与 Manager 可访问性
-
-1. 用户由有权管理员在 canonical Keycloak 中创建；公网和内网 Manager 均不开放自助注册。
-2. 新用户只在 Keycloak 创建一次。所有共享该 realm 的 Manager 因而能识别同一 `sub`，但每个 Manager 必须独立检查本地服务的访问角色、机构/层级范围和目标对象授权。
-3. 公网登录需要单独的 `public-manager-login` 权限；内网 Manager 的访问按机构与层级授权。公网权限不得从“属于某机构”自动推导，公网设备白名单也不得因内网信任而自动扩散。
-4. 用户创建和角色/组变更不通过 RabbitMQ、Manager Federation 或账号 outbox 复制。Manager 联邦传递的是受限的服务请求，不是用户目录同步协议。
+1. 公网仍关闭自助注册。各 Manager 的用户创建操作必须由本地 Keycloak FGAP 授权的管理员通过 Manager 管理 API 发起；内网离线时，内网本地 Keycloak 仍可创建本组织的新用户并即时赋予本地权限。
+2. Keycloak 是本地身份和权限的唯一权威存储。Manager 只保留通过现有 Manager Federation 控制通道传送变更所需的有界 outbox、游标、幂等事件 ID 和冲突状态；这些记录是传输状态，不是第二套用户/ACL 权限数据库。禁止直接复制 Keycloak 数据库。
+3. 每个同步事件由唯一 home Manager 发出，携带稳定实体 ID、来源 Manager、单调来源序号/版本、操作和必要的目标状态摘要。发送端持久化后重试；接收端按事件 ID 幂等应用到自己的 Keycloak，成功验证后推进游标。断线期间事件保留，恢复后继续发送；删除与撤权使用 tombstone，不得因分页、过期或缺字段静默省略。
+4. 用户基本资料、组织/层级组、成员关系、组织管理员组和被明确批准可跨 Manager 使用的角色/对象授权可同步。目标 Manager 的设备白名单、公网登录许可和本地 visitor policy 保持本地。每种可同步对象必须声明 owner、映射和授权范围；未知事件版本或未支持授权类型阻止该事件并报告，不能跳过。
+5. 同步消息不包含密码、密码 hash、MFA secret、refresh token 或可复用 bearer token。新用户在源 Manager 立即可用；目标 Keycloak 收到用户和权限镜像后仍需完成目标侧凭证初始化，不能伪称凭证已同步。
+6. Manager 到 Manager 链路离线时，本地用户继续使用本地 Keycloak 登录；本地权限可继续管理。远端权限变更只在同步成功后对目标 Manager 生效。对端副本的最大陈旧时间与远程访问租约必须配置并可观测；撤权尚未同步时不得把目标端旧权限声称为实时一致。对端身份状态超过租约时，跨 Manager 访问失败关闭，本地 home Manager 的本地用户访问不受影响。
 
 ### 跨 Manager 身份上下文
 
-1. 远程调用使用目标 Manager 可验证的服务身份、明确的 audience/scope，以及最小化的原始主体标识 `(iss, sub)` 与来源 Manager 标识。
-2. 接收 Manager 验证服务调用者后，仍按自己的 Keycloak 授权规则评估该主体和请求对象；来源 Manager 的管理员身份不会自动成为接收端管理员。
-3. 不把用户密码、refresh token、完整用户资料或可复用的 bearer token 写入 RabbitMQ 消息、RunSpec、ExecutionPlan 或长期缓存。任务执行只携带完成授权所必需的最小冻结主体上下文。
-4. 个人显示偏好可以经既有 account-domain 同步机制传输，但必须按 `(iss, sub)` 归属并使用既有 outbox/cursor/conflict 生命周期；这类资料同步不授予任何权限。设备信任与 Manager 登录许可保持目标 Manager 作用域。
+1. 远程调用使用目标 Manager 可验证的服务身份、明确的 audience/scope，以及稳定 `tr_identity_id`、来源 Manager 和本地认证来源摘要；不接受调用者自行声明的用户 ID。
+2. 接收 Manager 验证服务调用者后，按本地 Keycloak 已同步的身份镜像和授权规则评估主体与目标对象。来源 Manager 的管理员身份不会自动成为接收端管理员。
+3. 不把用户密码、refresh token、完整认证 token 或可复用 bearer token 写入 RabbitMQ 消息、RunSpec、ExecutionPlan 或长期缓存。任务执行只携带完成本次授权所必需的最小冻结主体上下文。
+4. 个人显示偏好可以继续经既有 account-domain 同步机制传输，但不得把该机制当作用户/权限权威或新身份同步协议；偏好同步不授予任何权限。
 
 ## 迁移顺序与清理门槛
 
-1. 在 canonical realm 创建并核验 Manager 客户端、角色、Realm Groups、层级关系及默认拒绝授权；保持公网自助注册关闭。
-2. 从公网控制目录与内网 SQLite 分别导出不含密码材料的快照，逐项比较账号集合、机构、层级、角色、状态和引用完整性。旧密码 hash 不导入；缺少可验证联系方式的用户由管理员在 Keycloak 中安排凭据初始化。
-3. 为旧用户名建立到唯一 `(iss, sub)` 的冻结映射；将 Job/report、因子/策略/产品组 owner、共享授权、个人设置和 outbox 逐类盘点迁移，并比较迁移前后的有效授权集合。
-4. 公网与内网 Manager 均配置到同一 issuer/realm 后，分别验收浏览器登录、注销、访客低权限身份、公网登录许可、机构与层级管理员、设备管理、对象授权、跨 Manager 任务/数据请求及 Keycloak 不可用时的拒绝行为。
-5. 只有两端运行版本、Keycloak 权限结果和历史对象引用都通过核对后，才能停止旧账号写入并移除旧用户/权限入口。旧数据备份按独立保留策略处理；不能将停用、隔离和删除混为一步。
+1. 在公网和内网各自的 Keycloak realm 创建并核验 Manager 客户端、角色、Realm Groups、层级关系及默认拒绝授权；公网自助注册始终关闭。
+2. 从公网控制目录与内网 SQLite 分别导出不含密码材料的快照，逐项比较账号集合、机构、层级、角色、状态和引用完整性。一次性迁移可将已核对的 PBKDF2-SHA256 凭据转换为 Keycloak 原生格式；不导出明文，不覆盖目标已有凭据。这不属于跨 Manager 的日常凭据同步。
+3. 为旧主体建立唯一 `tr_identity_id` 映射；将 Job/report、因子/策略/产品组 owner、共享授权、设备、个人设置和 outbox 逐类盘点。跨 Manager owner 映射必须比较精确的对象引用与有效授权集合。
+4. 实现并在隔离 Realm 验证可断网恢复的身份变更流：内网创建用户/修改嵌套组权限 → 网络中断期间内网登录和本地授权继续工作 → 恢复后按序同步到公网 Keycloak → 新用户目标侧凭证初始化 → 重放、乱序、重复、撤权、删除及冲突均有确定结果。
+5. 公网与内网 Manager 分别验收浏览器登录、注销、访客低权限身份、公网登录许可、机构与层级管理员、设备管理、对象授权和跨 Manager 任务/数据请求。对端 Keycloak 不可用时本地认证继续；本地 Keycloak 不可用时本 Manager 的受保护操作失败关闭。
+6. 只有两端运行版本、同步队列零积压、两侧 Keycloak 受管身份/授权对账一致、历史对象 owner 映射无歧义并完成回退演练后，才能停止旧账号写入并移除旧用户/权限运行实现。迁移脚本只在部署和对账验收后作为迁移代码清理；数据备份按独立保留策略处理。
 
-## 当前实现状态（2026-10-29）
+## 当前实现状态（2026-10-30）
 
-- 公网 Manager 通过已校验 TLS 的会话读取到的 `/api/session` 未包含 Keycloak `sub`；当前观察到的会话不能作为 Keycloak 登录验收证据。
-- 本机内网 Manager 容器未配置 Keycloak/OIDC 环境，保存的 CLI 凭据访问本机 `/api/session` 返回未登录。可见的本机 Keycloak 容器与 Manager 不在同一网络，不能作为已经接通的 canonical realm。
-- 公网与内网旧目录的只读快照目前均为 6 个账号、2 个机构记录、2 个层级记录；账号集合、机构/层级 ID 和导出的非密码字段一致，引用完整性检查为零问题。这只是旧目录对账，不代表 Keycloak 用户或授权已迁移。
-- 迁移脚本当前负责只读导出、结构化层级组规划和不暴露身份值的集合/字段对比；尚未创建 canonical realm 用户/组/策略，也未迁移现有 owner 引用。因此目前不得删除旧账号表、认证路径或权限存储。
+- 两端均运行独立的 Keycloak 26.8.1 realm 和持久化 PostgreSQL。两端原始目录实际均为 6 个用户、1 个机构、1 个层级；早期导出中添加的 default 机构并非真实记录，已从导出器移除。
+- 按已授权映射，两端均迁移 3 个保留用户、唯一机构、层级与父用户关系。稳定身份属性、Realm Groups、FGAP、角色、公网登录许可和原密码的原生 PBKDF2 凭据均已写入；旧数据库已备份，未销毁旧行。
+- 内网 Manager 已接通本地 realm。真实浏览器通过原用户密码登录、会话检查、管理员目录及注销；隔离验收账号分别验证超级管理员、机构管理员、普通用户的管理员边界与对象 UMA 允许/拒绝。机构外用户直接查询被拒绝。
+- 公网 Manager 仍运行旧应用版本。公网 realm 已准备，但不能将该准备状态称为公网网页登录或应用切换通过。
+- 旧用户/密码/权限运行实现已从任务分支移除；业务 owner 引用仍作为数据保留，不作为授权来源。迁移与备份脚本保留到两端部署、真实登录、现有对象授权和同步核对完成。
+- 联邦身份变更流、按公网许可的登录时懒同步、撤权/离线/重放、已有业务对象授权映射及真实跨 Manager 执行验收尚未全部完成。禁止以两端初始用户集合一致声称联邦同步已完成。
 
 ## 验收标准
 
-- 两端同一个人得到相同 `(iss, sub)`；没有 Manager 间账号或凭证复制。
-- Keycloak 中创建用户后，两端都能识别其身份；未获某 Manager 的服务角色/组授权时，该 Manager 明确拒绝访问。
+- 同一人的两个 Manager-local Keycloak 用户具有相同且唯一的 `tr_identity_id`；本地 token 仍按各自 issuer 验证，不同步认证凭证。
+- 断网期间内网 Manager 可登录、创建本组织用户并管理本地权限；恢复网络后变更完整、幂等地同步到公网 Manager 的 Keycloak，并对账用户/组/角色/对象授权集合。
+- 用户在目标 Keycloak 上完成本地凭证初始化后才能登录目标 Manager；跨 Manager 同步不复用密码或 MFA 凭证。
+- 未获某 Manager 本地服务角色/组授权时，该 Manager 明确拒绝访问。
 - 公网用户无 `public-manager-login` 时不能登录公网；开启公网注册不能绕过管理员创建流程。
 - 不同 Manager 的设备白名单、机构角色、对象授权和撤权不会因同一 realm 或联邦连接而自动扩散。
 - 旧身份引用映射无歧义，迁移前后有效对象授权集合一致；两端均通过发布验收后才允许移除旧实现。

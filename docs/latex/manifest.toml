@@ -81,6 +81,11 @@ source = "product_docs/concepts/network-topology.md"
 slug = "network-topology"
 
 [[sections.documents]]
+title = "系统图例与关键流程图"
+source = "docs/latex/figures.md"
+slug = "system-figures"
+
+[[sections.documents]]
 title = "用户与权限"
 source = "product_docs/concepts/identity-permissions.md"
 slug = "identity-permissions"

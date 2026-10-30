@@ -1,15 +1,15 @@
-# FactorTester Server Maintenance Agent Contract
+# TradeResearch Server Maintenance Agent Contract
 
 ## Separate authority domains
 
 | Activity | Scope | Authority |
 |---|---|---|
 | Local repository work | Inspect, edit, test, commit | Repository task authorization |
-| FactorTester runtime | Authenticated Manager API and bounded Maintenance Cases | Authorized Manager principal and server roles |
+| TradeResearch runtime | Authenticated Manager API and bounded Maintenance Cases | Authorized Manager principal and Keycloak roles |
 | Host/deployment work | Host, container, tunnel, peer-key, release transport | Explicit deployment authorization plus the target server's declared operator access |
 | Merge/push/publication | Source and release publication | Explicit human release authorization |
 
-The Manager token, ordinary FactorTester session, Swift session, and host
+The Manager token, ordinary TradeResearch session, desktop session, and host
 operator credential are different credentials. Never copy them, print them, or
 use one as a substitute for another.
 
@@ -20,9 +20,9 @@ runtime settings. The Manager exposes a validated projection; the CLI does not
 guess connection methods from a host name or server role:
 
 ```bash
-factortester-manager status --json
-factortester-manager server inspect --json
-factortester-manager server access --json
+traderesearch-manager status --json
+traderesearch-manager server inspect --json
+traderesearch-manager server access --json
 ```
 
 Use the returned `server`, `factor_tester`, and `management_access`
@@ -39,7 +39,7 @@ capability. Peer discovery, key distribution, routes, tunnel lifecycle, and
 handshake verification remain deployment-owned and are not inferred by the
 Manager CLI or this contract.
 
-The Manager CLI is intentionally limited to FactorTester application actions:
+The Manager CLI is intentionally limited to TradeResearch application actions:
 `jobs`, `artifacts`, `storage`, `transfers`, `devices`,
 server health/federation status, and Manager-owned `services`. It does not
 expose host restart, container lifecycle, tunnel changes, source transfer, or
@@ -71,7 +71,7 @@ explicitly requires one.
 ## Skill packaging and confidentiality
 
 The canonical repository source is
-`server/skills/factortester-server-maintenance/`. It may be delivered with
+`server/skills/traderesearch-server-maintenance/`. It may be delivered with
 the administrator-only Manager distribution, but must not be bundled into the
 ordinary research CLI, Swift client, public runtime, or generated client
 packet. Keeping it alongside the Manager installer does not grant backend

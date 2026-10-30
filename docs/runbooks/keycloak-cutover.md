@@ -20,7 +20,7 @@ synthetic organization. If an existing organization has no explicit root
 level, the export adds a marked synthetic root *level* so Keycloak group
 membership has a well-defined parent. Accounts with a missing or unknown
 organization remain unmapped and block apply; they are not assigned to a
-`default` organization. Salt/hash/password columns are never exported.
+`default` organization. Salt/hash/password columns are never exported in the directory inventory. The separately authorized one-time credential conversion reads the protected backup directly and imports Keycloak native PBKDF2 credentials; it never exports plaintext and never overwrites an existing target credential.
 
 If not empty, resolve manually before import.
 
@@ -65,6 +65,7 @@ Required user-profile configuration is applied by
 ```text
 unmanagedAttributePolicy = ADMIN_EDIT
 identity attributes: view/edit restricted to admin
+email / firstName / lastName: optional for migrated accounts
 ```
 
 Identity attributes and OIDC mappers must be explicitly registered. Never use

@@ -52,7 +52,8 @@
 ## Rollback
 
 - Unset `TRADERESEARCH_COUCHDB_AUTHORITY` -> SQLite/JSON/mirror.
-- `TRADERESEARCH_AUTH_MODE=legacy` -> old password login.
+- `TRADERESEARCH_AUTH_MODE=legacy` is retired and now resolves to Keycloak; old
+  password authorization is not an operational fallback.
 
 
 ## Public deployment (2026-10-25)

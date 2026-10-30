@@ -12,7 +12,7 @@
 
 Sparkle payload 过去同时包含 `FTClient.app` 和冻结 Python 运行时，Swift 小
 改动也会产生约 125MB 的完整 DMG。运行时还包含两个相同的 PyInstaller
-二进制：`factortester` 和 `cli-anything-factortester-research`。
+二进制：`factortester` 和 `cli-anything-traderesearch-research`。
 
 ## 决策
 

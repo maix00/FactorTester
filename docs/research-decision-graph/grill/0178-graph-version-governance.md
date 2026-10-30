@@ -36,7 +36,7 @@ v1–v3 Git 历史、既有 continuation trace 和 Grill 146 为事实基线。
 
 **用户决定。** 需要建立独立 Skill。
 
-**现状核对。** `cli-anything-factortester-research` 只提供
+**现状核对。** `cli-anything-traderesearch-research` 只提供
 `--role server_maintenance` 恢复入口和面向旧 Job continuation 的命令；
 `research-obligation-cycle` 的 `impact` 模式属于 Research Agent，用于提出
 图或方法变化造成的 Contract/义务影响。当前不存在完整指导图版本发布、激活、

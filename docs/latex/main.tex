@@ -3,6 +3,9 @@
 \geometry{a4paper,margin=24mm}
 \setlength{\emergencystretch}{6em}
 \usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc}
 \usepackage{booktabs}
 \usepackage{longtable}
 \usepackage{array}
@@ -15,6 +18,33 @@
 \urlstyle{same}
 \setCJKmonofont{FandolFang-Regular.otf}
 \lstset{basicstyle=\ttfamily\small,breaklines=true,breakatwhitespace=false,columns=fullflexible,keepspaces=true,frame=single}
+\definecolor{trBlue}{HTML}{245B8F}
+\definecolor{trTeal}{HTML}{168477}
+\definecolor{trViolet}{HTML}{7551A6}
+\definecolor{trAmber}{HTML}{A96A13}
+\definecolor{trRed}{HTML}{B23A48}
+\definecolor{trInk}{HTML}{344054}
+\definecolor{trPaleBlue}{HTML}{EEF5FB}
+\definecolor{trPaleTeal}{HTML}{EDF8F5}
+\definecolor{trPaleViolet}{HTML}{F4F0FA}
+\definecolor{trPaleAmber}{HTML}{FCF5E9}
+\definecolor{trPaleGray}{HTML}{F4F5F7}
+\tikzset{
+  trHost/.style={draw=trInk!65,fill=trPaleGray,rounded corners=3pt,line width=.8pt},
+  trManager/.style={draw=trBlue,fill=trPaleBlue,rounded corners=2pt,align=center,text width=3.3cm,minimum height=1.0cm,inner sep=5pt,line width=.8pt},
+  trIdentity/.style={draw=trViolet,fill=trPaleViolet,rounded corners=2pt,align=center,text width=2.7cm,minimum height=.85cm,inner sep=4pt,line width=.8pt},
+  trCompute/.style={draw=trTeal,fill=trPaleTeal,rounded corners=2pt,align=center,text width=3.1cm,minimum height=.9cm,inner sep=5pt,line width=.8pt},
+  trData/.style={draw=trTeal!80!black,fill=white,rounded corners=2pt,align=center,text width=2.8cm,minimum height=.8cm,inner sep=4pt,line width=.7pt},
+  trClient/.style={draw=trAmber,fill=trPaleAmber,rounded corners=2pt,align=center,text width=2.8cm,minimum height=.8cm,inner sep=4pt,line width=.8pt},
+  trStore/.style={draw=trInk!60,fill=white,rounded corners=2pt,align=center,text width=4.0cm,minimum height=.7cm,inner sep=4pt,line width=.7pt},
+  trControl/.style={-{Stealth[length=2mm]},draw=trBlue,line width=1pt},
+  trDataFlow/.style={-{Stealth[length=2mm]},draw=trTeal,line width=1pt},
+  trFederation/.style={<->,draw=trViolet,dashed,line width=1pt},
+  trPlanned/.style={-{Stealth[length=2mm]},draw=trAmber,dashed,line width=1pt},
+  trPrivate/.style={draw=trAmber,line width=1.1pt},
+  trBlocked/.style={draw=trRed,line width=1.6pt},
+  trRole/.style={draw=trViolet,fill=trPaleViolet,rounded corners=2pt,align=center,text width=3.5cm,minimum height=.72cm,inner sep=4pt,line width=.8pt}
+}
 \setcounter{secnumdepth}{3}
 \setcounter{tocdepth}{2}
 \input{.artifacts/docs-pdf/metadata.tex}

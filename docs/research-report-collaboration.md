@@ -4,9 +4,9 @@
 
 ## 查询、撰写和发布
 
-先查看 `factortester research reports --help` 及对应子命令帮助。`branch-status <report-id>` 列出可访问的分支及作者、版本和发布位置。写入要求该 Profile 对研究具有编辑资格；报告仅分享为只读不授予编辑权限。
+先查看 `traderesearch research reports --help` 及对应子命令帮助。`branch-status <report-id>` 列出可访问的分支及作者、版本和发布位置。写入要求该 Profile 对研究具有编辑资格；报告仅分享为只读不授予编辑权限。
 
-报告拥有者先用 `factortester research member-add <research-id> --principal <完整用户身份> --profile <profile> --role editor` 授权每个参与的 Profile。同一个用户的另一 Profile 也需要单独登记；服务器端与客户端遵循相同规则。
+报告拥有者先用 `traderesearch research member-add <research-id> --principal <完整用户身份> --profile <profile> --role editor` 授权每个参与的 Profile。同一个用户的另一 Profile 也需要单独登记；服务器端与客户端遵循相同规则。
 
 `branch-fork <report-id> --profile <profile> --from-branch <source> --branch-id <new>` 从已发布的服务器或客户端分支取得完整可编辑快照，在当前 Profile 登记新分支并发布。新分支标识应唯一；重试必须使用原标识，以继续同一次 fork，不能换标识掩盖失败。
 
@@ -21,7 +21,7 @@
 在同一报告的两个本地已登记分支间：
 
 ```bash
-factortester research reports copy-preview \
+traderesearch research reports copy-preview \
   --profile self --report-workspace-id <workspace-id> --branch-id main \
   --source-branch-id <review-branch> --component-id <chapter-or-section> \
   --parent-id <target-parent-or-root> --copy-id <stable-copy-id> --json
@@ -30,7 +30,7 @@ factortester research reports copy-preview \
 将完整 JSON 输出保存为预览文件，检查选中节点、完整子树、资源、来源版本和目标版本，再提交：
 
 ```bash
-factortester research reports copy-apply \
+traderesearch research reports copy-apply \
   --profile self --report-workspace-id <workspace-id> --branch-id main \
   --preview-file <preview.json> --json
 ```
