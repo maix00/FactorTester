@@ -4,6 +4,7 @@ from __future__ import annotations
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import base64
 import json
 import subprocess
 import threading
@@ -47,12 +48,16 @@ createRoot(document.getElementById('root')!).render(<App />);
                 for viewport in ({"width": 1440, "height": 900}, {"width": 390, "height": 844}):
                     page = browser.new_page(viewport=viewport, locale="zh-CN")
                     page.set_default_timeout(5000)
+                    image_id = "abcdef0123456789abcdef01"
+                    image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aR0AAAAASUVORK5CYII=")
+                    page.route(f"**/api/public-research/p1/local-resources/{image_id}*",
+                               lambda route: route.fulfill(body=image, content_type="image/png"))
                     page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
                     page.evaluate("""() => {
                       window.fixture = {rev:'1-a', conflict:true, operations:[], chapters:[
                         {chapter_id:'c1',title:'第一章'},{chapter_id:'c2',title:'第二章'}],
                         components:{c1:[{component_id:'c1',kind:'chapter',parent_id:null},
-                          {component_id:'p1',kind:'paragraph',parent_id:'c1',title:'原段落'}],
+                          {component_id:'p1',kind:'paragraph',parent_id:'c1',title:'原段落',body:'![正文图](factortester-local://abcdef0123456789abcdef01)'}],
                           c2:[{component_id:'c2',kind:'chapter',parent_id:null}]}};
                       window.fetch = async (input, options = {}) => {
                         const url = String(input), f = window.fixture;
@@ -63,7 +68,7 @@ createRoot(document.getElementById('root')!).render(<App />);
                         if (url === '/api/research-reports/p1/attachments') return response({attachments:[]});
                         if (url.startsWith('/api/research-reports/p1/chapters/')) return response({chapter:{components:f.components[url.split('/').at(-1)]}});
                         if (url === '/api/public-research/p1/index') return response({chapters:f.chapters.map(c => ({component_id:c.chapter_id,title:c.title}))});
-                        if (url.startsWith('/api/public-research/p1/chapters/')) return response({components:f.components[url.split('/').at(-1)]});
+                        if (url.startsWith('/api/public-research/p1/chapters/')) return response({components:f.components[url.split('/').at(-1)],local_resources:[{resource_id:'abcdef0123456789abcdef01'}]});
                         if (url === '/api/research-reports/p1/operations') {
                           const payload = JSON.parse(options.body);
                           if (payload.base_rev !== f.rev) throw Error('stale revision sent');
@@ -81,6 +86,10 @@ createRoot(document.getElementById('root')!).render(<App />);
                     }""")
                     page.add_script_tag(path=str(bundle))
                     reader = page.locator(".tr-report-reading")
+                    report_image = reader.locator('img[alt="正文图"]')
+                    report_image.wait_for(state="visible")
+                    report_image.evaluate("node => node.decode()")
+                    assert report_image.evaluate("node => node.complete && node.naturalWidth === 1")
                     selection = reader.get_by_role("combobox", name="章节")
                     selection.focus(); selection.press("ArrowDown")
                     page.locator(".ant-select-dropdown:visible").get_by_text("第二章", exact=True).click()
