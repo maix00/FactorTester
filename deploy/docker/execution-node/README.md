@@ -1,7 +1,8 @@
 # Execution-only node
 
-This Compose starts one Celery worker and one bounded market API, **no Manager,
-SQLite replica, CouchDB credentials or second broker**. Use a tested versioned
+This Linux Compose starts one Celery worker, one bounded market API, and one
+host-local data-I/O/cache service, **no Manager, SQLite replica, CouchDB
+credentials or second broker**. Use a tested versioned
 execution image; configure the owner-only node descriptor and scoped Keycloak
 clients before `docker compose --env-file <node.env> config` / `up -d`.
 The worker's database is private metadata, not an alternate Job authority.
@@ -11,6 +12,22 @@ that broker with ACLs restricted to its target queue. Distinct Managers use
 independent registrations/worker instances; connect independent brokers through
 RabbitMQ Federation/Shovel only where routing requires it. HTTP discovery and
 market reads do not go through RabbitMQ. No custom message forwarder is added.
+
+`data-io` is the only cache producer for the Nautilus replay path in this
+execution-node Compose. It reads source/catalog files in bounded Arrow batches and publishes immutable
+IPC files under the existing shared-cache budget. Workers receive file
+descriptors over the private Unix socket and memory-map the same host files;
+Arrow bytes do not travel through HTTP or Python. This fast path requires Unix
+file-descriptor passing. Nautilus itself supports Windows Server 2022 x86_64,
+but this Compose and its FactorTester worker/data-I/O transport are Linux-only;
+a Windows node must not advertise execution capability until its worker package,
+authentication, source adapters, and data transport are implemented and tested.
+The planned Windows/cross-host transport is bounded Arrow Flight; it is not
+implemented yet. The chart API still has its chart-specific cache reader. Keep
+`TR_DATA_IO_SOCKET_ROOT` on the same host and grant access only to the Manager
+and workers allowed to read these installed sources. The bounded chart API
+still uses its existing chart-specific adapter and is not yet routed through
+this replay data-I/O path.
 
 Set `TR_MANAGER_ID` to the owning Manager's stable identity, and set a distinct
 `TR_EXECUTION_NODE_ID` for each installed node. The Compose project maps

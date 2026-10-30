@@ -38,7 +38,46 @@ services:
   worker:
     <<: *node
     mem_limit: ${TR_WORKER_MEMORY:-2g}
+    depends_on:
+      data-io:
+        condition: service_healthy
+    environment:
+      <<: *environment
+      TR_DATA_IO_SOCKET_PATH: /data-io/data.sock
+    volumes:
+      - ${TR_NODE_DESCRIPTOR:?set descriptor path}:/config/node.json:ro
+      - ${TR_NODE_STATE_ROOT:?set node-private state directory}:/node-state
+      - ${TR_DATA_ROOT:?set node-owned data directory}:/data:ro
+      - ${TR_SHARED_CACHE_ROOT:?set host shared cache directory}:/shared-cache
+      - ${TR_DATA_IO_SOCKET_ROOT:?set host data-I/O socket directory}:/data-io
+      - ${TR_OIDC_SECRET_FILE:?set owner-only secret path}:/run/secrets/oidc:ro
     command: [python, -m, server.jobs.dispatch.node_cli, worker, --pool=solo, --concurrency=1, --prefetch-multiplier=1, --loglevel=INFO]
+  data-io:
+    image: ${TR_EXECUTION_IMAGE:?set a versioned tested execution image}
+    restart: unless-stopped
+    mem_limit: ${TR_DATA_IO_MEMORY:-1g}
+    cpus: ${TR_DATA_IO_CPUS:-2}
+    environment:
+      FACTORTESTER_SERVER_ID: ${TR_MANAGER_ID:?set owning Manager identity}
+      TR_DATA_HOST_ROLE: server
+      TR_DATA_DEVICE_REF: ${TR_SHARED_STORAGE_ID:?set actual kernel/storage domain}
+      TR_SHARED_DATA_CACHE_ROOT: /shared-cache
+      TR_SHARED_DATA_CACHE_BYTES: ${TR_SHARED_DATA_CACHE_BYTES:-536870912}
+      TR_SHARED_DATA_ENTRY_BYTES: ${TR_SHARED_DATA_ENTRY_BYTES:-67108864}
+      TR_DATA_QUERY_CONCURRENCY: ${TR_DATA_QUERY_CONCURRENCY:-2}
+      TR_DATA_IO_SOCKET_PATH: /data-io/data.sock
+      TR_DATA_IO_ALLOWED_ROOTS: /data,/node-state
+    volumes:
+      - ${TR_NODE_STATE_ROOT:?set node-private state directory}:/node-state:ro
+      - ${TR_DATA_ROOT:?set node-owned data directory}:/data:ro
+      - ${TR_SHARED_CACHE_ROOT:?set host shared cache directory}:/shared-cache
+      - ${TR_DATA_IO_SOCKET_ROOT:?set host data-I/O socket directory}:/data-io
+    healthcheck:
+      test: [CMD, python, -c, "from server.data_io.client import DataIOClient; assert DataIOClient('/data-io/data.sock', timeout=2).ping()"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+    command: [python, -m, server.data_io.service]
   market:
     <<: *node
     mem_limit: ${TR_MARKET_MEMORY:-512m}

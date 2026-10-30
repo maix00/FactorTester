@@ -1,7 +1,19 @@
 """Catalog → shared immutable Arrow handles; no Python event construction."""
 from pathlib import Path
+import os
 
 from traderesearch_data.shared_cache import host_input_cache
+
+
+def _iter_handles(path):
+    socket_path = os.environ.get("TR_DATA_IO_SOCKET_PATH")
+    if socket_path:
+        from server.data_io.client import DataIOClient
+        yield from DataIOClient(socket_path).iter_parquet_handles(path)
+        return
+    # Local development fallback. Managed node containers set the socket path,
+    # making the host data-I/O process the only cache producer for this path.
+    yield from host_input_cache().iter_parquet_handles(path)
 
 
 def catalog_input_handles(folder, receipt, event_type):
@@ -26,7 +38,7 @@ def catalog_input_handles(folder, receipt, event_type):
     if not files:
         raise ValueError(f'no frozen {event_type} catalog input')
     for path in sorted(files):
-        yield from host_input_cache().iter_parquet_handles(path)
+        yield from _iter_handles(path)
 
 
 def replay_shared_catalogs(engine, rows, *, chunk_size, max_chunk_events,

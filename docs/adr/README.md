@@ -1,5 +1,6 @@
 # 架构决策记录
 
+- [191 — 主机级 Data-I/O 服务与 Arrow 文件句柄共享](191-host-data-io-service.md)
 - [190 — 联邦 Manager 共用 Keycloak 身份权威](190-keycloak-manager-federation-identity.md)
 
 - [188 — 执行节点、来源安装与可移植数据需求](188-execution-nodes-and-portable-data-requirements.md)
