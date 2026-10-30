@@ -23,6 +23,8 @@ python scripts/docs/build_project_pdf.py
 
 默认输出到 `.artifacts/docs-pdf/TradeResearch-project-docs.pdf`，不会提交 PDF 或
 临时转换文件。可用 `--output /path/to/file.pdf` 指定其他位置。
+本合集包含部署、权限迁移与恢复等运维内容，仅供经授权的人员获取和分发；不要把
+该完整 PDF 作为匿名网页文档发布。
 
 ## 文档范围与准确性
 

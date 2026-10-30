@@ -217,6 +217,10 @@ source = "docs/runbooks/public-capacity.md"
 title = "公网主机不可用排查"
 source = "docs/runbooks/public-host-down.md"
 
+[[sections.documents]]
+title = "Research 授权迁移与验收"
+source = "docs/operations/research-keycloak-cutover.md"
+
 [[sections]]
 id = "testing"
 title = "测试与验收"
