@@ -87,3 +87,22 @@ def test_admin_console_uses_manager_same_origin_proxy(monkeypatch):
         "base_url": "https://id.example", "realm": "research",
     })
     assert manager_oidc.admin_console_url() == "/identity/admin/research/console/"
+
+
+@pytest.mark.parametrize("requested, expected", [
+    ("/app/jobs", "/app/jobs"), ("//evil.example", "/app"),
+    ("/auth/oidc/start", "/app"),
+])
+def test_login_entry_always_uses_keycloak_without_password_fallback(requested, expected):
+    from urllib.parse import urlencode
+    from server.manager.http.core_get_routes import CoreGetRoutesMixin
+    class Handler(CoreGetRoutesMixin):
+        def _redirect_configured_ingress(self, *args, **kwargs):
+            return False
+        def _send_redirect(self, location):
+            self.location = location
+    handler = Handler()
+    assert handler._get_entry_routes(urlsplit("/login?" + urlencode({"next": requested})))
+    location = urlsplit(handler.location)
+    assert location.path == "/auth/oidc/start"
+    assert parse_qs(location.query)["next"] == [expected]

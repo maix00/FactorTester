@@ -14,9 +14,6 @@ from server.manager.http.pages import (
     compliance_page as manager_compliance_page,
 )
 from server.manager.http.pages import (
-    login_page as manager_login_page,
-)
-from server.manager.http.pages import (
     safe_login_next as manager_safe_login_next,
 )
 from server.manager.http.responses import json_response
@@ -599,25 +596,6 @@ class RequestSecurityMixin:
         session = self.state.session(token)
         bind_verified_identity(token, session)
         return session
-
-    def _serve_login_page(self, parsed) -> None:
-        requested = parse_qs(parsed.query, keep_blank_values=True).get(
-            "next", ["/"]
-        )[0]
-        if self.state.require_device_auth and not self._is_loopback_client():
-            self._serve_compliance_page(
-                str(requested or "/"),
-                show_visitor_entry=(
-                    self._visitor_mode() is None
-                    and self._visitor_entry_origin_allowed()
-                ),
-            )
-            return
-        body = manager_login_page(
-            str(requested or "/"),
-            accept_language=self.headers.get("Accept-Language", ""),
-        )
-        self._send_html(body)
 
     def _send_html(self, body: bytes, *, cookie: str = "") -> None:
         self.send_response(200)

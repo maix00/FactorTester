@@ -48,6 +48,15 @@ def main() -> int:
                 page.locator("#kc-login").click()
             page.locator("#password").fill(password)
             page.locator("#kc-login").click()
+            if os.environ.get("KEYCLOAK_EXPECT_PUBLIC_LOGIN_DENIED") == "1":
+                page.wait_for_url(manager + "/app?auth_error=public_login_denied", timeout=30000)
+                if any(cookie["name"] == "ft-manager-session"
+                       for cookie in context.cookies(manager)):
+                    raise SystemExit("Denied public login created a Manager session")
+                print(json.dumps({"manager": manager,
+                                  "checks": ["react_login_entry", "public_login_denied",
+                                             "no_manager_session"]}))
+                return 0
             page.wait_for_url(re.compile(re.escape(manager) + r"/app(?:[?#].*)?$"), timeout=30000)
             response = context.request.get(manager + "/api/session")
             if response.status != 200:
