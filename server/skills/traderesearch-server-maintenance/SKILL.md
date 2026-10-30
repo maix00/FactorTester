@@ -1,18 +1,18 @@
 ---
-name: factortester-server-maintenance
-description: 使用 FactorTester Manager CLI 检查和操作已授权的应用运行状态，并通过现有部署脚本处理明确授权的服务器维护。适用于具体维护任务，不授予额外后端权限。
+name: traderesearch-server-maintenance
+description: 使用 TradeResearch Manager CLI 检查和操作已授权的应用运行状态，并通过现有部署脚本处理明确授权的服务器维护。适用于具体维护任务，不授予额外后端权限。
 ---
 
-# FactorTester 服务器维护
+# TradeResearch 服务器维护
 
-使用 `factortester-manager` 的 Click 单次命令访问 Manager API。它是应用客户端，不是主机管理终端。
+使用 `traderesearch-manager` 的 Click 单次命令访问 Manager API。它是应用客户端，不是主机管理终端。
 
 ## 登录与实现
 
 Manager CLI 由用户登录。不得索取、提取或转移登录凭据。可以使用已有的有效登录；未登录时，仅暂缓必须认证的运行时操作，继续已授权的代码实现、本地测试，以及通过现有脚本执行的独立授权部署。不得因为 CLI 登录阻塞实现。
 
 ```bash
-factortester-manager status --json
+traderesearch-manager status --json
 ```
 
 会话按完整 Manager URL 存放在系统凭据库中，不得跨服务器 URL 复用。命令语法通过对应命令组的 `--help` 读取。
@@ -33,8 +33,8 @@ Manager token、浏览器会话与主机凭据各自独立，不得互相替代�
 可通过以下命令读取服务器身份及非敏感连接声明：
 
 ```bash
-factortester-manager server inspect --json
-factortester-manager server access --json
+traderesearch-manager server inspect --json
+traderesearch-manager server access --json
 ```
 
 `server`、`factor_tester`、`management_access` 是运行时声明。声明可包含方式、配置标识、端点、端口及能力，不应包含秘密或可执行命令。

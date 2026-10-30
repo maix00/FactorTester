@@ -17,7 +17,7 @@
 
   function statusView(context, value, reload) {
     const root = document.createElement("section");
-    root.className = "settings-section manager-access-section";
+    root.className = "settings-section manager-mihomo-section";
     const heading = document.createElement("h3");
     heading.textContent = context.t("Mihomo Dashboard");
     const note = document.createElement("p");

@@ -70,11 +70,6 @@
       description: "Manage the current account, language and client preferences.",
     },
     {
-      id: "manager_accounts", path: "/manager?section=accounts", title: "User hierarchy", access: "admin",
-      cli: [], web_only: ["organizations", "levels", "subordinates", "user_roles"],
-      description: "Manage organizations, levels, users, parents and subordinates.",
-    },
-    {
       id: "manager_services", path: "/manager?section=services", title: "Server services", access: "super_admin",
       cli: [], web_only: ["service_controls", "global_job_queue"],
       description: "Inspect and control authorized Manager services.",
