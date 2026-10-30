@@ -24,6 +24,7 @@ def test_service_clients_have_no_human_admin_or_federation_grants(tmp_path):
         assert 'authorizationServicesEnabled' not in client
     assert node['protocolMappers'][0]['config']['included.custom.audience']=='manager-a'
     assert node['protocolMappers'][1]['config']['claim.value']=='node-a'
+    assert node['protocolMappers'][2]['config']['included.custom.audience']==receipt['clients']['verifier']
     assert all((p.stat().st_mode & 0o777)==0o600 for p in root.iterdir())
     with pytest.raises(FileExistsError):provision(a,manager_id='manager-a',node_id='node-a',output=root)
 

@@ -52,6 +52,12 @@ def provision(adapter, *, manager_id: str, node_id: str, output: Path) -> dict:
                 {"name": "execution-node", "protocol": "openid-connect", "protocolMapper": "oidc-hardcoded-claim-mapper",
                  "config": {"claim.name": "tr_node_id", "claim.value": node_id, "jsonType.label": "String",
                             "access.token.claim": "true", "introspection.token.claim": "true"}}]
+        if kind == "node":
+            # Keycloak also requires the introspecting confidential client in aud.
+            mappers.append({"name": "manager-introspection", "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper", "config": {
+                    "included.custom.audience": clients["verifier"], "access.token.claim": "true",
+                    "introspection.token.claim": "true"}})
         adapter._post("clients", {"clientId": client_id, "secret": secret, "protocol": "openid-connect",
             "enabled": True, "publicClient": False, "serviceAccountsEnabled": True,
             "standardFlowEnabled": False, "directAccessGrantsEnabled": False,
