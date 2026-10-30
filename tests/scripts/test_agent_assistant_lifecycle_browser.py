@@ -61,7 +61,7 @@ createRoot(document.getElementById("root")!).render(<App />);
                 page.evaluate("""() => {
                   window.fixture = {running: false, starts: 0, stops: 0,
                                     disposed: 0, holdStart: false, release: null,
-                                    workspaces:0, publishes:[], removes:[], releases:[], rpcs:[], contexts:[], allowResearch:true};
+                                    workspaces:0, publishes:[], removes:[], releases:[], rpcs:[], contexts:[], expired:[], allowResearch:true};
                   window.FTStaticLoader = {loadGroups: async () => {}};
                   window.FTAgentChat = {render: async (context, _profile, options) => {
                     window.fixture.contexts.push(context);
@@ -74,7 +74,7 @@ createRoot(document.getElementById("root")!).render(<App />);
                   }};
                   window.fetch = async (input, options = {}) => {
                     const url = String(input);
-                    let body;
+                    let body, status = 200;
                     if (url === '/api/client/profiles') body = {success: true, profiles: [{
                       profile_id: 'self', is_self_profile: true,
                       runtime: {runtime_kind: 'server', configured: true},
@@ -85,16 +85,27 @@ createRoot(document.getElementById("root")!).render(<App />);
                     else if (url === '/api/client/profile-agent/assistance/workspaces')
                       body = {success:true, workspace_id:`workspace-${++window.fixture.workspaces}`};
                     else if (url.startsWith('/api/client/profile-agent/assistance/workspaces?')) {
-                      window.fixture.releases.push(url); body = {success:true};
+                      window.fixture.releases.push(url);
+                      if (window.fixture.expired.some(id => url.includes('workspace_id=' + id))) {
+                        status = 403;body = {success:false,code:'assistance_workspace_expired'};
+                      } else body = {success:true};
                     }
                     else if (url === '/api/client/profile-agent/assistance/publish') {
                       const payload = JSON.parse(options.body), tab = payload.workspace.tabs[0];
                       window.fixture.publishes.push(payload);
-                      body = {success:true,page:tab && window.fixture.allowResearch ? {tab_id:tab.tab_id,assistance:tab.assistance} : null};
+                      if (window.fixture.expired.includes(payload.workspace_id)) {
+                        status = 403;body = {success:false,code:'assistance_workspace_expired'};
+                      } else body = {success:true,page:tab && window.fixture.allowResearch ? {tab_id:tab.tab_id,assistance:tab.assistance} : null};
                     } else if (url.startsWith('/api/client/profile-agent/assistance/page?')) {
-                      window.fixture.removes.push(url); body = {success:true};
+                      window.fixture.removes.push(url);
+                      if (window.fixture.expired.some(id => url.includes('workspace_id=' + id))) {
+                        status = 403;body = {success:false,code:'assistance_workspace_expired'};
+                      } else body = {success:true};
                     } else if (url === '/api/client/profile-agent/rpc') {
-                      window.fixture.rpcs.push(JSON.parse(options.body)); body = {success:true};
+                      const payload = JSON.parse(options.body);
+                      if (window.fixture.expired.includes(payload.workspace_id)) {
+                        status = 403;body = {success:false,code:'assistance_workspace_expired'};
+                      } else {window.fixture.rpcs.push(payload);body = {success:true};}
                     }
                     else if (url === '/api/client/profile-agent/start') {
                       window.fixture.starts++;
@@ -108,7 +119,7 @@ createRoot(document.getElementById("root")!).render(<App />);
                       body = {success: true};
                     } else throw new Error(`unexpected request: ${url}`);
                     return new Response(JSON.stringify(body), {
-                      status: 200, headers: {'Content-Type': 'application/json'},
+                      status, headers: {'Content-Type': 'application/json'},
                     });
                   };
                 }""")
@@ -159,6 +170,11 @@ createRoot(document.getElementById("root")!).render(<App />);
                 page.evaluate("fixture.allowResearch = true")
                 page.get_by_role("button",name="重试").click()
                 page.get_by_text("已连接", exact=True).wait_for()
+                page.evaluate("fixture.expired.push('workspace-2')")
+                page.evaluate("""async () => fixture.contexts[1].api('/api/client/profile-agent/rpc', {
+                  method:'POST',body:JSON.stringify({method:'turn/start',params:{}}),
+                })""")
+                assert page.evaluate("fixture.rpcs.at(-1).workspace_id") == "workspace-3"
 
                 page.locator("#second").click()
                 page.evaluate("fixture.running = false; fixture.holdStart = true")
