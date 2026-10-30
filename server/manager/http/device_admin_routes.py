@@ -8,6 +8,7 @@ from server.identity.realm_groups import (
     administrative_group_role,
     managed_member_group_paths,
 )
+from server.identity.server_admission import current_administrative_groups, current_manager_role
 from server.manager.http.responses import json_response
 from server.manager.storage.control_db import ControlDatabaseError
 
@@ -35,12 +36,16 @@ class DeviceAdministrationRoutesMixin:
                 "error": "device administration requires a secure Manager connection",
             }, 400)
             return None, False, set()
-        roles = session.get("keycloak_roles") or ()
-        is_super = (
-            isinstance(roles, (tuple, list, set, frozenset))
-            and "admin_console:manage" in roles
-        )
-        groups = session.get("keycloak_groups") or ()
+        is_super = current_manager_role(session, "admin_console:manage")
+        groups = current_administrative_groups(session)
+        if groups is None:
+            json_response(self, {
+                "success": False,
+                "code": "keycloak_authorization_unavailable",
+                "error": "Keycloak authorization is unavailable",
+            }, 503)
+            return None, False, set()
+        groups = groups or ()
         scopes = managed_member_group_paths(groups)
         if not is_super and administrative_group_role(tuple(groups)) not in {
             "org_admin", "level_admin",

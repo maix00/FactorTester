@@ -80,6 +80,8 @@ def test_organization_admin_can_read_and_revoke_only_in_scope_user_devices(
         "server.identity.federation_identity_sync.manager_keycloak_admin_adapter",
         lambda: admin.adapter,
     )
+    monkeypatch.setattr(device_admin_routes, "current_manager_role", lambda *_: False)
+    monkeypatch.setattr(device_admin_routes, "current_administrative_groups", lambda _: tuple(admin.session["keycloak_groups"]))
 
     admin._admin_device_list()
     assert responses[-1][0] == 200
@@ -114,6 +116,8 @@ def test_level_admin_scope_includes_child_levels_but_not_sibling_or_other_org(
         "server.identity.federation_identity_sync.manager_keycloak_admin_adapter",
         lambda: admin.adapter,
     )
+    monkeypatch.setattr(device_admin_routes, "current_manager_role", lambda *_: False)
+    monkeypatch.setattr(device_admin_routes, "current_administrative_groups", lambda _: tuple(admin.session["keycloak_groups"]))
 
     admin._admin_device_list()
     assert responses[-1][0] == 200
@@ -135,6 +139,28 @@ def test_superadmin_uses_verified_keycloak_role_without_username_scope_lookup(
         "server.identity.federation_identity_sync.manager_keycloak_admin_adapter",
         lambda: (_ for _ in ()).throw(AssertionError("superadmin needs no group lookup")),
     )
+    monkeypatch.setattr(device_admin_routes, "current_manager_role", lambda *_: True)
+    monkeypatch.setattr(device_admin_routes, "current_administrative_groups", lambda _: ())
     admin._admin_device_list()
     assert responses[-1][0] == 200
     assert responses[-1][1]["scope"] == "realm"
+
+
+def test_revoked_admin_group_cannot_list_or_revoke_with_old_token(monkeypatch, responses):
+    group = organization_admin_group_path("org-1")
+    admin = _Route({"username": "admin", "keycloak_groups": [group]},
+                   {"alice": [organization_group_path("org-1")]})
+    current = {"groups": (group,)}
+    monkeypatch.setattr(device_admin_routes, "current_manager_role", lambda *_: False)
+    monkeypatch.setattr(device_admin_routes, "current_administrative_groups", lambda _: current["groups"])
+    monkeypatch.setattr("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", lambda: admin.adapter)
+    admin._admin_device_list()
+    assert responses[-1][0] == 200
+    current["groups"] = ()
+    admin._admin_device_list()
+    assert responses[-1][0] == 403
+    admin._admin_device_revoke()
+    assert responses[-1][0] == 403 and admin.revoked == []
+    current["groups"] = None
+    admin._admin_device_list()
+    assert responses[-1][0] == 503
