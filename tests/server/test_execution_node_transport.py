@@ -59,6 +59,7 @@ def transport(tmp_path, monkeypatch):
 def _job(repo, binding):
     run_spec = {"data_requirements": [asdict(_requirement())]}
     repo.create(JobRecord(job_id="node-test", run_id="run", owner="alice", workspace_id="ws",
+        owner_issuer="https://identity.invalid/realms/transport", owner_subject="subject-alice",
         kind="backtest", status=JobStatus.SUBMITTED, deployment_id=binding["route_id"],
         service_port=8000, source_revision="test-build", job_spec={"run_spec":run_spec, "execution_binding": binding},
         run_spec_hash=canonical_hash(run_spec)))
