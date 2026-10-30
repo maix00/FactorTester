@@ -56,8 +56,8 @@ class TransferStore(TransferDatabase):
                     source_server_id, destination_server_id, storage_server_id,
                     job_id, artifact_name, expected_size, expected_sha256,
                     content_type, created_at, updated_at, expires_at,
-                    object_kind, object_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    object_kind, object_id, principal_identity_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     transfer_id, normalized.idempotency_key,
@@ -71,6 +71,7 @@ class TransferStore(TransferDatabase):
                     current, current, normalized.expires_at,
                     normalized.object_kind,
                     normalized.object_id,
+                    normalized.principal_identity_id,
                 ),
             )
             row = connection.execute(

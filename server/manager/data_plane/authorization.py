@@ -33,5 +33,8 @@ def authorize(
         end_offset=context.attempt.expected_size,
         consume=consume,
     )
+    if (grant.transfer_id != context.transfer.transfer_id
+            or grant.principal != context.transfer.principal):
+        raise PermissionError("transfer ticket identity does not match its request")
     runtime.authorize_transfer_telemetry(handler)
     return grant
