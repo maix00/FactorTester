@@ -123,3 +123,32 @@ def test_import_accepts_keycloak_lowercase_normalization_by_same_identity():
     assert import_accounts([account], adapter, dry_run=False)["created"] == 1
     assert import_accounts([account], adapter, dry_run=False)["updated"] == 1
     assert adapter.users["mixedcase"]["attributes"]["legacy_username"] == ("MixedCase",)
+
+
+def test_import_freezes_parent_identity_from_reviewed_hierarchy():
+    parent = _account("parent")
+    child = _account("child")
+    child["parent_username"] = "parent"
+    adapter = Fake()
+    result = import_accounts([child, parent], adapter, dry_run=False)
+    assert result["created"] == 2
+    assert adapter.users["child"]["attributes"]["tr_parent_identity_id"] == (parent["tr_identity_id"],)
+    assert adapter.users["child"]["attributes"]["tr_parent_username"] == ("parent",)
+
+
+def test_import_rejects_unmapped_cross_organization_and_cyclic_parent_before_writes():
+    parent, child = _account("parent"), _account("child")
+    child["parent_username"] = "missing"
+    adapter = Fake()
+    result = import_accounts([parent, child], adapter, dry_run=False)
+    assert "parent_identity_unmapped" in {item["reason"] for item in result["blockers"]}
+    assert not adapter.users
+    child["parent_username"] = "parent"
+    parent["organization_id"] = "other"
+    result = import_accounts([parent, child], adapter, dry_run=False)
+    assert "parent_in_different_organization" in {item["reason"] for item in result["blockers"]}
+    parent["organization_id"] = "org-1"
+    parent["parent_username"] = "child"
+    result = import_accounts([parent, child], adapter, dry_run=False)
+    assert "parent_hierarchy_cycle" in {item["reason"] for item in result["blockers"]}
+    assert not adapter.users
