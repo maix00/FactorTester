@@ -40,9 +40,8 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
     directory_secret, visitor_secret = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
     resource_secret = secrets.token_urlsafe(48)
     db_secret, bootstrap_secret = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
-    roles = ['admin_console:read', 'admin_console:manage', 'public_server:login', 'factor:develop',
-             'agent_assistant:use']
-    from server.identity.keycloak_profile import identity_mappers
+    from server.identity.keycloak_profile import identity_mappers, MANAGER_ROLES
+    roles = MANAGER_ROLES
     mappers = identity_mappers()
     definition = {'realm': realm, 'enabled': True, 'registrationAllowed': False,
                   'resetPasswordAllowed': False, 'adminPermissionsEnabled': True,

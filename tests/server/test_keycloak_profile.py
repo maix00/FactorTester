@@ -6,7 +6,7 @@ from server.identity.keycloak_profile import (
 
 class Adapter:
     def __init__(self):
-        self.profile = {'attributes': [{'name': 'email'}], 'groups': [{'name': 'custom'}]}
+        self.profile = {'attributes': [{'name': 'email', 'required': {'roles': ['user']}}], 'groups': [{'name': 'custom'}]}
         self.mappers = []
         self.writes = 0
 
@@ -49,3 +49,19 @@ def test_claims_use_imported_attribute_names_and_do_not_duplicate_mappers():
     assert len(a.mappers) == len(CLAIM_ATTRIBUTES) + 1
     assert next(r for r in a.mappers if r['name'] == 'manager-audience')['config']['included.client.audience'] == 'manager'
     assert next(r for r in a.mappers if r['name'] == 'tr_organization_id')['config']['user.attribute'] == 'tr_organization_id'
+
+
+def test_manager_role_provisioning_is_explicit_and_idempotent():
+    from server.identity.keycloak_profile import ensure_manager_roles, MANAGER_ROLES
+    class Roles:
+        def __init__(self): self.roles = [{'name': 'unrelated'}]; self.writes = 0
+        def _get(self, path):
+            return [{'clientId': 'manager', 'id': 'c'}] if path.startswith('clients?') else self.roles
+        def _post(self, path, value):
+            assert path == 'clients/c/roles'
+            self.roles.append(value); self.writes += 1
+    a = Roles()
+    ensure_manager_roles(a, 'manager'); n = a.writes
+    ensure_manager_roles(a, 'manager')
+    assert a.writes == n == len(MANAGER_ROLES)
+    assert {'name': 'unrelated'} in a.roles

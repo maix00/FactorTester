@@ -5,6 +5,28 @@ only carry stable object-owner and directory references through login.
 """
 from __future__ import annotations
 
+MANAGER_ROLES = (
+    'admin_console:read', 'admin_console:manage', 'public_server:login',
+    'factor:develop', 'agent_assistant:use',
+)
+
+
+def ensure_manager_roles(adapter, client_id: str = 'tr-manager') -> None:
+    from urllib.parse import urlencode, quote
+    clients = adapter._get('clients?' + urlencode({'clientId': client_id}))
+    exact = [c for c in clients if c.get('clientId') == client_id]
+    if len(exact) != 1:
+        raise ValueError('Manager OIDC client is missing or ambiguous')
+    path = 'clients/' + quote(exact[0]['id'], safe='') + '/roles'
+    existing = {r['name'] for r in adapter._get(path)}
+    for name in MANAGER_ROLES:
+        if name not in existing:
+            adapter._post(path, {'name': name})
+    verified = {r['name'] for r in adapter._get(path)}
+    if not set(MANAGER_ROLES).issubset(verified):
+        raise RuntimeError('Manager roles did not persist')
+
+
 CLAIM_ATTRIBUTES = {
     'tr_identity_id': 'tr_identity_id',
     'tr_username': 'legacy_username',
@@ -39,6 +61,11 @@ def protect_identity_attributes(adapter) -> None:
     owned = set(CLAIM_ATTRIBUTES.values())
     attributes = [dict(a) for a in profile.get('attributes', [])
                   if a.get('name') not in owned]
+    # Legacy platform accounts do not require email or personal legal names.
+    # Do not block their first login on invented contact information.
+    for attribute in attributes:
+        if attribute.get('name') in {'email', 'firstName', 'lastName'}:
+            attribute.pop('required', None)
     attributes.extend({'name': name, 'multivalued': False,
                        'permissions': {'view': ['admin'], 'edit': ['admin']}}
                       for name in sorted(owned))
