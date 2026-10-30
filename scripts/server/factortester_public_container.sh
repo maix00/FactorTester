@@ -396,7 +396,11 @@ case "$command" in
   config) "${compose[@]}" config "$@" ;;
   container-id) "${compose[@]}" ps --quiet "$@" ;;
   control-table-count) control_table_count ;;
-  build) check_source; DOCKER_BUILDKIT=1 "${compose[@]}" build "$@" ;;
+  build)
+    check_source
+    builder="$(python3 "$script_dir/public_build_builder.py")"
+    DOCKER_BUILDKIT=1 "${compose[@]}" build --builder "$builder" "$@"
+    ;;
   up) "${compose[@]}" up --detach --no-build --remove-orphans --wait "$@" ;;
   restart-app) "${compose[@]}" up --detach --no-build --no-deps --force-recreate --wait factortester-public "$@" ;;
   stop-app) "${compose[@]}" stop factortester-public "$@" ;;
