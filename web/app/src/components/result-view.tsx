@@ -24,7 +24,7 @@ export function ResultView({ value, depth = 0, field = "value" }: { value: unkno
   const nested = entries.filter(([, item]) => item !== null && typeof item === "object");
   return <div className="tr-result-view">{scalars.length ? <dl className="tr-record-values">{scalars.map(([key,item]) => <div key={key}><dt>{key}</dt><dd><ScalarValue field={key} value={item} record={value as Record<string, unknown>} /></dd></div>)}</dl> : null}
     {nested.length ? <Collapse ghost defaultActiveKey={depth < 1 ? nested.slice(0, 2).map(([key]) => key) : []} items={nested.map(([key, item]) => ({ key, label: key,
-      children: depth < 6 ? <ResultView value={item} depth={depth + 1} field={key} /> : <pre className="tr-job-detail">{JSON.stringify(item, null, 2)}</pre> }))} /> : null}</div>;
+      children: <ResultView value={item} depth={depth + 1} field={key} /> }))} /> : null}</div>;
 }
 function CellDetails({value}:{value:unknown}):React.ReactElement {
  const {t}=useTranslation();const [open,setOpen]=useState(false);
