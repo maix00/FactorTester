@@ -478,4 +478,3 @@ class StrategyLibraryStore:
         if result.rowcount == 1:
             self._sync_delete(strategy_ref)
         return result.rowcount == 1
-

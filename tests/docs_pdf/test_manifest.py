@@ -28,7 +28,7 @@ class ProjectPdfManifestTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("document manifest check: passed", result.stdout)
-        self.assertIn("sections, 42 documents", result.stdout)
+        self.assertIn("sections, 43 documents", result.stdout)
 
     def test_inline_code_can_be_used_with_listings_without_verbatim_macro_error(self) -> None:
         source = r"\passthrough{\lstinline!product\_docs/foo.md!}"
