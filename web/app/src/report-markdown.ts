@@ -2,6 +2,7 @@ import marked from "../../../static/vendor/marked/marked.min.js";
 import type { FormulaRenderer } from "./components/formula.tsx";
 
 type MathToken = { type:string; raw:string; latex:string; display:boolean };
+type LinkRenderer = (href: string, label: string) => string | null;
 const isFactorAlias = (value: string): boolean => /^\$(?:F|Rev|RF|COMMON)(?::|=|_|\b)/i.test(value);
 const escapeHTML = (value: string): string => value.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
@@ -15,11 +16,15 @@ function closingDollar(value: string, start: number): number {
 }
 
 /** Marked handles code spans/fences first; factor metadata is never read as TeX. */
-function parser(engine: FormulaRenderer | null): InstanceType<typeof marked.Marked> {
+function parser(engine: FormulaRenderer | null, link?: LinkRenderer): InstanceType<typeof marked.Marked> {
   const result = new marked.Marked();
   const render = (token: MathToken): string => engine
     ? engine.renderToString(token.latex, {displayMode:token.display,throwOnError:false,trust:false,maxExpand:1000})
     : `<span>${escapeHTML(token.raw)}</span>`;
+  if (link) result.use({renderer:{link(token:{href:string;text:string}) {
+    const id = link(token.href,token.text);
+    return id === null ? false : `<button type="button" class="tr-table-link tr-object-reference" data-tr-report-link="${escapeHTML(id).replace(/"/g,"&quot;")}">${escapeHTML(token.text)}</button>`;
+  }}});
   result.use({extensions:[
     {name:"reportBlockMath",level:"block",start:(source:string) => source.search(/(?:^|\n) {0,3}(?:\$\$|\\\[)/),
       tokenizer(source:string): MathToken | undefined {
@@ -54,7 +59,8 @@ function parser(engine: FormulaRenderer | null): InstanceType<typeof marked.Mark
 
 const plain = parser(null);
 const cached = new WeakMap<FormulaRenderer, InstanceType<typeof marked.Marked>>();
-export function reportMarkdown(value: string, engine: FormulaRenderer | null): string {
+export function reportMarkdown(value: string, engine: FormulaRenderer | null, link?: LinkRenderer): string {
+  if (link) return parser(engine,link).parse(value,{async:false});
   let current = engine ? cached.get(engine) : plain;
   if (!current && engine) {current = parser(engine);cached.set(engine,current);}
   return current!.parse(value,{async:false});
