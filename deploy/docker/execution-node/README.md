@@ -6,6 +6,10 @@ credentials or second broker**. Use a tested versioned
 execution image; configure the owner-only node descriptor and scoped Keycloak
 clients before `docker compose --env-file <node.env> config` / `up -d`.
 The worker's database is private metadata, not an alternate Job authority.
+Set `TR_NODE_RUNTIME_SETTINGS` to a node-owned JSON settings file containing
+`{"data_dir":"/data","sqlite_db_path":"/node-state/metadata.sqlite"}`.
+Worker and market mount it read-only at the runtime's existing settings path;
+do not mount the Manager's database or settings into an execution-only node.
 
 Manager owns its Job repository, dispatcher and RabbitMQ. The node connects to
 that broker with ACLs restricted to its target queue. Distinct Managers use
