@@ -64,8 +64,8 @@ class _StaticHandler(CoreGetRoutesMixin, _Handler):
     def _redirect_configured_ingress(self, parsed, *, next_path="/"):
         return False
 
-    def _serve_login_page(self, parsed):
-        return None
+    def _reject_retired_local_identity_route(self, parsed):
+        return False
 
 
 def test_accepts_gzip_parses_the_header():

@@ -131,29 +131,6 @@ def safe_login_next(value: str) -> str:
     return candidate or "/"
 
 
-def login_page(
-    next_path: str = "/",
-    *,
-    accept_language: object = "",
-) -> bytes:
-    locale, strings = page_localization(accept_language)
-    safe_next = safe_login_next(next_path)
-    login_error = _script(_text(strings, "登录失败"))
-    return f"""<!doctype html>
-<html lang="{html.escape(locale, quote=True)}"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><title>{_html(strings, "登录 FactorTester")}</title>
-<style>{_CARD_STYLE}</style>
-</head><body><main class="card"><h1>{_html(strings, "登录 FactorTester")}</h1>
-<p>{_html(strings, "登录后读取研究、任务和个人工作区；服务器管理能力会自动判断")}</p>
-<div class="notice">{_html(strings, PUBLIC_REGISTRATION_NOTICE)}<br>{_html(strings, "公网访问需要使用管理员创建的账户。")}</div>
-<form id="login-form"><label>{_html(strings, "用户名")}<input name="username" autocomplete="username" required></label>
-<label>{_html(strings, "密码")}<input name="password" type="password" autocomplete="current-password" required></label>
-<button type="submit">{_html(strings, "登录")}</button><div id="error" class="error" hidden></div></form></main>
-<script>const nextPath={_script(safe_next)};const loginError={login_error};const form=document.querySelector("#login-form");const button=form.querySelector("button");const error=document.querySelector("#error");form.addEventListener("submit",async event=>{{event.preventDefault();error.hidden=true;button.disabled=true;try{{const response=await fetch("/auth/login",{{method:"POST",headers:{{"Content-Type":"application/json"}},credentials:"same-origin",body:JSON.stringify({{username:form.elements.username.value,password:form.elements.password.value}})}});const payload=await response.json();if(!response.ok||!payload.success)throw new Error(payload.error||loginError);window.location.replace(nextPath)}}catch(cause){{error.textContent=cause.message||loginError;error.hidden=false;button.disabled=false}}}});</script>
-</body></html>""".encode("utf-8")
-
-
 def _device_auth_script(
     next_path: str,
     messages: Mapping[str, str],
