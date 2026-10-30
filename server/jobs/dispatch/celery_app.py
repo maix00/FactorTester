@@ -219,6 +219,10 @@ def create_app(
         task_reject_on_worker_lost=False,
         worker_prefetch_multiplier=1,
         worker_concurrency=1,
+        # Remote nodes use authenticated Manager RPC for lifecycle operations.
+        # Celery's pidbox opens additional broker channels/queues outside the
+        # node's target queue ACL and is unnecessary on execution-only nodes.
+        worker_enable_remote_control=not bool(os.environ.get("TR_MANAGER_ENDPOINT")),
         worker_max_tasks_per_child=max(1, int(os.environ.get("FACTORTESTER_WORKER_MAX_TASKS", "1"))),
         worker_max_memory_per_child=max(
             1, int(os.environ.get("FACTORTESTER_WORKER_MAX_MEMORY_KB", "3500000"))
