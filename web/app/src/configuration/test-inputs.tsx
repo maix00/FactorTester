@@ -6,6 +6,7 @@ import { NO_DEFAULTS } from "./form-options.ts";
 import { Alert, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { FactorPicker } from "../components/library-picker.tsx";
+import { ObjectReference } from "../components/object-reference.tsx";
 import { request } from "./api.ts";
 import { parseDraft, readPath, writePath, type JSONObject } from "./draft.ts";
 import { attachFrozenFactors } from "./strategies.ts";
@@ -33,7 +34,7 @@ export function TestInputs({ analysis, text, onChange, schema, defaults }: { sch
     const next = attachFrozenFactors(latest.current, [factor]);
     onChange(update(analysis === "ic" ? { factor_ref: factor.ref } : { factor_ref: factor.ref, factor_alias: factor.alias, factor_family_alias: readPath(factor, ["identity", "family_alias"]) || factor.factor_family_alias }, next));
   }} /></div></div>
-  <div className="tr-config-setting-row"><label>{t("configuration.strategyFields.product_group_ref")}</label><div className="tr-config-setting-control"><Select showSearch optionFilterProp="label" aria-label={t("configuration.strategyFields.product_group_ref")} value={typeof productRef === "string" ? productRef : undefined} options={groups.map((row) => ({ value: String(row.ref || row.group_ref || row.id), label: String(row.name || row.title || row.id) }))} onChange={(ref) => onChange(update(analysis === "ic" ? { product_scope_ref: ref } : { product_path_selection_id: ref }))} /></div></div>
+  <div className="tr-config-setting-row"><label>{t("configuration.strategyFields.product_group_ref")}</label><div className="tr-config-setting-control tr-reference-select"><Select showSearch optionFilterProp="label" aria-label={t("configuration.strategyFields.product_group_ref")} value={typeof productRef === "string" ? productRef : undefined} options={groups.map((row) => ({ value: String(row.ref || row.group_ref || row.id), label: String(row.name || row.title || row.id) }))} onChange={(ref) => onChange(update(analysis === "ic" ? { product_scope_ref: ref } : { product_path_selection_id: ref }))} />{typeof productRef === "string" && productRef ? <ObjectReference icon value={{kind:"productGroup",ref:productRef,label:String(groups.find(row => (row.ref || row.group_ref || row.id) === productRef)?.name || productRef)}} /> : null}</div></div>
   {analysis === "ic" && schema ? Object.entries(schema.properties as Record<string, JSONObject> || {}).map(([key, field]) => {
     const current = (group || defaults || {})[key];
     return <div className="tr-config-setting-row" key={key}><label htmlFor={`tr-input-${id}-${key}${key === "horizon" ? "_sampling" : ""}`}>{String(field.title || key)}</label><div className="tr-config-setting-control"><Form idPrefix={`tr-input-${id}-${key}`} schema={field as RJSFSchema} formData={current}

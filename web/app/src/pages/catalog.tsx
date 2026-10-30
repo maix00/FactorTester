@@ -13,6 +13,7 @@ import { LibraryCreate } from "../components/library-create.tsx";
 import { ProductGroupEditor } from "../components/product-group-editor.tsx";
 import { CategoryEditor } from "../components/category-editor.tsx";
 import { ResultView } from "../components/result-view.tsx";
+import { ObjectReference } from "../components/object-reference.tsx";
 import { request } from "../configuration/api.ts";
 import { formatDate } from "../format.ts";
 import { usePageInstance } from "../page-instance.ts";
@@ -25,6 +26,14 @@ const identity = (row: Row): string => String(row.group_ref || row.ref || row.fa
 const title = (row: Row): string => String(row.family_name || row.bundle_name || row.source_name || row.name || row.title || row.factor_family_name || row.factor_alias || row.alias || identity(row));
 const owner = (row: Row): string => String(row.owner_username || row.owner || row.owner_ref || "—");
 const family = (row: Row): string => String(row.factor_family_alias || row.family_alias || row.identity?.family_alias || row.family_ref || "—");
+const ownerLink = (row: Row): React.ReactNode => {
+  const ref = owner(row);
+  return ref === "—" || ref.startsWith("__") ? ref : <ObjectReference value={{ kind: "user", ref, label: row.owner_alias || ref }} />;
+};
+const familyLink = (row: Row): React.ReactNode => {
+  const label = family(row), ref = String(row.factor_family_ref || row.family_ref || row.identity?.family_ref || (label === "—" ? "" : label));
+  return ref ? <ObjectReference value={{ kind: "factorFamily", ref, label, owner: row.family_owner_username || row.identity?.family_owner_username }} /> : "—";
+};
 
 export function CatalogPage({ domain = "products" }: { domain?: Domain }): React.ReactElement {
   const { t } = useTranslation(), mobile = useCompactLayout(), instance = usePageInstance();
@@ -80,8 +89,8 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
       {!serverPaged && domain !== "products" ? <Select allowClear aria-label={t("library.allOwners")} placeholder={t("library.allOwners")} value={ownerFilter} options={[...new Set(rows.map(owner))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setOwnerFilter(value); setPage(1); }} /> : null}
       <Button onClick={() => { setQuery(""); setFamilyFilter(undefined); setOwnerFilter(undefined); setPage(1); }}>{t("library.reset")}</Button></div>
     <TRDataTable rows={visible} rowKey={identity} rowSelection={{ type: "radio", selectedRowKeys: selected ? [identity(selected)] : [], onSelect: select }} loading={loading} error={error} pagination={{ page, pageSize: size, total: serverPaged ? total : filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
-      { title: t(domain === "products" && tab === "products" ? "market.identifier" : "editor.name"), key: "name", render: (_: unknown, row: Row) => <button className={`tr-table-link ${selected && identity(row) === identity(selected) ? "is-selected" : ""}`} onClick={() => select(row)}>{displayTitle(row)}{mobile ? <small className="tr-library-row-meta">{domain === "products" ? [row.exchange, row.desc].filter(Boolean).join(" · ") : `${family(row)} · ${owner(row)}`}</small> : null}</button> },
-      ...(domain === "factors" ? [{ title: t("catalog.families"), key: "family", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => family(row) }] : []),
+      { title: t(domain === "products" && tab === "products" ? "market.identifier" : "editor.name"), key: "name", render: (_: unknown, row: Row) => <div><button className={`tr-table-link ${selected && identity(row) === identity(selected) ? "is-selected" : ""}`} onClick={() => select(row)}>{displayTitle(row)}</button>{mobile ? <small className="tr-library-row-meta">{domain === "products" ? [row.exchange, row.desc].filter(Boolean).join(" · ") : <>{domain === "factors" ? familyLink(row) : null}{domain === "factors" ? " · " : null}{ownerLink(row)}</>}</small> : null}</div> },
+      ...(domain === "factors" ? [{ title: t("catalog.families"), key: "family", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => familyLink(row) }] : []),
       ...(domain === "products" ? [
         ...(tab === "sources" ? [
           { title: t("sources.provider"), dataIndex: "provider_kind" },
@@ -91,11 +100,11 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
         ...(tab === "products" ? [{ title: t("market.description"), dataIndex: "desc", responsive: ["md"] as "md"[] }] : []),
       ] : [
       { title: t("library.version"), key: "version", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => <span className="tr-version-ref" title={row.current_revision?.revision_ref || row.revision_ref || row.ref}>{row.version || row.current_revision?.revision_ref || row.revision_ref || row.ref || "—"}</span> },
-      { title: t("library.owner"), key: "owner", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => owner(row) },
+      { title: t("library.owner"), key: "owner", responsive: ["md"] as "md"[], render: (_: unknown, row: Row) => ownerLink(row) },
       { title: t("jobs.updated"), dataIndex: "updated_at", responsive: ["lg"] as "lg"[], render: (value: string) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—" },
       ]),
     ]} />
-    {selected && !mobile && !detailOpen ? <section className="tr-library-detail"><header><h2>{displayTitle(selected)}</h2><Button onClick={() => setDetailOpen(true)}>{t("details")}</Button></header><div className="tr-library-meta">{domain === "factors" && family(selected) !== "—" ? <span>{family(selected)}</span> : null}{owner(selected) !== "—" ? <span>{owner(selected)}</span> : null}{selected.version || selected.current_revision?.revision_number ? <Tag>{selected.version || `r${selected.current_revision.revision_number}`}</Tag> : null}</div>{contents}</section> : null}
+    {selected && !mobile && !detailOpen ? <section className="tr-library-detail"><header><h2>{displayTitle(selected)}</h2><Button onClick={() => setDetailOpen(true)}>{t("details")}</Button></header><div className="tr-library-meta">{domain === "factors" && family(selected) !== "—" ? <span>{familyLink(selected)}</span> : null}{owner(selected) !== "—" ? <span>{ownerLink(selected)}</span> : null}{selected.version || selected.current_revision?.revision_number ? <Tag>{selected.version || `r${selected.current_revision.revision_number}`}</Tag> : null}</div>{contents}</section> : null}
     </>}
     {selected && detailOpen ? <DetailsPanel title={displayTitle(selected)} onClose={() => setDetailOpen(false)}>{contents}</DetailsPanel> : null}
   </FunctionPage>;

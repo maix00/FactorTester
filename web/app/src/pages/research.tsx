@@ -9,6 +9,7 @@ import { DetailsPanel } from "../components/details-panel.tsx";
 import { TRDataTable } from "../components/data-table.tsx";
 import { ResultView } from "../components/result-view.tsx";
 import { PropertyGroups } from "../components/property-groups.tsx";
+import { ObjectReference } from "../components/object-reference.tsx";
 import { ResearchCreate } from "../components/research-create.tsx";
 import { useAuth } from "../auth.tsx";
 import { ReportEditor } from "../components/report-editor.tsx";
@@ -47,7 +48,7 @@ export function ResearchPage(): React.ReactElement {
     <div className="tr-library-filters"><Input.Search allowClear aria-label={t("library.search")} placeholder={t("library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} /></div>
     <TRDataTable rows={filtered.slice((page - 1) * size, page * size)} rowKey={(row) => rowID(row)} loading={loading} error={error} pagination={{ page, pageSize: size, total: filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
       { title: t("editor.name"), key: "title", render: (_, row) => <button className="tr-table-link" onClick={() => { setSelected(row); setSelectedPublicationID(tab === "reports" ? selectReportBranch(row)?.publication_id || "" : ""); setEditor(false); }}>{row.title || rowID(row)}</button> },
-      { title: t("library.owner"), key: "owner", responsive: ["md"], render: (_, row) => row.owner_alias || row.owner_ref || row.owner || "—" },
+      { title: t("library.owner"), key: "owner", responsive: ["md"], render: (_, row) => row.owner_ref || row.owner ? <ObjectReference value={{ kind: "user", ref: row.owner_ref || row.owner, label: row.owner_alias || row.owner_ref || row.owner }} /> : "—" },
       { title: t("library.visibility"), dataIndex: "visibility", responsive: ["md"], render: (value) => value ? <Tag>{t(`research.visibility.${value}`, { defaultValue: value })}</Tag> : "—" },
       { title: t("jobs.updated"), dataIndex: "updated_at", render: (value) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—" },
     ]} />
@@ -84,9 +85,9 @@ function ResearchSummary({value}:{value:Row|null}):React.ReactElement {
   return <><PropertyGroups groups={[{key:"research",title:t("research.tabResearches"),items:[
     {key:"title",label:t("editor.name"),value:value.title},
     {key:"description",label:t("library.description"),value:value.description,wide:true},
-    {key:"owner",label:t("library.owner"),value:value.owner_alias||value.owner_ref},
+    {key:"owner",label:t("library.owner"),value:value.owner_ref,render:ref=><ObjectReference value={{kind:"user",ref:String(ref),label:value.owner_alias||String(ref)}} />},
     {key:"visibility",label:t("library.visibility"),value:value.visibility,render:value=>t(`research.visibility.${value}`,{defaultValue:String(value)})},
     {key:"updated",label:t("jobs.updated"),value:value.updated_at,render:value=>formatDate(value as number|string,{dateStyle:"medium",timeStyle:"short"})},
-    {key:"profile",label:t("research.profile"),value:value.profile_ref},
+    {key:"profile",label:t("research.profile"),value:value.profile_ref,render:ref=><ObjectReference value={{kind:"profile",ref:String(ref),profileKey:value.profile_key,owner:value.owner_ref}} />},
   ]}]} /><details><summary>{t("details")}</summary><ResultView value={value}/></details></>;
 }

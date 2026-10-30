@@ -410,6 +410,8 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-test-bench-page { display: flex; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--panel); }
 .tr-test-bench { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
 .tr-test-bench > .ant-tabs { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.tr-test-bench > .ant-tabs > .ant-tabs-nav { padding: 0 32px; margin: 0; min-height: 52px; }
+.tr-test-bench > .ant-tabs > .ant-tabs-nav .ant-tabs-extra-content { display: flex; align-items: center; }
 .tr-test-bench > .ant-tabs > .ant-tabs-content-holder { flex: 1; min-height: 0; overflow: hidden; }
 .tr-test-bench .ant-tabs-content,
 .tr-test-bench .ant-tabs-tabpane { height: 100%; min-height: 0; }
@@ -417,11 +419,21 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-test-bench .tr-function-page { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 .tr-test-bench .tr-function-page { display: flex; flex-direction: column; }
 .tr-test-bench .tr-function-body { flex: 1; min-height: 0; overflow: auto; }
+.tr-test-bench-header { flex: none; }
+.tr-embedded-jobs { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.tr-embedded-jobs-toolbar { display: flex; justify-content: flex-end; padding: 16px 32px 0; }
+.tr-embedded-jobs > .tr-function-body { padding-top: 0; }
+/* Legacy page CSS sets every table to a 700px minimum. Ant Design controls
+   their own scroll widths; inheriting that rule makes compact descriptions
+   and one-column tables overflow into adjacent panels. */
+[data-tr-web-app] .ant-descriptions table,
+[data-tr-web-app] .ant-table table { min-width: 0; }
 @media (max-width: 760px) {
   .tr-workspace-empty { padding: 30px 18px; }
   .tr-workspace-empty h1 { font-size: 19px; }
-  .tr-test-bench > .ant-tabs > .ant-tabs-nav { margin-bottom: 12px; }
+  .tr-test-bench > .ant-tabs > .ant-tabs-nav { padding: 0 14px; margin-bottom: 12px; }
   .tr-test-bench .ant-tabs-tab { padding: 9px 12px; }
+  .tr-embedded-jobs-toolbar { padding: 8px 14px 0; }
 }
 
 /* The mobile workspace has one shared, persistent action bar above each page. */
@@ -462,6 +474,10 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-artifact-frame { width:100%; height:70vh; border:0; margin-top:20px; background:white; }
 .tr-picker-control { display:flex; align-items:center; gap:8px; }
 .tr-picker-control .ant-select { flex:1; min-width:0; }
+.tr-object-reference { max-width: 100%; overflow-wrap: anywhere; }
+.tr-object-reference-hint { color: var(--text-secondary, #64748b); margin: 12px 0 0; }
+.tr-reference-select { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tr-reference-select > .ant-select { flex: 1; min-width: 0; }
 .tr-library-picker { width:100%; min-width:0; }
 .tr-library-create { width:100%; }
 .tr-config-test-type { padding:16px 0; }

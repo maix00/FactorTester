@@ -31,7 +31,7 @@ interface Contract { input_schemas?: Record<string, JSONObject>; input_defaults?
 interface Configuration { payload: JSONObject; execution_plan?: JSONObject; revision: number }
 
 
-export function TestConfigurationPage(): React.ReactElement {
+export function TestConfigurationPage({ embedded = false }: { embedded?: boolean }): React.ReactElement {
   const { t, i18n } = useTranslation();
   const instance = usePageInstance();
   const [planDraft,setPlanDraft]=useState<Draft|null>(null);
@@ -54,7 +54,6 @@ export function TestConfigurationPage(): React.ReactElement {
   const [tab, setTab] = useState("execution");
   const [jobs, setJobs] = useState<JobReference[]>([]);
   const [selectedJob, setSelectedJob] = useState(0);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspace, setWorkspace] = useState(() => instance.args.workspaceId || (instance.id === "standalone" ? new URLSearchParams(location.search).get("workspace_id") || "" : ""));
   const [contract, setContract] = useState<Contract | null>(null);
   const mobile = useCompactLayout();
@@ -79,12 +78,6 @@ export function TestConfigurationPage(): React.ReactElement {
     else url.searchParams.delete("workspace_id");
     history.replaceState(history.state, "", url.href);
   }, [workspace, instance.mobile, instance.active]);
-  useEffect(() => {
-    if (!contract) return;
-    const registered = (readPath(contract.schema, ["properties", "analyses", "properties"]) as JSONObject) || {};
-    const supported = availableTypes.filter(type => type in registered);
-    if (supported.length && !supported.includes(analysis)) { setAnalysis(supported[0]); }
-  }, [availableTypes, contract, analysis]);
   const resolutionKey=useMemo(()=>resolutionInputKey(planValue.value),[planValue]);
   useEffect(()=>{
     if(!workspace||!executionChoice.manager_id||!executionChoice.bundles.length||!resolutionKey){setResolutionError("");setResolving(false);return;}
@@ -112,14 +105,6 @@ export function TestConfigurationPage(): React.ReactElement {
       .then(setContract).catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
     return () => controller.abort();
   }, [i18n.language]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    request("/api/test-authoring/workspace-summaries", { signal: controller.signal })
-      .then((value) => setWorkspaces(value.workspaces ?? []))
-      .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
-    return () => controller.abort();
-  }, []);
 
   useEffect(() => {
     if (!workspace) { setDraft(null); return; }
@@ -162,9 +147,8 @@ export function TestConfigurationPage(): React.ReactElement {
       const value = await request("/api/test-authoring/workspaces", { method: "POST",
         body: JSON.stringify({ title: t("configuration.newTitle"), factors: [] }) });
       const row = value.workspace as Workspace;
-      setWorkspaces((current) => [row, ...current]);
       setWorkspace(row.workspace_id);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    } catch (reason) { notify({ code: "configuration.create.failed", type: "error", message: t("configuration.createFailed"), description: reason instanceof Error ? reason.message : String(reason) }); }
     finally { creating.current=false;setLoading(false); }
   };
   const save = async (): Promise<void> => {
@@ -185,7 +169,7 @@ export function TestConfigurationPage(): React.ReactElement {
     } catch (reason) {
       if (activeWorkspace.current !== savingWorkspace) return;
       if ((reason as { status?: number }).status === 409) setConflict(true);
-      else setError(reason instanceof Error ? reason.message : String(reason));
+      else notify({ code: "configuration.save.failed", type: "error", message: t("configuration.saveFailed"), description: reason instanceof Error ? reason.message : String(reason) });
     } finally { setSaving(false); }
   };
 
@@ -198,7 +182,7 @@ export function TestConfigurationPage(): React.ReactElement {
       setJobs(value.jobs||[]);setSelectedJob(0);setTab("results");
       notify({code:"configuration.submitted",type:"success",message:t("configuration.submitted"),description:String(value.run_id||"")});
     }catch(reason){if(activeWorkspace.current===currentWorkspace){
-      setError(reason instanceof Error?reason.message:String(reason));
+      notify({code:"configuration.run.failed",type:"error",message:t("configuration.runFailed"),description:reason instanceof Error?reason.message:String(reason)});
       if((reason as {code?:string}).code==='execution_binding_changed')setResolutionEpoch(value=>value+1);
     }}
     finally{setRunning(false);}
@@ -222,6 +206,11 @@ export function TestConfigurationPage(): React.ReactElement {
   const groupFields = (view.page === "field" && mobile && selectedField) ? [selectedField] : allFields.filter((field) => `${field.analysis}:${settingsSection(field.group)}` === groupID);
   const groupLabel = (field: Field): string => t(`configuration.sections.${settingsSection(field.group)}`);
   const groupName = groups.find(([id]) => id === groupID)?.[1];
+  const registeredTypes = (readPath(contract?.schema, ["properties", "analyses", "properties"]) as JSONObject) || {};
+  const supportedTypes = availableTypes.filter(key => key in registeredTypes);
+  const supportedAnalysis = supportedTypes.includes(analysis);
+  const testTypeOptions = supportedTypes.map(key => ({ value: key, label: t(`configuration.analysisNames.${key}`, { defaultValue: key }) }));
+  if (planDraft && !supportedAnalysis) testTypeOptions.unshift({ value: analysis, label: t(`configuration.analysisNames.${analysis}`, { defaultValue: analysis }) });
   const detail = view.page !== "overview";
   const panelTitle = view.page === "json" ? t("configuration.json") : ["strategy", "strategies", "catalog", "overview"].includes(view.page)
     ? (analysis === "backtest" ? strategy.title : t("configuration.inputs")) : (groupName ? groupLabel(groupName) : t("configuration.runSettings"));
@@ -243,38 +232,41 @@ export function TestConfigurationPage(): React.ReactElement {
       {included ? <Button type="text" className="tr-config-remove" aria-label={`${t("configuration.remove")} ${field.title}`} onClick={() => edit(field.path, undefined)}>×</Button> : null}
     </div>;
   };
-  const disabled = !executionSelection || resolving || !!resolutionError || !executionChoice.resolved || !draft || loading || saving || strategy.busy || strategy.invalid || conflict;
+  const disabled = !supportedAnalysis || !executionSelection || resolving || !!resolutionError || !executionChoice.resolved || !draft || loading || saving || strategy.busy || strategy.invalid || conflict;
   const saveAction = <Button type={mobile ? "primary" : "default"} aria-label={t("configuration.save")} loading={saving} disabled={disabled || !dirty || !!parsed.error || !contract} onClick={() => void save()}>{t("configuration.save")}</Button>;
   const actions = <>{saveAction}
     <Button type="primary" aria-label={t("configuration.run")} disabled={disabled || dirty || running} onClick={() => void execute()}>{t("configuration.run")}</Button>
   </>;
   return <section className="tr-config-page" data-detail={detail} aria-label={t("configuration.title")}>
     <header className="tr-config-topbar">
-      {mobile && detail ? <Button className="tr-config-back" type="text" icon={<ArrowLeftOutlined />} aria-label={t("back")} onClick={back}>{t(["strategy", "strategies", "catalog"].includes(view.page) ? "configuration.strategies" : "configuration.title")}</Button> : <h1>{t("configuration.title")}</h1>}
+      {mobile && detail ? <Button className="tr-config-back" type="text" icon={<ArrowLeftOutlined />} aria-label={t("back")} onClick={back}>{t(["strategy", "strategies", "catalog"].includes(view.page) ? "configuration.strategies" : "configuration.title")}</Button> : !embedded ? <h1>{t("configuration.title")}</h1> : null}
       {!mobile || !detail ? <div className="tr-config-workspace">
-        <Select aria-label={t("configuration.workspace")} placeholder={t("configuration.workspace")} value={workspace || undefined}
-          options={workspaces.map((row) => ({ value: row.workspace_id, label: row.title || row.workspace_id }))}
-          onChange={(value: string) => dirty ? setDiscard({ workspace: value }) : setWorkspace(value)} disabled={saving || strategy.busy} />
+        <div className="tr-config-test-type-control"><Select aria-label={t("configuration.analysis")} aria-describedby={`tr-test-type-hint-${instance.id}`} placeholder={t("configuration.chooseTestType")}
+          value={planDraft ? analysis : undefined}
+          options={testTypeOptions.map(option => ({ ...option, disabled: !supportedTypes.includes(option.value) }))}
+          onChange={(value: string) => { setAnalysis(value); navigate({ page: "overview" }); }}
+          disabled={!planDraft || !contract || !availableTypes.length || saving || strategy.busy} />
+          <small id={`tr-test-type-hint-${instance.id}`}>{t("configuration.testTypeHint")}</small></div>
         <Button type="text" icon={<PlusOutlined />} aria-label={t("configuration.create")} onClick={() => dirty ? setDiscard({ workspace: "" }) : void create()} disabled={saving || loading} >{!mobile ? t("configuration.create") : null}</Button>
         <Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => dirty ? setDiscard({ reload: true }) : setReload((value) => value + 1)} disabled={!workspace || saving} />
-        <span className={`tr-config-status ${dirty ? "is-dirty" : ""}`} role="status" aria-label={dirty ? t("configuration.unsaved") : t("configuration.savedState")} title={dirty ? t("configuration.unsaved") : t("configuration.savedState")} />
+        {planDraft ? <span className={`tr-config-status ${dirty ? "is-dirty" : ""}`} role="status" aria-label={dirty ? t("configuration.unsaved") : t("configuration.savedState")} title={dirty ? t("configuration.unsaved") : t("configuration.savedState")} /> : null}
       </div> : null}
       <div className="tr-config-top-actions">{tab !== "results" ? mobile ? <Button type="text" aria-label={t("configuration.json")} icon={<CodeOutlined />} disabled={!draft} onClick={() => {setTab("configuration");view.page === "json" ? back() : navigate({ page: "json" });}}>{t("configuration.json")}</Button> :
         <label className="tr-config-json-toggle"><Switch size="small" aria-label={t("configuration.json")} disabled={!draft} checked={view.page === "json"} onChange={(checked) => {setTab("configuration");navigate(checked ? { page: "json" } : lastFormView.current);}} /><span>{t("configuration.json")}</span></label> : null}{!mobile && tab === "configuration" ? actions : tab === "execution" ? saveAction : null}</div>
     </header>
     {conflict ? <Alert type="warning" showIcon message={t("configuration.conflict")} /> : null}
+    {planDraft && availableTypes.length > 0 && !supportedAnalysis ? <Alert type="warning" showIcon message={t("configuration.unsupportedTestType")} /> : null}
     {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError("")} /> : null}
     {loading ? <p className="tr-config-loading" role="status">{t("configuration.loading")}</p> : null}
     <Tabs activeKey={tab} onChange={setTab} items={[
       {key:"execution",label:t("executionTopology.tab")},
-      {key:"configuration",label:t("configuration.setup"),disabled:!availableTypes.length},
+      {key:"configuration",label:t("configuration.setup"),disabled:!supportedAnalysis},
       {key:"results",label:t("jobs.results"),disabled:!jobs.length},
     ]} />
     <div hidden={tab !== "execution"}>{!planDraft && !loading ? <Alert type="info" showIcon message={t("executionTopology.createFirst")} action={<Button onClick={()=>void create()}>{t("configuration.create")}</Button>} /> : null}<ExecutionTargetPicker initialize={planDraft?.source==="load"} disabled={!planDraft || !!planValue.error || loading || saving} value={executionChoice} onChange={changeExecution} onCapabilities={changeCapabilities} onRefresh={()=>setResolutionEpoch(value=>value+1)} resolving={resolving} error={resolutionError} /></div>
     {tab === "execution" ? null : tab === "results" ? <div className="tr-config-results">{jobs.length > 1 ? <Select value={selectedJob} options={jobs.map((job, index) => ({ value: index, label: job.task_name || job.job_id }))} onChange={setSelectedJob} /> : null}{jobs[selectedJob] ? <JobDetail job={jobs[selectedJob]} /> : null}</div> :
      !draft ? !loading ? <Empty description={false} /> : null : !contract ? <p role="status">{t("configuration.loading")}</p> : <div className="tr-config-layout">
       <aside className="tr-config-sidebar" hidden={mobile && detail}>
-        <div className="tr-config-test-type"><Select aria-label={t("configuration.analysis")} value={analysis} options={availableTypes.filter(key => key in ((readPath(contract.schema, ["properties", "analyses", "properties"]) as JSONObject) || {})).map((key) => ({ value: key, label: t(`configuration.analysisNames.${key}`, { defaultValue: key }) }))} onChange={(value) => { setAnalysis(value); navigate({ page: "overview" }); }} /></div>
         {analysis === "backtest" ? <><div className="tr-config-nav-heading"><button type="button" onClick={() => navigate({ page: "strategies" })}>{t("configuration.strategies")}</button>
           <Button type="text" size="small" icon={<PlusOutlined />} aria-label={t("configuration.addStrategy")} onClick={() => navigate({ page: "catalog" })} /></div>
         {strategy.navigation}</> : <button className="tr-config-input-nav" onClick={() => navigate({ page: "overview" })}>{t("configuration.inputs")}</button>}

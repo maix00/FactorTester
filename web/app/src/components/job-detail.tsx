@@ -9,6 +9,7 @@ import { FactorResults } from "./factor-results.tsx";
 import { seriesArtifact } from "../charts/factor-result.ts";
 import { FrozenRunSpec } from "./frozen-run-spec.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
+import { ObjectReference } from "./object-reference.tsx";
 import { ResultView } from "./result-view.tsx";
 import { TRDataTable } from "./data-table.tsx";
 import { JobHtmlReport } from "./job-html-report.tsx";
@@ -103,6 +104,8 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
         {key:"status",label:t("jobs.status"),value:detail.status,render:value => t(`jobs.states.${value}`,{defaultValue:String(value)})},
         {key:"server",label:t("jobs.server"),value:detail.server_name || detail.server_id || job.server_id},
         {key:"port",label:t("jobs.port"),value:detail.port ?? detail.service_port ?? job.service_port},
+        {key:"owner",label:t("library.owner"),value:detail.owner_username || detail.owner_ref,render:value=><ObjectReference value={{kind:"user",ref:String(value),label:detail.owner_alias || String(value)}} />},
+        {key:"profile",label:t("research.profile"),value:detail.profile_id || detail.profile_ref || detail.profile_key,render:value=><ObjectReference value={{kind:"profile",ref:String(value),profileKey:detail.profile_key,owner:detail.owner_username || detail.owner_ref}} />},
       ]}]} />{detail.result_summary ? <ResultView value={detail.result_summary} /> : null}</> },
       { key: "results", label: t("jobs.results"), children: detail.kind === "backtest" && artifacts.some(item=>item.name==="tearsheet.html") ? <JobHtmlReport job={job} name="tearsheet.html" /> : detail.kind === "factor_evaluation" ? <FactorResults result={result || detail.result_summary} artifactName={seriesArtifact(artifacts, true)} job={job} configuration={detail.configuration || detail.run_spec || detail.job_spec} /> : seriesArtifact(artifacts) ? <Tabs items={[
         { key: "summary", label: t("jobs.overview"), children: <ResultView value={result} /> },

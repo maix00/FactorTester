@@ -13,9 +13,14 @@ import { TestConfigurationPage } from "./pages/test-configuration.tsx";
 import { TestBenchPage } from "./pages/test-bench.tsx";
 import { AdminFunctionsPage } from "./pages/admin-functions.tsx";
 import { TechnicalDocsPage } from "./pages/technical-docs.tsx";
+import { ObjectReferenceProvider } from "./components/object-reference-provider.tsx";
 
 
 export function PageSurface({ pageId }: { pageId: string }): React.ReactElement {
+  return <ObjectReferenceProvider><PageContent pageId={pageId} /></ObjectReferenceProvider>;
+}
+
+function PageContent({ pageId }: { pageId: string }): React.ReactElement {
   const page = getPage(pageId);
   if (pageId === "source-detail") return <SourceDetailPage />;
   if (pageId === "product-detail") return <ProductDetailPage />;

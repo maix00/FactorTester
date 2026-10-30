@@ -1,4 +1,9 @@
 export type JobReference = { job_id: string; server_id?: string; service_port?: number; task_name?: string; status?: string; execution_node_id?: string };
+/** A local restore must never send a remote or unidentified job to this Manager. */
+export function isLocalJob(job: Record<string, any>, managerID: string): boolean {
+  const source = String(job.origin_server_id || job.server_id || "");
+  return !!managerID && !!job.job_id && source === managerID;
+}
 export function jobURL(job: JobReference, suffix = ""): string {
   const params = new URLSearchParams();
   if (job.server_id) params.set("server_id", job.server_id);

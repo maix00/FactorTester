@@ -8,6 +8,7 @@ import { request } from "../configuration/api.ts";
 import { tradingSnapshot, type TradingMode } from "../trading-model.ts";
 import { usePageInstance } from "../page-instance.ts";
 import { LocalNodeAccess } from "../components/local-node-access.tsx";
+import { hasDesktopClientBridge } from "../desktop-client.ts";
 export function TradingPage(): React.ReactElement {
   const { t } = useTranslation(), instance = usePageInstance();
   const [mode, setMode] = useState<TradingMode>("paper"), [revision, setRevision] = useState(0);
@@ -22,7 +23,7 @@ export function TradingPage(): React.ReactElement {
     { name: t(mode === "paper" ? "trading.paper" : "trading.live"), status: snapshot.reported ? snapshot.available ? "readOnly" : "unavailable" : "unreported", reason: snapshot.reason },
     { name: t("trading.reconciliation"), status: "unreported", reason: "" },
   ];
-  return <FunctionPage title={t("nav.trading")} actions={<Space>{!instance.mobile ? <LocalNodeAccess /> : null}<Button loading={loading} onClick={() => setRevision((value) => value + 1)}>{t("configuration.reload")}</Button></Space>}>
+  return <FunctionPage title={t("nav.trading")} actions={<Space>{hasDesktopClientBridge(window) ? <LocalNodeAccess /> : null}<Button loading={loading} onClick={() => setRevision((value) => value + 1)}>{t("configuration.reload")}</Button></Space>}>
     <Tabs activeKey={mode} onChange={(value) => setMode(value as TradingMode)} items={[{ key: "paper", label: t("trading.paper") }, { key: "live", label: t("trading.live") }]} />
     {error ? <Alert type="error" message={error} /> : null}<Spin spinning={loading}><div className="tr-trading-grid">
       <Card title={t("trading.runtime")} extra={<Tag color={snapshot.available ? "blue" : "default"}>{error ? t("loadFailed") : t(`trading.${snapshot.available ? "readOnly" : snapshot.reported ? "unavailable" : "unreported"}`)}</Tag>}>

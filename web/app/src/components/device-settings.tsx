@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Input, Popconfirm, Segmented, Select, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { ObjectReference } from "./object-reference.tsx";
 import { request } from "../configuration/api.ts";
 import { notify } from "../notifications/core.ts";
 import { devicePlatform, DEVICE_PLATFORMS, type DevicePlatform } from "../device-platform.ts";
@@ -194,7 +195,7 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
       pagination={{ page: currentPage, pageSize: size, total: filtered.length, hideOnSinglePage: true,
         onChange: (value, pageSize) => { setPage(value); setSize(pageSize); } }}
       columns={[
-        ...(scope === "admin" ? [{ key: "username", title: t("adminFunctions.user"), dataIndex: "username" }] : []),
+        ...(scope === "admin" ? [{ key: "username", title: t("adminFunctions.user"), render: (_: unknown, device: Device) => device.username ? <ObjectReference value={{kind:"user",ref:device.username}} /> : "—" }] : []),
         { key: "name", title: t("devices.name"), render: (_, device) => <div>
           <button className="tr-table-link" onClick={() => setSelectedID(device.device_id)}>{device.device_name || device.device_id}</button>
           <small className="tr-job-mobile-meta">{device.device_id}</small>

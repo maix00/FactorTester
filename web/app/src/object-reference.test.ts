@@ -1,0 +1,35 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { matchingFamily, objectDetailURL, referenceForField } from "./object-reference.ts";
+
+test("only known identity fields or canonical factor refs become object references", () => {
+  assert.deepEqual(referenceForField("owner_ref", "alice"), { kind: "user", ref: "alice" });
+  assert.deepEqual(referenceForField("signal", "factor:v2:abc", { owner_username: "alice" }), { kind: "factor", ref: "factor:v2:abc", owner: "alice" });
+  assert.equal(referenceForField("owner_ref", "__public_jobs__"), null);
+  assert.equal(referenceForField("description", "gold"), null);
+  assert.equal(referenceForField("group_ref", "research-group:one"), null);
+  assert.equal(referenceForField("product_path_selection_id", "inline:selection"), null);
+  assert.equal(referenceForField("authorized_users", "alice")?.kind, "user");
+  assert.equal(referenceForField("product_refs", "AU.SHF")?.kind, "product");
+  assert.equal(referenceForField("strategy_refs", "strategy:1")?.kind, "strategy");
+});
+
+test("profile lookup requires a fully scoped profile key", () => {
+  const short = referenceForField("profile_ref", "self", { owner_ref: "alice" })!;
+  assert.equal(objectDetailURL(short), null);
+  const scoped = referenceForField("profile_ref", "self", { profile_key: "node::alice::self" })!;
+  assert.equal(objectDetailURL(scoped), "/api/client/profile-directory/profile?scope=servers&profile_key=node%3A%3Aalice%3A%3Aself");
+});
+
+test("family aliases never silently choose another owner's same-named family", () => {
+  const rows = [{ family_alias: "Momentum", owner_username: "alice" }, { family_alias: "Momentum", owner_username: "bob" }];
+  assert.equal(matchingFamily(rows, "Momentum"), null);
+  assert.equal(matchingFamily(rows, "Momentum", "alice"), rows[0]);
+  assert.equal(matchingFamily(rows, "Momentum", "carol"), null);
+});
+
+test("remote detail URLs escape identities and preserve factor ownership", () => {
+  assert.equal(objectDetailURL({ kind: "factor", ref: "factor:v2:a/b", owner: "alice@org" }), "/api/factor-library/factors/detail?factor_ref=factor%3Av2%3Aa%2Fb&owner_username=alice%40org");
+  assert.equal(objectDetailURL({ kind: "productGroup", ref: "product-group:a/b" }), "/api/product-library/product-groups/product-group%3Aa%2Fb");
+  assert.equal(objectDetailURL({ kind: "user", ref: "alice" }), null);
+});

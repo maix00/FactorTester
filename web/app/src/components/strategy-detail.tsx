@@ -6,6 +6,7 @@ import { TRDataTable } from "./data-table.tsx";
 import { LibraryCreate } from "./library-create.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
 import { ResultView } from "./result-view.tsx";
+import { ObjectReference } from "./object-reference.tsx";
 import { formatDate } from "../format.ts";
 type Row = Record<string, any>;
 export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row | null; onUpdated: (strategy: Row) => void; onRemoved: () => void }): React.ReactElement {
@@ -55,7 +56,7 @@ export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row |
     <Tabs activeKey={tab} onChange={setTab} items={[
       { key: "overview", label: t("details"), children: <><PropertyGroups groups={[{key:"strategy",title:t("details"),items:[
         { key: "strategy", label: t("strategyDetail.reference"), value: strategy.strategy_ref },
-        { key: "owner", label: t("library.owner"), value: strategy.owner_ref },
+        { key: "owner", label: t("library.owner"), value: strategy.owner_ref, render: value => <ObjectReference value={{ kind: "user", ref: String(value), label: strategy.owner_alias || String(value) }} /> },
         { key: "description", label: t("library.description"), value: strategy.description, wide:true },
         { key: "entry", label: t("editor.entrypoint"), value: revision.entrypoint },
         { key: "revision", label:t("library.version"),value:revision.revision_ref},
@@ -71,7 +72,7 @@ export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row |
       { key: "requirements", label: t("editor.requirements"), children: <ResultView value={revision.requirements} /> },
       ...(strategy.access?.can_share ? [{ key: "shares", label: t("strategyDetail.shares"), children: <><div className="tr-detail-toolbar"><Input aria-label={t("strategyDetail.principal")} value={principal} onChange={(event) => setPrincipal(event.target.value)} /><Button type="primary" loading={loading} disabled={!principal.trim()} onClick={() => void action("/shares", "POST", { principal_ref: principal.trim() })}>{t("strategyDetail.share")}</Button></div>
         <TRDataTable rows={(strategy.shares || []).slice((sharePage - 1) * shareSize, sharePage * shareSize).map((value: string | Row) => typeof value === "string" ? { principal_ref: value } : value)} rowKey="principal_ref" pagination={{ page: sharePage, pageSize: shareSize, total: (strategy.shares || []).length, onChange: (p, s) => { setSharePage(p); setShareSize(s); } }} columns={[
-          { title: t("strategyDetail.principal"), key: "principal", render: (_: unknown, row: Row) => row.principal_ref || String(row) },
+          { title: t("strategyDetail.principal"), key: "principal", render: (_: unknown, row: Row) => row.principal_ref ? <ObjectReference value={{kind:"user",ref:String(row.principal_ref)}} /> : "—" },
           { title: t("strategyDetail.revoke"), key: "action", render: (_: unknown, row: Row) => <Popconfirm title={t("strategyDetail.revokeConfirm")} onConfirm={() => action(`/shares/${encodeURIComponent(row.principal_ref || String(row))}`, "DELETE")}><Button danger disabled={loading}>{t("strategyDetail.revoke")}</Button></Popconfirm> },
         ]} /></> }] : []),
     ]} />
