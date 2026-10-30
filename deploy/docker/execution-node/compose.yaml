@@ -48,6 +48,7 @@ services:
       <<: *environment
       TR_DATA_IO_SOCKET_PATH: /data-io/data.sock
     volumes:
+      - ${TR_NODE_RUNTIME_SETTINGS:?set node-local runtime settings file}:/opt/factortester/.settings:ro
       - ${TR_NODE_DESCRIPTOR:?set descriptor path}:/config/node.json:ro
       - ${TR_NODE_STATE_ROOT:?set node-private state directory}:/node-state
       - ${TR_DATA_ROOT:?set node-owned data directory}:/data:ro
@@ -92,6 +93,7 @@ services:
       TR_OIDC_AUDIENCE: ${TR_MARKET_OIDC_AUDIENCE:?set market API audience}
       TR_NODE_MARKET_PROVIDER: server.services.product_market_data.node_adapter:read_installed_market
     volumes:
+      - ${TR_NODE_RUNTIME_SETTINGS:?set node-local runtime settings file}:/opt/factortester/.settings:ro
       - ${TR_NODE_DESCRIPTOR:?set descriptor path}:/config/node.json:ro
       - ${TR_NODE_STATE_ROOT:?set node-private state directory}:/node-state
       - ${TR_DATA_ROOT:?set node-owned data directory}:/data:ro
