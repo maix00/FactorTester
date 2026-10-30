@@ -132,6 +132,18 @@ def test_public_requires_both_token_role_and_current_keycloak_role(auth):
     assert admission.server_admission(session, state=public) == (False, "public_login_denied")
 
 
+def test_uncached_admission_observes_revocation_without_changing_normal_cache(auth):
+    provider, session, internal, public = auth
+    assert admission.server_admission(session, state=public) == (True, "")
+    provider.roles = []
+    assert admission.server_admission(session, state=public, use_cache=False) == (False, "public_login_denied")
+    assert admission.server_admission(session, state=public) == (True, "")
+    assert admission.server_admission(session, state=internal) == (True, "")
+    provider.groups.clear()
+    assert admission.server_admission(session, state=internal, use_cache=False) == (False, "organization_login_denied")
+    assert admission.server_admission(session, state=internal) == (True, "")
+
+
 def test_public_cache_same_stripe_concurrency_cannot_deadlock(auth, monkeypatch):
     provider, session, _, public = auth
     # Force all cache keys to the same non-reentrant lock. Nested lookups

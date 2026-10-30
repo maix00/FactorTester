@@ -220,8 +220,8 @@ def _context(state):
     return state_public, state_server, state_orgs
 
 
-def server_admission(session, *, state=None):
-    """Return ``(allowed, code)`` for an already verified Keycloak session."""
+def server_admission(session, *, state=None, use_cache=True):
+    """Check a session; sensitive delegated operations can require live state."""
     if not isinstance(session, dict):
         return False, "unverified"
     subject = str(session.get("keycloak_subject") or "").strip()
@@ -251,6 +251,9 @@ def server_admission(session, *, state=None):
                 adapter = manager_keycloak_admin_adapter()
             return adapter
 
+        def resolve(key, loader):
+            return _cached(key, loader) if use_cache else loader()
+
         if public:
             client_id = settings["roles_client_id"]
             # FGAP view permission can expose the selected client's own
@@ -261,17 +264,17 @@ def server_admission(session, *, state=None):
             # Resolve the shared client projection before entering the
             # per-user cache. Nested striped locks can self-deadlock on a hash
             # collision or deadlock across two concurrent requests.
-            client_uuid = _cached(("client", issuer, client_id),
+            client_uuid = resolve(("client", issuer, client_id),
                                   lambda: _roles_client(provider(), client_id))
-            allowed = _cached(("public-user", issuer, subject, client_id),
+            allowed = resolve(("public-user", issuer, subject, client_id),
                               lambda: _effective_client_role(provider(), subject, client_uuid,
                                                              "public_server:login"))
             return bool(allowed), "" if allowed else "public_login_denied"
-        binding = _cached(("binding", issuer, server_id, org),
+        binding = resolve(("binding", issuer, server_id, org),
                           lambda: _internal_binding(provider(), server_id, org))
         if not binding:
             return False, "server_organization_conflict"
-        allowed = _cached(("internal-user", issuer, subject, org),
+        allowed = resolve(("internal-user", issuer, subject, org),
                           lambda: _internal_user(provider(), subject, org))
         return bool(allowed), "" if allowed else "organization_login_denied"
     except Exception:
