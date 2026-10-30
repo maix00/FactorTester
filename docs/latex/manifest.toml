@@ -210,6 +210,10 @@ title = "Nautilus Celery 工作端维护"
 source = "docs/runbooks/nautilus-celery-worker.md"
 
 [[sections.documents]]
+title = "联邦计算节点的 Keycloak 授权与验收"
+source = "docs/operations/federated-compute-keycloak.md"
+
+[[sections.documents]]
 title = "公网服务容量观察"
 source = "docs/runbooks/public-capacity.md"
 
