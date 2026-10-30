@@ -9,8 +9,12 @@ import secrets
 from urllib.parse import urlsplit
 
 
-def prepare(root: Path, *, public_url: str, network: str, project: str, realm: str) -> None:
+def prepare(root: Path, *, public_url: str, network: str, project: str, realm: str, manager_ipv4: str) -> None:
     import re
+    import ipaddress
+    address = ipaddress.IPv4Address(manager_ipv4)
+    if not address.is_private or address.is_loopback or address.is_link_local or address.is_unspecified:
+        raise ValueError('reserve a private IPv4 address in the Manager Docker network')
     if any(ord(c) < 33 or ord(c) == 127 for c in public_url):
         raise ValueError('public URL must not contain whitespace or control characters')
     for value in (network, project):
@@ -94,6 +98,7 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
         os.chmod(target, 0o600)
     write('identity.env', '\n'.join([
         f'TR_IDENTITY_PROJECT={project}', f'TR_MANAGER_DOCKER_NETWORK={network}',
+        f'TR_IDENTITY_MANAGER_IPV4={address}',
         f'TR_IDENTITY_IMPORT_DIR={imports.resolve()}',
         'TR_IDENTITY_DB_URL=jdbc:postgresql://identity-db:5432/tr_identity',
         'TR_IDENTITY_DB_NAME=tr_identity', 'TR_IDENTITY_DB_USER=tr_identity',
@@ -129,10 +134,11 @@ def main() -> None:
     p.add_argument('--state-dir', type=Path, required=True)
     p.add_argument('--public-url', required=True)
     p.add_argument('--network', required=True)
+    p.add_argument('--manager-ipv4', required=True, help='reserved Keycloak IPv4 on the Manager Docker network')
     p.add_argument('--project', required=True)
     p.add_argument('--realm', default='traderesearch')
     a = p.parse_args()
-    prepare(a.state_dir, public_url=a.public_url, network=a.network, project=a.project, realm=a.realm)
+    prepare(a.state_dir, public_url=a.public_url, network=a.network, project=a.project, realm=a.realm, manager_ipv4=a.manager_ipv4)
     print('Protected bootstrap files prepared; no existing users or credentials modified.')
 
 if __name__ == '__main__':
