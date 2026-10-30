@@ -46,6 +46,10 @@ function MobileWorkspace(): React.ReactElement {
     setActive(id); setSetting(null);
   };
   const open = (pageId: string, args: PageArguments = {}): void => {
+    if (Object.keys(args).length === 0) {
+      const existing = entries.find((item) => item.pageId === pageId && Object.keys(item.args).length === 0);
+      if (existing) { setRoute(existing.id); return; }
+    }
     const item: Entry = { id: newPageInstanceId(pageId), pageId, args };
     setEntries((items) => [...items, item]); setRoute(item.id);
   };

@@ -39,6 +39,6 @@ test("unbound runtime errors are recognized without classifying unrelated failur
 test("assistant permission failures are recognized from Manager API errors", () => {
   assert.equal(isAgentAssistantPermissionDenied({ status: 403 }), true);
   assert.equal(isAgentAssistantPermissionDenied({ code: "permission_denied" }), true);
-  assert.equal(isAgentAssistantPermissionDenied({ status: 503, code: "permission_store_unavailable" }), false);
+  assert.equal(isAgentAssistantPermissionDenied({ status: 503, code: "agent_state_unavailable" }), false);
   assert.equal(isAgentAssistantPermissionDenied(new Error("forbidden")), false);
 });

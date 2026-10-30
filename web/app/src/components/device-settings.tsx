@@ -4,12 +4,13 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { notify } from "../notifications/core.ts";
-import { devicePlatform, deviceUsernames, DEVICE_PLATFORMS, type DevicePlatform } from "../device-platform.ts";
+import { devicePlatform, DEVICE_PLATFORMS, type DevicePlatform } from "../device-platform.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
 import { TRDataTable } from "./data-table.tsx";
 
 type Device = Record<string, any>;
+type DirectoryUser = { username: string; alias?: string; organization_name?: string; level_id?: string };
 
 export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" }): React.ReactElement {
   const { t } = useTranslation();
@@ -20,6 +21,10 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<DevicePlatform>("all");
   const [username, setUsername] = useState("");
+  const [directoryUsers, setDirectoryUsers] = useState<DirectoryUser[]>([]);
+  const [directoryQuery, setDirectoryQuery] = useState("");
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [directoryError, setDirectoryError] = useState("");
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(20);
   const [revision, setRevision] = useState(0);
@@ -29,10 +34,48 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
 
   useEffect(() => () => mutation.current?.abort(), []);
   useEffect(() => {
+    if (scope !== "admin") {
+      setDirectoryUsers([]);
+      setDirectoryError("");
+      setDirectoryLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setDirectoryLoading(true);
+      setDirectoryError("");
+      const params = new URLSearchParams({ limit: "100", query: directoryQuery });
+      void request(`/api/admin/users?${params.toString()}`, { signal: controller.signal })
+        .then(data => {
+          if (!controller.signal.aborted) setDirectoryUsers(data.users || []);
+        })
+        .catch(reason => {
+          if (!controller.signal.aborted) setDirectoryError(reason.message);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setDirectoryLoading(false);
+        });
+    }, directoryQuery ? 250 : 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [directoryQuery, scope]);
+
+  useEffect(() => {
+    if (scope === "admin" && !username) {
+      setDevices([]);
+      setPublicServer(null);
+      setLoading(false);
+      setError("");
+      return;
+    }
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    const endpoint = scope === "admin" ? "/api/admin/access-control" : "/api/devices";
+    const endpoint = scope === "admin"
+      ? `/api/admin/devices?username=${encodeURIComponent(username)}`
+      : "/api/devices";
     void request(endpoint, { signal: controller.signal }).then(data => {
       if (controller.signal.aborted) return;
       setDevices(data.devices || []);
@@ -43,7 +86,7 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [revision, scope]);
+  }, [revision, scope, username]);
 
   const filtered = useMemo(() => {
     const text = query.trim().toLocaleLowerCase();
@@ -58,17 +101,18 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     });
   }, [devices, platform, query, scope, username]);
 
-  const users = useMemo(() => deviceUsernames(devices), [devices]);
-
   const revoke = async (device: Device): Promise<void> => {
     if (loading || mutation.current || !device.enabled || !device.device_id) return;
     const controller = new AbortController();
     mutation.current = controller;
     setPending(device.device_id);
     try {
-      const data = await request(scope === "admin" ? "/api/admin/access-control/devices/revoke" : "/api/devices/revoke", {
+      const data = await request(scope === "admin" ? "/api/admin/devices/revoke" : "/api/devices/revoke", {
         method: "POST", signal: controller.signal,
-        body: JSON.stringify({ device_id: device.device_id }),
+        body: JSON.stringify({
+          device_id: device.device_id,
+          ...(scope === "admin" ? { username } : {}),
+        }),
       });
       if (controller.signal.aborted) return;
       if (data.device) setDevices(current => current.map(row => row.device_id === device.device_id ? data.device : row));
@@ -91,11 +135,26 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     value,
     label: t(`devices.filters.${value}`),
   }));
+  const userOptions = useMemo(() => {
+    const rows = [...directoryUsers];
+    if (username && !rows.some(user => user.username === username)) {
+      rows.unshift({ username, alias: username });
+    }
+    return rows.map(user => ({
+      value: user.username,
+      label: <span>{user.alias || user.username}<small className="tr-device-user-meta">
+        {user.organization_name || user.level_id || user.username}
+      </small></span>,
+      searchText: `${user.username} ${user.alias || ""} ${user.organization_name || ""}`.toLocaleLowerCase(),
+    }));
+  }, [directoryUsers, username]);
 
   return <section className="tr-device-settings" aria-label={t("settingsPanel.sections.devices")}>
     {scope === "admin" ? <Alert type="info" showIcon
       message={t("adminFunctions.devicesTitle")}
-      description={t("adminFunctions.devicesHint", { count: users.length })} /> : <Alert
+      description={username
+        ? t("adminFunctions.devicesHint", { username, devices: devices.length })
+        : t("adminFunctions.devicesSelectUserHint")} /> : <Alert
       type="info"
       showIcon
       message={t(publicServer === false ? "devices.internalPolicy" : "devices.publicPolicy")}
@@ -105,10 +164,20 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
       <Input.Search allowClear aria-label={t(scope === "admin" ? "adminFunctions.searchDevices" : "devices.search")}
         placeholder={t(scope === "admin" ? "adminFunctions.searchDevices" : "devices.search")}
         value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} />
-      {scope === "admin" ? <Select allowClear showSearch optionFilterProp="label"
-        aria-label={t("adminFunctions.filterUser")} placeholder={t("adminFunctions.filterUser")}
-        value={username || undefined} options={users.map(value => ({ value, label: value }))}
-        onChange={value => { setUsername(value || ""); setPage(1); }} /> : null}
+      {scope === "admin" ? <Select
+        aria-label={t("adminFunctions.filterUser")}
+        showSearch allowClear filterOption={(input, option) =>
+          String(option?.searchText || "").includes(input.toLocaleLowerCase())
+        }
+        placeholder={t("adminFunctions.filterUser")}
+        value={username || undefined}
+        searchValue={directoryQuery}
+        onSearch={setDirectoryQuery}
+        onChange={value => { setUsername(value || ""); setPage(1); }}
+        loading={directoryLoading}
+        options={userOptions}
+        notFoundContent={directoryLoading ? t("loading") : t("adminFunctions.noUsersInScope")}
+        style={{ minWidth: 260, flex: "1 1 280px" }} /> : null}
       <Button icon={<ReloadOutlined />} aria-label={t("configuration.reload")}
         onClick={() => setRevision(value => value + 1)} disabled={!!pending} />
     </div>
@@ -119,6 +188,8 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     </div>
     {error ? <Alert type="error" showIcon message={error}
       action={<Button onClick={() => setRevision(value => value + 1)}>{t("retry")}</Button>} /> : null}
+    {scope === "admin" && directoryError ? <Alert type="error" showIcon
+      message={t("adminFunctions.directoryLoadFailed")} description={directoryError} /> : null}
     <TRDataTable rows={filtered} rowKey="device_id" loading={loading} empty={t("devices.empty")}
       pagination={{ page: currentPage, pageSize: size, total: filtered.length, hideOnSinglePage: true,
         onChange: (value, pageSize) => { setPage(value); setSize(pageSize); } }}

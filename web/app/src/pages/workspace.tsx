@@ -23,7 +23,7 @@ export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): Re
   const { session } = useAuth();
   const recent = recentIds();
   const pages = pagesForAdminCapabilities("mobile", session?.admin_capabilities || [])
-    .filter((page) => !page.mobileTab && (page.sidebarVisible !== false || page.id === "settings"))
+    .filter((page) => !page.mobileTab && page.sidebarVisible !== false)
     .sort((a, b) => {
       const ai = recent.indexOf(a.id);
       const bi = recent.indexOf(b.id);
@@ -32,7 +32,7 @@ export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): Re
   return (
     <section className="tr-mobile-workspace">
       <header className="tr-mobile-workspace-header">
-        <AccountMenu/>
+        <AccountMenu onOpenSettings={() => instance.open("settings")}/>
       </header>
       <div className="tr-mobile-open-list">
         {pages.map((page) => (

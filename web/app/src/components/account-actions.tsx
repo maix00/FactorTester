@@ -1,6 +1,6 @@
 import React from "react";
 import { DownOutlined } from "@ant-design/icons";
-import { Button, Dropdown, Tooltip } from "antd";
+import { Button, Dropdown, Tooltip, type MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth.tsx";
 import { PageIcon } from "../icon.tsx";
@@ -8,18 +8,23 @@ import { PageIcon } from "../icon.tsx";
 export function AccountActions(): React.ReactElement {
   const {t}=useTranslation(),{session,openAuth,logout,registrationEnabled}=useAuth();
   return <div className="tr-account-actions" aria-label={t("auth.account")}>
-    <Button onClick={()=>openAuth("login")}>{t("auth.signIn")}</Button>
-    {registrationEnabled?<Button onClick={()=>openAuth("register")}>{t("auth.register")}</Button>:null}
-    {session?<Button onClick={()=>void logout()}>{t("auth.signOut")}</Button>:null}
+    {session ? <Button onClick={()=>void logout()}>{t("auth.signOut")}</Button> : <>
+      <Button onClick={()=>openAuth("login")}>{t("auth.signIn")}</Button>
+      {registrationEnabled?<Button onClick={()=>openAuth("register")}>{t("auth.register")}</Button>:null}
+    </>}
   </div>;
 }
-export function AccountMenu({collapsed=false}:{collapsed?:boolean}):React.ReactElement {
+export function AccountMenu({collapsed=false,onOpenSettings}:{collapsed?:boolean;onOpenSettings?:()=>void}):React.ReactElement {
   const {t}=useTranslation(),{session,openAuth,logout,registrationEnabled}=useAuth();
-  const items=[{key:"login",label:t("auth.signIn")},
-    ...(registrationEnabled?[{key:"register",label:t("auth.register")}]:[]),
-    ...(session?[{key:"logout",label:t("auth.signOut")}]:[])];
-  return <Dropdown trigger={["click"]} menu={{items,onClick:({key})=>key==="logout"?void logout():openAuth(key as "login"|"register")}}>
-    <Tooltip title={collapsed?t("auth.account"):undefined} placement="right"><button type="button" className="tr-account-menu" aria-label={t("auth.account")}>
+  const items: MenuProps["items"] = session
+    ? [{key:"settings",label:t("settings")},{type:"divider"},{key:"logout",label:t("auth.signOut"),danger:true}]
+    : [{key:"login",label:t("auth.signIn")},...(registrationEnabled?[{key:"register",label:t("auth.register")}]:[])];
+  return <Dropdown trigger={["click"]} menu={{items,onClick:({key})=>{
+    if(key==="logout")void logout();
+    else if(key==="settings")onOpenSettings?.();
+    else openAuth(key as "login"|"register");
+  }}}>
+    <Tooltip title={collapsed?(session?.alias||session?.username||t("auth.account")):undefined} placement="right"><button type="button" className="tr-account-menu" aria-label={session?.alias||session?.username||t("auth.account")}>
       <PageIcon name="account"/>{collapsed?null:<><span>{session?.alias||session?.username||t("auth.account")}</span><DownOutlined/></>}
     </button></Tooltip>
   </Dropdown>;

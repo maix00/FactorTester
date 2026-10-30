@@ -13,7 +13,7 @@ type Directory = {
   identity_provider?: string;
   managed_externally?: boolean;
   message?: string;
-  admin_scope?: "realm" | "organization";
+  admin_scope?: "realm" | "organization_or_level";
   admin_console_url?: string;
 };
 
@@ -23,7 +23,9 @@ function safeAdminURL(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "";
   try {
     const url = new URL(value, window.location.href);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
+    const sameOrigin = url.origin === window.location.origin;
+    const realmConsole = /^\/identity\/admin\/[A-Za-z0-9._-]+\/console\/?$/.test(url.pathname);
+    return sameOrigin && realmConsole && !url.search && !url.hash ? url.href : "";
   } catch {
     return "";
   }
@@ -39,11 +41,16 @@ export function AdminFunctionsPage(): React.ReactElement {
   const [revision, setRevision] = useState(0);
   const isSuperAdmin = session?.admin_capabilities?.includes("admin_console:manage") === true;
   const isFederationAdmin = session?.admin_capabilities?.includes("federation:manage") === true;
-  const isAdmin = isSuperAdmin || isFederationAdmin;
+  const isIdentityAdmin = session?.admin_capabilities?.includes("identity:manage") === true;
+  const isOrganizationAdmin = session?.role === "org_admin";
+  const isAdmin = isSuperAdmin || isIdentityAdmin || isFederationAdmin;
 
   const visibleTabs = useMemo(() => isSuperAdmin ? [
     "organizations", "users", "devices", "mihomo", "federation", "controlDatabase", "manager",
-  ] : isFederationAdmin ? ["organizations", "users", "federation"] : [], [isFederationAdmin, isSuperAdmin]);
+  ] : isIdentityAdmin ? [
+    ...(isOrganizationAdmin ? ["organizations"] : []), "users", "devices",
+    ...(isOrganizationAdmin && isFederationAdmin ? ["federation"] : []),
+  ] : [], [isFederationAdmin, isIdentityAdmin, isOrganizationAdmin, isSuperAdmin]);
 
   useEffect(() => {
     if (!isAdmin || (tab !== "organizations" && tab !== "users")) return;
@@ -95,7 +102,9 @@ export function AdminFunctionsPage(): React.ReactElement {
         </div>
         <Button type="primary" icon={<ExportOutlined />} href={adminURL || undefined}
           target="_blank" rel="noopener noreferrer" disabled={!adminURL}>
-          {t(!isSuperAdmin ? "adminFunctions.manageOrganizationMembers"
+          {t(!isSuperAdmin ? session?.role === "level_admin"
+            ? "adminFunctions.manageHierarchyMembers"
+            : "adminFunctions.manageOrganizationMembers"
             : isOrganizations ? "adminFunctions.manageOrganizations" : "adminFunctions.manageUsers")}
         </Button>
       </Card>
