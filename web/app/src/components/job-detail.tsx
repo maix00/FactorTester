@@ -14,7 +14,7 @@ import { ResultView } from "./result-view.tsx";
 import { TRDataTable } from "./data-table.tsx";
 import { JobHtmlReport } from "./job-html-report.tsx";
 
-export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
+export function JobDetail({ job, readOnly = false }: { job: JobReference; readOnly?:boolean }): React.ReactElement {
   const { t } = useTranslation();
   const instance = usePageInstance();
   const [detail, setDetail] = useState<Record<string, any> | null>(null);
@@ -94,7 +94,7 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
   return <div className="tr-job-page-detail"><div className="tr-job-state"><Tag color={detail.status === "succeeded" ? "green" : detail.status === "failed" ? "red" : "blue"}>{t(`jobs.states.${detail.status}`, { defaultValue: detail.status })}</Tag>
     {percent !== undefined ? <Progress percent={percent} showInfo status={detail.status === "failed" ? "exception" : !terminalStatus(detail.status) ? "active" : "normal"} /> : null}
     {progress?.phase || progress?.message ? <span className="tr-job-phase">{String(progress.phase || progress.message)}</span> : null}
-    {!terminalStatus(detail.status) ? <Button danger onClick={() => { void request(jobURL(job, "/cancel"), { method: "POST" }).then(() => setRefresh((value) => value + 1)).catch((reason) => setError(reason.message)); }}>{t("jobs.cancel")}</Button> : null}</div>
+    {!readOnly && !terminalStatus(detail.status) ? <Button danger onClick={() => { void request(jobURL(job, "/cancel"), { method: "POST" }).then(() => setRefresh((value) => value + 1)).catch((reason) => setError(reason.message)); }}>{t("jobs.cancel")}</Button> : null}</div>
     {detail.error ? <Alert type="error" showIcon message={typeof detail.error === "string" ? detail.error : JSON.stringify(detail.error)} /> : null}
     {outputError ? <Alert type="error" showIcon message={outputError} action={<Button onClick={() => setRefresh(value => value + 1)}>{t("retry")}</Button>} /> : null}
     <Tabs activeKey={activeTab} destroyOnHidden onChange={(key) => { setActiveTab(key); setArtifactPage(1); }} items={[

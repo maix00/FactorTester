@@ -7,6 +7,7 @@ import { request } from "../configuration/api.ts";
 import { reportResourceURL, type ReportExportTarget } from "../report-export.ts";
 import { reportReference, type ReportReference } from "../report-references.ts";
 import { REPORT_FONT_SIZES, readReportFont, writeReportFont } from "../report-reading-preference.ts";
+import { reportJobReference, reportTree, validReportComponents, type ReportNode } from "../report-tree.ts";
 import { useAuth } from "../auth.tsx";
 import { referenceForField, type ObjectKind } from "../object-reference.ts";
 import { downloadBlob } from "../download.ts";
@@ -17,6 +18,7 @@ import { ObjectReference, ObjectReferenceContext } from "./object-reference.tsx"
 import { ResultView } from "./result-view.tsx";
 import { TRDataTable } from "./data-table.tsx";
 import { DetailsPanel } from "./details-panel.tsx";
+import { JobDetail } from "./job-detail.tsx";
 import "./report-branch-reader.css";
 
 type Row = Record<string, any>;
@@ -98,7 +100,7 @@ function ReportTable({ value, onOpen, resolveImage }: { value: unknown; onOpen:(
   }))} />;
 }
 
-function ReportBlock({ component, assets, bindings, resources, target }: { component: Row; assets: Row[]; bindings: Row[]; resources: Row[]; target: ReportExportTarget }): React.ReactElement {
+function ReportBlock({ component, assets, bindings, resources, target, hideTitle = false }: { component: Row; assets: Row[]; bindings: Row[]; resources: Row[]; target: ReportExportTarget; hideTitle?:boolean }): React.ReactElement {
   const { t } = useTranslation();
   const openObject = useContext(ObjectReferenceContext), [referenceDetail,setReferenceDetail] = useState<Row | null>(null);
   const pending = useRef(false);
@@ -157,7 +159,7 @@ function ReportBlock({ component, assets, bindings, resources, target }: { compo
     })();
   };
   return <section className={`tr-report-reading-block tr-report-reading-${kind}`}>
-    {title && !["chapter"].includes(kind) ? <h3>{title}</h3> : null}
+    {!hideTitle && title && !["chapter"].includes(kind) ? <h3>{title}</h3> : null}
     {body && kind !== "math" && component.display_kind !== "display_math" ? <Markdown value={body} onOpen={openReference} resolveImage={resolveImage} /> : null}
     {kind === "image" && assetURL ? <img className="tr-report-reading-image" loading="lazy" src={assetURL} alt={title || t("report.image")} />
       : kind === "image" ? <span>{t("report.imageUnavailable")}</span>
@@ -172,6 +174,22 @@ function ReportBlock({ component, assets, bindings, resources, target }: { compo
     })}</details> : null}
     {referenceDetail ? <DetailsPanel title={String(referenceDetail.label)} onClose={() => setReferenceDetail(null)}><ResultView value={referenceDetail} /></DetailsPanel> : null}
   </section>;
+}
+
+function ReportTreeNode({ node, assets, resources, bindings, target }: { node:ReportNode; assets:Row[]; resources:Row[]; bindings:Map<string,Row[]>; target:ReportExportTarget }): React.ReactElement {
+  const { t } = useTranslation(), component = node.component, kind = String(component.kind || "");
+  const [expanded,setExpanded] = useState(kind !== "special");
+  const associated = bindings.get(String(component.component_id || "")) || [];
+  const isResult = kind === "special" && component.display_kind === "test_result";
+  const job = isResult ? reportJobReference(component,associated) : null;
+  const descendants = node.children.map(child => <ReportTreeNode key={String(child.component.component_id)} node={child} assets={assets} resources={resources} bindings={bindings} target={target} />);
+  const content = <ReportBlock component={component} assets={assets} bindings={associated} resources={resources} target={target} hideTitle={kind === "special" || kind === "section" || kind === "subsection"} />;
+  if (kind === "chapter") return <>{content}{descendants}</>;
+  if (["special","section","subsection"].includes(kind)) return <details className="tr-report-reading-section" open={expanded} onToggle={event => {if (event.target === event.currentTarget) setExpanded(event.currentTarget.open);}}>
+    <summary>{String(component.title || component.display_kind || kind)}</summary>
+    {expanded ? <div className="tr-report-reading-section-content">{isResult ? job ? <JobDetail job={job} readOnly /> : <Alert type="info" showIcon message={t("report.jobRoutingMissing")} /> : null}{content}{descendants}</div> : null}
+  </details>;
+  return <>{content}{descendants}</>;
 }
 
 /** Read one authorized branch at a time, retaining only the selected chapter. */
@@ -202,7 +220,7 @@ export function ReportBranchReader({ target, initialChapterID = "", onChapterCha
     setLoading(true); setError("");
     void request(chapterURL,{signal:controller.signal}).then(result => {
       if (controller.signal.aborted) return;
-      if (!Array.isArray(result.components)) throw new Error(t("researchDetail.invalidResponse"));
+      if (!validReportComponents(result.components)) throw new Error(t("researchDetail.invalidResponse"));
       setChapter(result);
     }).catch(reason => {if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason));})
       .finally(() => {if (!controller.signal.aborted) setLoading(false);});
@@ -217,8 +235,9 @@ export function ReportBranchReader({ target, initialChapterID = "", onChapterCha
     }
     return result;
   }, [chapter]);
+  const tree = useMemo(() => reportTree(Array.isArray(chapter?.components) ? chapter.components : []),[chapter]);
   return <section className="tr-report-reading" aria-label={t("report.read")} style={{"--tr-report-font-size":`${fontSize}px`} as React.CSSProperties}>
     {index?.chapters?.length ? <div className="tr-report-reading-toolbar"><label className="tr-report-reading-choice"><span>{t("report.chapter")}</span><Select aria-label={t("report.chapter")} value={chapterID || undefined} onChange={value => {setChapterID(value);onChapterChange?.(value);}} options={index.chapters.map((item:Row) => ({value:String(item.component_id || ""),label:String(item.title || item.component_id || "")})).filter((item:Row) => item.value)} /></label><Popover trigger="click" title={t("report.readingSettings")} content={<label className="tr-report-reading-font"><span>{t("report.fontSize")}</span><Select aria-label={t("report.fontSize")} value={fontSize} options={REPORT_FONT_SIZES.map(size => ({value:size,label:`${size} px`}))} onChange={setFontSize} /></label>}><Button type="text" icon={<FontSizeOutlined />} aria-label={t("report.readingSettings")} /></Popover></div> : null}
-    {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} action={<Button onClick={() => index ? setChapterRevision(value => value + 1) : setIndexRevision(value => value + 1)}>{t("retry")}</Button>} /> : chapter ? <article>{chapter.components.map((component:Row,index:number) => <ReportBlock key={String(component.component_id || index)} component={component} assets={chapter.assets || []} bindings={bindingsByComponent.get(String(component.component_id || "")) || []} resources={chapter.local_resources || []} target={target} />)}</article> : index ? <Empty description={t("empty")} /> : null}
+    {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} action={<Button onClick={() => index ? setChapterRevision(value => value + 1) : setIndexRevision(value => value + 1)}>{t("retry")}</Button>} /> : chapter ? <article>{tree.map(node => <ReportTreeNode key={String(node.component.component_id)} node={node} assets={chapter.assets || []} resources={chapter.local_resources || []} bindings={bindingsByComponent} target={target} />)}</article> : index ? <Empty description={t("empty")} /> : null}
   </section>;
 }

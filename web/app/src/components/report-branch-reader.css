@@ -7,6 +7,9 @@
 .tr-report-reading article { max-width: 820px; color: var(--text); font-size:var(--tr-report-font-size,16px); line-height: 1.65; overflow-wrap: anywhere; }
 .tr-report-reading article .ant-table { font-size:inherit; }
 .tr-report-reading-block { margin-bottom: 16px; }
+.tr-report-reading-section { margin: 0 0 16px; }
+.tr-report-reading-section > summary { cursor:pointer; font-weight:600; }
+.tr-report-reading-section-content { margin:8px 0 0 14px; min-width:0; }
 .tr-report-reading-block h3 { margin: 0 0 8px; font-size: 1em; }
 .tr-report-reading-section h3, .tr-report-reading-subsection h3 { font-size: 1.08em; }
 .tr-report-reading-text > :first-child { margin-top: 0; }
