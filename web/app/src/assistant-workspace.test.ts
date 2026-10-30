@@ -74,3 +74,24 @@ test("a context-free expired RPC is retried once, but authorization denial is no
   assert.equal(issued,2);assert.equal(attempts,3);
   await session.close();
 });
+
+test("closing a workspace while context synchronization is pending prevents a late turn", async () => {
+  let release:() => void = () => undefined, dispatched=0;
+  const blocked = new Promise<void>(resolve => {release=resolve;});
+  const session = await AssistantWorkspaceSession.open(async (url,options) => {
+    if (url.endsWith("/workspaces")) return {workspace_id:"workspace-a"};
+    if (url.endsWith("/publish")) {
+      const tab=JSON.parse(String(options?.body)).workspace.tabs[0];
+      await blocked;
+      return {page:{tab_id:tab.tab_id,assistance:tab.assistance}};
+    }
+    if (url.endsWith("/rpc")) dispatched++;
+    return {success:true};
+  },"self");
+  session.set({pageId:"panel-a",researchId:"research-a",title:"A",section:"details"});
+  const turn=session.request("/api/client/profile-agent/rpc",{method:"POST",body:JSON.stringify({method:"turn/start"})});
+  const closing=session.close();release();
+  await assert.rejects(() => turn,/workspace is closed/);
+  await closing;
+  assert.equal(dispatched,0);
+});

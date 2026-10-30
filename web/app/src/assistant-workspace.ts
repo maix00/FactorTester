@@ -60,7 +60,10 @@ export class AssistantWorkspaceSession {
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid Agent RPC request");
     const turn = body.method === "turn/start" || body.method === "turn/steer";
     if (turn) await this.ready();
-    const send = (id:string):Promise<any> => this.requestAPI(url,{...options,body:JSON.stringify({...body,workspace_id:id})});
+    const send = (id:string):Promise<any> => {
+      if (this.closed) return Promise.reject(new Error("Assistant workspace is closed"));
+      return this.requestAPI(url,{...options,body:JSON.stringify({...body,workspace_id:id})});
+    };
     const id = this.workspaceID;
     try {return await send(id);}
     catch (cause) {
