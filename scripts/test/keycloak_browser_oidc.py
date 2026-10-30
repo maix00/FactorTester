@@ -112,6 +112,28 @@ def main() -> int:
                     if keycloak_authorized(token, resource_id=resource_id, scope="read") != expected:
                         raise SystemExit("Keycloak object ownership boundary failed")
                     checks.append("object_allowed" if expected else "object_denied")
+            inventory_path = os.environ.get("KEYCLOAK_RESOURCE_INVENTORY")
+            if inventory_path:
+                # This owner-only check detects accidentally public resources;
+                # it does not represent historical sharing/hierarchy parity.
+                from pathlib import Path
+                from collections import defaultdict
+                from server.identity.keycloak_authorization import keycloak_authorized_objects
+                inventory = json.loads(Path(inventory_path).read_text())
+                by_type = defaultdict(list)
+                expected = set()
+                for index, resource in enumerate(inventory):
+                    by_type[resource["resource_type"]].append((resource["resource_ref"], index))
+                    if resource["owner_subject"] == session["keycloak_subject"]:
+                        expected.add(index)
+                token = next(c["value"] for c in context.cookies(manager) if c["name"] == "ft-manager-session")
+                actual = set()
+                for resource_type, refs in by_type.items():
+                    actual.update(keycloak_authorized_objects(
+                        token, resource_type=resource_type, refs=refs, scope="read"))
+                if actual != expected:
+                    raise SystemExit(f"Existing object permission mismatch (missing={len(expected-actual)}, unexpected={len(actual-expected)})")
+                checks.append(f"owner_only_inventory_verified:{len(inventory)}")
             logout = context.request.post(manager + "/auth/logout", headers={"Origin": manager})
             if logout.status != 200:
                 raise SystemExit(f"Manager logout failed (HTTP {logout.status})")
@@ -132,4 +154,7 @@ if __name__ == "__main__":
     except Exception as exc:
         # Playwright exceptions can contain authorization URLs and cookies.
         # Keep only a safe failure category in the public acceptance output.
-        raise SystemExit(f"Browser acceptance failed: {type(exc).__name__}") from None
+        cause = exc.__cause__
+        status = getattr(cause, "code", None)
+        suffix = f" (upstream HTTP {status})" if isinstance(status, int) else ""
+        raise SystemExit(f"Browser acceptance failed: {type(exc).__name__}{suffix}") from None
