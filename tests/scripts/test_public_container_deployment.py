@@ -133,15 +133,17 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     )
     compose = _compose()["services"]["factortester-public"]
     args = compose["build"]["args"]
+    installer = (ROOT / "deploy/docker/factortester-server/install-agent-tools.sh").read_text()
 
     assert "nodejs" not in dockerfile
     assert "npm install" not in dockerfile
     assert "ARG CODEX_VERSION=0.147.0" in dockerfile
     assert "ARG CODEX_NPM_REGISTRY=https://registry.npmjs.org" in dockerfile
-    assert "codex-${CODEX_VERSION}-${codex_platform}.tgz" in dockerfile
-    assert "codex_sha512=" in dockerfile
-    assert "Codex platform package integrity check failed" in dockerfile
-    assert 'test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"' in dockerfile
+    assert "codex-${CODEX_VERSION}-${codex_platform}.tgz" in installer
+    assert "codex_sha512=" in installer
+    assert "Codex platform package integrity check failed" in installer
+    assert 'test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"' in installer
+    assert "COPY deploy/docker/factortester-server/install-agent-tools.sh" in dockerfile
     assert "COPY tools tools" in dockerfile
     assert "AS traderesearch-cli-builder" in dockerfile
     assert "AS factortester-public-deps" in dockerfile
@@ -184,6 +186,7 @@ def test_public_agent_image_installs_cc_switch_from_verified_local_archives() ->
     dockerignore = (DEPLOYMENT / "FactorTester.Dockerfile.dockerignore").read_text(
         encoding="utf-8",
     )
+    installer = (ROOT / "deploy/docker/factortester-server/install-agent-tools.sh").read_text()
     archives = {
         "cc-switch-cli-linux-x64-musl-v5.10.2.tar.gz": (
             "8065c5bae9eda270747c1766cefbb2091d9625655dbf409ad7764eb47c0a8635"
@@ -200,7 +203,7 @@ def test_public_agent_image_installs_cc_switch_from_verified_local_archives() ->
         assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected_digest
         assert f"!deploy/docker/factortester-public/{name}" in dockerignore
         assert f"COPY deploy/docker/factortester-public/{name}" in dockerfile
-        assert expected_digest in dockerfile
+        assert expected_digest in installer
 
 
 def test_public_agent_uses_codex_secure_container_profile() -> None:

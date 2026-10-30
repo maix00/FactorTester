@@ -126,6 +126,27 @@ The public `main` deployment keeps hot reload disabled. It changes source only
 through an explicit Git/image version and restarts `factortester-public`, so an
 uncommitted filesystem edit cannot silently alter the public service.
 
+## Local Profile Agent isolation
+
+The Manager image installs the same pinned Codex and CC Switch artifacts as the
+public image through `install-agent-tools.sh`, plus non-setuid Bubblewrap and
+the `traderesearch` CLI. The Manager drops all outer capabilities and retains
+`no-new-privileges`. Its `agent-seccomp.json` starts with the Docker 29.8.2
+default profile from Moby commit `8af9fe3a36bab3e039862a2ab1cef1880c9b4d03`
+(`vendor/github.com/moby/profiles/seccomp/default.json`, Apache-2.0) and adds
+only the namespace flags and mount operations Bubblewrap requires. It does not
+enable new network/time namespaces or `ptrace`. Re-audit the profile against
+the deployed Docker default when upgrading the engine.
+
+For a **reviewed, unchanged** Python/alpha base, a one-off BuildKit
+`manager-base=docker-image://<existing-image>` named-context override builds
+only the Agent layers without downloading Python packages. Check the base
+image's Python/alpha provenance first; an old image without a build identity
+does not prove which alpha revision it contains. A normal build without the
+override builds the Python and alpha inputs from source. Keep the running image
+available until the candidate's sandbox and login checks pass, so rollback uses
+the existing image tag/ID.
+
 ## Public-node variant
 
 The public deployment is intentionally two business containers, each with a
