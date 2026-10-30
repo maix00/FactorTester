@@ -25,6 +25,7 @@ BATCH_ROWS = 128
 IDENTITY_COLUMNS = frozenset(("owner_issuer", "owner_subject"))
 BACKUP_MAX_BYTES = 8 * 1024 ** 3
 BACKUP_RESERVE_BYTES = 2 * 1024 ** 3
+MAX_FOREIGN_KEY_VIOLATIONS = 100_000
 
 
 def _digest(value):
@@ -256,6 +257,27 @@ def _backup_capacity(path, total_bytes):
         raise ValueError("insufficient disk reserve for database backup")
 
 
+def _integrity_check(db):
+    rows = db.execute("PRAGMA integrity_check").fetchall()
+    if len(rows) != 1 or rows[0][0] != "ok":
+        raise ValueError("database integrity check failed")
+
+
+def _foreign_key_summary(db):
+    """Compare exact pre-existing violations without printing object identities."""
+    cursor = db.execute("PRAGMA foreign_key_check")
+    violations = []
+    while True:
+        rows = cursor.fetchmany(BATCH_ROWS)
+        if not rows:
+            break
+        if len(violations) + len(rows) > MAX_FOREIGN_KEY_VIOLATIONS:
+            raise ValueError("foreign-key inventory exceeds its configured budget")
+        violations.extend(json.dumps(list(row), separators=(",", ":")) for row in rows)
+    violations.sort()
+    return {"count": len(violations), "sha256": _digest(violations)}
+
+
 def make_backup(db, path, expected):
     """Make and integrity-check an exclusive consistent SQLite online backup."""
     path = Path(path).expanduser()
@@ -273,17 +295,27 @@ def make_backup(db, path, expected):
                 _backup_capacity(path, int(total) * page_size)
 
             db.backup(backup, pages=256, sleep=0.01, progress=progress)
-            if backup.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
-                raise ValueError("backup integrity check failed")
+            _integrity_check(backup)
             if inventory(backup) != _job_snapshot(expected):
                 raise ValueError("backup Job state differs from reviewed inventory")
+            foreign_keys = _foreign_key_summary(backup)
         with path.open("rb") as stream:
             os.fsync(stream.fileno())
         _fsync_directory(path.parent)
-        return _file_sha256(path)
+        return {"sha256": _file_sha256(path), "foreign_keys": foreign_keys}
     except BaseException:
         path.unlink(missing_ok=True)
         raise
+
+
+def _apply_job_binding(db, issuer, target):
+    result = db.execute(
+        "UPDATE research_jobs SET owner_issuer=?, owner_subject=? "
+        "WHERE job_id=? AND owner=? AND owner_issuer='' AND owner_subject=''",
+        (issuer, target["subject"], target["job_id"], target["owner"]),
+    )
+    if result.rowcount != 1:
+        raise ValueError("Job changed while applying identity binding")
 
 
 def apply(db, reviewed, adapter, issuer, *, backup_path, receipt_path,
@@ -294,24 +326,22 @@ def apply(db, reviewed, adapter, issuer, *, backup_path, receipt_path,
     if _database_identity(db) != reviewed["snapshot"].get("source_db"):
         raise ValueError("migration plan is for another database")
     revalidate_identities(reviewed, adapter, issuer, verify_discovery=verify_discovery)
-    backup_sha256 = make_backup(db, backup_path, reviewed["snapshot"])
-    receipt = {"version": 1, "plan": reviewed, "backup_sha256": backup_sha256}
+    backup = make_backup(db, backup_path, reviewed["snapshot"])
+    receipt = {"version": 1, "plan": reviewed, "backup": backup}
     _protected_json(receipt_path, receipt)
     db.execute("BEGIN IMMEDIATE")
     try:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name='research_jobs' LIMIT 1").fetchone():
+            raise ValueError("unexpected Job trigger requires separate review")
         if inventory(db) != _job_snapshot(reviewed["snapshot"]):
             raise ValueError("Job inventory changed after review or backup")
+        if _foreign_key_summary(db) != backup["foreign_keys"]:
+            raise ValueError("foreign-key inventory changed after backup")
         changed = 0
         for target in reviewed["targets"]:
             if target["before_issuer"]:
                 continue
-            result = db.execute(
-                "UPDATE research_jobs SET owner_issuer=?, owner_subject=? "
-                "WHERE job_id=? AND owner=? AND owner_issuer='' AND owner_subject=''",
-                (reviewed["issuer"], target["subject"], target["job_id"], target["owner"]),
-            )
-            if result.rowcount != 1:
-                raise ValueError("Job changed while applying identity binding")
+            _apply_job_binding(db, reviewed["issuer"], target)
             changed += 1
         actual = inventory(db)
         expected = json.loads(json.dumps(_job_snapshot(reviewed["snapshot"])))
@@ -321,8 +351,14 @@ def apply(db, reviewed, adapter, issuer, *, backup_path, receipt_path,
             row["issuer"], row["subject"] = reviewed["issuer"], target["subject"]
         if actual != expected:
             raise ValueError("Job identity or non-identity data failed verification")
+        if _foreign_key_summary(db) != backup["foreign_keys"]:
+            raise ValueError("foreign-key inventory changed during migration")
+        _integrity_check(db)
         db.commit()
-        return {"changed": changed, "jobs": len(actual["jobs"]), "backup_sha256": backup_sha256}
+        return {"changed": changed, "jobs": len(actual["jobs"]),
+                "before_sha256": _digest(_job_snapshot(reviewed["snapshot"])),
+                "after_sha256": _digest(actual), "backup_sha256": backup["sha256"],
+                "foreign_keys": backup["foreign_keys"], "integrity": "ok"}
     except BaseException:
         db.rollback()
         raise

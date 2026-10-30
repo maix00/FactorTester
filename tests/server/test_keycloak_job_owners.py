@@ -187,17 +187,65 @@ def test_existing_backup_is_never_overwritten(case):
     assert (case[-1] / "backup.sqlite").read_text() == "keep"
 
 
-def test_sql_error_rolls_back_every_job(case):
+def test_unexpected_trigger_is_blocked(case):
     db = case[0]
     db.execute("""CREATE TRIGGER deny_second BEFORE UPDATE ON research_jobs
                   WHEN OLD.job_id='job-2' BEGIN SELECT RAISE(ABORT, 'blocked'); END""")
     db.commit()
     plan = reviewed(case)
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(ValueError, match="unexpected Job trigger"):
         do_apply(case, plan)
     assert db.execute("SELECT COUNT(*) FROM research_jobs WHERE owner_subject<>''").fetchone()[0] == 0
     assert (case[-1] / "backup.sqlite").exists()
     assert (case[-1] / "receipt.json").exists()
+
+
+def test_sql_error_rolls_back_every_job(case, monkeypatch):
+    db = case[0]
+    plan = reviewed(case)
+    original = migration._apply_job_binding
+
+    def fail_second(db, issuer, target):
+        if target["job_id"] == "job-2":
+            raise sqlite3.IntegrityError("simulated update failure")
+        return original(db, issuer, target)
+
+    monkeypatch.setattr(migration, "_apply_job_binding", fail_second)
+    with pytest.raises(sqlite3.IntegrityError):
+        do_apply(case, plan)
+    assert db.execute("SELECT COUNT(*) FROM research_jobs WHERE owner_subject<>''").fetchone()[0] == 0
+
+
+def test_existing_foreign_key_violations_are_preserved(case):
+    db = case[0]
+    db.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
+    db.execute("CREATE TABLE child (id INTEGER REFERENCES parent(id))")
+    db.execute("INSERT INTO child (id) VALUES (123)")
+    db.commit()
+    plan = reviewed(case)
+    result = do_apply(case, plan)
+    assert result["foreign_keys"]["count"] == 1
+    assert migration._foreign_key_summary(db) == result["foreign_keys"]
+
+
+def test_new_foreign_key_violations_abort_transaction(case, monkeypatch):
+    db = case[0]
+    db.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
+    db.execute("CREATE TABLE child (id INTEGER REFERENCES parent(id))")
+    db.commit()
+    plan = reviewed(case)
+    original = migration._apply_job_binding
+
+    def corrupt(db, issuer, target):
+        original(db, issuer, target)
+        if target["job_id"] == "job-2":
+            db.execute("INSERT INTO child (id) VALUES (999)")
+
+    monkeypatch.setattr(migration, "_apply_job_binding", corrupt)
+    with pytest.raises(ValueError, match="foreign-key inventory changed"):
+        do_apply(case, plan)
+    assert db.execute("SELECT COUNT(*) FROM research_jobs WHERE owner_subject<>''").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM child").fetchone()[0] == 0
 
 
 def test_rollback_refuses_all_if_any_job_changed(case):
