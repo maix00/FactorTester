@@ -14,6 +14,7 @@ import { ResearchCreate } from "../components/research-create.tsx";
 import { useAuth } from "../auth.tsx";
 import { ReportEditor } from "../components/report-editor.tsx";
 import { ReportMarkdown } from "../components/report-markdown.tsx";
+import { ReportExport } from "../components/report-export.tsx";
 import { ResearchEdit } from "../components/research-edit.tsx";
 import { ResearchRelations } from "../components/research-relations.tsx";
 import { linkedResearchID, reportBranches, reportRowID, researchRowID, selectReportBranch } from "../research-model.ts";
@@ -68,6 +69,7 @@ export function ResearchPage(): React.ReactElement {
             }))}
             onChange={setSelectedPublicationID}
           />
+          {selectedReportBranch ? <ReportExport target={{...selected, ...selectedReportBranch, title:selected.title || selectedReportBranch.title}} /> : null}
         </div> : null}
         {selectedPublicationBranch?.publication_id
           ? <><ReportEditor key={selectedPublicationBranch.publication_id} publicationID={selectedPublicationBranch.publication_id} /><ReportMarkdown key={selectedPublicationBranch.publication_id} publicationID={selectedPublicationBranch.publication_id} /></>

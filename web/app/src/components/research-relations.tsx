@@ -7,6 +7,7 @@ import { notify } from "../notifications/core.ts";
 import { reportRowID, researchRelationCandidates } from "../research-model.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { ObjectReference } from "./object-reference.tsx";
+import { ResearchEvidenceEditor } from "./research-evidence-editor.tsx";
 import { ResultView } from "./result-view.tsx";
 import { TRDataTable } from "./data-table.tsx";
 
@@ -129,11 +130,16 @@ export function ResearchRelations({ research, overview, onReport }: { research: 
 function ResearchEvidence({ evidence, onClose }: { evidence: Row; onClose: () => void }): React.ReactElement {
   const { t } = useTranslation(); const ref = String(evidence.evidence_ref || "");
   const [tab, setTab] = useState("overview"), [value, setValue] = useState<unknown>(null), [error, setError] = useState("");
+  const [canManage, setCanManage] = useState(false), [editing, setEditing] = useState(false), [revision, setRevision] = useState(0);
   useEffect(() => {
-    const controller = new AbortController(); setValue(null); setError("");
+    const controller = new AbortController(); setValue(null); setError(""); setCanManage(false);
     const endpoint = tab === "overview" ? `/api/research-evidence/catalog/${encodeURIComponent(ref)}/summary` : tab === "relationships" ? `/api/research-evidence/catalog/${encodeURIComponent(ref)}/relationships?page=1&page_size=20` : `/api/research-evidence/${encodeURIComponent(ref)}`;
-    void request(endpoint, {signal:controller.signal}).then(result => {if (!controller.signal.aborted) setValue(tab === "relationships" ? result.relationships : result.evidence);}).catch(reason => {if (!controller.signal.aborted) setError(String(reason.message || reason));});
+    void request(endpoint, {signal:controller.signal}).then(result => {if (!controller.signal.aborted) { setValue(tab === "relationships" ? result.relationships : result.evidence); setCanManage(result.access?.can_manage === true); }}).catch(reason => {if (!controller.signal.aborted) setError(String(reason.message || reason));});
     return () => controller.abort();
-  }, [ref,tab]);
-  return <DetailsPanel title={evidence.title_zh || ref} onClose={onClose}><Tabs activeKey={tab} onChange={setTab} items={[{key:"overview",label:t("jobs.overview")},{key:"fragments",label:t("researchDetail.fragments")},{key:"relationships",label:t("researchDetail.relationships") }]} />{error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} /> : value ? <ResultView value={tab === "fragments" ? (value as Row).fragments || [] : value} /> : <Spin />}</DetailsPanel>;
+  }, [ref,tab,revision]);
+  return <DetailsPanel title={evidence.title_zh || ref} onClose={onClose}>{editing
+    ? <ResearchEvidenceEditor evidenceRef={ref} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); setRevision(current => current + 1); }} />
+    : <><Tabs activeKey={tab} onChange={setTab} items={[{key:"overview",label:t("jobs.overview")},{key:"fragments",label:t("researchDetail.fragments")},{key:"relationships",label:t("researchDetail.relationships") }]} />
+      {error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} /> : value ? <>{tab === "overview" && canManage ? <Button onClick={() => setEditing(true)}>{t("researchEvidence.edit")}</Button> : null}<ResultView value={tab === "fragments" ? (value as Row).fragments || [] : value} /></> : <Spin />}</>}
+  </DetailsPanel>;
 }
