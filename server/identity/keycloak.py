@@ -793,6 +793,14 @@ class ServiceOIDCClient(OIDCClient):
             "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
             "audience": audience, **({"scope": scope} if scope else {})})
 
+    def jwt_authorization_grant(self, assertion: str, *, scope: str = "") -> dict:
+        """Exchange an IdP-trusted, audience-bound JWT for a local token."""
+        if not isinstance(assertion, str) or not assertion or len(assertion) > 32768:
+            raise ValueError("JWT authorization assertion is invalid")
+        return self._token({"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "client_id": self.client_id, "assertion": assertion,
+            **({"scope": scope} if scope else {})})
+
     def authorize(self, token: str, *, audience: str, resource_id: str,
                   scope: str, timeout: float | None = None) -> bool:
         """Ask Keycloak Authorization Services for one resource/scope decision.
