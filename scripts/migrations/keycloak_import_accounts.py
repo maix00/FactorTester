@@ -63,13 +63,13 @@ def _attributes_for(account: dict[str, Any]) -> dict[str, tuple[str, ...]]:
     fields = {
         "tr_identity_id": str(account["tr_identity_id"]).strip(),
         "legacy_username": username,
-        "organization_id": str(account["organization_id"]).strip(),
-        "organization_name": str(account.get("organization_name") or "").strip(),
-        "parent_username": str(account.get("parent_username") or "").strip(),
+        "tr_organization_id": str(account["organization_id"]).strip(),
+        "tr_organization_name": str(account.get("organization_name") or account.get("organization") or "").strip(),
+        "tr_parent_username": str(account.get("parent_username") or "").strip(),
     }
     level_id = str(account.get("level_id") or "").strip()
     if level_id:
-        fields["organization_level_id"] = level_id
+        fields["tr_level_id"] = level_id
     return {key: (value,) for key, value in fields.items() if value}
 
 

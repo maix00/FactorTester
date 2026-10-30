@@ -46,5 +46,6 @@ def test_claims_use_imported_attribute_names_and_do_not_duplicate_mappers():
     n = a.writes
     configure_identity_mappers(a, 'manager')
     assert a.writes == n
-    assert len(a.mappers) == len(CLAIM_ATTRIBUTES)
-    assert next(r for r in a.mappers if r['name'] == 'tr_organization_id')['config']['user.attribute'] == 'organization_id'
+    assert len(a.mappers) == len(CLAIM_ATTRIBUTES) + 1
+    assert next(r for r in a.mappers if r['name'] == 'manager-audience')['config']['included.client.audience'] == 'manager'
+    assert next(r for r in a.mappers if r['name'] == 'tr_organization_id')['config']['user.attribute'] == 'tr_organization_id'

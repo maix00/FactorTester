@@ -37,14 +37,16 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
     imports = root / 'import'
     imports.mkdir(mode=0o755)  # parent remains private; container can read bind mount
     manager_secret, migration_secret = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
+    directory_secret, visitor_secret = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
     db_secret, bootstrap_secret = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
     roles = ['admin_console:read', 'admin_console:manage', 'public_server:login', 'factor:develop',
-             'agent:use', 'agent:runtime:server', 'agent:runtime:client']
+             'agent_assistant:use']
     from server.identity.keycloak_profile import identity_mappers
     mappers = identity_mappers()
     definition = {'realm': realm, 'enabled': True, 'registrationAllowed': False,
                   'resetPasswordAllowed': False, 'adminPermissionsEnabled': True,
-                  'roles': {'client': {'tr-manager': [{'name': role} for role in roles]}},
+                  'roles': {'client': {'tr-manager': [{'name': role} for role in roles],
+                                       'tr-visitor': [{'name': 'access'}]}},
                   'clients': [
                       {'clientId': 'tr-manager', 'enabled': True, 'publicClient': False,
                        'secret': manager_secret, 'standardFlowEnabled': True,
@@ -56,10 +58,23 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
                        'protocolMappers': mappers},
                       {'clientId': 'tr-migration', 'enabled': True, 'publicClient': False,
                        'secret': migration_secret, 'standardFlowEnabled': False,
-                       'directAccessGrantsEnabled': False, 'serviceAccountsEnabled': True}],
+                       'directAccessGrantsEnabled': False, 'serviceAccountsEnabled': True},
+                      {'clientId': 'tr-directory', 'enabled': True, 'publicClient': False,
+                       'secret': directory_secret, 'standardFlowEnabled': False,
+                       'directAccessGrantsEnabled': False, 'serviceAccountsEnabled': True},
+                      {'clientId': 'tr-visitor', 'enabled': True, 'publicClient': False,
+                       'secret': visitor_secret, 'standardFlowEnabled': False,
+                       'directAccessGrantsEnabled': False, 'serviceAccountsEnabled': True,
+                       'protocolMappers': [identity_mappers('tr-visitor')[-1]]}],
                   'users': [{'username': 'service-account-tr-migration', 'enabled': True,
                              'serviceAccountClientId': 'tr-migration',
-                             'clientRoles': {'realm-management': ['realm-admin']}}]}
+                             'clientRoles': {'realm-management': ['realm-admin']}},
+                            {'username': 'service-account-tr-directory', 'enabled': True,
+                             'serviceAccountClientId': 'tr-directory',
+                             'clientRoles': {'realm-management': ['query-users', 'query-groups', 'view-users']}},
+                            {'username': 'service-account-tr-visitor', 'enabled': True,
+                             'serviceAccountClientId': 'tr-visitor',
+                             'clientRoles': {'tr-visitor': ['access']}}]}
     (imports / 'realm.json').write_text(json.dumps(definition))
     os.chmod(imports / 'realm.json', 0o644)
     def write(name: str, contents: str) -> None:
@@ -80,6 +95,13 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
         'TR_KEYCLOAK_PROXY_BACKEND_URL=http://tr-keycloak:8080',
         'TR_USER_OIDC_CLIENT_ID=tr-manager', 'TR_USER_OIDC_ROLES_CLIENT_ID=tr-manager',
         f'TR_USER_OIDC_CLIENT_SECRET={manager_secret}', '']))
+    with (root / 'manager.env').open('a') as output:
+        output.write('\n'.join([
+            'TRADERESEARCH_KEYCLOAK_ADMIN_CLIENT_ID=tr-directory',
+            f'TRADERESEARCH_KEYCLOAK_ADMIN_CLIENT_SECRET={directory_secret}',
+            f'TR_KEYCLOAK_VISITOR_ISSUER={public_url.rstrip("/")}/identity/realms/{realm}',
+            'TR_KEYCLOAK_VISITOR_CLIENT_ID=tr-visitor',
+            f'TR_KEYCLOAK_VISITOR_CLIENT_SECRET={visitor_secret}', '']))
     write('migration.env', '\n'.join([
         'TRADERESEARCH_KEYCLOAK_URL=http://127.0.0.1:8099/identity',
         f'TRADERESEARCH_KEYCLOAK_REALM={realm}',

@@ -13,8 +13,8 @@ def test_prepare_creates_private_files_and_correct_identity_claims(tmp_path):
     assert stat.S_IMODE((root / 'manager.env').stat().st_mode) == 0o600
     manager = next(c for c in data['clients'] if c['clientId'] == 'tr-manager')
     assert manager['directAccessGrantsEnabled'] is False
-    claims = {m['name']: m['config']['user.attribute'] for m in manager['protocolMappers']}
-    assert claims['tr_organization_id'] == 'organization_id'
+    claims = {m['name']: m['config']['user.attribute'] for m in manager['protocolMappers'] if 'user.attribute' in m['config']}
+    assert claims['tr_organization_id'] == 'tr_organization_id'
     assert claims['tr_username'] == 'legacy_username'
     with pytest.raises(FileExistsError):
         prepare(root, public_url='https://example.test', network='manager-private', project='identity', realm='research')

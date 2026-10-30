@@ -33,6 +33,8 @@ def _attribute(identity: object, key: str) -> str:
 
 def _project(identity: object) -> dict[str, Any]:
     username = str(getattr(identity, "username", "") or "").strip()
+    if _attribute(identity, "tr_identity_id") and _attribute(identity, "legacy_username"):
+        username = _attribute(identity, "legacy_username")
     display_name = str(getattr(identity, "display_name", "") or "").strip()
     groups = tuple(sorted({
         str(path).rstrip("/") for path in (getattr(identity, "groups", ()) or ())
