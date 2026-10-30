@@ -32,7 +32,17 @@ def main() -> int:
             username = os.environ["KEYCLOAK_USERNAME"]
             password = os.environ["KEYCLOAK_PASSWORD"]
             page = context.new_page()
-            page.goto(manager + "/auth/oidc/start?next=/app")
+            page.goto(manager + "/app")
+            organization_entry = page.get_by_role("button", name=re.compile(
+                r"使用组织账户继续|Continue with your organization account"))
+            page.get_by_role("button", name=re.compile(
+                r"^(登录|Sign in)$|使用组织账户继续|Continue with your organization account"
+            )).first.wait_for(state="visible")
+            if not organization_entry.is_visible():
+                page.get_by_role("button", name=re.compile(r"^(登录|Sign in)$")).first.click()
+            organization_entry.wait_for(state="visible")
+            organization_entry.click()
+            page.locator("#username").wait_for(state="visible")
             page.locator("#username").fill(username)
             if not page.locator("#password").is_visible():
                 page.locator("#kc-login").click()
@@ -49,7 +59,7 @@ def main() -> int:
             expected_role = os.environ.get("KEYCLOAK_EXPECTED_ROLE")
             if expected_role and session.get("role") != expected_role:
                 raise SystemExit("Manager role does not match migration acceptance")
-            checks = ["manager_login", "verified_session"]
+            checks = ["react_login_entry", "manager_login", "verified_session"]
             directory = context.request.get(manager + "/api/admin/account-directory")
             is_admin = session.get('role') in {'super_admin', 'org_admin', 'level_admin'}
             if directory.status != (200 if is_admin else 403):
