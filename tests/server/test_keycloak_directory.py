@@ -120,6 +120,9 @@ def test_native_manager_directory_uses_only_the_verified_request_claims(monkeypa
     clear_directory_cache()
     adapter = DirectoryAdapter()
     monkeypatch.setattr("server.identity.keycloak_directory.manager_keycloak_admin_adapter", lambda: adapter)
+    monkeypatch.setattr("server.identity.server_admission.current_administrative_groups",
+                        lambda session: tuple(session.get("keycloak_groups") or ()))
+    monkeypatch.setattr("server.identity.server_admission.current_manager_role", lambda *_: False)
     session = {"username": "admin", "keycloak_subject": "subject-admin",
                "keycloak_issuer": "https://identity.example.test/realms/trade",
                "keycloak_groups": (organization_admin_group_path("gtht"),), "keycloak_roles": ()}
@@ -134,9 +137,32 @@ def test_native_manager_directory_uses_only_the_verified_request_claims(monkeypa
 def test_native_unprivileged_identity_gets_empty_directory_without_a_query(monkeypatch):
     adapter = DirectoryAdapter()
     monkeypatch.setattr("server.identity.keycloak_directory.manager_keycloak_admin_adapter", lambda: adapter)
+    monkeypatch.setattr("server.identity.server_admission.current_administrative_groups", lambda _: ())
+    monkeypatch.setattr("server.identity.server_admission.current_manager_role", lambda *_: False)
     with identity_request():
         bind_verified_identity("verified-token", {"username": "member", "keycloak_subject": "s",
             "keycloak_issuer": "https://identity.example.test/realms/trade",
             "keycloak_groups": (), "keycloak_roles": ()})
         assert managed_users_for_verified_request("member") == []
     assert adapter.calls == []
+
+
+def test_directory_rechecks_current_role_and_groups_on_old_token(monkeypatch):
+    from server.identity.keycloak_authorization import AuthorizationUnavailable
+    adapter = DirectoryAdapter()
+    monkeypatch.setattr("server.identity.keycloak_directory.manager_keycloak_admin_adapter", lambda: adapter)
+    group = organization_admin_group_path("gtht")
+    current = {"groups": (group,), "role": False}
+    monkeypatch.setattr("server.identity.server_admission.current_administrative_groups", lambda _: current["groups"])
+    monkeypatch.setattr("server.identity.server_admission.current_manager_role", lambda *_: current["role"])
+    session = {"username": "admin", "keycloak_subject": "subject-admin",
+               "keycloak_issuer": "https://identity.example.test/realms/trade",
+               "keycloak_groups": (group,), "keycloak_roles": ("admin_console:manage",)}
+    with identity_request():
+        bind_verified_identity("same-token", session)
+        assert [row["username"] for row in managed_users_for_verified_request("admin")] == ["member-a"]
+        current["groups"] = ()
+        assert managed_users_for_verified_request("admin") == []
+        current["groups"] = None
+        with pytest.raises(AuthorizationUnavailable):
+            managed_users_for_verified_request("admin")
