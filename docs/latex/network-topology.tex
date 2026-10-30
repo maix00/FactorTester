@@ -50,15 +50,15 @@
   \node[text=blue!55!black,font=\Large] at (.55,23.55) {\faBuilding};
   \node[heading] at (.95,23.55) {\TRlabel{机构 A}{Organization A}};
   \draw[host] (.35,20.65) rectangle (4.5,22.95);
-  \node[device] at (.95,21.85) {\faUser\\\TRlabel{用户 1}{User 1}};
-  \node[device] at (2.35,21.85) {\Large\faDesktop\\\scriptsize\TRlabel{网页}{Web}};
-  \node[device] at (3.7,21.85) {\Large\faMobile\\\scriptsize\TRlabel{移动端}{Mobile}};
+  \node[heading,font=\small\bfseries] at (.65,22.6) {\faUser\quad\TRlabel{用户 1}{User 1}};
+  \node[device] at (1.7,21.55) {{\Large\faDesktop}\\\scriptsize\TRlabel{网页}{Web}};
+  \node[device] at (3.2,21.55) {{\Large\faMobile}\\\scriptsize\TRlabel{移动端}{Mobile}};
   \draw[host] (5.1,19.95) rectangle (9.25,22.95);
-  \node[device] at (5.7,22.25) {\faUser\\\TRlabel{用户 2}{User 2}};
-  \node[device] at (7.05,22.25) {\Large\faLaptop\\\scriptsize\TRlabel{电脑客户端}{Desktop app}};
-  \node[device] at (8.6,22.25) {\Large\faTerminal\\\scriptsize CLI};
+  \node[heading,font=\small\bfseries] at (5.4,22.6) {\faUser\quad\TRlabel{用户 2}{User 2}};
+  \node[device] at (6.55,21.85) {{\Large\faLaptop}\\\scriptsize\TRlabel{电脑客户端}{Desktop app}};
+  \node[device] at (8.2,21.85) {{\Large\faTerminal}\\\scriptsize CLI};
   \node[pendingservice,text width=3.5cm,font=\footnotesize] (localruntime) at (7.2,20.65) {\faCogs\,Nautilus\quad\faChartLine\,Alpha\\\faDatabase\,\faDatabase\,\faDatabase};
-  \draw[pending] (7.05,21.65) -- node[number,right] {6} (localruntime.north);
+  \draw[pending] (6.55,21.35) -- node[number,left] {6} (localruntime.north);
   % Each user's devices can reach the public or their own intranet Manager.
   \draw[draw=blue!55!black,line width=1pt] (2.4,22.95) -- (2.4,23.15) -- (7.2,23.15) -- (7.2,22.95);
   \draw[draw=blue!55!black,line width=1pt] (2.4,20.65) -- (2.4,19.65) -- (7.2,19.65) -- (7.2,19.95);
@@ -79,7 +79,7 @@
   \node[data,text width=1.35cm] (ad) at (8.15,14.95) {{\Large\faHdd}\\Data I/O\\\faDatabase\,\faDatabase};
   \draw[control] (am) -- (ak);
   \draw[control] (ak) -- (as);
-  \draw[control] (am.north) -- (1.75,18.15) -| (as.north);
+  \draw[control] (am.north) -- (1.75,18.45) -| (as.north);
   \draw[control] (am) -- (aq);
   \draw[control] (aq) -- (aw);
   \draw[pending] (aa) -- (aw);
@@ -115,8 +115,8 @@
   \draw[draw=blue!55!black,line width=1pt] (11.85,20.37) -- (12.1,20.37);
   \draw[draw=blue!55!black,line width=1pt] (11.85,18.25) -- (13.65,18.25) -- (13.65,18.5);
   \draw[draw=blue!55!black,line width=1pt] (13.65,18.25) -- (16.9,18.25) -- (16.9,18.5);
-  \draw[host] (11.95,15.2) rectangle (19.25,17.4);
-  \node[device,text width=6.4cm] at (15.6,16.3) {{\Large\faServer}\\\TRlabel{内网服务器 · 一台 Manager}{Intranet server · one Manager}\\\scriptsize\TRlabel{内部结构同机构 A}{Internal structure as in organization A}};
+  \draw[host] (11.95,15.5) rectangle (19.25,17.4);
+  \node[device,text width=6.4cm] at (15.6,16.45) {{\Large\faServer}\\\TRlabel{内网服务器 · 一台 Manager}{Intranet server · one Manager}\\\scriptsize\TRlabel{内部结构同机构 A}{Internal structure as in organization A}};
   \draw[control] (11.85,18.25) -- (11.85,17.55) -- (15.6,17.55) -- (15.6,17.4);
 
   % User login and manager federation use different routes and permissions.
@@ -124,7 +124,7 @@
   \draw[control] (15.6,23.15) -- node[number,left] {1} (15.6,26.2);
   \node[text=red!75!black,font=\Large] at (10.6,22.1) {\faBan};
   \draw[pending] (9.25,17.8) -- (10.15,17.8) -- node[number,left,near end] {2} (10.15,26.2);
-  \draw[pending] (11.95,16.3) -- (11.05,16.3) -- (11.05,26.2);
+  \draw[pending] (11.95,16.45) -- (11.05,16.45) -- (11.05,26.2);
 
   % Separate execution and data-only hosts belong to organization A.
   \begin{scope}[yshift=2.3cm]
@@ -153,13 +153,13 @@
   \draw[pending,Stealth-Stealth] (4.51,7.15) -- node[number,above] {5} (5.35,7.15);
 
   % B shows additional hosts without repeating their internals.
-  \begin{scope}[yshift=2.5cm]
-  \draw[host] (12.21,7.76) rectangle (15.41,9.56);
-  \draw[host] (12.13,7.68) rectangle (15.33,9.48);
-  \draw[host] (12.05,7.6) rectangle (15.25,9.4);
-  \draw[host] (16.11,7.76) rectangle (19.31,9.56);
-  \draw[host] (16.03,7.68) rectangle (19.23,9.48);
-  \draw[host] (15.95,7.6) rectangle (19.15,9.4);
+  \begin{scope}[yshift=2.8cm]
+  \draw[host] (12.21,7.46) rectangle (15.41,9.76);
+  \draw[host] (12.13,7.38) rectangle (15.33,9.68);
+  \draw[host] (12.05,7.3) rectangle (15.25,9.6);
+  \draw[host] (16.11,7.46) rectangle (19.31,9.76);
+  \draw[host] (16.03,7.38) rectangle (19.23,9.68);
+  \draw[host] (15.95,7.3) rectangle (19.15,9.6);
   \node[device] at (13.65,8.5) {{\Large\faServer}\\\TRlabel{执行节点主机}{Execution host}\\\faDatabase\,\faDatabase};
   \node[device] at (17.55,8.5) {{\Large\faHdd}\\\TRlabel{数据专用主机}{Data-only host}\\\faDatabase\,\faDatabase};
   \draw[pending,Stealth-Stealth] (15.41,8.5) -- (15.95,8.5);
@@ -167,8 +167,8 @@
   \end{scope}
   \draw[pending] (2.5,13.0) -- node[number,right] {3} (2.5,12.11);
   \draw[pending] (7.1,13.0) -- node[number,right] {7} (7.1,12.11);
-  \draw[pending] (13.65,15.2) -- (13.65,14.36);
-  \draw[pending] (17.55,15.2) -- (17.55,14.36);
+  \draw[pending] (13.65,15.5) -- (13.65,14.86);
+  \draw[pending] (17.55,15.5) -- (17.55,14.86);
 
   % Additional public hosts are separate from the public Manager host.
   \begin{scope}[yshift=30cm]
