@@ -230,6 +230,67 @@ def test_authorize_many_rejects_oversized_batches_and_invalid_scope():
         )
 
 
+def test_authorize_many_isolates_missing_resources_and_keeps_valid_decisions(monkeypatch):
+    from io import BytesIO
+    from urllib.error import HTTPError
+    requests = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self, _limit):
+            return json.dumps([{"rsname": "valid", "scopes": ["read", "use"]}]).encode()
+    class Transport:
+        def open(self, request, *, timeout):
+            form = parse_qs(request.data.decode())
+            permissions = form["permission"]
+            requests.append(permissions)
+            missing = next((item.split("#", 1)[0] for item in permissions if item.startswith("/missing")), None)
+            if missing:
+                payload = {"error": "invalid_resource",
+                           "error_description": f"Resource with uri [{missing}] does not exist."}
+                raise HTTPError(request.full_url, 400, "Bad Request", {}, BytesIO(json.dumps(payload).encode()))
+            return Response()
+    monkeypatch.setattr("server.manager.domain.federation_transport.FederationTransport", Transport)
+    values = [("/valid", "valid", "read"), ("/missing1", "missing1", "read"),
+              ("/missing1", "missing1", "write"), ("/missing2", "missing2", "read"),
+              ("/valid", "valid", "use")]
+    assert ServiceOIDCClient("https://id.example", "research", "api").authorize_many(
+        "verified-token", audience="api", permissions=values) == {("/valid", "read"), ("/valid", "use")}
+    assert [len(items) for items in requests] == [5, 3, 2]
+
+
+@pytest.mark.parametrize("status,payload", [
+    (401, {"error": "invalid_token"}),
+    (400, {"error": "invalid_request"}),
+    (400, {"error": "invalid_resource", "error_description": "Resource with uri [/other] does not exist."}),
+    (400, {"error": "invalid_resource", "error_description": "other problem"}),
+])
+def test_authorize_many_does_not_hide_unrelated_errors(monkeypatch, status, payload):
+    from io import BytesIO
+    from urllib.error import HTTPError
+    class Transport:
+        def open(self, request, *, timeout):
+            raise HTTPError(request.full_url, status, "failure", {}, BytesIO(json.dumps(payload).encode()))
+    monkeypatch.setattr("server.manager.domain.federation_transport.FederationTransport", Transport)
+    with pytest.raises(HTTPError) as raised:
+        ServiceOIDCClient("https://id.example", "research", "api").authorize_many(
+            "token", audience="api", permissions=[("/candidate", "candidate", "read")])
+    assert raised.value.code == status
+
+
+def test_single_authorization_does_not_turn_unauthorized_into_denial(monkeypatch):
+    from io import BytesIO
+    from urllib.error import HTTPError
+    class Transport:
+        def open(self, request, *, timeout):
+            raise HTTPError(request.full_url, 401, "unauthorized", {}, BytesIO(b'{}'))
+    monkeypatch.setattr("server.manager.domain.federation_transport.FederationTransport", Transport)
+    with pytest.raises(HTTPError) as raised:
+        ServiceOIDCClient("https://id.example", "research", "api").authorize(
+            "token", audience="api", resource_id="existing", scope="read")
+    assert raised.value.code == 401
+
+
 def test_factor_source_permissions_are_deduplicated_and_bounded(monkeypatch):
     calls = []
 

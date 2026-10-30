@@ -135,10 +135,16 @@ def test_independent_keycloak_grants_can_be_updated_and_revoked():
     assert manager.set_user_grant(**common, source="profile:work", scopes=["read", "use"])
     assert not manager.set_user_grant(**common, source="explicit", scopes=["read"])
     assert manager.set_user_grant(**common, source="explicit", scopes=["read", "use"])
+    explicit = next(policy for policy in policies.values() if '"source":"explicit"' in policy["description"])
+    explicit["roles"] = ["unrelated-role"]
+    from server.identity.keycloak_authorization import AuthorizationUnavailable
+    with pytest.raises(AuthorizationUnavailable, match="conflicts"):
+        manager.set_user_grant(**common, source="explicit", scopes=[])
+    del explicit["roles"]
     assert manager.set_user_grant(**common, source="explicit", scopes=[])
     assert len(policies) == 1
     assert sorted(next(iter(policies.values()))["scopes"]) == ["read", "use"]
-    assert len(invalidations) == 9  # five fresh caller checks plus four changes
+    assert len(invalidations) == 10  # six fresh caller checks plus four changes
 
 
 def test_user_grants_require_verified_share_permission_and_cannot_delegate_admin():
