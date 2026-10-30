@@ -81,6 +81,7 @@ class AgentAppServerSupervisor:
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._starting: set[tuple[str, str]] = set()
+        self._stopping: set[tuple[str, str]] = set()
         self._cancelled_starts: set[tuple[str, str]] = set()
         self._starting_sessions: dict[tuple[str, str], AgentAppServerSession] = {}
         self._starting_tokens: dict[tuple[str, str], str] = {}
@@ -160,7 +161,9 @@ class AgentAppServerSupervisor:
             ]
         for key in idle:
             try:
-                self.stop(*key)
+                # Activity may have resumed since the candidate list was
+                # built. Check again while atomically detaching the session.
+                self.stop(*key, _idle_before=cutoff)
             except Exception:
                 LOGGER.exception("Idle Agent session cleanup failed profile=%s", key[1])
 
@@ -186,7 +189,16 @@ class AgentAppServerSupervisor:
         self.thread_reader.close(*key)
         stale_session: AgentAppServerSession | None = None
         stale_token = ""
-        with self._lock:
+        with self._condition:
+            deadline = time.monotonic() + 6.0
+            while key in self._stopping and not self._shutting_down:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AgentAppServerError(
+                        "Agent shutdown is still in progress",
+                        code="start_in_progress",
+                    )
+                self._condition.wait(timeout=remaining)
             if self._shutting_down:
                 raise AgentAppServerError("Agent supervisor is shutting down")
             existing = self._sessions.get(key)
@@ -305,9 +317,31 @@ class AgentAppServerSupervisor:
                 self._cancelled_starts.discard(key)
                 self._condition.notify_all()
 
-    def stop(self, principal: str, profile_id: str) -> dict[str, Any]:
+    def stop(
+        self, principal: str, profile_id: str, *, _idle_before: float | None = None,
+    ) -> dict[str, Any]:
         key = self._key(principal, profile_id)
         with self._condition:
+            deadline = time.monotonic() + 6.0
+            while key in self._stopping:
+                if _idle_before is not None:
+                    return {"stopped": False}
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AgentAppServerError(
+                        "Agent shutdown is still in progress",
+                        code="start_in_progress",
+                    )
+                self._condition.wait(timeout=remaining)
+            if _idle_before is not None and (
+                key not in self._sessions
+                or self._last_activity.get(key, float("inf")) > _idle_before
+                or key in self._processing_turns
+                or key in self._inflight_requests
+                or key in self._starting
+            ):
+                return {"stopped": False}
+            self._stopping.add(key)
             self._model_catalog_cache.pop(key, None)
             if key in self._starting:
                 self._cancelled_starts.add(key)
@@ -318,25 +352,29 @@ class AgentAppServerSupervisor:
             active_token = self._agent_session_tokens.pop(key, "")
             starting_token = self._starting_tokens.get(key, "")
             self._stop_heartbeat(key)
-        stopped: set[int] = set()
-        for candidate in (session, starting_session):
-            if candidate is not None and id(candidate) not in stopped:
-                stopped.add(id(candidate))
-                candidate.stop()
-        for token in {active_token, starting_token} - {""}:
-            self.profile_service.revoke_agent_session(token)
-        self.profile_service.pause_server_agent(*key)
-        # Starting work checks the cancellation flag before and after every
-        # external startup step. Wait briefly for a subprocess handshake to
-        # observe it, but never hold the supervisor lock while doing so.
-        deadline = time.monotonic() + 6.0
-        with self._condition:
-            while key in self._starting:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                self._condition.wait(timeout=remaining)
-        return {"stopped": True, "running": False}
+        try:
+            stopped: set[int] = set()
+            for candidate in (session, starting_session):
+                if candidate is not None and id(candidate) not in stopped:
+                    stopped.add(id(candidate))
+                    candidate.stop()
+            for token in {active_token, starting_token} - {""}:
+                self.profile_service.revoke_agent_session(token)
+            self.profile_service.pause_server_agent(*key)
+            # Starting work checks cancellation at every external step. Do not
+            # hold the supervisor lock while a process or provider shuts down.
+            deadline = time.monotonic() + 6.0
+            with self._condition:
+                while key in self._starting:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._condition.wait(timeout=remaining)
+            return {"stopped": True, "running": False}
+        finally:
+            with self._condition:
+                self._stopping.discard(key)
+                self._condition.notify_all()
 
     def status(self, principal: str, profile_id: str) -> dict[str, Any]:
         key = self._key(principal, profile_id)
@@ -682,11 +720,23 @@ class AgentAppServerSupervisor:
                     "conversation_id": str(conversation["conversation_id"]),
                     "event_after": event_after,
                 }
-        bind_start_to_session()
-        with self._lock:
-            self._inflight_requests[key] = self._inflight_requests.get(key, 0) + 1
-            self._last_activity[key] = time.monotonic()
+        # Reserve the exact live session before issuing a request. Without
+        # this check a reaper could detach it after the initial running probe.
+        for _ in range(2):
+            with self._lock:
+                if self._sessions.get(key) is session:
+                    self._inflight_requests[key] = self._inflight_requests.get(key, 0) + 1
+                    self._last_activity[key] = time.monotonic()
+                    break
+            self.start(*key)
+            with self._lock:
+                session = self._sessions.get(key)
+            if session is None:
+                raise AgentAppServerError("Profile Agent could not be started")
+        else:
+            raise AgentAppServerError("Profile Agent session changed; retry")
         try:
+            bind_start_to_session()
             try:
                 response = session.request(method, request_params)
             except AgentAppServerError as exc:
@@ -765,7 +815,8 @@ class AgentAppServerSupervisor:
                     self._inflight_requests[key] = remaining
                 else:
                     self._inflight_requests.pop(key, None)
-                self._last_activity[key] = time.monotonic()
+                if key in self._sessions:
+                    self._last_activity[key] = time.monotonic()
                 self._condition.notify_all()
         self._save_conversation_state(
             key,
@@ -945,7 +996,7 @@ class AgentAppServerSupervisor:
         with self._condition:
             self._shutting_down = True
             self._reaper_stop.set()
-            keys = list(set(self._sessions) | set(self._starting))
+            keys = list(set(self._sessions) | set(self._starting) | set(self._stopping))
             self._cancelled_starts.update(self._starting)
         for principal, profile_id in keys:
             self.stop(principal, profile_id)

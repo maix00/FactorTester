@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -804,6 +805,141 @@ def test_agent_supervisor_limits_live_sessions_and_reaps_idle_ones(
     supervisor._reap_idle_sessions_once(now=time.monotonic())
     assert not supervisor.status(*key)["running"]
     supervisor.stop_all()
+
+
+def test_agent_reaper_rechecks_activity_before_stopping(tmp_path, monkeypatch):
+    service, _provider = _claimed_agent_service(tmp_path, monkeypatch)
+    supervisor = AgentAppServerSupervisor(
+        service, codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        idle_timeout_seconds=30,
+    )
+    key = (PRINCIPAL, PROFILE_ID)
+    supervisor.start(*key)
+    supervisor._last_activity[key] = time.monotonic() - 31
+    original_stop = supervisor.stop
+
+    def renewed_before_stop(*args, **kwargs):
+        # A request arrived after the reaper built its candidate list.
+        with supervisor._lock:
+            supervisor._last_activity[key] = time.monotonic()
+        return original_stop(*args, **kwargs)
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(supervisor, "stop", renewed_before_stop)
+            supervisor._reap_idle_sessions_once(now=time.monotonic())
+        assert supervisor.status(*key)["running"]
+    finally:
+        supervisor.stop_all()
+
+
+def test_agent_start_waits_until_previous_process_has_stopped(tmp_path, monkeypatch):
+    service, _provider = _claimed_agent_service(tmp_path, monkeypatch)
+    supervisor = AgentAppServerSupervisor(
+        service, codex_binary=_fake_codex(tmp_path / "fake-codex"),
+    )
+    key = (PRINCIPAL, PROFILE_ID)
+    supervisor.start(*key)
+    previous = supervisor._sessions[key]
+    original_stop = previous.stop
+    stopping = threading.Event()
+    release = threading.Event()
+    started = threading.Event()
+    failures = []
+
+    def slow_stop():
+        stopping.set()
+        assert release.wait(timeout=5)
+        original_stop()
+
+    def start_again():
+        try:
+            supervisor.start(*key)
+            started.set()
+        except Exception as exc:  # reported in the parent thread
+            failures.append(exc)
+
+    monkeypatch.setattr(previous, "stop", slow_stop)
+    stopping_thread = threading.Thread(target=supervisor.stop, args=key)
+    starting_thread = threading.Thread(target=start_again)
+    try:
+        stopping_thread.start()
+        assert stopping.wait(timeout=2)
+        starting_thread.start()
+        started_before_release = started.wait(timeout=0.2)
+    finally:
+        release.set()
+        stopping_thread.join(timeout=8)
+        starting_thread.join(timeout=8)
+    try:
+        assert not stopping_thread.is_alive()
+        assert not starting_thread.is_alive()
+        assert not started_before_release
+        assert failures == []
+        assert started.is_set()
+        assert supervisor.status(*key)["running"]
+    finally:
+        supervisor.stop_all()
+
+
+def test_request_rebinds_if_idle_reaper_detaches_probed_session(tmp_path, monkeypatch):
+    service, _provider = _claimed_agent_service(tmp_path, monkeypatch)
+    supervisor = AgentAppServerSupervisor(
+        service, codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        idle_timeout_seconds=30,
+    )
+    key = (PRINCIPAL, PROFILE_ID)
+    supervisor.start(*key)
+    previous = supervisor._sessions[key]
+    original_request = previous.request
+    stale_requests = []
+    entered = threading.Event()
+    release = threading.Event()
+    results = []
+    failures = []
+
+    def stale_request(*args, **kwargs):
+        stale_requests.append(args)
+        return original_request(*args, **kwargs)
+
+    class BlockingParams(Mapping):
+        def __len__(self):
+            return 1
+
+        def __iter__(self):
+            entered.set()
+            assert release.wait(timeout=5)
+            return iter(("limit",))
+
+        def __getitem__(self, key):
+            if key != "limit":
+                raise KeyError(key)
+            return 10
+
+    def request():
+        try:
+            results.append(supervisor.request(*key, "model/list", BlockingParams()))
+        except Exception as exc:
+            failures.append(exc)
+
+    monkeypatch.setattr(previous, "request", stale_request)
+    supervisor._last_activity[key] = time.monotonic() - 31
+    worker = threading.Thread(target=request)
+    try:
+        worker.start()
+        assert entered.wait(timeout=2)
+        supervisor._reap_idle_sessions_once(now=time.monotonic())
+    finally:
+        release.set()
+        worker.join(timeout=8)
+    try:
+        assert not worker.is_alive()
+        assert failures == []
+        assert results
+        assert stale_requests == []
+        assert supervisor._sessions[key] is not previous
+    finally:
+        supervisor.stop_all()
 
 
 def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(

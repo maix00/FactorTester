@@ -51,8 +51,6 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
   const mountRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<LegacyChatRoot | null>(null);
   const pendingRef = useRef<Promise<void> | null>(null);
-  const startedHereRef = useRef(false);
-  const startedProfileRef = useRef("");
   const profileRef = useRef<AgentProfile | null>(null);
   profileRef.current = profile;
   const ownerRef = useRef(`react-agent-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`);
@@ -193,8 +191,6 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
           method: "POST", body: JSON.stringify({ profile_id: self.profile_id }),
         });
         status = started.status || status;
-        startedHereRef.current = true;
-        startedProfileRef.current = self.profile_id;
       }
       if (!aliveRef.current || !mountRef.current) return;
 
@@ -247,12 +243,8 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
     return () => {
       aliveRef.current = false;
       disposeChat();
-      const profileID = startedProfileRef.current || profileRef.current?.profile_id;
-      if (startedHereRef.current && profileID) {
-        void request("/api/client/profile-agent/stop", {
-          method: "POST", body: JSON.stringify({ profile_id: profileID }),
-        }).catch(() => undefined);
-      }
+      // The process belongs to the Profile, not this panel. Another tab or
+      // device may still use it; the supervisor reaps it when truly idle.
     };
   }, [disposeChat]);
 
