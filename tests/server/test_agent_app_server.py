@@ -662,8 +662,8 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     config = config_path.read_text(encoding="utf-8")
     import tomllib
     instructions = tomllib.loads(config)["developer_instructions"]
-    assert instructions.startswith("你是 FactorTester")
-    assert "factortester assist inspect" in instructions
+    assert instructions.startswith("你是 TradeResearch")
+    assert "traderesearch assist inspect" in instructions
     assert "\n" in instructions
     assert len(instructions) < 400
     assert "research-model" in config

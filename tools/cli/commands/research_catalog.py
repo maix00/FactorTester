@@ -260,8 +260,8 @@ def register_research_catalog_commands(research: click.Group) -> None:
         initialized = initialize_report_space(store, profile_ref, report)
         # The existing server report reader sees the Profile-owned tree; client
         # reports continue to use the existing explicit publication workflow.
-        import os
-        if os.environ.get("FACTORTESTER_AGENT_CAPABILITY_FILE"):
+        from tools.cli.agent_auth import capability_path
+        if capability_path():
             client.register_research_report(research_id, {
                 "report_id": report["report_id"], "title": report["title"],
                 "profile_ref": profile_ref, "workspace_id": report["workspace_id"],

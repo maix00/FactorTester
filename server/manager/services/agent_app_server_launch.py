@@ -29,6 +29,11 @@ _PAGE_ASSISTANCE_INSTRUCTION = """你是 TradeResearch 研究助手。
 按页面声明的 schema 修改草稿，经 validate、apply 后以 applied 回执确认；保留未请求的字段，不猜参数。
 研究和报告操作用 `traderesearch research --help` 查询。节点、候选和正文按需读取，不全量枚举；不绕过权限。"""
 
+_AGENT_INHERITED_ENV = frozenset({
+    "LANG", "LANGUAGE", "PATH", "SSL_CERT_DIR", "SSL_CERT_FILE",
+    "NIX_SSL_CERT_FILE", "TERM", "TZ",
+})
+
 
 def _toml_string(value: object) -> str:
     return json.dumps(str(value or ""), ensure_ascii=False)
@@ -124,7 +129,7 @@ class AgentAppServerLaunch:
             [
                 f"model = {_toml_string(model)}",
                 f"developer_instructions = {_toml_string(_PAGE_ASSISTANCE_INSTRUCTION)}",
-                'model_provider = "factortester"',
+                'model_provider = "traderesearch"',
                 'approval_policy = "never"',
                 # FactorTester already launches Codex inside a Profile-only
                 # Bubblewrap mount namespace with a private /tmp.  Asking
@@ -134,10 +139,10 @@ class AgentAppServerLaunch:
                 # namespace, not to the Manager host/container filesystem.
                 'sandbox_mode = "danger-full-access"',
                 "",
-                "[model_providers.factortester]",
-                'name = "FactorTester provider"',
+                "[model_providers.traderesearch]",
+                'name = "TradeResearch provider"',
                 f"base_url = {_toml_string(base_url)}",
-                'env_key = "FACTORTESTER_AGENT_TOKEN"',
+                'env_key = "TRADERESEARCH_AGENT_TOKEN"',
                 'wire_api = "responses"',
                 "",
                 "[shell_environment_policy]",
@@ -189,7 +194,7 @@ class AgentAppServerLaunch:
         principal = str(self.factor_tester_auth.get("principal") or "").strip()
         if not all((base_url, token, profile_id, claim_id, principal)):
             raise AgentAppServerError(
-                "Profile Agent FactorTester capability is incomplete"
+                "Profile Agent TradeResearch capability is incomplete"
             )
         self._write_private_json(
             self.factor_tester_config_path,
@@ -288,16 +293,14 @@ class AgentAppServerLaunch:
         secret = str(self.provider.get("secret") or "")
         if not secret:
             raise AgentAppServerError("Agent provider token is unavailable")
-        environment = self.runtime.environment()
-        # Do not inherit credentials from the Manager process.  The child gets
-        # exactly one token through the private env key named by config.toml.
-        for key in (
-            "OPENAI_API_KEY",
-            "CODEX_API_KEY",
-            "FACTORTESTER_AGENT_TOKEN",
-        ):
-            environment.pop(key, None)
-        environment["FACTORTESTER_AGENT_TOKEN"] = secret
+        # Build an allowlisted environment before handing it to the Profile
+        # runtime.  A denylist would leak newly added Manager credentials to
+        # the assistant process and its tool children.
+        inherited = {key: value for key, value in os.environ.items()
+                     if key in _AGENT_INHERITED_ENV or key.startswith("LC_")}
+        inherited.setdefault("PATH", os.defpath)
+        environment = self.runtime.environment(base=inherited)
+        environment["TRADERESEARCH_AGENT_TOKEN"] = secret
         if self.proxy_url:
             self._set_proxy_environment(environment)
         cli = str(self.factor_tester_cli or "").strip()
@@ -310,21 +313,21 @@ class AgentAppServerLaunch:
                         environment.get("PATH", ""),
                     ]
                 ).rstrip(os.pathsep)
-            environment["FACTORTESTER_CLI"] = cli
+            environment["TRADERESEARCH_CLI"] = cli
         if self.factor_tester_auth:
             if self.factor_tester_ca_path.is_file():
                 environment["SSL_CERT_FILE"] = str(self.factor_tester_ca_path)
-            environment["FACTORTESTER_CONFIG"] = str(self.factor_tester_config_path)
-            environment["FACTORTESTER_HOME"] = str(
+            environment["TRADERESEARCH_CONFIG"] = str(self.factor_tester_config_path)
+            environment["TRADERESEARCH_HOME"] = str(
                 self.runtime.home_root / "factortester"
             )
-            environment["FACTORTESTER_CLIENT_ROOT"] = str(
+            environment["TRADERESEARCH_CLIENT_ROOT"] = str(
                 self.runtime.factor_tester_client_root
             )
-            environment["FACTORTESTER_PROFILE"] = str(
+            environment["TRADERESEARCH_PROFILE"] = str(
                 self.factor_tester_auth.get("profile_id") or ""
             )
-            environment["FACTORTESTER_AGENT_CAPABILITY_FILE"] = str(
+            environment["TRADERESEARCH_AGENT_CAPABILITY_FILE"] = str(
                 self.factor_tester_capability_path
             )
         workspace_root = getattr(self.runtime, "workspace_root", None)
