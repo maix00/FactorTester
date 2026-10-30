@@ -729,7 +729,12 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         from server.modules.single_factor_test.execution_nodes import bind_prepared_execution
         from server.identity.keycloak_authorization import AuthorizationUnavailable
         try:
-            prepared["execution_binding"] = bind_prepared_execution(prepared, selected_execution)
+            # The frozen context retains its source-realm owner. Node and
+            # Bundle access, however, must be evaluated for the authenticated
+            # target-realm account, which may have a different username.
+            # Only adapt the lookup input; do not rewrite the frozen RunSpec.
+            target_prepared = {**prepared, "owner": owner} if context is not None else prepared
+            prepared["execution_binding"] = bind_prepared_execution(target_prepared, selected_execution)
         except AuthorizationUnavailable as exc:
             raise _RunRequestError(str(exc), status_code=503,
                 details={"code": "keycloak_authorization_unavailable"}) from exc

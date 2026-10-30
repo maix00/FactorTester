@@ -189,3 +189,26 @@ def test_federated_frozen_context_keeps_source_owner_for_validation(monkeypatch)
             {research_jobs.MANAGER_RUN_CONTEXT_KEY: context}, owner="target-name")
     assert value["execution_binding"]["route_id"] == "target"
     assert captured == [(context, "source-name")]
+
+
+def test_federated_node_access_uses_target_account_without_rewriting_source_context(monkeypatch):
+    from flask import Flask, g
+    from server.modules.single_factor_test import execution_nodes, research_jobs
+
+    run_spec = {"owner": "source-name", "nested": {"owner": "source-name"}}
+    prepared = {"owner": "source-name", "run_spec": run_spec,
+                "execution_selection": {"mode": "manual"}}
+    monkeypatch.setattr(research_jobs, "load_manager_run_context", lambda _value, *, owner: prepared)
+    observed = []
+    def bind(value, selection):
+        observed.append((value["owner"], value["run_spec"], selection))
+        return {"route_id": "target"}
+    monkeypatch.setattr(execution_nodes, "bind_prepared_execution", bind)
+    with Flask(__name__).test_request_context():
+        g.tr_federated_source_username = "source-name"
+        result = research_jobs._prepare_research_run_request(
+            {research_jobs.MANAGER_RUN_CONTEXT_KEY: {}}, owner="target-name")
+    assert observed == [("target-name", run_spec, {"mode": "manual"})]
+    assert result["owner"] == "source-name"
+    assert result["run_spec"] is run_spec
+    assert run_spec == {"owner": "source-name", "nested": {"owner": "source-name"}}
