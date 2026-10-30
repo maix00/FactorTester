@@ -5,7 +5,7 @@ export type ReportExportTarget = {
 };
 
 /** Use the selected branch's canonical channel; never infer a different user's report. */
-export function reportExportURL(target: ReportExportTarget, format: ReportExportFormat): string | null {
+export function reportResourceURL(target: ReportExportTarget, segments: string[], params: Record<string, string> = {}): string | null {
   const explicit = String(target.publication_id || target.source_ref || "").trim();
   let channel: "client" | "server" | "public";
   let ref: string;
@@ -21,9 +21,15 @@ export function reportExportURL(target: ReportExportTarget, format: ReportExport
   }
   if (!ref) return null;
   const prefix = channel === "client" ? "/api/client/research" : channel === "server" ? "/api/server-research" : "/api/public-research";
-  const query = new URLSearchParams({ format });
+  const query = new URLSearchParams(params);
   if (channel === "server" && target.owner_ref?.trim()) query.set("target_ref", target.owner_ref.trim());
-  return `${prefix}/${encodeURIComponent(ref)}/export?${query}`;
+  const suffix = segments.map(encodeURIComponent).join("/");
+  const encodedQuery = query.toString();
+  return `${prefix}/${encodeURIComponent(ref)}${suffix ? `/${suffix}` : ""}${encodedQuery ? `?${encodedQuery}` : ""}`;
+}
+
+export function reportExportURL(target: ReportExportTarget, format: ReportExportFormat): string | null {
+  return reportResourceURL(target, ["export"], {format});
 }
 
 export function reportExportPayload(target: ReportExportTarget, format: ReportExportFormat): Record<string, string> {

@@ -15,6 +15,7 @@ import { useAuth } from "../auth.tsx";
 import { ReportEditor } from "../components/report-editor.tsx";
 import { ReportMarkdown } from "../components/report-markdown.tsx";
 import { ReportExport } from "../components/report-export.tsx";
+import { ReportBranchReader } from "../components/report-branch-reader.tsx";
 import { ResearchEdit } from "../components/research-edit.tsx";
 import { ResearchRelations } from "../components/research-relations.tsx";
 import { linkedResearchID, reportBranches, reportRowID, researchRowID, selectReportBranch } from "../research-model.ts";
@@ -73,7 +74,9 @@ export function ResearchPage(): React.ReactElement {
         </div> : null}
         {selectedPublicationBranch?.publication_id
           ? <><ReportEditor key={selectedPublicationBranch.publication_id} publicationID={selectedPublicationBranch.publication_id} /><ReportMarkdown key={selectedPublicationBranch.publication_id} publicationID={selectedPublicationBranch.publication_id} /></>
-          : <Alert type="info" showIcon message={t("research.reportVersionUnavailable")} description={selectedReportBranch ? t(`research.reportSources.${selectedReportBranch.source_kind || "unknown"}`) : selected.build_source === "workspace" ? t("research.reportSources.workspace") : undefined} />}
+          : selectedReportBranch?.publication_id && ["client", "server_agent"].includes(String(selectedReportBranch.source_kind))
+            ? <><Alert type="info" showIcon message={t("report.branchReadOnly")} /><ReportBranchReader key={selectedReportBranch.publication_id} target={{...selected,...selectedReportBranch}} /></>
+            : <Alert type="info" showIcon message={t("research.reportVersionUnavailable")} description={selectedReportBranch ? t(`research.reportSources.${selectedReportBranch.source_kind || "unknown"}`) : selected.build_source === "workspace" ? t("research.reportSources.workspace") : undefined} />}
       </>
         : editingResearch ? <ResearchEdit research={selected as Row} onCancel={() => setEditingResearch(false)} onArchived={() => { setSelected(null); setEditingResearch(false); setRevision((value) => value + 1); }} onSaved={(value) => { setSelected({ ...selected, ...value }); setDetail(value); setEditingResearch(false); setRevision((revision) => revision + 1); }} />
         : editor ? <><Button onClick={() => setEditor(false)}>{t("research.backToSummary")}</Button><iframe className="tr-artifact-frame" title={selected.title || rowID(selected)} src={`/researches/${encodeURIComponent(researchRowID(selected))}?presentation=embedded`} /></> : detail && !(detail as Row).error ? <ResearchRelations key={researchRowID(selected)} research={detail as Row} overview={<><ResearchSummary value={detail as Row} /><div className="tr-inline-actions">{(detail as Row).access?.can_manage ? <Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button> : null}<Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></div></>} onReport={(report) => { setTab("reports"); setRows([]); setPage(1); setSelected(report); setSelectedPublicationID(selectReportBranch(report)?.publication_id || ""); }} onResearch={(research) => { setTab("researches"); setSelected(research); setEditingResearch(false); setEditor(false); }} /> : <ResearchSummary value={detail as Row | null} />}
