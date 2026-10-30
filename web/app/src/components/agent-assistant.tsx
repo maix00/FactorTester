@@ -6,6 +6,9 @@ import { request } from "../configuration/api.ts";
 import { useCompactLayout } from "../configuration/layout.ts";
 import { loadScript } from "../assets.ts";
 import { agentAssistantSetupStep, agentProfileLabel, isAgentAssistantPermissionDenied, isUnboundAgentRuntimeError, selfAgentProfile, type AgentProfile } from "../agent-assistant-model.ts";
+import { assistantResearchContexts, useAssistantResearchContext } from "../assistant-research-context.ts";
+import type { AssistanceStatus } from "../assistant-context-publisher.ts";
+import { AssistantWorkspaceSession } from "../assistant-workspace.ts";
 import { AgentModelSetupModal } from "./agent-model-setup-modal.tsx";
 
 type LegacyChatRoot = HTMLElement & { __ftBeforeTabSave?: () => void };
@@ -48,9 +51,13 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
   const [setupError, setSetupError] = useState("");
   const [modelSetupOpen, setModelSetupOpen] = useState(false);
   const [profile, setProfile] = useState<AgentProfile | null>(null);
+  const [assistanceStatus, setAssistanceStatus] = useState<AssistanceStatus>("idle");
+  const researchContext = useAssistantResearchContext();
   const mountRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<LegacyChatRoot | null>(null);
   const pendingRef = useRef<Promise<void> | null>(null);
+  const workspaceRef = useRef<AssistantWorkspaceSession | null>(null);
+  const openRef = useRef(open); openRef.current = open;
   const profileRef = useRef<AgentProfile | null>(null);
   profileRef.current = profile;
   const ownerRef = useRef(`react-agent-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`);
@@ -194,12 +201,24 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
       }
       if (!aliveRef.current || !mountRef.current) return;
 
+      if (!workspaceRef.current) {
+        const workspace = await AssistantWorkspaceSession.open(request,self.profile_id,
+          value => {if (aliveRef.current) setAssistanceStatus(value);});
+        if (!aliveRef.current || !mountRef.current) {void workspace.close().catch(() => undefined);return;}
+        workspaceRef.current = workspace;
+      }
+      const workspace = workspaceRef.current;
+      workspace.set(openRef.current ? assistantResearchContexts.snapshot() : null);
+
       const legacyT = (key: string): string => {
         const translated = legacyRef.current.FTI18n?.t?.(key, key);
         return translated && translated !== key ? translated : t(key, { defaultValue: key });
       };
       const context: Record<string, unknown> = {
-        api: request,
+        api: (url:string, options?:RequestInit) => {
+          if (url === "/api/client/profile-agent/rpc") workspace.set(openRef.current ? assistantResearchContexts.snapshot() : null);
+          return workspace.request(url,options);
+        },
         t: legacyT,
         locale: i18n.language === "zh" ? "zh-Hans" : i18n.language,
         language: i18n.language,
@@ -242,6 +261,9 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
+      const workspace = workspaceRef.current;
+      workspaceRef.current = null;
+      if (workspace) void workspace.close().catch(() => undefined);
       disposeChat();
       // The process belongs to the Profile, not this panel. Another tab or
       // device may still use it; the supervisor reaps it when truly idle.
@@ -252,9 +274,16 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
     if (open && !rootRef.current) void loadAssistant();
   }, [loadAssistant, open, retry]);
 
+  useEffect(() => { workspaceRef.current?.set(open ? researchContext : null); }, [open,researchContext]);
+
   const retryLoad = (): void => { pendingRef.current = null; setRetry((value) => value + 1); };
   const width = compact ? "100vw" : 560;
   const content = <>
+    {researchContext && workspaceRef.current ? <div className="tr-agent-assistant-context">
+      <span>{t("assistant.currentResearch")}</span><strong title={researchContext.title}>{researchContext.title}</strong>
+      <span role="status">{t(assistanceStatus === "ready" ? "assistant.contextReady" : assistanceStatus === "unavailable" ? "assistant.contextUnavailable" : "assistant.contextSyncing")}</span>
+      {assistanceStatus === "unavailable" ? <Button size="small" type="link" onClick={() => void workspaceRef.current?.ready().catch(() => undefined)}>{t("assistant.retry")}</Button> : null}
+    </div> : null}
     {setupRequired === "forbidden" ? <div className="tr-agent-assistant-setup">
       <Alert type="warning" showIcon message={t("assistant.permissionTitle")} description={t("assistant.permissionHint")} />
     </div> : null}
