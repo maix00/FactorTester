@@ -272,7 +272,15 @@ def keycloak_request_identity() -> VerifiedRequestIdentity | None:
         from flask import g, has_request_context, request
 
         if not has_request_context():
-            return None
+            from server.identity.request_context import current_verified_identity
+            verified = current_verified_identity()
+            if not verified:
+                return None
+            token, identity = verified
+            return VerifiedRequestIdentity(
+                token, identity["keycloak_issuer"], identity["keycloak_subject"],
+                identity["username"],
+            )
         identity = getattr(g, "keycloak_user_session", None)
         if not isinstance(identity, dict):
             return None

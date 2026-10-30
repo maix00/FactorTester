@@ -32,7 +32,8 @@ def publish_strategy(sync, strategy_ref: str, principal: str) -> None:
         sync.delete(principal, 'strategy', strategy_ref, flush=False)
         return
     owner = entry['owner_ref']
-    shares = store.shares(strategy_ref)
+    # Sync metadata only; grants are authoritative in Keycloak.
+    shares = []
     visibility = 'authorized' if entry['visibility'] == 'shared' else entry['visibility']
     policy = {'visibility': visibility, 'authorized_users': shares}
     for summary in store.list_revisions(strategy_ref):
@@ -113,6 +114,3 @@ def materialize_strategy(database, row: dict) -> None:
             current_revision_ref=excluded.current_revision_ref,updated_at=excluded.updated_at,deleted_at=0''',
             (identifier, value['owner_ref'], value['name'], value['description'], value['entry_visibility'],
              value['current_revision_ref'], value['created_at'], value['updated_at']))
-        db.execute('DELETE FROM strategy_library_shares WHERE strategy_ref=?', (identifier,))
-        db.executemany('INSERT INTO strategy_library_shares VALUES (?,?,?)',
-                       [(identifier, target, value['updated_at']) for target in value.get('shares') or []])

@@ -594,7 +594,11 @@ class RequestSecurityMixin:
         )
 
     def _session(self) -> dict[str, object] | None:
-        return self.state.session(self._bearer_token())
+        from server.identity.request_context import bind_verified_identity
+        token = self._bearer_token()
+        session = self.state.session(token)
+        bind_verified_identity(token, session)
+        return session
 
     def _serve_login_page(self, parsed) -> None:
         requested = parse_qs(parsed.query, keep_blank_values=True).get(

@@ -69,7 +69,9 @@ def _verified_keycloak_request_identity() -> dict | None:
     try:
         from flask import g, has_request_context
         if not has_request_context():
-            return None
+            from server.identity.request_context import current_verified_identity
+            verified = current_verified_identity()
+            return verified[1] if verified else None
         identity = getattr(g, "keycloak_user_session", None)
         if not isinstance(identity, dict):
             from server.services.session_runtime import _keycloak_request_session

@@ -560,6 +560,11 @@ class Handler(
     state: ManagerState
     protocol_version = "HTTP/1.1"
 
+    def handle_one_request(self) -> None:
+        from server.identity.request_context import identity_request
+        with identity_request():
+            super().handle_one_request()
+
     def end_headers(self) -> None:
         """Keep framed responses alive and close legacy unframed responses.
 
