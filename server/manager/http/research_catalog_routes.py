@@ -63,7 +63,10 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 return True
             if parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
-                subordinate_refs = self._research_catalog_subordinate_refs(viewer)
+                subordinate_refs = (
+                    self._research_catalog_subordinate_refs(viewer)
+                    if scope == "subordinates" else []
+                )
                 value = service.list_researches(
                     viewer=viewer,
                     include_archived=query.get("include_archived") == ["1"],
@@ -100,7 +103,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     viewer=viewer,
                     include_archived=query.get("include_archived") == ["1"],
                     scope=scope,
-                    subordinate_refs=self._research_catalog_subordinate_refs(viewer),
+                    subordinate_refs=(self._research_catalog_subordinate_refs(viewer)
+                                      if scope == "subordinates" else []),
                 )
                 value = self._research_catalog_publication_branches(value, viewer)
                 payload = {
@@ -499,7 +503,12 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         return path == "/api/research" or path.startswith("/api/research/")
 
     def _research_catalog_subordinate_refs(self, viewer: str) -> list[str]:
-        subordinate_users = self._subordinate_users(viewer)
+        # The directory helper consumes verified claims, not a username.
+        # Never let a caller-provided viewer substitute another user's claims.
+        session = self._session()
+        if not isinstance(session, dict) or str(session.get("username") or "") != str(viewer):
+            raise PermissionError("verified user session required")
+        subordinate_users = self._subordinate_users(session)
         return [
             str(item.get("username") or item.get("owner_ref") or "").strip()
             for item in subordinate_users
