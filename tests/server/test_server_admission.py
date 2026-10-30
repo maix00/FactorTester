@@ -7,7 +7,7 @@ from urllib.parse import unquote
 import pytest
 
 from server.identity import server_admission as admission
-from server.identity.realm_groups import organization_group_path
+from server.identity.realm_groups import organization_admin_group_path, organization_group_path
 
 
 ISSUER = "https://identity.example/realms/traderesearch"
@@ -142,6 +142,31 @@ def test_uncached_admission_observes_revocation_without_changing_normal_cache(au
     provider.groups.clear()
     assert admission.server_admission(session, state=internal, use_cache=False) == (False, "organization_login_denied")
     assert admission.server_admission(session, state=internal) == (True, "")
+
+
+def test_current_admin_groups_recheck_keycloak_and_fail_closed(auth):
+    provider, session, _, _ = auth
+    group = organization_admin_group_path(ORG)
+    session["keycloak_groups"].append(group)
+    provider.groups.add(group)
+    assert admission.current_administrative_groups(session) == (group,)
+    provider.groups.remove(group)
+    # A token issued before the revocation still contains the old group.
+    assert group in session["keycloak_groups"]
+    assert admission.current_administrative_groups(session) == ()
+    provider.groups.add(group)
+    session["tr_identity_id"] = "stable-id"
+    assert admission.current_administrative_groups(session) is None
+    provider.user["attributes"]["tr_identity_id"] = ["stable-id"]
+    assert admission.current_administrative_groups(session) == (group,)
+    provider.user["enabled"] = False
+    assert admission.current_administrative_groups(session) is None
+    provider.user["enabled"] = True
+    session["keycloak_issuer"] = "https://other.example/realms/traderesearch"
+    assert admission.current_administrative_groups(session) is None
+    session["keycloak_issuer"] = ISSUER
+    provider.unavailable = True
+    assert admission.current_administrative_groups(session) is None
 
 
 def test_public_cache_same_stripe_concurrency_cannot_deadlock(auth, monkeypatch):

@@ -24,7 +24,7 @@ from server.identity import server_admission as access
 from server.identity.keycloak import KeycloakAdminAdapter, ServiceOIDCClient
 from server.identity.keycloak_hierarchy_admin import KeycloakHierarchyProvisioner
 from server.identity.keycloak_profile import configure_identity_mappers, protect_identity_attributes
-from server.identity.realm_groups import organization_group_path
+from server.identity.realm_groups import organization_admin_group_path, organization_group_path
 from server.identity.user_session import UserSessionVerifier
 from server.manager.domain.federation.registry import FederatedServerRegistry
 from server.manager.http.federation import admin as federation_admin
@@ -73,8 +73,11 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         provisioner.enable_admin_permissions()
         protect_identity_attributes(admin)
         orgpath = organization_group_path("org-a")
+        admin_group = organization_admin_group_path("org-a")
         groups, _ = provisioner.ensure_groups([
             "/traderesearch", "/traderesearch/organizations", orgpath,
+            "/traderesearch/admin-scopes", "/traderesearch/admin-scopes/organizations",
+            admin_group.rsplit("/", 1)[0], admin_group,
         ])
         org_id = groups[orgpath]
 
@@ -110,6 +113,7 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         user = location.rstrip("/").rsplit("/", 1)[-1]
         assert admin._get("users/" + user).get("attributes", {}).get("tr_organization_id") == ["org-a"]
         admin._put("users/" + user + "/groups/" + org_id, {})
+        admin._put("users/" + user + "/groups/" + groups[admin_group], {})
         admin._post("clients/" + login + "/roles", {"name": "public_server:login"})
         role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("public_server:login", safe=""))
         admin._post("users/" + user + "/role-mappings/clients/" + login, [role])
@@ -119,6 +123,9 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         admin._post("clients/" + login + "/roles", {"name": "agent_assistant:use"})
         agent_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("agent_assistant:use", safe=""))
         admin._post("users/" + user + "/role-mappings/clients/" + login, [agent_role])
+        admin._post("clients/" + login + "/roles", {"name": "desktop_local_node:download"})
+        download_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("desktop_local_node:download", safe=""))
+        admin._post("users/" + user + "/role-mappings/clients/" + login, [download_role])
         directory_adapter = KeycloakAdminAdapter(base, realm, client_id="tr-directory", client_secret=directory_secret)
         with urllib.request.urlopen(base + "/realms/" + realm + "/.well-known/openid-configuration",
                                     timeout=10) as response:
@@ -209,12 +216,20 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         access.clear_server_admission_cache()
         assert access.server_admission(identity, state=public) == (True, "")
         assert access.current_manager_role(identity, "admin_console:manage")
+        assert access.current_administrative_groups(identity) == (admin_group,)
+        migration._delete(admin, "users/" + user + "/groups/" + groups[admin_group])
+        assert admin_group in verifier.session(user_token)["keycloak_groups"]
+        assert access.current_administrative_groups(identity) == ()
         assert can_use_agent_assistant(identity)
         migration._delete(admin, "users/" + user + "/role-mappings/clients/" + login, [agent_role])
         # The same already-issued token still contains its old role, but the
         # assistant gate must reject it as soon as Keycloak revokes the role.
         assert "agent_assistant:use" in verifier.session(user_token)["keycloak_roles"]
         assert not can_use_agent_assistant(identity)
+        assert access.current_manager_role(identity, "desktop_local_node:download")
+        migration._delete(admin, "users/" + user + "/role-mappings/clients/" + login, [download_role])
+        assert "desktop_local_node:download" in verifier.session(user_token)["keycloak_roles"]
+        assert not access.current_manager_role(identity, "desktop_local_node:download")
 
         # Drive the real admin handler against the real isolated Keycloak
         # bindings and a real registry/SQLite audit, without changing either

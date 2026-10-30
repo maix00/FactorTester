@@ -761,6 +761,24 @@ def test_agent_route_denies_a_revoked_role_even_if_token_still_has_it(tmp_path, 
     assert _route_payload(handler)["code"] == "permission_denied"
 
 
+def test_force_release_rejects_revoked_admin_even_when_assistant_is_allowed(tmp_path, monkeypatch):
+    from server.identity import server_admission
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    monkeypatch.setattr(server_admission, "current_manager_role",
+                        lambda _session, role: role == "agent_assistant:use")
+    handler = _AgentRouteHandler(service, session={
+        "username": PRINCIPAL, "role": "super_admin",
+        "keycloak_roles": ("agent_assistant:use", "admin_console:manage"),
+    }, payload={"claim_id": "claim", "force": True})
+    assert handler._post_agent_routes(urlparse("/api/client/profile-claims/release"))
+    assert handler.response_status == 403
+
+
 def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path, monkeypatch):
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",

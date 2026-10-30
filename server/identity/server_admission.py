@@ -15,7 +15,7 @@ import threading
 import time
 from urllib.parse import quote, urlencode
 
-from server.identity.realm_groups import component, organization_group_path
+from server.identity.realm_groups import component, normalize_group_claim, organization_group_path
 from server.identity.user_session import may_login_public_server, oidc_settings
 
 _TTL = 5.0
@@ -179,6 +179,42 @@ def current_manager_role(session, role_name):
         return _effective_client_role(adapter, subject, client_uuid, str(role_name))
     except Exception:
         return False
+
+
+def current_administrative_groups(session):
+    """Return currently held admin-scope groups from a verified session.
+
+    Keycloak may continue to introspect an old token after a group has been
+    removed.  Intersect its verified claims with the user's current groups;
+    an unavailable provider or changed stable identity fails closed.  This is
+    deliberately uncached for administrative authorization decisions.
+    """
+    if not isinstance(session, dict):
+        return None
+    try:
+        subject = str(session.get("keycloak_subject") or "").strip()
+        issuer = str(session.get("keycloak_issuer") or "").strip().rstrip("/")
+        claimed = normalize_group_claim(session.get("keycloak_groups"))
+        settings = oidc_settings()
+        if (not subject or len(subject) > 512 or claimed is None
+                or issuer != settings["issuer"].rstrip("/")):
+            return None
+        from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+
+        adapter = manager_keycloak_admin_adapter()
+        user = _user(adapter, subject)
+        if not user:
+            return None
+        identity = str(session.get("tr_identity_id") or "").strip()
+        if identity and (user.get("attributes") or {}).get("tr_identity_id") != [identity]:
+            return None
+        current = normalize_group_claim(list(adapter.user_group_paths(subject)))
+        if current is None:
+            return None
+        return tuple(path for path in claimed if path in current
+                     and path.startswith("/traderesearch/admin-scopes/"))
+    except Exception:
+        return None
 
 
 def _environment_value(name, convert):

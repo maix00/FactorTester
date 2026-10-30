@@ -5,9 +5,11 @@ only carry stable object-owner and directory references through login.
 """
 from __future__ import annotations
 
+from server.permissions.roles import DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE
+
 MANAGER_ROLES = (
     'admin_console:read', 'admin_console:manage', 'public_server:login',
-    'factor:develop', 'agent_assistant:use',
+    'factor:develop', 'agent_assistant:use', DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE,
 )
 
 

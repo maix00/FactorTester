@@ -184,9 +184,12 @@ def test_dual_mode_never_falls_back_to_a_preexisting_local_session(monkeypatch):
 
 def test_keycloak_roles_override_stale_local_admin_flags(monkeypatch):
     from flask import Flask, g
+    from server.identity import server_admission
     from tools.data.account_manage import is_super_admin_account, get_account
 
     monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'keycloak')
+    monkeypatch.setattr(server_admission, 'current_manager_role',
+                        lambda session, role: role in session.get('keycloak_roles', ()))
     app = Flask(__name__)
     with app.test_request_context('/'):
         g.keycloak_user_session = {
@@ -203,13 +206,44 @@ def test_keycloak_roles_override_stale_local_admin_flags(monkeypatch):
         assert not is_super_admin_account(projected)
 
 
+def test_sensitive_account_roles_follow_current_keycloak_grant(monkeypatch):
+    from flask import Flask, g
+    from server.identity import server_admission
+    from tools.data.account_manage import (
+        get_account, is_any_admin_account, is_developer_account, is_super_admin_account,
+    )
+
+    granted = {'admin_console:manage', 'factor:develop'}
+    monkeypatch.setattr(server_admission, 'current_manager_role',
+                        lambda _session, role: role in granted)
+    with Flask(__name__).test_request_context('/'):
+        g.keycloak_user_session = {
+            'username': 'alice',
+            'keycloak_roles': ('admin_console:manage', 'factor:develop'),
+        }
+        account = get_account('alice')
+        assert is_super_admin_account(account)
+        assert is_any_admin_account(account)
+        assert is_developer_account(account)
+        granted.clear()
+        assert not is_super_admin_account(account)
+        assert not is_any_admin_account(account)
+        assert not is_developer_account(account)
+        assert not is_developer_account({'username': 'other'})
+
+
 def test_keycloak_scoped_admin_roles_do_not_use_legacy_hierarchy(monkeypatch):
     from flask import Flask, g
+    from server.identity import server_admission
     from tools.data.account_manage import (
-        get_account, is_any_admin_account, is_org_admin_account,
+        get_account, is_any_admin_account, is_level_admin_account, is_org_admin_account,
     )
 
     monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'keycloak')
+    current_groups = ['/traderesearch/admin-scopes/organizations/org-a/organization-admins']
+    monkeypatch.setattr(server_admission, 'current_manager_role', lambda *_args: False)
+    monkeypatch.setattr(server_admission, 'current_administrative_groups',
+                        lambda _session: tuple(current_groups))
     app = Flask(__name__)
     with app.test_request_context('/'):
         g.keycloak_user_session = {
@@ -219,7 +253,11 @@ def test_keycloak_scoped_admin_roles_do_not_use_legacy_hierarchy(monkeypatch):
         manager = get_account('manager')
         assert manager['role'] == 'org_admin'
         assert is_org_admin_account(manager)
+        assert is_level_admin_account(manager)
         assert not is_any_admin_account(manager)
+        current_groups.clear()
+        assert not is_org_admin_account(manager)
+        assert not is_level_admin_account(manager)
 
 
 def test_admin_owned_identity_label_preserves_owner_refs_after_login_normalization():

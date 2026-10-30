@@ -466,13 +466,12 @@ class AgentRoutesMixin:
                 json_response(self, {"success": True, **result})
                 return True
 
-            force = (
-                bool(payload.get("force"))
-                and str(
-                    session.get("role") or "",
-                )
-                == "super_admin"
-            )
+            force = bool(payload.get("force"))
+            if force:
+                from server.identity.server_admission import current_manager_role
+
+                if not current_manager_role(session, "admin_console:manage"):
+                    raise PermissionError("force release requires current Manager administrator permission")
             result = service.release(
                 principal,
                 str(payload.get("claim_id") or "").strip(),

@@ -2251,7 +2251,7 @@ def test_worktree_api_does_not_leak_filesystem_paths(
     assert payload["worktrees"][0]["instance_id"] == state.instance_id(worktree)
 
 
-def test_loopback_browser_can_submit_same_origin_action(
+def test_loopback_same_origin_does_not_authorize_manager_action(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -2284,10 +2284,11 @@ def test_loopback_browser_can_submit_same_origin_action(
             },
             method="POST",
         )
-        with urlopen(request) as response:
-            assert response.status == 200
+        with pytest.raises(HTTPError) as denied:
+            urlopen(request)
 
-    assert called == [(source, 8141)]
+    assert denied.value.code == 401
+    assert called == []
 
 
 @pytest.mark.parametrize("branch", ["main", "master"])

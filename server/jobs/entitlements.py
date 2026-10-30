@@ -7,9 +7,9 @@ from .models import SchedulingEntitlement
 
 def entitlement_for_owner(owner: str) -> SchedulingEntitlement:
     from tools.data.account_manage import (
-        ROLE_DEVELOPER,
         get_account,
         is_any_admin_account,
+        is_developer_account,
     )
 
     account = get_account(owner) or {}
@@ -36,7 +36,7 @@ def entitlement_for_owner(owner: str) -> SchedulingEntitlement:
             reserved_capacity_class="research-admin",
             max_concurrency=2,
         )
-    if str(account.get("role") or "") == ROLE_DEVELOPER:
+    if is_developer_account(account):
         return SchedulingEntitlement(
             priority_class="high", weight=2.0, max_concurrency=2,
         )

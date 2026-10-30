@@ -87,13 +87,9 @@ class WriteRoutesMixin:
                 self._require_capability()
                 return
             if browser_session is not None:
-                from server.manager.http.core_get_routes import _admin_capabilities
+                from server.identity.server_admission import current_manager_role
 
-                if "admin_console:manage" not in _admin_capabilities(
-                    str(browser_session.get("username") or ""),
-                    str(browser_session.get("role") or ""),
-                    browser_session.get("keycloak_roles", ()),
-                ):
+                if not current_manager_role(browser_session, "admin_console:manage"):
                     json_response(self, {"success": False, "error": "admin console manage permission required"}, 403)
                     return
             try:
@@ -537,22 +533,14 @@ class WriteRoutesMixin:
         if self.path not in actions:
             self.send_error(404)
             return
-        if not (
-            self._has_api_authorization()
-            or self._is_same_origin_browser_action()
-        ):
-            self._require_capability()
-            return
-        browser_session = self._session()
-        if browser_session is not None:
-            from server.manager.http.core_get_routes import _admin_capabilities
+        if not self._has_capability():
+            browser_session = self._session()
+            if browser_session is None:
+                self._require_capability()
+                return
+            from server.identity.server_admission import current_manager_role
 
-            capabilities = _admin_capabilities(
-                str(browser_session.get("username") or ""),
-                str(browser_session.get("role") or ""),
-                browser_session.get("keycloak_roles", ()),
-            )
-            if "admin_console:manage" not in capabilities:
+            if not current_manager_role(browser_session, "admin_console:manage"):
                 json_response(self, {
                     "success": False,
                     "error": "admin console manage permission required",
