@@ -4,11 +4,18 @@ import {
   IonList, IonModal, IonTitle, IonToast, IonToolbar,
 } from "@ionic/react";
 import { useTranslation } from "react-i18next";
+import { closeOutline } from "ionicons/icons";
 import { bindNotificationSink, type ActiveNotice } from "./core.ts";
 
 type Entry = ActiveNotice & { id: number; read: boolean; at: number };
 type Queued = { notice: ActiveNotice; done: () => void; id: number };
 type MobileNotificationCenter = { openCenter: () => void; unread: number };
+
+/** Anchor a toast below the visible header so it does not cover Back or Close. */
+function visibleHeader(): HTMLElement | undefined {
+  const headers = Array.from(document.querySelectorAll<HTMLElement>(".ant-modal-header, .ant-drawer-header, .tr-mobile-header"));
+  return headers.reverse().find(header => header.getBoundingClientRect().height > 0);
+}
 
 const MobileNotificationContext = createContext<MobileNotificationCenter | null>(null);
 
@@ -60,6 +67,10 @@ export function MobileNotificationHost({ children }: { children: React.ReactNode
     });
   };
 
+  // Ionic's ion-app establishes a stacking context below Ant Design dialogs.
+  // The Ionic React overlay restores relocated elements on unmount.
+  const revealAboveDialogs = (event: CustomEvent): void => { document.body.appendChild(event.target as HTMLElement); };
+
   return (
     <MobileNotificationContext.Provider value={contextValue}>
       {children}
@@ -70,6 +81,9 @@ export function MobileNotificationHost({ children }: { children: React.ReactNode
         color={current?.notice.type === "error" ? "danger" : current?.notice.type === "success" ? "success" : "dark"}
         duration={current?.notice.duration ?? (current?.notice.type === "error" ? 7000 : 3500)}
         position="top"
+        positionAnchor={current ? visibleHeader() : undefined}
+        buttons={[{ icon: closeOutline, role: "cancel", htmlAttributes: { "aria-label": t("notifications.close") } }]}
+        onWillPresent={revealAboveDialogs}
         onDidDismiss={dismiss}
       />
       <IonModal isOpen={open} onDidDismiss={() => setOpen(false)}>
