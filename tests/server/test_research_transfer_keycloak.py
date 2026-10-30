@@ -81,6 +81,19 @@ def test_foreign_identity_and_unavailable_delegation_fail_closed(tmp_path):
     auth = KeycloakResearchTransferAuthorization(catalog, evaluator_factory=lambda: evaluator,
         verify_foreign_delegation=lambda *, transfer, identity_id: identity_id == "bob-id")
     auth.authorize(transfer=transfer, record=record, metadata={})
+    # A stable identity can have a different effective username in another
+    # realm. The local catalog lookup uses the source realm's mapped name,
+    # while the verifier must authenticate the original remote name/context.
+    transfer.principal = "remote-bob"
+    checked = []
+    auth = KeycloakResearchTransferAuthorization(catalog, evaluator_factory=lambda: evaluator,
+        verify_foreign_delegation=lambda *, transfer, identity_id: checked.append(
+            (transfer.principal, transfer.request_owner_manager_id, identity_id)) or True)
+    auth.authorize(transfer=transfer, record=record, metadata={})
+    assert checked == [("remote-bob", "remote", "bob-id")]
+    transfer.principal_identity_id = "different-id"
+    with pytest.raises(PermissionError, match="identity is unavailable"):
+        auth.authorize(transfer=transfer, record=record, metadata={})
 
 
 def test_policy_update_during_source_evaluation_cannot_use_old_profile_decision(tmp_path):
@@ -152,6 +165,13 @@ def test_7997_rechecks_live_policy_even_for_a_previously_issued_ticket(tmp_path)
         headers = {"Authorization": "Bearer " + access.bearer}
         with urlopen(Request(url, headers=headers), timeout=10) as response:
             assert response.read() == raw
+        # The final byte may reach the client before the threaded handler has
+        # persisted its completed lifecycle. Wait for that transition so this
+        # test exercises a later authorization, not two racing transitions.
+        deadline = time.monotonic() + 3
+        while runtime.attempts.require(access.attempt_id).status.value != "completed":
+            assert time.monotonic() < deadline
+            time.sleep(0.005)
         evaluator.allow.clear()
         with pytest.raises(HTTPError) as error:
             urlopen(Request(url, headers=headers), timeout=10)

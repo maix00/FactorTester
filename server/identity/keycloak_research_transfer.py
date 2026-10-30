@@ -42,8 +42,8 @@ class KeycloakResearchTransferAuthorization:
         if legacy is not None and (not isinstance(legacy, list) or len(legacy) != 1 or not isinstance(legacy[0], str)):
             raise PermissionError("Research transfer principal is ambiguous")
         local_principal = legacy[0] if legacy else str(user.get("username") or "")
-        if not local_principal or principal != local_principal:
-            raise PermissionError("Research transfer principal does not match its stable identity")
+        if not local_principal:
+            raise PermissionError("Research transfer local principal is unavailable")
         owner_manager = str(getattr(transfer, "request_owner_manager_id", "") or "")
         source = str(getattr(transfer, "source_server_id", "") or "")
         if not owner_manager or not source:
@@ -52,6 +52,8 @@ class KeycloakResearchTransferAuthorization:
             verifier = self.verify_foreign_delegation
             if verifier is None or verifier(transfer=transfer, identity_id=stable) is not True:
                 raise PermissionError("live foreign Manager delegation is required")
+        elif principal != local_principal:
+            raise PermissionError("Research transfer principal does not match its stable identity")
 
         report = self.catalog._publication_report(record)
         if report is None:
