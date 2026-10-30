@@ -20,6 +20,8 @@ def _queued(repository: JobRepository, job_id: str = "job-celery") -> None:
             job_id=job_id,
             run_id="run-celery",
             owner="owner",
+            owner_issuer="https://identity.example/realms/research",
+            owner_subject="frozen-owner-subject",
             workspace_id="workspace",
             kind="backtest",
             status=JobStatus.SUBMITTED,
@@ -136,3 +138,18 @@ def test_worker_app_registers_target_heartbeat(monkeypatch, tmp_path):
     monkeypatch.setenv("FACTORTESTER_SERVICE_PORT", "8001")
     assert worker_app.heartbeat_target_once()
     assert JobRepository(tmp_path / "jobs.db").worker_target_online("local-docker", 8001)
+
+
+def test_remote_node_uses_target_queue_without_broker_remote_control(monkeypatch):
+    from dataclasses import asdict
+    from types import SimpleNamespace
+    from server.jobs.dispatch import remote
+    from tests.server.test_execution_data_binding import _target
+    monkeypatch.setenv("TR_MANAGER_ENDPOINT", "https://manager.example")
+    monkeypatch.setattr(remote, "remote_repository_from_env", lambda: SimpleNamespace(
+        descriptor={"target": asdict(_target()), "service_port": 8000}))
+    app = create_app(broker_url="memory://")
+    assert app.conf.worker_enable_remote_control is False
+    assert app.conf.task_default_queue.endswith(".8000")
+    monkeypatch.delenv("TR_MANAGER_ENDPOINT")
+    assert create_app(broker_url="memory://").conf.worker_enable_remote_control is True
