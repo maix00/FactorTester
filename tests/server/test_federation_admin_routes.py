@@ -4,6 +4,16 @@ from server.identity.realm_groups import (
 )
 from server.manager.http.federation import admin as federation_admin
 from server.manager.http.federation.admin import FederationAdminRoutesMixin
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _current_admin_groups(monkeypatch):
+    # Isolate federation configuration behavior from Keycloak transport.
+    monkeypatch.setattr(
+        "server.identity.server_admission.current_administrative_groups",
+        lambda session: tuple(session.get("keycloak_groups") or ()),
+    )
 
 
 class FakeState:

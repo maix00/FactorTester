@@ -200,13 +200,20 @@ class FederationAdminRoutesMixin:
         return {organization_group_path(value) for value in organization_ids}
 
     def _identity_sync_admin_context(self) -> tuple[dict[str, object] | None, bool, set[str]]:
+        from server.identity.server_admission import current_administrative_groups
+
         session = self._session()
         if session is None or not self._has_secure_ui_transport():
             return session, False, set()
         is_super = self._has_super_admin_session()
         if is_super:
             return session, True, set()
-        groups = session.get("keycloak_groups") or ()
+        groups = current_administrative_groups(session) or ()
+        # An unexpired token may retain a revoked realm-wide role. Do not pass
+        # that stale grant to downstream scoped-directory authorization.
+        session = {**session, "keycloak_groups": groups,
+                   "keycloak_roles": tuple(role for role in (session.get("keycloak_roles") or ())
+                                           if role != "admin_console:manage")}
         organization_paths = managed_member_group_paths(groups)
         return session, False, organization_paths
 
@@ -506,21 +513,13 @@ class FederationAdminRoutesMixin:
         })
 
     def _has_super_admin_session(self) -> bool:
+        from server.identity.server_admission import current_manager_role
+
         session = self._session()
-        if session:
-            from server.identity.auth_mode import keycloak_enabled
-            if keycloak_enabled():
-                roles = set(session.get("keycloak_roles", ()) or ())
-                capabilities = set(session.get("admin_capabilities", ()) or ())
-                return bool(
-                    self._has_secure_ui_transport()
-                    and ({"admin_console:manage"} <= roles
-                         or {"admin_console:manage"} <= capabilities)
-                )
         return bool(
             self._has_secure_ui_transport()
             and session
-            and str(session.get("role") or "") == "super_admin"
+            and current_manager_role(session, "admin_console:manage")
         )
 
     def _require_super_admin_session(self) -> bool:
