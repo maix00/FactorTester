@@ -90,6 +90,12 @@ createRoot(document.getElementById('root')!).render(<App />);
                     report_image.wait_for(state="visible")
                     report_image.evaluate("node => node.decode()")
                     assert report_image.evaluate("node => node.complete && node.naturalWidth === 1")
+                    reader.get_by_role("button", name="阅读设置").click()
+                    font = page.get_by_role("combobox", name="字号")
+                    font.focus(); font.press("ArrowDown")
+                    page.locator(".ant-select-dropdown:visible").get_by_text("20 px", exact=True).click()
+                    assert reader.locator("article").evaluate("node => getComputedStyle(node).fontSize") == "20px"
+                    reader.get_by_role("button", name="阅读设置").click()
                     selection = reader.get_by_role("combobox", name="章节")
                     selection.focus(); selection.press("ArrowDown")
                     page.locator(".ant-select-dropdown:visible").get_by_text("第二章", exact=True).click()
@@ -112,6 +118,7 @@ createRoot(document.getElementById('root')!).render(<App />);
                     assert operations[0]["component"]["body"] == "草稿"
                     assert page.locator(".tr-report-reading").count() == 1
                     assert page.locator(".tr-report-reading-choice .ant-select-selection-item").inner_text() == "第二章"
+                    assert page.locator(".tr-report-reading article").evaluate("node => getComputedStyle(node).fontSize") == "20px"
                     page.close()
             finally:
                 browser.close()

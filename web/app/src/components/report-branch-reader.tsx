@@ -1,10 +1,13 @@
 import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Empty, Select, Spin } from "antd";
+import { Alert, Button, Empty, Popover, Select, Spin } from "antd";
+import { FontSizeOutlined } from "@ant-design/icons";
 import DOMPurify from "dompurify";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { reportResourceURL, type ReportExportTarget } from "../report-export.ts";
 import { reportReference, type ReportReference } from "../report-references.ts";
+import { REPORT_FONT_SIZES, readReportFont, writeReportFont } from "../report-reading-preference.ts";
+import { useAuth } from "../auth.tsx";
 import { referenceForField, type ObjectKind } from "../object-reference.ts";
 import { downloadBlob } from "../download.ts";
 import { notify } from "../notifications/core.ts";
@@ -174,6 +177,9 @@ function ReportBlock({ component, assets, bindings, resources, target }: { compo
 /** Read one authorized branch at a time, retaining only the selected chapter. */
 export function ReportBranchReader({ target, initialChapterID = "", onChapterChange }: { target: ReportExportTarget; initialChapterID?:string; onChapterChange?:(id:string) => void }): React.ReactElement {
   const { t } = useTranslation();
+  const { session } = useAuth(), username = session?.username || "anonymous";
+  const [fontSize,setFontSize] = useState(() => {try {return readReportFont(window.localStorage,username);} catch {return 16;}});
+  useEffect(() => {try {writeReportFont(window.localStorage,username,fontSize);} catch { /* Storage may be unavailable. */ }}, [username,fontSize]);
   const indexURL = reportResourceURL(target,["index"]);
   const [index,setIndex] = useState<Row | null>(null), [chapterID,setChapterID] = useState(""), [chapter,setChapter] = useState<Row | null>(null);
   const [error,setError] = useState(""), [loading,setLoading] = useState(false), [indexRevision,setIndexRevision] = useState(0), [chapterRevision,setChapterRevision] = useState(0);
@@ -211,8 +217,8 @@ export function ReportBranchReader({ target, initialChapterID = "", onChapterCha
     }
     return result;
   }, [chapter]);
-  return <section className="tr-report-reading" aria-label={t("report.read")}>
-    {index?.chapters?.length ? <label className="tr-report-reading-choice"><span>{t("report.chapter")}</span><Select aria-label={t("report.chapter")} value={chapterID || undefined} onChange={value => {setChapterID(value);onChapterChange?.(value);}} options={index.chapters.map((item:Row) => ({value:String(item.component_id || ""),label:String(item.title || item.component_id || "")})).filter((item:Row) => item.value)} /></label> : null}
+  return <section className="tr-report-reading" aria-label={t("report.read")} style={{"--tr-report-font-size":`${fontSize}px`} as React.CSSProperties}>
+    {index?.chapters?.length ? <div className="tr-report-reading-toolbar"><label className="tr-report-reading-choice"><span>{t("report.chapter")}</span><Select aria-label={t("report.chapter")} value={chapterID || undefined} onChange={value => {setChapterID(value);onChapterChange?.(value);}} options={index.chapters.map((item:Row) => ({value:String(item.component_id || ""),label:String(item.title || item.component_id || "")})).filter((item:Row) => item.value)} /></label><Popover trigger="click" title={t("report.readingSettings")} content={<label className="tr-report-reading-font"><span>{t("report.fontSize")}</span><Select aria-label={t("report.fontSize")} value={fontSize} options={REPORT_FONT_SIZES.map(size => ({value:size,label:`${size} px`}))} onChange={setFontSize} /></label>}><Button type="text" icon={<FontSizeOutlined />} aria-label={t("report.readingSettings")} /></Popover></div> : null}
     {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} action={<Button onClick={() => index ? setChapterRevision(value => value + 1) : setIndexRevision(value => value + 1)}>{t("retry")}</Button>} /> : chapter ? <article>{chapter.components.map((component:Row,index:number) => <ReportBlock key={String(component.component_id || index)} component={component} assets={chapter.assets || []} bindings={bindingsByComponent.get(String(component.component_id || "")) || []} resources={chapter.local_resources || []} target={target} />)}</article> : index ? <Empty description={t("empty")} /> : null}
   </section>;
 }
