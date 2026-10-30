@@ -42,10 +42,21 @@ class PublicResearchObjectStore:
         projection = self.library._projection(publication_id)
         metadata, path = self._entry(projection, publication_id, object_kind, item_id)
         self.library.require_resource_access(record, metadata, viewer_ref)
+        return self._object(metadata, path)
+
+    def resolve_for_transfer(self, publication_id, object_kind, item_id, *, transfer, authorizer):
+        """Resolve bytes only after the source's live Keycloak transfer check."""
+        record = self.library._record(publication_id)
+        projection = self.library._projection(publication_id)
+        metadata, path = self._entry(projection, publication_id, object_kind, item_id)
+        authorizer.authorize(transfer=transfer, record=record, metadata=metadata)
+        return self._object(metadata, path)
+
+    @staticmethod
+    def _object(metadata, path) -> PublicResearchObject:
         if path.is_symlink() or not path.is_file():
             raise FileNotFoundError("research object is unavailable")
-        raw = path.read_bytes()
-        digest = hashlib.sha256(raw).hexdigest()
+        digest, size = _file_digest(path)
         expected = str(metadata.get("content_hash") or digest).lower()
         if expected != digest:
             raise ValueError("research object integrity check failed")
@@ -53,7 +64,7 @@ class PublicResearchObjectStore:
         filename = str(metadata.get("filename") or path.name).strip() or path.name
         return PublicResearchObject(
             path=path,
-            size_bytes=len(raw),
+            size_bytes=size,
             content_hash=digest,
             content_type=media_type or mimetypes.guess_type(filename)[0]
             or "application/octet-stream",

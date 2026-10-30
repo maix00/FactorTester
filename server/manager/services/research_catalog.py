@@ -567,19 +567,15 @@ class ResearchCatalog(ResearchBranchesMixin):
             value["branches"] = self._report_branches(value)
         return values
 
-    def can_read_publication(self, record: dict, viewer: str | None) -> bool:
-        """Reuse current research download rights for its immutable projection.
-
-        Publication metadata is authenticated at ingestion; match both its report
-        and owner. Do not copy an authorization list that becomes stale on revoke.
-        """
+    def _publication_report(self, record: dict):
+        """Find the active report for this exact registered publication."""
         report_id = str(record.get("report_id") or "")
         if not report_id:
-            return False
+            return None
         try:
             row = self._report_row(report_id)
         except KeyError:
-            return False
+            return None
         same_owner = str(row["owner_ref"]) == str(record.get("owner_ref") or "")
         registered = False
         if not same_owner:
@@ -602,10 +598,16 @@ class ResearchCatalog(ResearchBranchesMixin):
                         (report_id, str(record.get("owner_ref") or ""),
                          str(record.get("publication_id") or "")),
                     ).fetchone() is not None
-        return bool(
-            str(row["status"]) == "active" and (same_owner or registered)
-            and self._report_access(row, viewer)["can_download"]
-        )
+        return row if str(row["status"]) == "active" and (same_owner or registered) else None
+
+    def can_read_publication(self, record: dict, viewer: str | None) -> bool:
+        """Reuse current research download rights for its immutable projection.
+
+        Publication metadata is authenticated at ingestion; match both its report
+        and owner. Do not copy an authorization list that becomes stale on revoke.
+        """
+        row = self._publication_report(record)
+        return bool(row is not None and self._report_access(row, viewer)["can_download"])
 
     def can_read_authoring_publication(self, record: dict, viewer: str | None) -> bool:
         """Editable source is restricted to active collaborators, not public readers."""
