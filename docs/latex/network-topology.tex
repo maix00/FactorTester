@@ -1,5 +1,4 @@
-% Single source for the web SVG and the project documentation figure.
-% Define \TREnglish before including this file to render English labels.
+% The web SVG and the project PDF are rendered from this one diagram source.
 \ifdefined\TREnglish
   \def\TRlabel#1#2{#2}
 \else
@@ -7,113 +6,195 @@
 \fi
 \begin{tikzpicture}[
   x=1cm,y=1cm,>=Stealth,font=\small,
-  host/.style={draw=black!38,fill=black!1,dashed,rounded corners=11pt,line width=.8pt},
-  box/.style={minimum width=2.45cm,text width=2.45cm,minimum height=1.05cm,align=center,inner sep=3pt},
-  compute/.style={box,text=blue!55!black},
-  data/.style={box,text=teal!65!black},
-  plannedbox/.style={box,text=orange!75!black},
-  control/.style={-{Stealth[length=2.4mm]},draw=blue!55!black,line width=1.05pt},
-  dataflow/.style={-{Stealth[length=2.4mm]},draw=teal!65!black,line width=1.05pt},
-  pending/.style={-{Stealth[length=2.4mm]},draw=orange!75!black,dashed,line width=1.1pt},
+  institution/.style={draw=blue!35!black,fill=blue!1,dashed,rounded corners=12pt,line width=1pt},
+  publiczone/.style={draw=black!45,fill=black!1,dashed,rounded corners=12pt,line width=.8pt},
+  host/.style={draw=black!42,fill=white,rounded corners=8pt,line width=.8pt},
+  optional/.style={draw=orange!65!black,dashed,rounded corners=5pt,line width=.7pt},
+  device/.style={align=center,inner sep=2pt,text=blue!55!black},
+  service/.style={text width=2.25cm,align=center,inner sep=2pt,text=blue!55!black},
+  data/.style={text width=2.25cm,align=center,inner sep=2pt,text=teal!65!black},
+  pendingservice/.style={text width=2.6cm,align=center,inner sep=2pt,text=orange!75!black},
+  control/.style={-{Stealth[length=2.2mm]},draw=blue!55!black,line width=1pt},
+  dataflow/.style={-{Stealth[length=2mm]},draw=teal!65!black,line width=1pt},
+  pending/.style={-{Stealth[length=2.2mm]},draw=orange!75!black,dashed,line width=1pt},
   number/.style={circle,fill=white,draw=black!35,inner sep=1.4pt,font=\scriptsize\bfseries},
   heading/.style={font=\bfseries,anchor=west,text=black!80},
-  note/.style={font=\scriptsize,anchor=north west,align=left,text width=9.65cm,text=black!80},
+  note/.style={font=\scriptsize,anchor=north west,align=left,text width=9.3cm,text=black!80},
 ]
-  % Client devices and the user's private desktop machine.
-  \node[heading] at (.25,22.48) {\TRlabel{网页、移动端与 CLI}{Web, mobile and CLI}};
-  \node[text=blue!55!black,font=\Large] at (1.75,21.45) {\faDesktop};
-  \node[text=blue!55!black,font=\Large] at (4.8,21.45) {\faMobile};
-  \node[text=blue!55!black,font=\Large] at (7.85,21.45) {\faTerminal};
-  \node at (1.75,20.55) {\TRlabel{电脑网页}{Desktop web}};
-  \node at (4.8,20.55) {\TRlabel{移动端}{Mobile}};
-  \node at (7.85,20.55) {CLI};
+  % A single public Manager host, outside the organizations.
+  \draw[host] (2.3,26.2) rectangle (18.9,30.4);
+  \node[text=blue!55!black,font=\Large] at (2.85,29.9) {\faServer};
+  \node[heading] at (3.25,29.9) {\TRlabel{公网服务器 · 单台 Manager}{Public server · one Manager}};
+  \node[service,text width=1.5cm] (publicmanager) at (3.65,28.1) {{\Large\faServer}\\Manager};
+  \node[service,text width=1.5cm] (publickeycloak) at (6,28.1) {{\Large\faKey}\\Keycloak};
+  \node[data,text width=2.05cm] (publicstore) at (8.35,28.1) {{\Large\faDatabase}\\PostgreSQL\\CouchDB};
+  \node[service,text width=1.65cm] (publicqueue) at (10.7,28.1) {{\Large\faRandom}\\RabbitMQ};
+  \draw[optional] (11.85,27.2) rectangle (16.6,29.25);
+  \node[font=\scriptsize,text=orange!75!black] at (14.23,29.03) {\TRlabel{可选 · 同机执行节点}{Optional co-hosted execution}};
+  \node[service,text width=1.5cm] (publicworker) at (13.05,28.1) {{\Large\faCogs}\\Nautilus};
+  \node[service,text width=1.5cm] (publicalpha) at (15.4,28.1) {{\Large\faChartLine}\\Alpha};
+  \draw[optional] (16.7,27.2) rectangle (18.85,29.25);
+  \node[font=\scriptsize,text=orange!75!black] at (17.77,29.03) {\TRlabel{可选 · 数据}{Optional data}};
+  \node[data,text width=1.5cm] (publicdata) at (17.75,28.1) {{\Large\faHdd}\\Data I/O\\\faDatabase\,\faDatabase};
+  \draw[control] (publicmanager) -- (publickeycloak);
+  \draw[control] (publickeycloak) -- (publicstore);
+  \draw[control] (publicmanager.north) -- (3.65,29.15) -| (publicstore.north);
+  \draw[control] (publicqueue) -- (publicworker);
+  \draw[control] (publicmanager.south) -- (3.65,26.75) -| (publicqueue.south);
+  \draw[pending] (publicalpha) -- (publicworker);
+  \draw[pending] (publicdata) -- (publicalpha);
+  \draw[pending] (publicdata.south) -- (17.75,26.45) -| (publicworker.south);
 
-  \draw[host] (11.6,19.55) rectangle (21.2,22.8);
-  \node[heading] at (11.85,22.48) {\TRlabel{用户个人电脑}{User-owned computer}};
-  \node[text=blue!55!black,font=\Large] at (13.15,21.4) {\faLaptop};
-  \node[align=center] (desktop) at (15.05,21.4) {\TRlabel{桌面客户端}{Desktop client}\\TradeResearch};
-  \node[plannedbox,text width=2.75cm] (personal) at (19,21.35) {{\Large\faCogs}\\\TRlabel{本机计算运行时}{Personal runtime}\\\TRlabel{仅供本用户}{User only}};
-  \node[font=\scriptsize,text=teal!65!black] at (19,19.95) {\faDatabase\,\faDatabase\,\faDatabase\quad Bundle A / B / …};
-  \draw[pending] (desktop.east) -- node[number,above] {6} (personal.west);
-  \draw[pending,Stealth-Stealth] (19,20.65) -- (19,20.23);
+  % Two distinct organizations; each has users and exactly one Manager.
+  \draw[institution] (0,7.2) rectangle (9.6,24.1);
+  \node[text=blue!55!black,font=\Large] at (.55,23.55) {\faBuilding};
+  \node[heading] at (.95,23.55) {\TRlabel{机构 A}{Organization A}};
+  \draw[host] (.35,20.65) rectangle (4.5,22.95);
+  \node[device] at (.95,21.85) {\faUser\\\TRlabel{用户 1}{User 1}};
+  \node[device] at (2.35,21.85) {\Large\faDesktop\\\scriptsize\TRlabel{网页}{Web}};
+  \node[device] at (3.7,21.85) {\Large\faMobile\\\scriptsize\TRlabel{移动端}{Mobile}};
+  \draw[host] (5.1,19.95) rectangle (9.25,22.95);
+  \node[device] at (5.7,22.25) {\faUser\\\TRlabel{用户 2}{User 2}};
+  \node[device] at (7.05,22.25) {\Large\faLaptop\\\scriptsize\TRlabel{电脑客户端}{Desktop app}};
+  \node[device] at (8.6,22.25) {\Large\faTerminal\\\scriptsize CLI};
+  \node[pendingservice,text width=3.5cm,font=\scriptsize] (localruntime) at (7.2,20.65) {\faCogs\,Nautilus\quad\faChartLine\,Alpha\\\faDatabase\,\faDatabase\,\faDatabase};
+  \draw[pending] (7.05,21.65) -- node[number,right] {6} (localruntime.north);
+  % Each user's devices can reach the public or their own intranet Manager.
+  \draw[draw=blue!55!black,line width=1pt] (2.4,22.95) -- (2.4,23.15) -- (7.2,23.15) -- (7.2,22.95);
+  \draw[draw=blue!55!black,line width=1pt] (2.4,20.65) -- (2.4,19.65) -- (7.2,19.65) -- (7.2,19.95);
 
-  % Public and organization hosts. Each outer frame is one host boundary.
-  \draw[host] (0,11.8) rectangle (9.6,18);
-  \node[text=blue!55!black,font=\Large] at (.55,17.5) {\faServer};
-  \node[heading] at (.95,17.5) {\TRlabel{公网服务器 · 单台 Manager}{Public server · one Manager}};
-  \node[compute] (pm) at (1.75,16.05) {{\Large\faServer}\\Manager\\OIDC / API};
-  \node[box] (pk) at (4.8,16.05) {{\Large\faKey}\\Keycloak\\\TRlabel{身份与权限}{Identity and access}};
-  \node[data] (ps) at (7.85,16.05) {{\Large\faDatabase}\\PostgreSQL\\CouchDB};
-  \node[box] (pq) at (1.75,13.65) {{\Large\faRandom}\\RabbitMQ\\\TRlabel{任务队列}{Job queue}};
-  \node[compute] (pw) at (4.8,13.65) {{\Large\faCogs}\\Nautilus\\worker};
-  \node[data] (pd) at (7.85,13.65) {{\Large\faHdd}\\Data I/O\\Bundle × N};
-  \draw[control] (pm) -- (pk);
-  \draw[control] (pk) -- (ps);
-  \draw[control] (pm.north) -- ++(0,.25) -| (ps.north);
-  \draw[control] (pm) -- (pq);
-  \draw[control] (pq) -- (pw);
-  \draw[dataflow,Stealth-Stealth] (pw) -- (pd);
+  \draw[host] (.35,13.0) rectangle (9.25,19.35);
+  \node[text=blue!55!black,font=\Large] at (.88,18.8) {\faServer};
+  \node[heading] at (1.25,18.8) {\TRlabel{内网服务器 · 一台 Manager}{Intranet server · one Manager}};
+  \node[service] (am) at (1.75,17.25) {{\Large\faServer}\\Manager};
+  \node[service] (ak) at (4.8,17.25) {{\Large\faKey}\\Keycloak};
+  \node[data] (as) at (7.85,17.25) {{\Large\faDatabase}\\PostgreSQL\\CouchDB};
+  \node[service,text width=1.65cm] (aq) at (1.35,14.95) {{\Large\faRandom}\\RabbitMQ};
+  \draw[optional] (2.5,13.9) rectangle (7.0,16.0);
+  \node[font=\scriptsize,text=orange!75!black] at (4.75,15.75) {\TRlabel{可选 · 同机执行节点}{Optional co-hosted execution}};
+  \node[service,text width=1.35cm] (aw) at (3.65,14.95) {{\Large\faCogs}\\Nautilus};
+  \node[service,text width=1.35cm] (aa) at (5.95,14.95) {{\Large\faChartLine}\\Alpha};
+  \draw[optional] (7.1,13.9) rectangle (9.2,16.0);
+  \node[font=\scriptsize,text=orange!75!black] at (8.15,15.75) {\TRlabel{可选 · 数据}{Optional data}};
+  \node[data,text width=1.35cm] (ad) at (8.15,14.95) {{\Large\faHdd}\\Data I/O\\\faDatabase\,\faDatabase};
+  \draw[control] (am) -- (ak);
+  \draw[control] (ak) -- (as);
+  \draw[control] (am.north) -- (1.75,18.15) -| (as.north);
+  \draw[control] (am) -- (aq);
+  \draw[control] (aq) -- (aw);
+  \draw[pending] (aa) -- (aw);
+  \draw[pending] (ad) -- (aa);
+  \draw[pending] (ad.south) -- (8.15,13.3) -| (aw.south);
+  \draw[control] (4.8,19.65) -- (4.8,19.35);
 
-  \draw[host] (11.6,11.8) rectangle (21.2,18);
-  \node[text=teal!65!black,font=\Large] at (12.15,17.5) {\faServer};
-  \node[heading] at (12.55,17.5) {\TRlabel{本机构内网 · Manager 主机 × N}{Own organization · Manager hosts × N}};
-  \node[compute] (om) at (13.35,16.05) {{\Large\faServer}\\Manager\\\TRlabel{本地认证与管理}{Local access}};
-  \node[box] (ok) at (16.4,16.05) {{\Large\faKey}\\Keycloak\\\TRlabel{机构与层级}{Groups and roles}};
-  \node[data] (os) at (19.45,16.05) {{\Large\faDatabase}\\PostgreSQL\\CouchDB};
-  \node[box] (oq) at (13.35,13.65) {{\Large\faRandom}\\RabbitMQ\\\TRlabel{任务队列}{Job queue}};
-  \node[compute] (ow) at (16.4,13.65) {{\Large\faCogs}\\Nautilus\\worker};
-  \node[data] (od) at (19.45,13.65) {{\Large\faHdd}\\Data I/O\\Bundle × N};
-  \draw[control] (om) -- (ok);
-  \draw[control] (ok) -- (os);
-  \draw[control] (om.north) -- ++(0,.25) -| (os.north);
-  \draw[control] (om) -- (oq);
-  \draw[control] (oq) -- (ow);
-  \draw[dataflow,Stealth-Stealth] (ow) -- (od);
+  \draw[institution] (11.6,12.0) rectangle (19.6,24.1);
+  \node[text=teal!65!black,font=\Large] at (12.15,23.55) {\faBuilding};
+  \node[heading] at (12.55,23.55) {\TRlabel{机构 B}{Organization B}};
+  \draw[host] (12.1,22.0) rectangle (18.45,22.95);
+  \draw[host] (12.1,20.95) rectangle (18.45,21.9);
+  \draw[host] (12.1,19.9) rectangle (18.45,20.85);
+  \draw[host] (12.1,18.5) rectangle (15.2,19.45);
+  \draw[host] (15.4,18.5) rectangle (18.45,19.45);
+  \node[anchor=west,text=blue!55!black] at (12.35,22.47) {\faUserTie\quad\TRlabel{机构管理员}{Organization admin}};
+  \node[anchor=west,text=blue!55!black] at (12.35,21.42) {\faUserShield\quad\TRlabel{层级管理员}{Hierarchy admin}};
+  \node[anchor=west,text=blue!55!black] at (12.35,20.37) {\faUserShield\quad\TRlabel{下级管理员}{Lower-level admin}};
+  \node[anchor=west,text=blue!55!black,font=\scriptsize] at (12.25,18.97) {\faUser\;\TRlabel{用户}{User}\quad\faMobile};
+  \node[anchor=west,text=blue!55!black,font=\scriptsize] at (15.55,18.97) {\faUser\;\TRlabel{用户}{User}\quad\faDesktop};
+  \node[text=blue!55!black] at (17.65,22.47) {\faDesktop\quad\faMobile};
+  \node[text=blue!55!black] at (17.65,21.42) {\faLaptop\quad\faTerminal};
+  \node[text=blue!55!black] at (17.65,20.37) {\faMobile\quad\faDesktop};
+  \draw[control] (18.45,22.47) -- (18.75,22.47) -- (18.75,21.42) -- (18.45,21.42);
+  \draw[control] (18.45,21.42) -- (18.75,21.42) -- (18.75,20.37) -- (18.45,20.37);
+  \draw[draw=blue!55!black,line width=1pt] (15.3,19.9) -- (15.3,19.67) -- (13.65,19.67);
+  \draw[draw=blue!55!black,line width=1pt] (15.3,19.67) -- (16.9,19.67);
+  \draw[control] (13.65,19.67) -- (13.65,19.45);
+  \draw[control] (16.9,19.67) -- (16.9,19.45);
+  \draw[draw=blue!55!black,line width=1pt] (11.85,18.25) -- (11.85,23.15) -- (15.6,23.15);
+  \draw[draw=blue!55!black,line width=1pt] (11.85,22.47) -- (12.1,22.47);
+  \draw[draw=blue!55!black,line width=1pt] (11.85,21.42) -- (12.1,21.42);
+  \draw[draw=blue!55!black,line width=1pt] (11.85,20.37) -- (12.1,20.37);
+  \draw[draw=blue!55!black,line width=1pt] (11.85,18.25) -- (13.65,18.25) -- (13.65,18.5);
+  \draw[draw=blue!55!black,line width=1pt] (13.65,18.25) -- (16.9,18.25) -- (16.9,18.5);
+  \draw[host] (11.95,15.2) rectangle (19.25,17.4);
+  \node[device,text width=6.4cm] at (15.6,16.3) {{\Large\faServer}\\\TRlabel{内网服务器 · 一台 Manager}{Intranet server · one Manager}\\\scriptsize\TRlabel{内部结构同机构 A}{Internal structure as in organization A}};
+  \draw[control] (11.85,18.25) -- (11.85,17.55) -- (15.6,17.55) -- (15.6,17.4);
 
-  % Both kinds of client can select either Manager; the cloud is only a
-  % networking junction, not another deployed service.
-  \node[text=blue!55!black,font=\Large] at (10.6,19.12) {\faCloud};
-  \draw[control] (4.8,19.55) |- (9.9,19.12);
-  \draw[control] (16.4,19.55) |- (11.3,19.12);
-  \draw[control] (10.2,18.73) -- (10.2,18.43) -| (4.8,18.05);
-  \draw[control] (11,18.73) -- (11,18.43) -| (16.4,18.05);
-  \node[number] at (10.6,18.35) {1};
-  \draw[pending,Stealth-Stealth] (9.6,15) -- node[number,above] {2} (11.6,15);
+  % User login and manager federation use different routes and permissions.
+  \draw[control] (4.8,23.15) -- node[number,right] {1} (4.8,26.2);
+  \draw[control] (15.6,23.15) -- node[number,left] {1} (15.6,26.2);
+  \node[text=red!75!black,font=\Large] at (10.6,22.1) {\faBan};
+  \draw[pending] (9.25,17.8) -- (10.15,17.8) -- (10.15,25.45) -- (10.3,25.45) -- node[number,left] {2} (10.3,26.2);
+  \draw[pending] (11.95,16.3) -- (11.05,16.3) -- (11.05,25.45) -- (10.9,25.45) -- (10.9,26.2);
 
-  % Optional dedicated hosts, with no Manager installed.
-  \draw[host] (0,4.85) rectangle (9.6,10.35);
-  \node[text=blue!55!black,font=\Large] at (.55,9.85) {\faServer};
-  \node[heading] at (.95,9.85) {\TRlabel{执行节点主机 × N · 无 Manager}{Execution hosts × N · no Manager}};
-  \node[compute] (rw) at (1.75,8.15) {{\Large\faCogs}\\Nautilus\\worker};
-  \node[data] (rd) at (4.8,8.15) {{\Large\faHdd}\\Data I/O\\\TRlabel{有界缓存}{Bounded cache}};
-  \node[data] (rb) at (7.85,8.15) {{\Large\faDatabase\,\faDatabase}\\Bundle × N};
-  \draw[dataflow,Stealth-Stealth] (rw) -- (rd);
-  \draw[dataflow,Stealth-Stealth] (rd) -- (rb);
-  \node[align=left,font=\scriptsize,text=black!65] at (4.8,5.8) {\TRlabel{节点受 Manager 授权；数据保留在本机}{Authorized by its Manager; data stays on this host}};
+  % Separate execution and data-only hosts belong to organization A.
+  \begin{scope}[yshift=2.3cm]
+  \draw[host] (.61,5.36) rectangle (4.51,9.81);
+  \draw[host] (.53,5.28) rectangle (4.43,9.73);
+  \draw[host] (.45,5.2) rectangle (4.35,9.65);
+  \node[text=blue!55!black] at (.8,9.15) {\faServer};
+  \node[heading,font=\scriptsize\bfseries] at (1.1,9.15) {\TRlabel{执行节点主机}{Execution host}};
+  \node[service,text width=1.4cm] (worker) at (1.55,8.0) {{\faCogs}\\Nautilus};
+  \node[service,text width=1.4cm] (alpha) at (3.45,8.0) {{\faChartLine}\\Alpha};
+  \node[data,text width=1.4cm] (workerio) at (1.55,6.2) {{\faHdd}\\Data I/O};
+  \node[data,text width=1.4cm] (workerbundle) at (3.45,6.2) {{\faDatabase\,\faDatabase}\\Bundles};
+  \draw[pending] (alpha) -- (worker);
+  \draw[pending] (workerio) -- (worker);
+  \draw[pending] (workerio.north east) -- (alpha.south west);
+  \draw[dataflow] (workerbundle) -- (workerio);
+  \node[number] at (2.6,7.2) {4};
+  \draw[host] (5.51,5.36) rectangle (9.31,9.81);
+  \draw[host] (5.43,5.28) rectangle (9.23,9.73);
+  \draw[host] (5.35,5.2) rectangle (9.15,9.65);
+  \node[text=teal!65!black] at (5.7,9.15) {\faHdd};
+  \node[heading,font=\scriptsize\bfseries] at (6.0,9.15) {\TRlabel{数据专用主机}{Data-only host}};
+  \node[pendingservice,text width=3.2cm] (onlyio) at (7.1,7.85) {{\faHdd}\\Data I/O\\\TRlabel{有界 Arrow 缓存}{Bounded Arrow cache}};
+  \node[data,text width=2.6cm] (onlybundle) at (7.1,5.95) {{\faDatabase\,\faDatabase\,\faDatabase}\\Bundles};
+  \draw[dataflow] (onlybundle) -- (onlyio);
+  \draw[pending,Stealth-Stealth] (4.51,7.15) -- node[number,above] {5} (5.35,7.15);
 
-  \draw[host] (11.6,4.85) rectangle (21.2,10.35);
-  \node[text=teal!65!black,font=\Large] at (12.15,9.85) {\faHdd};
-  \node[heading] at (12.55,9.85) {\TRlabel{数据专用主机 × N · 无 Manager / worker}{Data-only hosts × N · no Manager / worker}};
-  \node[plannedbox,text width=3cm] (onlyio) at (14.5,8.15) {{\Large\faHdd}\\Data I/O\\\TRlabel{有界 Arrow 缓存}{Arrow cache}};
-  \node[data,text width=3cm] (onlybundle) at (19,8.15) {{\Large\faDatabase\,\faDatabase}\\Bundle × N};
-  \draw[dataflow,Stealth-Stealth] (onlyio) -- (onlybundle);
-  \node[align=left,font=\scriptsize,text=black!65] at (16.4,5.8) {\TRlabel{只提供数据，不执行 Manager 任务}{Serves data only; does not execute Manager jobs}};
-  \draw[decorate,decoration={brace,amplitude=5pt},draw=teal!55!black] (21.4,4.85) -- (21.4,18)
-    node[midway,right=8pt,rotate=90,anchor=south,teal!65!black,font=\scriptsize] {\TRlabel{本机构}{Own organization}};
+  % B shows additional hosts without repeating their internals.
+  \begin{scope}[yshift=2.5cm]
+  \draw[host] (12.21,7.76) rectangle (15.41,9.56);
+  \draw[host] (12.13,7.68) rectangle (15.33,9.48);
+  \draw[host] (12.05,7.6) rectangle (15.25,9.4);
+  \draw[host] (16.11,7.76) rectangle (19.31,9.56);
+  \draw[host] (16.03,7.68) rectangle (19.23,9.48);
+  \draw[host] (15.95,7.6) rectangle (19.15,9.4);
+  \node[device] at (13.65,8.25) {{\Large\faServer}\\\TRlabel{执行节点主机}{Execution host}\\\faDatabase\,\faDatabase};
+  \node[device] at (17.55,8.25) {{\Large\faHdd}\\\TRlabel{数据专用主机}{Data-only host}\\\faDatabase\,\faDatabase};
+  \draw[pending,Stealth-Stealth] (15.41,8.25) -- (15.95,8.25);
+  \end{scope}
+  \end{scope}
+  \draw[pending] (2.5,13.0) -- node[number,right] {3} (2.5,12.11);
+  \draw[pending] (7.1,13.0) -- node[number,right] {7} (7.1,12.11);
+  \draw[pending] (13.65,15.2) -- (13.65,14.36);
+  \draw[pending] (17.55,15.2) -- (17.55,14.36);
 
-  \draw[pending] (4.8,11.8) -- node[number,right] {3} (4.8,10.35);
-  \draw[pending] (13.35,11.8) -- (13.35,10.8) -- (4.8,10.8);
-  \draw[pending] (16.4,11.8) -- node[number,right] {7} (16.4,10.35);
-  \draw[pending,Stealth-Stealth] (9.6,8.15) -- node[number,above] {5} (11.6,8.15);
-  \node[number] at (6.35,8.85) {4};
+  % Additional public hosts are separate from the public Manager host.
+  \begin{scope}[yshift=30cm]
+  \draw[publiczone] (2.15,1.55) rectangle (17.3,6.05);
+  \node[heading] at (2.6,5.55) {\TRlabel{公网公共节点 · 可选的独立主机}{Public shared nodes · optional separate hosts}};
+  \draw[host] (2.81,2.06) rectangle (8.01,4.96);
+  \draw[host] (2.73,1.98) rectangle (7.93,4.88);
+  \draw[host] (2.65,1.9) rectangle (7.85,4.8);
+  \draw[host] (11.76,2.06) rectangle (17.01,4.96);
+  \draw[host] (11.68,1.98) rectangle (16.93,4.88);
+  \draw[host] (11.6,1.9) rectangle (16.85,4.8);
+  \node[device] at (5.25,3.35) {\Large\faServer\\\TRlabel{执行节点主机}{Execution host}\\\faCogs\,Nautilus\quad\faChartLine\,Alpha\\\faHdd\,Data I/O\quad\faDatabase\,\faDatabase};
+  \node[device] at (14.22,3.35) {\Large\faHdd\\\TRlabel{数据专用主机}{Data-only host}\\Data I/O\quad\faDatabase\,\faDatabase\,\faDatabase};
+  \draw[pending,Stealth-Stealth] (8.01,3.35) -- node[number,above] {5} (11.6,3.35);
+  \end{scope}
+  \draw[pending] (5.25,30.4) -- node[number,left] {3} (5.25,31.9);
+  \draw[pending] (14.22,30.4) -- node[number,right] {7} (14.22,31.9);
 
-  % Detailed descriptions are part of this single static image.
-  \node[note] at (0,3.85) {\textbf{1} \TRlabel{设备可连接本机构多台内网服务器，以及获准的公网服务器；跨机构内网连接须拒绝，校验待贯通。}{Devices may use their own organization's servers and the public server when allowed; cross-organization checks are pending.}};
-  \node[note] at (0,2.60) {\textbf{2} \TRlabel{Manager 互联：能力发现、任务与结果传递；用户身份懒同步仍待完成与验收。}{Manager links: capability discovery and Job/results; lazy identity synchronization is pending.}};
-  \node[note] at (0,1.35) {\textbf{3} \TRlabel{Celery / RabbitMQ：节点可连接获授权的 Manager，接收任务并回传结果；跨主机待验收。}{Celery / RabbitMQ: a node receives Jobs from an authorized Manager and returns results; remote validation is pending.}};
-  \node[note] at (11.2,3.85) {\textbf{4} \TRlabel{同主机数据：Data I/O 读取 Bundle；Arrow 文件映射复用文件页，不共享进程对象。}{Same host: Data I/O reads Bundles; Arrow mappings reuse file pages, not process objects.}};
-  \node[note] at (11.2,2.60) {\textbf{5} \TRlabel{跨主机行情：Arrow Flight 数据读取为规划能力，尚未接通。}{Cross-host market data: Arrow Flight reads are planned, not connected.}};
-  \node[note] at (11.2,1.35) {\textbf{6} \TRlabel{个人电脑：本机运行时仅由用户启动，Manager 不可发现或调度；下载能力待接通。}{Personal computer: the runtime is user-started and not Manager-scheduled; download is pending.}};
-  \node[note] at (0,-.15) {\textbf{7} \TRlabel{远程图表读取：Manager 从数据节点请求有限范围行情；数据节点接入尚待完成。}{Remote chart data: a Manager requests a bounded range from the data node; integration is pending.}};
-  \node[anchor=west,font=\scriptsize,text=black!65] at (0,-1.55) {\TRlabel{实线：已实现的组件关系　虚线：规划或待验收　外框：主机　× N：允许多台}{Solid: implemented    Dashed: planned or not yet validated    Frame: host    × N: multiple hosts}};
+  % Detailed edge annotations are included in the same static figure.
+  \node[heading,font=\scriptsize\bfseries] at (10.3,11.75) {\TRlabel{连线说明}{Connections}};
+  \node[note] at (10.3,11.4) {\textbf{1}\quad\TRlabel{用户仅登录所属机构内网；有权限者可登录公网。校验待验收。}{Own intranet only; public access needs permission. Checks pending.}};
+  \node[note] at (10.3,10.97) {\textbf{2}\quad\TRlabel{Manager 互联：能力发现、任务与结果；身份懒同步待验收。}{Manager federation: discovery, jobs and results; identity sync pending.}};
+  \node[note] at (10.3,10.54) {\textbf{3}\quad\TRlabel{Celery / RabbitMQ 投递任务并回传结果；跨主机待验收。}{Celery / RabbitMQ: jobs and results. Remote validation pending.}};
+  \node[note] at (10.3,10.11) {\textbf{4}\quad\TRlabel{Nautilus、Alpha 消费行情；bridge 提供因子；Arrow 同机复用待验收。}{Nautilus + Alpha: data and factors. Arrow sharing pending.}};
+  \node[note] at (10.3,9.68) {\textbf{5}\quad\TRlabel{跨主机 Arrow Flight 数据读取尚未接通。}{Cross-host Arrow Flight access is not connected.}};
+  \node[note] at (10.3,9.25) {\textbf{6}\quad\TRlabel{本机运行时与 Bundle 仅本人使用，Manager 不调度；下载待接通。}{Personal runtime and Bundles are user-only; download pending.}};
+  \node[note] at (10.3,8.82) {\textbf{7}\quad\TRlabel{远程图表按范围读取数据；接入待完成。}{Remote chart data access is not connected.}};
+  \node[note,text=black!65] at (10.3,8.2) {\TRlabel{实线：已有实现；虚线：规划或待验收；蓝框：机构；橙框：可选；叠框：多台主机。}{Solid: implemented; dashed: planned/pending; blue: org; orange: optional; stacks: hosts.}};
 \end{tikzpicture}

@@ -15,6 +15,7 @@ function NetworkTopology(): React.ReactElement {
   const { t, i18n } = useTranslation();
   const language = (i18n.resolvedLanguage || i18n.language || "zh").toLowerCase().startsWith("zh") ? "zh" : "en";
   return <section className="tr-topology" aria-label={t("technicalDocs.topologyLabel")}>
+    <p className="tr-topology-hint"><span aria-hidden="true">↔ </span>{t("technicalDocs.scrollHint", { defaultValue: language === "zh" ? "左右滑动查看完整拓扑" : "Swipe horizontally to view the full diagram" })}</p>
     <div className="tr-topology-canvas" tabIndex={0}>
       <img className="tr-topology-image" src={`/research-static/vendor/web-app/network-topology.${language}.svg`}
         alt={`${t("technicalDocs.topologyTitle")} · ${t("technicalDocs.crossHostArrowFlightPlanned")} · ${t("technicalDocs.managerOnlyPath")}`} />

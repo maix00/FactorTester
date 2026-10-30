@@ -10,3 +10,14 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+
+.tr-topology-hint {
+  display: none;
+  margin: 0 0 8px;
+  color: var(--text-secondary, #667085);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 760px) {
+  .tr-topology-hint { display: block; }
+}
