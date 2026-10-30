@@ -1,0 +1,242 @@
+schema_version = 1
+title = "TradeResearch 项目文档合集"
+description = "从仓库中的权威文档源生成的项目技术与使用手册。"
+edition = "0.1.0"
+
+[[changes]]
+version = "0.1.0"
+date = "2026-10-30"
+summary = "建立显式文档清单与单一 PDF 构建入口；正文由 #443 当前工作树的登记文档生成。"
+
+[[sections]]
+id = "user-guide"
+title = "用户使用指南"
+audience = "平台用户、研究人员与命令行用户"
+purpose = "按任务介绍平台使用流程、研究对象和常见问题。"
+
+[[sections.documents]]
+title = "准备产品与因子"
+source = "product_docs/guides/prepare-products-and-factors.md"
+slug = "prepare-products-and-factors"
+
+[[sections.documents]]
+title = "运行 IC 测试与回测"
+source = "product_docs/guides/run-tests.md"
+slug = "run-tests"
+
+[[sections.documents]]
+title = "阅读任务结果"
+source = "product_docs/guides/read-results.md"
+slug = "read-results"
+
+[[sections.documents]]
+title = "开展研究"
+source = "product_docs/guides/research-workflow.md"
+slug = "research-workflow"
+
+[[sections.documents]]
+title = "自动化与 CLI"
+source = "product_docs/guides/automation-and-cli.md"
+slug = "automation-and-cli"
+
+[[sections.documents]]
+title = "核心对象"
+source = "product_docs/concepts/core-objects.md"
+slug = "core-objects"
+
+[[sections.documents]]
+title = "研究、报告与证据"
+source = "product_docs/concepts/research-model.md"
+slug = "research-model"
+
+[[sections.documents]]
+title = "运行配置、任务与生成物"
+source = "product_docs/concepts/runspec-job-artifact.md"
+slug = "runspec-job-artifact"
+
+[[sections.documents]]
+title = "任务失败排查"
+source = "product_docs/troubleshooting/job-failures.md"
+slug = "job-failures"
+
+[[sections]]
+id = "architecture-design"
+title = "技术方案与架构设计"
+audience = "架构师、研发人员和维护人员"
+purpose = "描述 TradeResearch 当前系统边界、执行链路及已接受的设计决策；带状态和日期的决策仍按其原文解释。"
+
+[[sections.documents]]
+title = "项目概述"
+source = "README.md"
+slug = "project-overview"
+
+[[sections.documents]]
+title = "系统总览"
+source = "product_docs/implementation/system-overview.md"
+slug = "system-overview"
+
+[[sections.documents]]
+title = "网络拓扑"
+source = "product_docs/concepts/network-topology.md"
+slug = "network-topology"
+
+[[sections.documents]]
+title = "用户与权限"
+source = "product_docs/concepts/identity-permissions.md"
+slug = "identity-permissions"
+
+[[sections.documents]]
+title = "回测与交易"
+source = "product_docs/concepts/backtest-trading.md"
+slug = "backtest-trading"
+
+[[sections.documents]]
+title = "因子表示"
+source = "product_docs/concepts/factor-representation.md"
+slug = "factor-representation"
+
+[[sections.documents]]
+title = "Web 与 Swift 导航"
+source = "product_docs/implementation/web-swift-navigation.md"
+slug = "web-swift-navigation"
+
+[[sections.documents]]
+title = "研究报告实现"
+source = "product_docs/implementation/research-reports.md"
+slug = "research-reports"
+
+[[sections.documents]]
+title = "代码架构与合规控制"
+source = "product_docs/implementation/compliance-architecture.md"
+slug = "compliance-architecture"
+
+[[sections.documents]]
+title = "技术文档实现"
+source = "product_docs/implementation/technical-docs.md"
+slug = "technical-docs"
+
+[[sections.documents]]
+title = "Nautilus 执行与结果边界"
+source = "docs/adr/162-nautilus-execution-and-results.md"
+
+[[sections.documents]]
+title = "策略家族与账户划转"
+source = "docs/adr/164-strategy-families-and-account-transfers.md"
+
+[[sections.documents]]
+title = "因子预热要求与运行边界"
+source = "docs/adr/185-alpha-warmup-requirements-and-run-boundaries.md"
+
+[[sections.documents]]
+title = "本地 Nautilus 功能边界"
+source = "docs/adr/174-local-nautilus-feature-boundary.md"
+
+[[sections.documents]]
+title = "TradeResearch CLI 命名"
+source = "docs/adr/182-traderesearch-cli-naming.md"
+
+[[sections.documents]]
+title = "Keycloak 身份与权限"
+source = "docs/adr/170-keycloak-identity-and-managed-permissions.md"
+
+[[sections.documents]]
+title = "跨 Manager Keycloak 身份"
+source = "docs/adr/190-keycloak-manager-federation-identity.md"
+
+[[sections]]
+id = "api-reference"
+title = "API 与字段参考"
+audience = "客户端、集成开发者和测试配置维护人员"
+purpose = "提供当前登记的业务 API、CLI 和测试字段参考；具体版本的 schema 仍以运行服务返回为准。"
+
+[[sections.documents]]
+title = "API 与 CLI 参考"
+source = "product_docs/reference/api-cli-reference.md"
+slug = "api-cli-reference"
+
+[[sections.documents]]
+title = "测试字段参考"
+source = "product_docs/reference/test-fields.md"
+slug = "test-fields"
+
+[[sections.documents]]
+title = "技术文档发布契约"
+source = "product_docs/reference/documentation-contract.md"
+slug = "documentation-contract"
+
+[[sections]]
+id = "data-and-databases"
+title = "数据与数据库"
+audience = "平台架构师、数据库维护人员和执行节点维护人员"
+purpose = "记录控制数据、任务数据、版本化对象和文件数据面的存储边界。带迁移日期的条目是对应日期的状态记录。"
+
+[[sections.documents]]
+title = "7997 生成物与提交物数据面"
+source = "docs/adr/057-artifact-data-plane.md"
+
+[[sections.documents]]
+title = "版本化对象与报告存储决策"
+source = "docs/adr/167-versioned-objects-and-reports-in-couchdb.md"
+
+[[sections.documents]]
+title = "通用对象版本控制"
+source = "docs/adr/163-common-object-versioning.md"
+
+[[sections.documents]]
+title = "主机级数据 I/O 服务与 Arrow 句柄共享"
+source = "docs/adr/191-host-data-io-service.md"
+
+[[sections.documents]]
+title = "远端 PostgreSQL 控制库"
+source = "docs/remote-control-postgres.md"
+
+[[sections]]
+id = "deployment-operations"
+title = "部署与运维"
+audience = "部署工程师、服务器管理员和 on-call 维护人员"
+purpose = "说明仓库当前登记的部署、容量、恢复与服务维护操作。生产执行前仍须遵守对应授权和备份流程。"
+
+[[sections.documents]]
+title = "远端 main 容器发布"
+source = "docs/remote-deployment.md"
+
+[[sections.documents]]
+title = "Nautilus Celery 工作端维护"
+source = "docs/runbooks/nautilus-celery-worker.md"
+
+[[sections.documents]]
+title = "公网服务容量观察"
+source = "docs/runbooks/public-capacity.md"
+
+[[sections.documents]]
+title = "公网主机不可用排查"
+source = "docs/runbooks/public-host-down.md"
+
+[[sections]]
+id = "testing"
+title = "测试与验收"
+audience = "研发人员、测试人员和发布审核人员"
+purpose = "说明受支持的开发/测试环境、测试执行语义与已记录的验收证据。历史报告保留其原有时间范围。"
+
+[[sections.documents]]
+title = "开发环境"
+source = "docs/development-environment.md"
+
+[[sections.documents]]
+title = "测试执行链路"
+source = "product_docs/implementation/test-execution.md"
+slug = "test-execution"
+
+[[sections]]
+id = "release"
+title = "发布与客户端使用"
+audience = "发布负责人、客户端维护人员和桌面端用户"
+purpose = "说明客户端发行物、安装恢复和当前部署入口；计划文档与实际发布状态分开阅读。"
+
+[[sections.documents]]
+title = "客户端安装与恢复"
+source = "docs/client-release.md"
+
+[[sections.documents]]
+title = "客户端发布物边界"
+source = "docs/adr/130-client-release-artifact-split.md"

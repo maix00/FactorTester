@@ -1,0 +1,46 @@
+\documentclass[UTF8,oneside,openany]{ctexbook}
+\usepackage{geometry}
+\geometry{a4paper,margin=24mm}
+\setlength{\emergencystretch}{6em}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{calc}
+\usepackage{xurl}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+\usepackage{bookmark}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\urlstyle{same}
+\setCJKmonofont{FandolFang-Regular.otf}
+\lstset{basicstyle=\ttfamily\small,breaklines=true,breakatwhitespace=false,columns=fullflexible,keepspaces=true,frame=single}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{2}
+\input{.artifacts/docs-pdf/metadata.tex}
+\begin{document}
+\frontmatter
+\begin{titlepage}
+  \centering
+  \vspace*{30mm}
+  {\Huge\bfseries TradeResearch 项目文档合集\par}
+  \vspace{8mm}
+  {\Large 技术方案、架构设计、接口、数据、运维与用户指南\par}
+  \vfill
+  {\large 文档版本：\DocEdition\par}
+  {\large 源码快照：\DocBuildRevision\par}
+  {\large 构建日期：\DocBuildDate\par}
+  {\large 维护方：TradeResearch 项目\par}
+  \vspace{12mm}
+\end{titlepage}
+\chapter*{版本记录与变更说明}
+\DocChangeSummary\par
+\vspace{3mm}
+\noindent\textbf{构建工具：} \DocToolchain
+\chapter*{读者指南}
+本手册按读者任务组织。每章首页注明适用读者、用途和源文档最后修改时间。正文由仓库登记的 Markdown/TeX 源生成；这些源文件仍是唯一权威版本。\tableofcontents
+\mainmatter
+\input{.artifacts/docs-pdf/chapters.tex}
+\appendix
+\chapter{构建与来源}
+本 PDF 由 \texttt{docs/latex/manifest.toml} 中登记的源文件生成。只有显式登记的资料会被纳入，不会自动扫描整个仓库。构建版本与源文件修改时间用于定位对应内容；它们本身不代表内容已经通过代码审查。\end{document}
