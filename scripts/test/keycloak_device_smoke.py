@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Exercise device grants and revocation in a disposable Keycloak realm."""
+from __future__ import annotations
+
+import json
+import secrets
+from unittest.mock import patch
+from urllib.parse import urlencode
+
+from scripts.test.keycloak_cross_realm_smoke import Sandbox
+from server.identity import keycloak_authorization, keycloak_device
+
+
+def run(sandbox: Sandbox) -> dict[str, str]:
+    realm = "device-qa"
+    password, secret = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
+    issuer = f"http://localhost:8080/realms/{realm}"
+    sandbox.request("POST", "/admin/realms", token=sandbox.admin, body={
+        "realm": realm, "enabled": True, "sslRequired": "none", "registrationAllowed": False,
+    })
+    sandbox.api("POST", realm, "clients", {
+        "clientId": "tr-resource-server", "enabled": True, "protocol": "openid-connect",
+        "publicClient": False, "secret": secret, "serviceAccountsEnabled": True,
+        "directAccessGrantsEnabled": True, "authorizationServicesEnabled": True,
+    })
+    users = {}
+    for username in ("owner", "other"):
+        sandbox.api("POST", realm, "users", {
+            "username": username, "enabled": True, "emailVerified": True,
+            "firstName": "Temporary", "lastName": "User", "email": username + "@example.invalid",
+            "credentials": [{"type": "password", "value": password, "temporary": False}],
+        })
+        users[username] = sandbox.find(realm, "users?" + urlencode({"username": username, "exact": "true"}),
+                                       username, field="username")
+
+    def token(username: str) -> str:
+        result = sandbox.request("POST", f"/realms/{realm}/protocol/openid-connect/token", form={
+            "grant_type": "password", "client_id": "tr-resource-server", "client_secret": secret,
+            "username": username, "password": password,
+        })
+        return result["access_token"]
+
+    class Admin:
+        def _get(self, path):
+            return sandbox.api("GET", realm, path)
+
+    settings = {"issuer": issuer, "base_url": sandbox.base, "backchannel_base_url": sandbox.base,
+                "realm": realm, "authz_client_id": "tr-resource-server", "authz_client_secret": secret}
+    owner = {"keycloak_subject": users["owner"]["id"], "keycloak_issuer": issuer,
+             "tr_identity_id": "stable-owner", "username": "owner"}
+    other = {"keycloak_subject": users["other"]["id"], "keycloak_issuer": issuer,
+             "tr_identity_id": "stable-other", "username": "other"}
+    key = {"kty": "EC", "crv": "P-256", "x": "A" * 43, "y": "A" * 43}
+    other_key = {**key, "x": "B" * 42 + "A"}
+    device_id = "device-1234567890123456"
+    owner_token, other_token = token("owner"), token("other")
+    args = {"server_id": "manager-1", "device_id": device_id, "public_key": key}
+    with patch.object(keycloak_device, "oidc_settings", return_value=settings), \
+         patch.object(keycloak_authorization, "oidc_settings", return_value=settings), \
+         patch("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", return_value=Admin()):
+        keycloak_device.register_device(session=owner, **args)
+        assert keycloak_device.may_use_device(token=owner_token, session=owner, **args)
+        assert not keycloak_device.may_use_device(token=other_token, session=other, **args)
+        assert not keycloak_device.may_use_device(token=owner_token, session=owner, **{**args, "public_key": other_key})
+        assert keycloak_device.revoke_device(session=owner, **args)
+        assert not keycloak_device.may_use_device(token=owner_token, session=owner, **args)
+        assert not keycloak_device.revoke_device(session=owner, **args)
+    return {"owner": "allowed", "other_user": "denied", "other_key": "denied",
+            "same_token_after_revoke": "denied"}
+
+
+if __name__ == "__main__":
+    with Sandbox() as sandbox:
+        result = run(sandbox)
+    print(json.dumps({**result, "temporary_container_removed": True}, sort_keys=True))
