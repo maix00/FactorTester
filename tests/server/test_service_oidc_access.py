@@ -42,3 +42,25 @@ def test_federation_requires_registered_peer_and_delegated_principal(monkeypatch
         def _has_federation_proxy_token(self):raise AssertionError("execution must not fall back to old proxy token")
     Handler()._federation_public_data()
     assert responses[0][0]==status
+
+
+def test_service_backchannel_preserves_canonical_token_issuer(tmp_path, monkeypatch):
+    from server.identity import service_access as module
+    secret = tmp_path / "secret"
+    secret.write_text("fixture")
+    for key, value in {"ISSUER": "https://public.example/identity/realms/tr",
+                       "CLIENT_ID": "node", "CLIENT_SECRET_FILE": str(secret),
+                       "BACKCHANNEL_URL": "http://keycloak:8080/identity"}.items():
+        monkeypatch.setenv("TR_OIDC_" + key, value)
+    calls = []
+    monkeypatch.setattr(module, "ServiceOIDCClient",
+                        lambda base, realm, client, **kw: calls.append((base, realm, client)) or object())
+    module.configured_client()
+    verifier = module._verifier("https://public.example/identity/realms/tr", "node",
+                                str(secret), 1, "manager", "http://keycloak:8080/identity")
+    assert calls == [("http://keycloak:8080/identity", "tr", "node")] * 2
+    assert verifier.issuer == "https://public.example/identity/realms/tr"
+    monkeypatch.setenv("TR_OIDC_BACKCHANNEL_URL", "http://untrusted.example/identity")
+    with pytest.raises(ValueError):
+        module.configured_client()
+    module._verifier.cache_clear()

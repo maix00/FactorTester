@@ -2,6 +2,8 @@ name: traderesearch-execution-node
 
 x-node: &node
   image: ${TR_EXECUTION_IMAGE:?set a versioned tested execution image}
+  # Reusing the application image must not start its Manager entrypoint.
+  entrypoint: []
   restart: unless-stopped
   environment: &environment
     TR_MANAGER_ENDPOINT: ${TR_MANAGER_ENDPOINT:?set owning Manager control endpoint}
@@ -14,6 +16,7 @@ x-node: &node
     TR_NODE_DESCRIPTOR_FILE: /config/node.json
     TR_NODE_STATE_DIR: /node-state
     TR_OIDC_ISSUER: ${TR_OIDC_ISSUER:?set Keycloak issuer}
+    TR_OIDC_BACKCHANNEL_URL: ${TR_OIDC_BACKCHANNEL_URL:-}
     TR_OIDC_CLIENT_ID: ${TR_OIDC_CLIENT_ID:?set scoped node client}
     TR_OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc
     FACTORTESTER_FEDERATION_CA_FILE: ${TR_CA_FILE_IN_CONTAINER:-}
@@ -54,6 +57,7 @@ services:
     command: [python, -m, server.jobs.dispatch.node_cli, worker, --pool=solo, --concurrency=1, --prefetch-multiplier=1, --loglevel=INFO]
   data-io:
     image: ${TR_EXECUTION_IMAGE:?set a versioned tested execution image}
+    entrypoint: []
     restart: unless-stopped
     mem_limit: ${TR_DATA_IO_MEMORY:-1g}
     cpus: ${TR_DATA_IO_CPUS:-2}

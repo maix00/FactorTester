@@ -38,15 +38,7 @@ class PeerControlHandler(
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
-        execution_operations = {
-            "/api/federation/execution/register": "register",
-            "/api/federation/execution/job": "operation",
-            "/api/federation/execution/result-file": "report_file",
-            "/api/federation/execution/report": "publish_report",
-        }
-        operation = execution_operations.get(urlparse(self.path).path)
-        if operation:
-            self._execution_node_operation(operation)
+        if self._dispatch_execution_node(urlparse(self.path).path):
             return
         handlers = {
             "/api/federation/register": self._federation_register,

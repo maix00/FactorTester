@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from urllib.request import Request
 
 from server.identity.keycloak import ServiceOIDCClient
+from server.identity.user_session import _backchannel_base_url
 from server.manager.domain.federation_transport import FederationTransport
 
 
@@ -39,7 +40,8 @@ def configured_client(prefix="TR_OIDC"):
         raise ValueError("invalid OIDC issuer")
     secret=Path(os.environ[prefix+"_CLIENT_SECRET_FILE"]).read_text().strip()
     if not secret:raise ValueError("OIDC service credential is missing")
-    return ServiceOIDCClient(base,realm,os.environ[prefix+"_CLIENT_ID"],client_secret=secret)
+    return ServiceOIDCClient(_backchannel_base_url(base, os.environ.get(prefix+"_BACKCHANNEL_URL", "")),
+                             realm,os.environ[prefix+"_CLIENT_ID"],client_secret=secret)
 
 
 class ServiceTokenVerifier:
@@ -72,10 +74,11 @@ class ServiceTokenVerifier:
 
 
 @lru_cache(maxsize=8)
-def _verifier(issuer,client_id,secret_file,secret_mtime,audience):
+def _verifier(issuer,client_id,secret_file,secret_mtime,audience,backchannel=""):
     del secret_mtime
     base,_,realm=issuer.rstrip("/").rpartition("/realms/")
-    client=ServiceOIDCClient(base,realm,client_id,client_secret=Path(secret_file).read_text().strip())
+    client=ServiceOIDCClient(_backchannel_base_url(base, backchannel),realm,client_id,
+                             client_secret=Path(secret_file).read_text().strip())
     return ServiceTokenVerifier(client,issuer=issuer,audience=audience)
 
 
@@ -87,7 +90,8 @@ def authenticate_service(handler, *, required_scope):
         try:
             path=Path(os.environ["TR_OIDC_CLIENT_SECRET_FILE"])
             verifier=_verifier(os.environ["TR_OIDC_ISSUER"],os.environ["TR_OIDC_CLIENT_ID"],
-                str(path),path.stat().st_mtime_ns,os.environ["TR_OIDC_AUDIENCE"])
+                str(path),path.stat().st_mtime_ns,os.environ["TR_OIDC_AUDIENCE"],
+                os.environ.get("TR_OIDC_BACKCHANNEL_URL", ""))
         except (KeyError,OSError,ValueError) as exc:
             raise PermissionError("OIDC execution authentication is not configured") from exc
     return verifier.verify(token,required_scope=required_scope)

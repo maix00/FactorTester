@@ -55,3 +55,10 @@ def test_standalone_execution_node_uses_owning_manager_cache_authority():
         assert env['FACTORTESTER_SERVER_ID'] == '${TR_MANAGER_ID:?set owning Manager identity}'
         assert env['TR_DATA_DEVICE_REF'] == '${TR_SHARED_STORAGE_ID:?set actual kernel/storage domain}'
         assert env['TR_SHARED_DATA_CACHE_ROOT'] == '/shared-cache'
+
+
+def test_execution_commands_do_not_inherit_the_application_manager_entrypoint():
+    for name in ('worker', 'market', 'data-io'):
+        service = _service('execution-node', name)
+        assert service['entrypoint'] == []
+        assert service['command'][0] == 'python'
