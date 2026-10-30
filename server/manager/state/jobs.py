@@ -541,6 +541,7 @@ class JobProjectionStateMixin:
         object_owner_ref: str = "", object_alias: str = "",
         delegated_user_token: str = "",
         _allow_federation: bool = True,
+        _allow_stale: bool = True,
     ) -> dict[str, object]:
         """Read the permissioned server projection for a Manager user.
 
@@ -586,6 +587,8 @@ class JobProjectionStateMixin:
             except (ConnectionError, OSError, TypeError, ValueError):
                 continue
 
+        if not _allow_stale:
+            raise ConnectionError("current authorized job service is unavailable")
         cached = [] if cursor else _filter_object_jobs(
             self.job_index.list_all(limit=2000),
             object_kind=object_kind, object_ref=object_ref,
@@ -615,6 +618,7 @@ class JobProjectionStateMixin:
         object_owner_ref: str = "", object_alias: str = "",
         delegated_user_token: str = "",
         _allow_federation: bool = True,
+        _allow_stale: bool = True,
     ) -> dict[str, object]:
         """Read one account projection from the shared job repository.
 
@@ -663,6 +667,8 @@ class JobProjectionStateMixin:
             except (ConnectionError, OSError, TypeError, ValueError):
                 continue
 
+        if not _allow_stale:
+            raise ConnectionError("current authorized job service is unavailable")
         cached_rows = _filter_object_jobs(
             self.job_index.list(cache_principal, limit=2000),
             object_kind=object_kind, object_ref=object_ref,
@@ -748,7 +754,9 @@ class JobProjectionStateMixin:
             hashlib.sha256(delegated_user_token.encode("utf-8")).digest(),
             object_kind, object_ref, object_owner_ref, object_alias,
         )
-        cached = self._cross_server_cache_get(cache_key)
+        # Peer permissions may be revoked while the source user's token is
+        # unchanged. Recheck every peer instead of serving cached foreign rows.
+        cached = None if peer_routes else self._cross_server_cache_get(cache_key)
         if cached is not None:
             cached["sync_mode"] = "cache"
             return cached
@@ -907,7 +915,7 @@ class JobProjectionStateMixin:
                 }
                 try:
                     _route, payload = future.result()
-                except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                except (ConnectionError, OSError, TypeError, ValueError, PermissionError, RuntimeError) as exc:
                     source_status.append({
                         **base_status,
                         "status": "error",
@@ -954,7 +962,7 @@ class JobProjectionStateMixin:
                     else:
                         _route, next_payload = query_peer(route, page_number, cursor)
                         next_rows = self._annotate_route_jobs(route, next_payload)
-                except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                except (ConnectionError, OSError, TypeError, ValueError, PermissionError, RuntimeError) as exc:
                     status.update(status="error", error=str(exc))
                     return
                 # An old peer that ignores cursor must not silently repeat the
@@ -1005,7 +1013,7 @@ class JobProjectionStateMixin:
             if str(item.get("status") or "") != "offline"
         )
         total = max(total, unique_count + int(has_more))
-        return self._cross_server_cache_put(cache_key, {
+        result = {
             "success": True,
             "scope": "cross-server",
             "source_scope": source_scope,
@@ -1025,4 +1033,5 @@ class JobProjectionStateMixin:
                 source_status,
                 key=lambda item: str(item.get("server_id") or ""),
             ),
-        })
+        }
+        return result if peer_routes else self._cross_server_cache_put(cache_key, result)

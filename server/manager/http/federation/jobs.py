@@ -1,142 +1,95 @@
-"""Semantic slice of the authenticated federation HTTP adapter."""
-
+"""Signed Manager job queries with current cross-realm user authorization."""
 from __future__ import annotations
 
 import json
 
+from server.identity.federated_peer_delegation import accept_from_peer, bound_peer
+from server.identity.keycloak_authorization import AuthorizationUnavailable
+from server.identity.server_admission import current_manager_role
+from server.manager.http.federation.node_auth import authenticated_node
 from server.manager.http.responses import json_response
+
+
+def _subordinate_username(identity: dict, target_identity_id: str) -> str:
+    """Resolve the local subject and check the live Keycloak group hierarchy."""
+    from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+    from server.identity.realm_groups import managed_member_group_paths
+
+    if not target_identity_id or target_identity_id == identity.get("tr_identity_id"):
+        raise PermissionError("a distinct subordinate stable identity is required")
+    adapter = manager_keycloak_admin_adapter()
+    user = adapter.user_by_identity_id(target_identity_id)
+    attributes = user.get("attributes") if isinstance(user, dict) else None
+    if (not isinstance(user, dict) or user.get("enabled") is not True or not user.get("id")
+            or not isinstance(attributes, dict) or attributes.get("tr_identity_id") != [target_identity_id]):
+        raise PermissionError("subordinate Keycloak identity is unavailable")
+    if not current_manager_role(identity, "admin_console:manage"):
+        current_groups = adapter.user_group_paths(identity["keycloak_subject"])
+        roots = managed_member_group_paths(current_groups)
+        member_groups = adapter.user_group_paths(str(user["id"]))
+        if not roots or not any(
+                group == root or group.startswith(root.rstrip("/") + "/")
+                for group in member_groups for root in roots):
+            raise PermissionError("requested user is outside the current Keycloak hierarchy")
+    legacy = attributes.get("legacy_username")
+    if legacy is not None and (not isinstance(legacy, list) or len(legacy) != 1 or not legacy[0]):
+        raise PermissionError("subordinate local identity is ambiguous")
+    username = str(legacy[0] if legacy else user.get("username") or "").strip()
+    if not username:
+        raise PermissionError("subordinate local identity is unavailable")
+    return username
 
 
 class FederationJobRoutesMixin:
     def _federation_jobs_query(self) -> None:
-        """Serve a bounded local task projection to a peer Manager.
-
-        The proxy token authenticates the peer-to-peer request.  The local
-        aggregation methods are explicitly called with federation disabled so
-        this endpoint cannot recurse through the other Manager.
-        """
-        if not self._has_federation_proxy_token():
-            json_response(
-                self,
-                {"success": False, "error": "federation proxy is unauthorized"},
-                401,
-            )
-            return
+        """Query local jobs without accepting foreign tokens or local fallbacks."""
         try:
-            payload = self._json_body(64 * 1024)
-            requester = str(payload.get("requester_server_id") or "").strip()
-            principal = str(payload.get("principal") or "").strip()
-            delegated_user_token = str(payload.get("delegated_user_token") or "").strip()
+            body, payload = self._node_json_body(64 * 1024)
+            node = authenticated_node(self, method="POST", body=body)
+            if str(payload.get("requester_server_id") or "") != node.node_id:
+                raise PermissionError("requesting Manager does not match the signed node")
+            binding = bound_peer(self.state, node.node_id)
             scope = str(payload.get("scope") or "").strip().lower()
-            page = int(payload.get("page") or 1)
-            limit = int(payload.get("limit") or 100)
-            cursor = str(payload.get("cursor") or "").strip()
-            if len(cursor) > 4096:
-                raise ValueError("cursor is invalid")
-            if not requester:
-                raise ValueError("requester_server_id is required")
-            if requester == self.state.server_id:
-                raise ValueError("requester_server_id must identify a peer")
-            if not principal:
-                raise ValueError("principal is required")
-            if not delegated_user_token or len(delegated_user_token) > 32_768:
-                json_response(self, {
-                    "success": False,
-                    "error": "verified Keycloak user session is required",
-                }, 401)
-                return
             if scope not in {"mine", "subordinates", "visible", "server"}:
-                raise ValueError(
-                    "scope must be mine, subordinates, visible, or server"
-                )
-            username = str(payload.get("username") or "").strip()
-            if scope == "subordinates" and not username:
-                raise ValueError("username is required for subordinate jobs")
-            identity = self.state.session(delegated_user_token)
-            if identity is None or str(identity.get("username") or "").strip() != principal:
-                json_response(self, {
-                    "success": False,
-                    "error": "delegated Keycloak session does not match the requested principal",
-                }, 403)
-                return
-            roles = identity.get("keycloak_roles") or ()
-            groups = identity.get("keycloak_groups") or ()
-            if scope == "server" and "admin_console:manage" not in roles:
-                json_response(self, {
-                    "success": False,
-                    "error": "Keycloak super administrator role is required",
-                }, 403)
-                return
+                raise ValueError("scope must be mine, subordinates, visible, or server")
+            delegated = accept_from_peer(self.state, binding,
+                assertion=str(payload.get("delegation_assertion") or ""),
+                stable_id=str(payload.get("identity_id") or ""), target_scope="read")
+            identity, token = delegated.target_session, delegated.target_token
+            principal = str(identity.get("username") or "").strip()
+            if not principal:
+                raise PermissionError("target realm user is unavailable")
+            username = ""
+            if scope == "server" and not current_manager_role(identity, "admin_console:manage"):
+                raise PermissionError("current Keycloak super administrator role is required")
             if scope == "subordinates":
-                from server.identity.keycloak_directory import managed_users_for_claims
-                try:
-                    if "admin_console:manage" not in roles and not groups:
-                        raise PermissionError("Keycloak hierarchy administration permission required")
-                    managed = managed_users_for_claims(groups=groups, roles=roles)
-                except PermissionError:
-                    json_response(self, {
-                        "success": False,
-                        "error": "Keycloak hierarchy administration permission required",
-                    }, 403)
-                    return
-                except Exception:
-                    json_response(self, {
-                        "success": False,
-                        "code": "keycloak_directory_unavailable",
-                        "error": "Keycloak user hierarchy is unavailable",
-                    }, 503)
-                    return
-                allowed_users = {str(row.get("username") or "") for row in managed}
-                if username == principal or username not in allowed_users:
-                    json_response(self, {
-                        "success": False,
-                        "error": "requested user is outside the Keycloak managed hierarchy",
-                    }, 403)
-                    return
-            elif scope == "mine" and username and username != principal:
-                json_response(self, {
-                    "success": False,
-                    "error": "mine scope may only query the authenticated principal",
-                }, 403)
-                return
-            if page < 1 or not 1 <= limit <= 100:
-                raise ValueError("page or limit is invalid")
-            object_filter = {
-                key: str(payload.get(key) or "").strip()
-                for key in (
-                    "object_kind", "object_ref",
-                    "object_owner_ref", "object_alias",
-                )
-                if str(payload.get(key) or "").strip()
-            }
+                username = _subordinate_username(identity, str(payload.get("target_identity_id") or "").strip())
+            page, limit = int(payload.get("page") or 1), int(payload.get("limit") or 100)
+            cursor = str(payload.get("cursor") or "").strip()
+            if len(cursor) > 4096 or page < 1 or not 1 <= limit <= 100:
+                raise ValueError("cursor, page or limit is invalid")
+            object_filter = {key: str(payload.get(key) or "").strip() for key in
+                ("object_kind", "object_ref", "object_owner_ref", "object_alias")
+                if str(payload.get(key) or "").strip()}
             if scope == "server":
-                value = self.state.aggregate_server_jobs(
-                    principal=principal,
-                    cursor=cursor,
-                    limit=limit,
-                    delegated_user_token=delegated_user_token,
-                    **object_filter,
-                    _allow_federation=False,
-                )
+                value = self.state.aggregate_server_jobs(principal=principal, cursor=cursor,
+                    limit=limit, delegated_user_token=token, _allow_federation=False,
+                    _allow_stale=False, **object_filter)
             else:
-                account_query = {
-                    "principal": principal,
-                    "scope": scope,
-                    "page": page,
-                    "limit": limit,
-                    "delegated_user_token": delegated_user_token,
-                    "_allow_federation": False,
-                    **object_filter,
-                }
+                query = dict(principal=principal, scope=scope, page=page, limit=limit,
+                    delegated_user_token=token, _allow_federation=False, _allow_stale=False,
+                    **object_filter)
                 if username:
-                    account_query["username"] = username
-                value = self.state.aggregate_account_jobs(**account_query)
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    query["username"] = username
+                value = self.state.aggregate_account_jobs(**query)
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+            return
+        except (AuthorizationUnavailable, ConnectionError, OSError, RuntimeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return
-        json_response(self, {
-            **value,
-            "success": True,
-            "source_server_id": self.state.server_id,
-            "source_scope": scope,
-        })
+        json_response(self, {**value, "success": True, "source_server_id": self.state.server_id,
+                             "source_scope": scope})

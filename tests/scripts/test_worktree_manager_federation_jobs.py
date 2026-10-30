@@ -52,6 +52,8 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
             assert route.server_id == "remote-main"
             assert kwargs["scope"] == "mine"
             self.calls.append(kwargs)
+            if len(self.calls) > 1:
+                raise PermissionError("peer permission was revoked")
             return {
                 "jobs": [{
                     "job_id": "remote-job", "port": 8000,
@@ -86,7 +88,11 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
         principal="alice", source_scope="mine", limit=20,
         delegated_user_token="verified-alice-token",
     )
-    assert cached["sync_mode"] == "cache"
+    # Remote permissions can change while the browser retains the same token.
+    assert cached["sync_mode"] == "on_demand"
+    assert len(gateway.calls) == 2
+    assert [item["job_id"] for item in cached["jobs"]] == ["local-job"]
+    assert cached["partial"] is True
     assert gateway.calls[0]["limit"] == 20
 
 
@@ -202,7 +208,7 @@ def test_cross_server_visible_object_jobs_forward_stable_filter(
     }
 
 
-def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monkeypatch) -> None:
+def test_peer_job_query_rejects_proxy_token_without_node_signature(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(
         tmp_path / "query-repo",
         "python",
@@ -274,38 +280,12 @@ def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monke
 
     try:
         status, value = query()
-        assert status == 200
-        assert value["source_server_id"] == "remote-main"
-        assert calls == [{
-            "principal": "alice",
-            "scope": "mine",
-            "page": 1,
-            "limit": 20,
-            "delegated_user_token": "verified-alice-token",
-            "_allow_federation": False,
-        }]
-
-        status, forged = query(principal="mallory")
-        assert status == 403
-        assert "does not match" in forged["error"]
-
-        status, unrelated_owner = query(scope="mine", username="charlie")
-        assert status == 403
-        assert "authenticated principal" in unrelated_owner["error"]
-        assert len(calls) == 1
-
-        status, unrelated = query(
-            scope="subordinates", username="charlie",
-        )
-        assert status == 403
-        assert "outside the Keycloak managed hierarchy" in unrelated["error"]
-        assert len(calls) == 1
-
+        assert status == 403 and "authentication headers" in value["error"]
+        assert query(principal="mallory")[0] == 403
+        assert query(scope="subordinates", username="charlie")[0] == 403
         identity["keycloak_roles"] = ("admin_console:manage",)
-        status, value = query(scope="server", cursor="continuation")
-        assert status == 200
-        assert server_calls == [{"principal": "alice", "cursor": "continuation", "limit": 20,
-                                 "delegated_user_token": "verified-alice-token", "_allow_federation": False}]
+        assert query(scope="server", cursor="continuation")[0] == 403
+        assert calls == [] and server_calls == []
     finally:
         server.shutdown()
         server.server_close()

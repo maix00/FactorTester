@@ -378,7 +378,7 @@ class ManagerState(
         self.federation_config_store = FederationConfigStore(
             self.state_root / "federation-config.json",
         )
-        self.federation_gateway = FederatedGateway()
+        self.federation_gateway = FederatedGateway(state=self)
         self.federation_announcer: FederationAnnouncer | None = None
         self.federation_directory = FederationNodeDirectory()
         self.federation_sync = FederationSyncWorker(
