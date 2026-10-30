@@ -124,13 +124,11 @@ manager_args=(
     --server-id "${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}"
     --fixed-port 8000
     --fixed-branch main
+    --fixed-source /opt/factortester/app
     --state-root /state
     --daemon-socket /state/main-8000.sock
     --no-browser
 )
-if [[ -n "${FACTORTESTER_FIXED_SOURCE:-}" ]]; then
-    manager_args+=(--fixed-source "$FACTORTESTER_FIXED_SOURCE")
-fi
 extra_ports=(${FACTORTESTER_EXTRA_SERVICE_PORTS:-})
 extra_sources=(${FACTORTESTER_EXTRA_SERVICE_SOURCES:-})
 if (( ${#extra_ports[@]} != ${#extra_sources[@]} )); then
