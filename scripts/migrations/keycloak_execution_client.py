@@ -1,7 +1,9 @@
 """Provision one node-bound Keycloak service client without human/admin grants.
 
 Operator-only deployment adapter. Credentials are written to a new protected
-output directory; existing clients are never overwritten or silently rebound.
+output directory; existing clients are never overwritten or silently rebound. Additional nodes
+explicitly reuse the Manager verifier from its first protected receipt; they do
+not rotate that verifier or copy its secret into node credentials.
 """
 from __future__ import annotations
 
@@ -15,7 +17,8 @@ from urllib.parse import urlencode
 SCOPE = "tr:execution:node"
 
 
-def provision(adapter, *, manager_id: str, node_id: str, output: Path) -> dict:
+def provision(adapter, *, manager_id: str, node_id: str, output: Path,
+              verifier_client_id: str | None = None) -> dict:
     for value in (manager_id, node_id):
         if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", value):
             raise ValueError("explicit stable Manager and node identifiers are required")
@@ -25,7 +28,26 @@ def provision(adapter, *, manager_id: str, node_id: str, output: Path) -> dict:
     import hashlib
     namespace = hashlib.sha256((manager_id + "\0" + node_id).encode()).hexdigest()[:24]
     clients = {"node": "tr-node-" + namespace, "verifier": "tr-node-verifier-" + namespace}
-    for client in clients.values():
+    if verifier_client_id is not None:
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", verifier_client_id):
+            raise ValueError("invalid explicit Manager verifier client")
+        clients["verifier"] = verifier_client_id
+        existing = adapter._get("clients?" + urlencode({"clientId": verifier_client_id}))
+        if len(existing) != 1 or not existing[0].get("id"):
+            raise ValueError("explicit Manager verifier client is missing or ambiguous")
+        verifier = adapter._get("clients/" + str(existing[0]["id"]))
+        if (verifier.get("clientId") != verifier_client_id
+                or verifier.get("enabled") is not True
+                or verifier.get("publicClient") is not False
+                or verifier.get("serviceAccountsEnabled") is not True
+                or verifier.get("protocol") != "openid-connect"
+                or verifier.get("standardFlowEnabled") is not False
+                or verifier.get("directAccessGrantsEnabled") is not False
+                or verifier.get("fullScopeAllowed") is not False):
+            raise ValueError("Manager verifier must be a restricted confidential service client")
+    created_clients = {k: v for k, v in clients.items()
+                       if k != "verifier" or verifier_client_id is None}
+    for client in created_clients.values():
         if adapter._get("clients?" + urlencode({"clientId": client})):
             raise ValueError("node client already exists; inspect its protected deployment receipt")
     scope = next((s for s in adapter._get("client-scopes") if s.get("name") == SCOPE), None)
@@ -39,7 +61,7 @@ def provision(adapter, *, manager_id: str, node_id: str, output: Path) -> dict:
     os.chmod(output, 0o700)
     receipt = {"manager_id": manager_id, "node_id": node_id, "clients": clients, "scope": SCOPE}
     # Persist each secret before registering its client, for recoverable partial failure.
-    for kind, client_id in clients.items():
+    for kind, client_id in created_clients.items():
         secret = secrets.token_urlsafe(48)
         path = output / (kind + ".secret")
         with open(path, "x", opener=lambda path, flags: os.open(path, flags, 0o600)) as f:

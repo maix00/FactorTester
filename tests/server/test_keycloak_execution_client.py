@@ -35,3 +35,28 @@ def test_refuses_existing_client_without_rotating_or_rebinding(tmp_path):
         provision(a,manager_id='manager-a',node_id='node-a',output=tmp_path/'credentials')
     assert not a.clients
     assert not (tmp_path/'credentials').exists()
+
+
+def test_additional_nodes_share_manager_verifier_without_copying_its_secret(tmp_path):
+    a = Adapter()
+    verifier = {'id': 'shared', 'clientId': 'manager-verifier', 'enabled': True,
+                'publicClient': False, 'serviceAccountsEnabled': True,
+                'standardFlowEnabled': False, 'directAccessGrantsEnabled': False,
+                'fullScopeAllowed': False, 'protocol': 'openid-connect'}
+    original = a._get
+    a._get = lambda path: ([verifier] if path == 'clients?clientId=manager-verifier'
+                          else verifier if path == 'clients/shared' else original(path))
+    for node in ['node-a', 'node-b']:
+        receipt = provision(a, manager_id='manager-a', node_id=node,
+                            verifier_client_id='manager-verifier', output=tmp_path/node)
+        assert receipt['clients']['verifier'] == 'manager-verifier'
+        assert not (tmp_path/node/'verifier.secret').exists()
+    assert len(a.clients) == 2
+    assert a.clients[0]['clientId'] != a.clients[1]['clientId']
+    assert all(c['protocolMappers'][2]['config']['included.custom.audience'] ==
+               'manager-verifier' for c in a.clients)
+    verifier['publicClient'] = True
+    with pytest.raises(ValueError, match='restricted confidential'):
+        provision(a, manager_id='manager-a', node_id='node-c',
+                  verifier_client_id='manager-verifier', output=tmp_path/'node-c')
+    assert not (tmp_path/'node-c').exists()
