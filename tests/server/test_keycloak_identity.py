@@ -1,6 +1,4 @@
-from server.identity.keycloak import (
-    Identity, InMemoryKeycloak, group_subject, organization_subject, permission_subjects, user_subject,
-)
+from server.identity.keycloak import Identity, InMemoryKeycloak
 
 
 def test_nested_group_and_org_membership():
@@ -10,10 +8,6 @@ def test_nested_group_and_org_membership():
     ])
     assert [u.username for u in adapter.group_members("team/a")] == ["alice"]
     assert [u.username for u in adapter.organization_members("org-a")] == ["alice"]
-    assert user_subject("alice") == "user:alice"
-    assert group_subject("/team/a/") == "group:team/a"
-    assert permission_subjects(adapter.user("alice"))[0] == "user:alice"
-    assert organization_subject("org-a") == "org:org-a"
 
 
 def test_oidc_authorization_url_contains_state_and_redirect():

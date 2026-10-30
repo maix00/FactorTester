@@ -17,6 +17,9 @@ class Identity:
     organizations: tuple[str, ...] = ()
     roles: tuple[str, ...] = ()
     attributes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    subject: str = ""
+    display_name: str = ""
+    enabled: bool = True
 
 
 class KeycloakAdapter(Protocol):
@@ -65,9 +68,11 @@ class KeycloakAdminAdapter:
         self.password = password
         self.timeout = timeout
         self._token_value = ""
+        self._token_expires_at = 0.0
 
     def _token(self) -> str:
-        if self._token_value:
+        import time
+        if self._token_value and self._token_expires_at > time.monotonic() + 30:
             return self._token_value
         import json
         import urllib.parse
@@ -83,7 +88,11 @@ class KeycloakAdminAdapter:
             data=urllib.parse.urlencode(form).encode(), method="POST",
         )
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            self._token_value = str(json.loads(response.read())["access_token"])
+            payload = json.loads(response.read())
+        self._token_value = str(payload["access_token"])
+        self._token_expires_at = time.monotonic() + max(
+            30, int(payload.get("expires_in") or 60),
+        )
         return self._token_value
 
     def _get(self, path: str) -> object:
@@ -98,22 +107,26 @@ class KeycloakAdminAdapter:
             return json.loads(response.read())
 
     def _identity(self, raw: dict, groups: list[str], orgs: list[str]) -> Identity:
+        display_name = " ".join(
+            part for part in (str(raw.get("firstName") or "").strip(),
+                              str(raw.get("lastName") or "").strip())
+            if part
+        )
         return Identity(
             username=str(raw.get("username") or ""),
             groups=tuple(groups),
             organizations=tuple(orgs),
             roles=tuple(raw.get("realmRoles") or ()),
             attributes={k: tuple(v) for k, v in (raw.get("attributes") or {}).items()},
+            subject=str(raw.get("id") or ""),
+            display_name=display_name or str(raw.get("username") or ""),
+            enabled=raw.get("enabled") is True,
         )
 
     def user(self, username: str) -> Identity | None:
-        import urllib.parse
-
-        query = urllib.parse.urlencode({"username": username, "exact": "true"})
-        rows = self._get(f"users?{query}")
-        if not isinstance(rows, list) or not rows:
+        raw = self.user_representation(username)
+        if raw is None:
             return None
-        raw = rows[0]
         user_id = str(raw.get("id") or "")
         groups = []
         for group in self._get(f"users/{user_id}/groups") or []:
@@ -122,6 +135,24 @@ class KeycloakAdminAdapter:
                 groups.append(path)
         orgs = self._organizations_for_user(user_id, str(raw.get("username") or ""))
         return self._identity(raw, groups, orgs)
+
+    def user_representation(self, username: str) -> dict[str, Any] | None:
+        """Return one exact Keycloak user representation without directory fan-out."""
+        import urllib.parse
+
+        query = urllib.parse.urlencode({"username": username, "exact": "true"})
+        rows = self._get(f"users?{query}")
+        if not isinstance(rows, list):
+            raise RuntimeError("Keycloak user lookup returned an invalid result")
+        matches = [
+            row for row in rows
+            if isinstance(row, dict) and str(row.get("username") or "") == str(username)
+        ]
+        if len(matches) > 1:
+            raise LookupError("Keycloak username is ambiguous")
+        if not matches:
+            return None
+        return matches[0]
 
     def _post(self, path: str, payload: Any) -> tuple[int, str]:
         import json
@@ -206,6 +237,56 @@ class KeycloakAdminAdapter:
             raise LookupError(f"Keycloak user is missing or ambiguous: {username}")
         return str(matches[0]["id"])
 
+    def user_by_identity_id(self, identity_id: str) -> dict[str, Any] | None:
+        """Find one exact cross-Manager identity without username guessing.
+
+        Keycloak's Admin API supports the ``q`` attribute query for custom
+        user attributes. We still verify the returned attribute locally and
+        reject ambiguity; the stable identity is the lookup key, while a
+        username collision is never treated as proof that two users match.
+        """
+        selected = str(identity_id or "").strip()
+        if not selected or len(selected) > 128:
+            raise ValueError("stable identity ID is required")
+        import urllib.parse
+
+        query = urllib.parse.urlencode({"q": f"tr_identity_id:{selected}", "first": 0, "max": 3})
+        rows = self._get("users?" + query)
+        matches = [
+            row for row in rows or ()
+            if isinstance(row, dict)
+            and selected in (row.get("attributes") or {}).get("tr_identity_id", ())
+        ]
+        if len(matches) > 1:
+            raise LookupError("Keycloak stable identity ID is ambiguous")
+        return matches[0] if matches else None
+
+    def update_migrated_user(
+        self, user_id: str, *, username: str, email: str = "",
+        attributes: dict[str, tuple[str, ...]] | None = None,
+        enabled: bool = True,
+    ) -> None:
+        """Idempotently update migration-owned fields without touching credentials."""
+        import urllib.parse
+
+        selected_id = str(user_id or "").strip()
+        if not selected_id:
+            raise ValueError("Keycloak user ID is required")
+        current = self._get(f"users/{urllib.parse.quote(selected_id, safe='')}")
+        if not isinstance(current, dict) or not str(current.get("id") or "") == selected_id:
+            raise LookupError("Keycloak user is missing or changed")
+        if str(current.get("username") or "") != str(username):
+            raise ValueError("Keycloak username differs from the migration identity")
+        current["enabled"] = bool(enabled)
+        if email:
+            current["email"] = email
+        incoming = {key: list(values) for key, values in (attributes or {}).items()}
+        previous = current.get("attributes")
+        merged = dict(previous) if isinstance(previous, dict) else {}
+        merged.update(incoming)
+        current["attributes"] = merged
+        self._put(f"users/{urllib.parse.quote(selected_id, safe='')}", current)
+
     def add_client_roles(self, username: str, client_id: str,
                          role_names: tuple[str, ...] | list[str]) -> list[str]:
         """Idempotently assign existing client roles to one exact user."""
@@ -288,6 +369,46 @@ class KeycloakAdminAdapter:
                 return sorted(users.values(), key=lambda row: str(row["username"]).casefold())
             offset += len(rows)
         raise RuntimeError("Keycloak role-user result exceeded safety cap")
+
+    def user_group_paths(
+        self, user_id: str, *, page_size: int = 500, max_groups: int = 5000,
+    ) -> set[str]:
+        """Return one user's bounded Realm Group memberships.
+
+        Used only during an explicit organization-sync policy transition. This
+        is deliberately not called by login, job, or per-Bar paths.
+        """
+        import urllib.parse
+
+        selected_id = str(user_id or "").strip()
+        if not selected_id or len(selected_id) > 512:
+            raise ValueError("invalid Keycloak user id")
+        if not 1 <= int(page_size) <= 1000 or not 1 <= int(max_groups) <= 100_000:
+            raise ValueError("invalid Keycloak user-group query bounds")
+        encoded_id = urllib.parse.quote(selected_id, safe="")
+        result: set[str] = set()
+        offset = 0
+        while offset < max_groups:
+            count = min(page_size, max_groups - offset)
+            rows = self._get(
+                f"users/{encoded_id}/groups?"
+                + urllib.parse.urlencode({"first": offset, "max": count})
+            )
+            if not isinstance(rows, list):
+                raise RuntimeError("Keycloak user-group response is invalid")
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise RuntimeError("Keycloak user-group response is invalid")
+                path = str(row.get("path") or "").strip()
+                if not path.startswith("/") or "//" in path:
+                    raise RuntimeError("Keycloak returned an invalid group path")
+                result.add(path.rstrip("/"))
+            if len(result) > max_groups:
+                raise RuntimeError("Keycloak user-group result exceeds its safety cap")
+            if len(rows) < count:
+                return result
+            offset += count
+        raise RuntimeError("Keycloak user-group result exceeds its safety cap")
 
     def create_user(self, *, username: str, email: str = "", groups: tuple[str, ...] = (),
                     attributes: dict[str, tuple[str, ...]] | None = None) -> str:
@@ -378,14 +499,108 @@ class KeycloakAdminAdapter:
             if response.status not in {201, 204}:
                 raise RuntimeError(f"organization member add failed: {response.status}")
 
-    def _all_groups(self, parent: str = "") -> list[dict]:
-        path = f"groups/{parent}/children" if parent else "groups"
-        rows = self._get(path) or []
-        result = []
-        for item in rows:
-            result.append(item)
-            result.extend(self._all_groups(str(item.get("id") or "")))
+    def _page(self, path: str, *, page_size: int = 100,
+              max_items: int = 20_000) -> list[dict[str, Any]]:
+        """Read one Keycloak collection with explicit pagination bounds."""
+        import urllib.parse
+
+        if not 1 <= int(page_size) <= 500 or not 1 <= int(max_items) <= 100_000:
+            raise ValueError("invalid Keycloak directory page budget")
+        result: list[dict[str, Any]] = []
+        separator = "&" if "?" in path else "?"
+        for offset in range(0, max_items, page_size):
+            count = min(page_size, max_items - offset)
+            page_path = path + separator + urllib.parse.urlencode({
+                "first": offset, "max": count,
+            })
+            rows = self._get(page_path)
+            if not isinstance(rows, list):
+                raise RuntimeError("Keycloak directory response is not a list")
+            if any(not isinstance(row, dict) for row in rows):
+                raise RuntimeError("Keycloak directory returned an invalid item")
+            result.extend(rows)
+            if len(rows) < count:
+                return result
+        raise RuntimeError("Keycloak directory exceeds its configured item limit")
+
+    def _all_groups(self, parent: str = "", *, max_groups: int = 20_000) -> list[dict]:
+        """Return a bounded Realm Group tree, paging every level."""
+        result: list[dict[str, Any]] = []
+        visited: set[str] = set()
+
+        def walk(parent_id: str) -> None:
+            endpoint = f"groups/{parent_id}/children" if parent_id else "groups"
+            for item in self._page(endpoint, max_items=max_groups):
+                group_id = str(item.get("id") or "").strip()
+                path = str(item.get("path") or "").strip()
+                if not group_id or not path:
+                    raise RuntimeError("Keycloak returned a group without id/path")
+                if group_id in visited:
+                    continue
+                visited.add(group_id)
+                result.append(item)
+                if len(result) > max_groups:
+                    raise RuntimeError("Keycloak group tree exceeds its configured limit")
+                walk(group_id)
+
+        walk(parent)
         return result
+
+    def group_tree_members(self, group_path: str, *,
+                           max_groups: int = 4096,
+                           max_users: int = 20_000) -> list[Identity]:
+        """Return unique users directly assigned under a nested group path.
+
+        This is a bounded administrative directory query for catalog/admin
+        surfaces. It is not used for request authorization or market-data hot
+        paths; object access is still decided by Keycloak FGAP.
+        """
+        root = "/" + "/".join(part for part in str(group_path).split("/") if part)
+        if root != "/traderesearch" and not root.startswith("/traderesearch/"):
+            raise ValueError("group path is outside the TradeResearch realm tree")
+        groups = self._all_groups(max_groups=max_groups)
+        selected = [row for row in groups
+                    if (path := str(row.get("path") or "")) == root
+                    or path.startswith(root + "/")]
+        if not selected:
+            return []
+        users: dict[str, tuple[dict[str, Any], set[str]]] = {}
+        for group in selected:
+            group_id = str(group["id"])
+            path = str(group["path"])
+            for raw in self._page(
+                f"groups/{group_id}/members", max_items=max_users,
+            ):
+                username = str(raw.get("username") or "").strip()
+                user_id = str(raw.get("id") or "").strip()
+                if not username or not user_id:
+                    raise RuntimeError("Keycloak group member omitted identity")
+                existing = users.get(user_id)
+                if existing is None:
+                    users[user_id] = (raw, {path})
+                else:
+                    existing[1].add(path)
+                if len(users) > max_users:
+                    raise RuntimeError("Keycloak group membership exceeds its configured limit")
+        return [
+            self._identity(raw, sorted(paths), [])
+            for _user_id, (raw, paths) in sorted(
+                users.items(), key=lambda item: (
+                    str(item[1][0].get("username") or "").casefold(), item[0],
+                ),
+            )
+        ]
+
+    def list_users(self, *, max_users: int = 20_000) -> list[Identity]:
+        """List a bounded user directory for explicitly authorized admins."""
+        rows = self._page("users", max_items=max_users)
+        identities: list[Identity] = []
+        for raw in rows:
+            username = str(raw.get("username") or "").strip()
+            if not username or not str(raw.get("id") or "").strip():
+                raise RuntimeError("Keycloak user directory returned an invalid identity")
+            identities.append(self._identity(raw, [], []))
+        return identities
 
     def group_members(self, group_path: str) -> list[Identity]:
         target = next(
@@ -395,7 +610,7 @@ class KeycloakAdminAdapter:
         )
         if target is None:
             return []
-        members = self._get(f"groups/{target['id']}/members") or []
+        members = self._page(f"groups/{target['id']}/members")
         return [self._identity(item, [group_path], []) for item in members]
 
     def organization_members(self, organization: str) -> list[Identity]:
