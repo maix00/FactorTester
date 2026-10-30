@@ -10,7 +10,12 @@ from __future__ import annotations
 import json
 import secrets
 import subprocess
+import tempfile
+import threading
 import time
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -243,6 +248,112 @@ def run(sandbox: Sandbox) -> dict[str, object]:
     )
     result = verifier.authenticate(assertion(), expected_identity="stable-alice")
     assert result.target_session["username"] == "target-alice"
+
+    # The target's individual compute nodes use Keycloak resources, not the
+    # Manager grant or Bundle visibility. Check with the same retained user
+    # token both before and after the node-specific grant is revoked.
+    from server.identity import keycloak_authorization as object_authz
+    from server.identity.request_context import bind_verified_identity, identity_request
+    from server.modules.single_factor_test import execution_nodes
+    node_resources = []
+    for node_id, subject in (("node-allowed", alice_b["id"]), ("node-denied", other_b["id"])):
+        ref = execution_nodes.execution_node_resource_ref("target-manager", node_id)
+        node_id_resource = sandbox.protection(target_realm, "POST", "resource_set", token=b_pat, body={
+            "name": object_authz.keycloak_resource_name("execution_node", ref),
+            "ownerManagedAccess": True, "uris": [object_authz.keycloak_resource_uri("execution_node", ref)],
+            "resource_scopes": ["use"],
+        })["_id"]
+        sandbox.protection(target_realm, "POST", "uma-policy/" + node_id_resource, token=b_pat, body={
+            "name": node_id + "-use", "users": [subject], "scopes": ["use"], "logic": "POSITIVE",
+        })
+        node_resources.append(node_id_resource)
+    from types import SimpleNamespace
+    rows = [{"deployment_id": node, "service_port": 8000, "online": True, "expires_at": time.time() + 60,
+             "capabilities": {"execution_target": {"manager_id": "target-manager", "node_id": node},
+                              "offers": [], "runtime_adapters": {}}}
+            for node in ("node-allowed", "node-denied")]
+    local_node_service = SimpleNamespace(manager_id="target-manager", directory=lambda: rows)
+    object_settings = {"authz_client_id": "chain-b-client", "authz_client_secret": b_secret,
+                       "base_url": sandbox.base, "realm": target_realm}
+    with patch.object(execution_nodes, "node_service", return_value=local_node_service), \
+         patch.object(object_authz, "oidc_settings", return_value=object_settings), \
+         identity_request():
+        bind_verified_identity(result.target_token, result.target_session)
+        assert [row["target"]["node_id"] for row in execution_nodes.visible_targets("target-alice")] == ["node-allowed"]
+        policy = next(row for row in sandbox.protection(
+            target_realm, "GET", "uma-policy?" + urlencode({"resource": node_resources[0]}), token=b_pat)
+            if row.get("name") == "node-allowed-use")
+        sandbox.protection(target_realm, "DELETE", "uma-policy/" + quote(policy["id"], safe=""), token=b_pat)
+        assert execution_nodes.visible_targets("target-alice") == []
+
+    # Exercise the actual signed peer HTTP route with the real two-realm
+    # Keycloak grant, online source UMA and target UMA. The temporary Manager's
+    # admission and job repository are explicit test doubles; their respective
+    # real admission and repository tests are separate.
+    from server.identity import federated_peer_delegation as peer_delegation
+    from server.manager import runtime as manager
+    from server.manager.http.federation import jobs as peer_jobs
+    from server.manager.http.peer_handler import peer_control_handler
+    from server.manager.transfers.node_client import NodeControlClient
+    from server.manager.transfers.node_keys import NodeKey
+
+    route_resource = resource(target_realm, b_pat, "target-route", "read")
+    sandbox.protection(target_realm, "POST", "uma-policy/" + route_resource, token=b_pat, body={
+        "name": "target-alice-route-read", "users": [alice_b["id"]], "scopes": ["read"], "logic": "POSITIVE",
+    })
+    binding = peer_delegation.PeerBinding("source-manager", "", source_issuer, "chain-a-client",
+        target_issuer, "chain-a-client", source_resource, route_resource, "access-chain-b")
+    settings = {"issuer": target_issuer, "realm": target_realm, "backchannel_base_url": sandbox.base,
+                "authz_client_id": "chain-b-client", "authz_client_secret": b_secret}
+    def client_factory(_base, realm, _client, **_kwargs):
+        return introspection if realm == source_realm else b
+    with tempfile.TemporaryDirectory(prefix="tr-kc-route-") as directory:
+        root = Path(directory)
+        state = manager.ManagerState(root / "repo", "python", server_role="main",
+                                     server_id="target-manager", state_root=root / "state")
+        key = NodeKey.load_or_create(root / "source.key", node_id="source-manager")
+        state.node_identities.enroll(key.public_record())
+        observed = []
+        def local_jobs(**kwargs):
+            observed.append(kwargs)
+            return {"jobs": [{"job_id": "isolated-job"}], "total": 1}
+        state.aggregate_account_jobs = local_jobs
+        server = ThreadingHTTPServer(("127.0.0.1", 0), peer_control_handler(state))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        node = NodeControlClient(f"http://127.0.0.1:{server.server_address[1]}", key=key)
+        def route_query(token):
+            return node.signed_json("/api/federation/jobs/query", {
+                "requester_server_id": "source-manager", "identity_id": "stable-alice",
+                "delegation_assertion": token, "scope": "mine", "page": 1, "limit": 20,
+            })
+        try:
+            with patch.object(peer_jobs, "bound_peer", return_value=binding), \
+                 patch.object(peer_delegation, "oidc_settings", return_value=settings), \
+                 patch.object(peer_delegation, "_peer_secret", return_value=peer_secret), \
+                 patch.object(peer_delegation, "_local_client", return_value=b), \
+                 patch.object(peer_delegation, "ServiceOIDCClient", side_effect=client_factory), \
+                 patch.object(peer_delegation, "keycloak_session", side_effect=target_session.session), \
+                 patch.object(peer_delegation, "server_admission", return_value=(True, "")):
+                assert route_query(assertion())["jobs"][0]["job_id"] == "isolated-job"
+                assert observed[0]["principal"] == "target-alice"
+                assert observed[0]["delegated_user_token"] != original("source-alice")
+                pending_route = assertion()
+                role_change(alice_a, "DELETE")
+                try:
+                    denied(lambda: route_query(pending_route))
+                finally:
+                    role_change(alice_a, "POST")
+                policy = next(row for row in sandbox.protection(
+                    target_realm, "GET", "uma-policy?" + urlencode({"resource": route_resource}), token=b_pat)
+                    if row.get("name") == "target-alice-route-read")
+                sandbox.protection(target_realm, "DELETE", "uma-policy/" + quote(policy["id"], safe=""), token=b_pat)
+                denied(lambda: route_query(assertion()))
+                assert len(observed) == 1
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
     one_time = assertion()
     verifier.authenticate(one_time, expected_identity="stable-alice")
     denied(lambda: verifier.authenticate(one_time, expected_identity="stable-alice"))
@@ -289,7 +400,9 @@ def run(sandbox: Sandbox) -> dict[str, object]:
         if row.get("name") == "target-alice-read")
     sandbox.protection(target_realm, "DELETE", "uma-policy/" + quote(target_policy["id"], safe=""), token=b_pat)
     denied(lambda: verifier.authenticate(assertion(), expected_identity="stable-alice"))
-    return {"different_names_same_identity": True, "same_names_different_identity": "denied",
+    return {"signed_manager_http_real_keycloak_uma": "passed_with_repository_and_admission_doubles",
+            "real_node_specific_uma_same_token_revocation": "passed",
+            "different_names_same_identity": True, "same_names_different_identity": "denied",
             "source_offline_or_revoked": "denied", "target_object_revoked": "denied",
             "wrong_audience_replay_and_unlisted_idp": "denied"}
 

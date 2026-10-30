@@ -399,7 +399,8 @@ def test_single_authorization_does_not_turn_unauthorized_into_denial(monkeypatch
 def test_factor_source_permissions_are_deduplicated_and_bounded(monkeypatch):
     calls = []
 
-    def authorize_many(_token, *, permissions):
+    def authorize_many(_token, *, permissions, use_cache=True):
+        assert use_cache is True
         offset = sum(len(batch) for batch in calls)
         calls.append(list(permissions))
         return {

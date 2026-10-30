@@ -5,7 +5,7 @@ import json
 
 from server.identity.federated_peer_delegation import accept_from_peer, bound_peer
 from server.identity.keycloak_authorization import AuthorizationUnavailable
-from server.identity.server_admission import current_manager_role
+from server.identity.server_admission import current_administrative_groups, current_manager_role
 from server.manager.http.federation.node_auth import authenticated_node
 from server.manager.http.responses import json_response
 
@@ -24,7 +24,7 @@ def _subordinate_username(identity: dict, target_identity_id: str) -> str:
             or not isinstance(attributes, dict) or attributes.get("tr_identity_id") != [target_identity_id]):
         raise PermissionError("subordinate Keycloak identity is unavailable")
     if not current_manager_role(identity, "admin_console:manage"):
-        current_groups = adapter.user_group_paths(identity["keycloak_subject"])
+        current_groups = current_administrative_groups(identity)
         roots = managed_member_group_paths(current_groups)
         member_groups = adapter.user_group_paths(str(user["id"]))
         if not roots or not any(

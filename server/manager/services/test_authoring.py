@@ -27,6 +27,24 @@ class TestAuthoringError(RuntimeError):
         self.details = details
 
 
+def _verified_manager_identity(owner: str):
+    """Forward only the exact Keycloak identity verified by the Manager."""
+    from server.identity.request_context import current_verified_identity
+
+    verified = current_verified_identity()
+    if verified is None:
+        return None
+    if str(verified[1].get("username") or "") != str(owner):
+        raise PermissionError("verified Keycloak identity does not match the local user")
+    return verified
+
+
+def _bind_flask_identity(verified) -> None:
+    if verified is not None:
+        from flask import g
+        g.keycloak_access_token, g.keycloak_user_session = verified
+
+
 class TestAuthoringService:
     """Serve authoring state directly from the shared local data store."""
 
@@ -258,6 +276,7 @@ class TestAuthoringService:
 
     def node_job_operation(self, *, job_id: str, suffix: str, owner: str) -> TestAuthoringResponse:
         """Reuse established owner-scoped handlers without a business listener."""
+        verified = _verified_manager_identity(owner)
         from server.jobs.repository.sqlite import JobRepository
         record = JobRepository().load(job_id, owner=owner)
         if record is None or not record.job_spec.get("execution_binding"):
@@ -275,6 +294,7 @@ class TestAuthoringService:
         import secrets
         app.secret_key = secrets.token_bytes(32)
         with app.test_request_context("/api/jobs/" + job_id + suffix, method="POST" if suffix == "/cancel" else "GET"):
+            _bind_flask_identity(verified)
             session["username"] = owner
             response = app.make_response(actions[suffix](job_id))
             return TestAuthoringResponse(response.get_json(), response.status_code)
@@ -282,6 +302,7 @@ class TestAuthoringService:
     def write(
         self, method: str, path: str, *, owner: str, payload: dict[str, Any],
         trusted_context: bool = False,
+        verified_source_owner: str | None = None,
     ) -> TestAuthoringResponse:
         from server.services import research_configurations, research_workspaces
 
@@ -316,17 +337,24 @@ class TestAuthoringService:
         if method == "POST" and path in {"/api/runs", "/api/runs/preview"}:
             # Adapt the existing control API functions; never start a Flask
             # listener or import/run an execution engine in the Manager.
-            from flask import Flask, session
+            from flask import Flask, g, session
             from server.modules.single_factor_test.research_jobs import (
                 submit_research_run, preview_research_run,
             )
             if not trusted_context:
                 from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
                 payload = {key: value for key, value in payload.items() if key != MANAGER_RUN_CONTEXT_KEY}
+            verified = _verified_manager_identity(owner)
+            if verified_source_owner is not None and (
+                    not trusted_context or verified is None or not str(verified_source_owner).strip()):
+                raise PermissionError("verified source identity is required for a federated Run")
             app = Flask("traderesearch-run-control")
             import secrets
             app.secret_key = secrets.token_bytes(32)
             with app.test_request_context(path, method="POST", json=payload):
+                _bind_flask_identity(verified)
+                if verified_source_owner is not None:
+                    g.tr_federated_source_username = str(verified_source_owner).strip()
                 session["username"] = owner
                 value = submit_research_run() if path == "/api/runs" else preview_research_run()
                 response = app.make_response(value)

@@ -25,6 +25,7 @@ class DelegatedIdentity:
     identity_id: str
     source_issuer: str
     source_subject: str
+    source_username: str
 
 
 class CrossRealmDelegation:
@@ -73,7 +74,8 @@ class CrossRealmDelegation:
             raise PermissionError("source assertion is malformed") from exc
         if not isinstance(signed, dict):
             raise PermissionError("source assertion claims are invalid")
-        for key in ("iss", "sub", "jti", "exp", "iat", "azp", "tr_identity_id"):
+        for key in ("iss", "sub", "jti", "exp", "iat", "azp", "tr_identity_id",
+                    "tr_username", "preferred_username"):
             if signed.get(key) != claims.get(key):
                 raise PermissionError("source assertion and introspection differ")
         audience = signed.get("aud")
@@ -130,5 +132,8 @@ class CrossRealmDelegation:
             raise PermissionError("source assertion identity changed during exchange")
         if self.target_authorize(session, target_token) is not True:
             raise PermissionError("target Keycloak current object authorization was denied")
+        source_username = source.get("tr_username") or source.get("preferred_username") or ""
+        if not isinstance(source_username, str) or len(source_username) > 512:
+            raise PermissionError("source username claim is invalid")
         return DelegatedIdentity(target_token, dict(session), expected_identity,
-                                 self.source_issuer, str(source["sub"]))
+                                 self.source_issuer, str(source["sub"]), source_username.strip())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs
 
+from server.identity.server_admission import current_administrative_groups, current_manager_role
 from server.manager.domain.federation import TargetUnavailable
 from server.manager.http.responses import json_response
 
@@ -57,9 +58,12 @@ class JobListRoutesMixin:
         from server.identity.keycloak_directory import managed_users_for_claims
 
         username = str(session.get("username") or "").strip()
+        groups = current_administrative_groups(session)
+        if groups is None:
+            raise PermissionError("current Keycloak administrative groups are unavailable")
+        roles = ("admin_console:manage",) if current_manager_role(session, "admin_console:manage") else ()
         users = managed_users_for_claims(
-            groups=session.get("keycloak_groups") or (),
-            roles=session.get("keycloak_roles") or (),
+            groups=groups, roles=roles, use_cache=False,
         )
         return [row for row in users
                 if str(row.get("username") or "").strip() != username]
@@ -87,6 +91,8 @@ class JobListRoutesMixin:
             return True
         if parsed.path == "/api/jobs":
             session = self._session()
+            is_admin = bool(session and session.get("role") == "super_admin"
+                            and current_manager_role(session, "admin_console:manage"))
             visitor = self._visitor_mode()
             query = parse_qs(parsed.query, keep_blank_values=True)
             scope = str(query.get("scope", [""])[0] or "").strip().lower()
@@ -99,7 +105,7 @@ class JobListRoutesMixin:
                 if str(query.get(key, [""])[0] or "").strip()
             }
             if not scope:
-                if session is None or str(session.get("role") or "") == "super_admin":
+                if session is None or is_admin:
                     scope = "server"
                 else:
                     scope = "mine"
@@ -166,12 +172,10 @@ class JobListRoutesMixin:
                 if not source_scope:
                     source_scope = (
                         "server"
-                        if str(session.get("role") or "") == "super_admin"
+                        if is_admin
                         else "mine"
                     )
-                if source_scope == "server" and str(
-                    session.get("role") or ""
-                ) != "super_admin":
+                if source_scope == "server" and not is_admin:
                     json_response(self, {
                         "success": False,
                         "error": "只有超级管理员可以查看跨服务器全部任务",
@@ -204,7 +208,7 @@ class JobListRoutesMixin:
                     query.get("cursor", [""])[0] or ""
                 )
                 try:
-                    if session is not None and str(session.get("role") or "") == "super_admin":
+                    if is_admin:
                         payload = self.state.aggregate_server_jobs(
                             principal=principal, cursor=cursor, limit=limit,
                             delegated_user_token=self._bearer_token(),

@@ -204,6 +204,7 @@ class FederatedGateway:
         operation: str,
         principal: str,
         payload: dict[str, object] | None = None,
+        delegated_user_token: str = "",
     ) -> dict[str, object]:
         """Read one bounded safe projection from a peer Manager.
 
@@ -213,25 +214,27 @@ class FederatedGateway:
         or device-local path requests.
         """
         if kind == "execution":
-            if not route.remote or not route.online:
+            if not route.remote or not route.online or self.state is None:
                 raise ValueError("remote Manager is unavailable")
-            from server.identity.service_access import (
-                ServiceHTTPClient,
-                configured_client,
-            )
-            clients = getattr(self, "_execution_clients", None)
-            if clients is None:
-                self._execution_clients = clients = {}
-            endpoint = self._peer_url(route, "")
-            client = clients.get(endpoint)
-            if client is None:
-                if len(clients) >= 64:
-                    clients.clear()
-                client = clients[endpoint] = ServiceHTTPClient(endpoint,
-                    oidc=configured_client("TR_FEDERATION_OIDC"), response_limit=MAX_ENVELOPE_BYTES)
-            return client.post_json("/api/federation/public-data", {
-                "kind": kind, "operation": operation, "principal": principal,
-                "payload": dict(payload or {})})
+            from server.identity.federated_peer_delegation import bound_peer, exchange_for_peer
+            from server.manager.transfers.node_client import NodeControlClient
+            binding = bound_peer(self.state, route.server_id, expected_endpoint=route.peer_control_endpoint)
+            assertion, identity_id = exchange_for_peer(self.state, binding,
+                token=str(delegated_user_token or ""), principal=principal)
+            try:
+                return NodeControlClient(binding.endpoint, key=self.state.node_key,
+                    transport=self.transport).signed_json("/api/federation/public-data", {
+                        "kind": kind, "operation": operation,
+                        "requester_server_id": self.state.server_id,
+                        "identity_id": identity_id, "delegation_assertion": assertion,
+                        "payload": dict(payload or {}),
+                    }, timeout=self.timeout)
+            except HTTPError as exc:
+                if exc.code in (401, 403):
+                    raise PermissionError("federated execution was denied") from exc
+                raise ConnectionError(f"federated execution returned HTTP {exc.code}") from exc
+            except (URLError, OSError) as exc:
+                raise ConnectionError("federated execution is unavailable") from exc
         if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         request_payload = {

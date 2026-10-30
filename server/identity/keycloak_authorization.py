@@ -237,7 +237,7 @@ def keycloak_authorized_objects(
     *,
     resource_type: str,
     refs: list[tuple[str, object]],
-    scope: str,
+    scope: str, use_cache: bool = True,
 ) -> set[object]:
     """Batch-authorize stable object refs and return caller-provided labels."""
     normalized_scope = str(scope or "").strip()
@@ -258,7 +258,7 @@ def keycloak_authorized_objects(
     allowed: set[object] = set()
     for offset in range(0, len(permissions), 256):
         result = keycloak_authorized_many(
-            token, permissions=permissions[offset:offset + 256],
+            token, permissions=permissions[offset:offset + 256], use_cache=use_cache,
         )
         allowed.update(
             label for uri, label, _name, permission_scope in candidates[offset:offset + 256]

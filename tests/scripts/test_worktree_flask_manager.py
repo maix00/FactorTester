@@ -746,6 +746,14 @@ def test_anonymous_server_jobs_are_bounded_to_twenty(
 def test_super_admin_server_jobs_use_permissioned_projection(
     tmp_path, monkeypatch,
 ) -> None:
+    from tests.server.test_server_admission import Keycloak, ISSUER
+    from server.identity import server_admission as admission
+    provider = Keycloak()
+    provider.roles = [{"name": "admin_console:manage"}]
+    admission.clear_server_admission_cache()
+    monkeypatch.setattr(admission, "oidc_settings", lambda: {
+        "issuer": ISSUER, "roles_client_id": "tr-manager", "client_id": "tr-manager"})
+    monkeypatch.setattr("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", lambda: provider)
     state = manager.ManagerState(tmp_path, "python")
     calls = []
     monkeypatch.setattr(
@@ -754,6 +762,8 @@ def test_super_admin_server_jobs_use_permissioned_projection(
         lambda token: {
             "username": "admin@1",
             "role": "super_admin",
+            "keycloak_subject": "subject", "keycloak_issuer": ISSUER,
+            "keycloak_roles": ["admin_console:manage"],
             "capabilities": {"manager": True, "research": True},
         } if token == "admin-token" else None,
     )
@@ -787,6 +797,7 @@ def test_super_admin_server_jobs_use_permissioned_projection(
     assert payload["public"] is False
     assert payload["jobs"][0]["job_id"] == "admin-job"
     assert calls == [("admin@1", "", 100, "admin-token")]
+    admission.clear_server_admission_cache()
 
 
 def test_permissioned_server_jobs_forward_verified_token_to_local_service(tmp_path, monkeypatch):

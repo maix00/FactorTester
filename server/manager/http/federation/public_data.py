@@ -32,34 +32,45 @@ class FederationPublicDataRoutesMixin:
 
     def _federation_public_data(self) -> None:
         try:
-            request = self._json_body(256 * 1024)
+            body, request = self._node_json_body(1024 * 1024)
             kind = str(request.get("kind") or "").strip()
             operation = str(request.get("operation") or "").strip()
             principal = str(request.get("principal") or "").strip()
             payload = request.get("payload")
             if kind == "execution":
-                from server.identity.service_access import authenticate_service
-                identity = authenticate_service(self, required_scope="tr:federation:read")
-                self._execution_identity = identity
-                peers = self.state.federation_registry.servers(include_offline=True)
-                if not identity.manager_id or not any(item["server_id"] == identity.manager_id for item in peers):
-                    raise PermissionError("unregistered federated Manager")
-                if principal not in identity.principals:
-                    raise PermissionError("principal is not delegated to this Manager client")
-                if operation == "submit" and "tr:federation:submit" not in identity.scopes:
-                    raise PermissionError("federated submission scope is missing")
+                from server.identity.federated_peer_delegation import accept_from_peer, bound_peer
+                from server.manager.http.federation.node_auth import authenticated_node
+                node = authenticated_node(self, method="POST", body=body)
+                if str(request.get("requester_server_id") or "") != node.node_id:
+                    raise PermissionError("requesting Manager does not match the signed node")
+                if operation not in {"targets", "resolve-selection", "preview", "submit", "job"}:
+                    raise ValueError("unsupported execution operation")
+                if not isinstance(payload, dict):
+                    raise TypeError("federated execution payload must be an object")
+                scope = "write" if operation == "submit" or (
+                    operation == "job" and payload.get("suffix") == "/cancel") else "read"
+                delegated = accept_from_peer(self.state, bound_peer(self.state, node.node_id),
+                    assertion=str(request.get("delegation_assertion") or ""),
+                    stable_id=str(request.get("identity_id") or ""), target_scope=scope)
+                principal = str(delegated.target_session.get("username") or "").strip()
+                if not principal:
+                    raise PermissionError("target realm user is unavailable")
             elif not self._has_federation_proxy_token():
                 raise PermissionError("federation proxy is unauthorized")
             if not kind or not operation or not principal:
                 raise ValueError("federated public-data request is incomplete")
             if not isinstance(payload, dict):
                 raise TypeError("federated public-data payload must be an object")
-            value = self._public_data_value(
-                kind=kind,
-                operation=operation,
-                principal=principal,
-                payload=payload,
-            )
+            if kind == "execution":
+                from server.identity.request_context import bind_verified_identity, identity_request
+                with identity_request():
+                    bind_verified_identity(delegated.target_token, delegated.target_session)
+                    self._delegated_source_username = delegated.source_username
+                    value = self._public_data_value(kind=kind, operation=operation,
+                                                    principal=principal, payload=payload)
+            else:
+                value = self._public_data_value(kind=kind, operation=operation,
+                                                principal=principal, payload=payload)
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return
@@ -91,8 +102,6 @@ class FederationPublicDataRoutesMixin:
                 return {"binding":bind_prepared_execution(prepared,payload["selection"])}
             if operation == "job":
                 suffix = str(payload.get("suffix") or "")
-                if suffix == "/cancel" and "tr:federation:submit" not in self._execution_identity.scopes:
-                    raise PermissionError("federated mutation scope is missing")
                 value = self.state.test_authoring.node_job_operation(
                     job_id=str(payload.get("job_id") or ""), suffix=suffix, owner=viewer)
                 return {"response": value.payload, "status": value.status}
@@ -104,7 +113,8 @@ class FederationPublicDataRoutesMixin:
                 request = payload.get("request")
                 if not isinstance(request, dict):
                     raise ValueError("frozen execution request is required")
-                value = self.state.test_authoring.write("POST", path, owner=viewer, payload=request, trusted_context=True)
+                value = self.state.test_authoring.write("POST", path, owner=viewer, payload=request,
+                    trusted_context=True, verified_source_owner=self._delegated_source_username)
                 return {"response": value.payload, "status": value.status}
             raise ValueError("unsupported execution operation")
         if kind == "storage" and operation == "profile-inventory":
