@@ -1,4 +1,5 @@
 import sqlite3
+import json
 
 import pytest
 
@@ -9,6 +10,7 @@ from server.identity.keycloak_research_cutover import (
     KeycloakResearchPolicyEvaluator,
     compare_research_decisions,
     research_candidate_universe,
+    verify_live_profile_policy_parity,
     verify_live_research_policy_parity,
 )
 
@@ -177,3 +179,34 @@ def test_directory_missing_organization_or_ambiguous_identity_blocks_parity(lega
     args["evaluator"].adapter.org_members = {"a", "b"}
     with pytest.raises(AuthorizationUnavailable, match="organization coverage"):
         verify_live_research_policy_parity(**args)
+
+
+def test_profile_parity_covers_every_user_and_rejects_an_extra_writer(legacy_catalog):
+    evaluator = AuditEvaluator()
+    extra = set()
+    def evaluate(identity, *, candidates):
+        return {(kind, ref, "write"): (json.loads(ref)[1] == identity or identity in extra)
+                for kind, ref, _scopes in candidates}
+    evaluator.evaluate = evaluate
+    args = {"database": legacy_catalog, "source_sha256": legacy_authorization_snapshot_sha256(legacy_catalog),
+            "identity_by_principal": {"alice": "a", "bob": "b"}, "evaluator": evaluator}
+    assert verify_live_profile_policy_parity(**args) == {"principals": 3, "profiles": 1, "decisions": 3}
+    extra.add("new-user")
+    with pytest.raises(AuthorizationUnavailable, match="decisions differ"):
+        verify_live_profile_policy_parity(**args)
+
+
+def test_profile_parity_rejects_revoked_write_and_identity_collapse(legacy_catalog):
+    evaluator = AuditEvaluator()
+    evaluator.evaluate = lambda identity, *, candidates: {
+        (kind, ref, "write"): json.loads(ref)[1] == identity for kind, ref, _scopes in candidates
+    }
+    with sqlite3.connect(legacy_catalog) as db:
+        db.execute("UPDATE research_catalog_memberships SET status='revoked'")
+    args = {"database": legacy_catalog, "source_sha256": legacy_authorization_snapshot_sha256(legacy_catalog),
+            "identity_by_principal": {"alice": "a", "bob": "b"}, "evaluator": evaluator}
+    with pytest.raises(AuthorizationUnavailable, match="decisions differ"):
+        verify_live_profile_policy_parity(**args)
+    args["identity_by_principal"] = {"alice": "a", "bob": "a"}
+    with pytest.raises(AuthorizationUnavailable, match="ambiguous"):
+        verify_live_profile_policy_parity(**args)
