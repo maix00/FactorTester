@@ -274,11 +274,13 @@ class ManagerState(
         self.public_server = _env_bool(
             "FACTORTESTER_PUBLIC_SERVER", self.require_device_auth,
         )
-        # Organization and user authority lives in Keycloak Realm Groups.
-        # This empty compatibility projection is not used for authorization;
-        # deployments must not infer a local account hierarchy from Manager
-        # environment variables.
-        self.managed_organizations: tuple[str, ...] = ()
+        # This is an expected deployment identity, not permission by itself.
+        # Login requires a matching reciprocal Keycloak Realm Group binding.
+        from server.manager.domain.organization_scope import configured_managed_organizations
+        self.managed_organizations = configured_managed_organizations(
+            public_server=self.public_server, server_role=self.server_role,
+            explicit=managed_organizations,
+        )
         self.trusted_proxy_networks = configured_trusted_proxy_networks()
         self.local_client_networks = configured_local_client_networks()
         self.visitor_entry_origins = configured_visitor_origins()

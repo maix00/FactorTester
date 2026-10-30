@@ -135,8 +135,10 @@ def test_keycloak_permission_does_not_use_local_super_admin(monkeypatch):
 def test_manager_keycloak_mode_uses_verified_session(monkeypatch):
     from server.manager.state.sessions import SessionStateMixin
     import server.identity.user_session as user_session
+    import server.identity.server_admission as server_admission
     monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'keycloak')
     monkeypatch.setattr(user_session, 'keycloak_session', lambda token: {'username': 'alice'} if token == 'trusted' else None)
+    monkeypatch.setattr(server_admission, 'server_admission', lambda *_a, **_k: (True, ''))
     state = SessionStateMixin()
     assert state.session('trusted') == {'username': 'alice'}
     assert state.session('local-super-admin') is None
@@ -145,10 +147,12 @@ def test_manager_keycloak_mode_uses_verified_session(monkeypatch):
 def test_manager_dual_mode_prefers_a_verified_keycloak_session(monkeypatch):
     from server.manager.state.sessions import SessionStateMixin
     import server.identity.user_session as user_session
+    import server.identity.server_admission as server_admission
     monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'dual')
     monkeypatch.setattr(user_session, 'keycloak_session', lambda token: {
         'username': 'alice', 'keycloak_roles': ('admin_console:manage',),
     } if token == 'kc-token' else None)
+    monkeypatch.setattr(server_admission, 'server_admission', lambda *_a, **_k: (True, ''))
     state = SessionStateMixin()
     assert state.session('kc-token')['keycloak_roles'] == ('admin_console:manage',)
     assert state.session('legacy-token') is None

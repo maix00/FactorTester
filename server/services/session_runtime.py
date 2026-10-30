@@ -78,7 +78,7 @@ def current_user() -> str | None:
                 # only after manager_gateway_auth validates the shared
                 # capability token and loopback peer address.
                 if session.get("manager_gateway"):
-                    delegated = str(session.get("username") or "").strip()
+                    delegated = str(getattr(g, "manager_gateway_principal", "") or "").strip()
                     return delegated or None
         except Exception:
             # Session verification failures never become an authenticated
@@ -129,6 +129,12 @@ def _keycloak_request_session() -> dict[str, Any] | None:
     """Resolve and memoize the verified Manager session for a Flask request."""
     cached = getattr(g, "keycloak_user_session", None)
     if isinstance(cached, dict):
+        if getattr(g, "manager_admission_verified", False):
+            return cached
+        from server.identity.server_admission import server_admission
+        if not server_admission(cached)[0]:
+            return None
+        g.manager_admission_verified = True
         return cached
     scheme, _, bearer = str(request.headers.get("Authorization") or "").partition(" ")
     token = bearer.strip() if scheme.lower() == "bearer" else ""
@@ -138,6 +144,10 @@ def _keycloak_request_session() -> dict[str, Any] | None:
     from server.identity.user_session import keycloak_session
     value = keycloak_session(token)
     if value:
+        from server.identity.server_admission import server_admission
+        if not server_admission(value)[0]:
+            return None
+        g.manager_admission_verified = True
         g.keycloak_user_session = value
         g.keycloak_access_token = token
         return value

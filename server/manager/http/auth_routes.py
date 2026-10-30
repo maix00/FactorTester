@@ -95,12 +95,10 @@ class AuthenticationRoutesMixin:
             sys.stderr.write(f"[manager] Keycloak callback rejected: {type(exc).__name__}\n")
             self._send_redirect("/app?auth_error=invalid", cookie=self._oidc_state_cookie(clear=True))
             return
-        from server.identity.user_session import may_login_public_server
-        if (
-            bool(getattr(self.state, "public_server", False))
-            and not may_login_public_server(session)
-        ):
-            self._send_redirect("/app?auth_error=public_login_denied", cookie=[
+        from server.identity.server_admission import server_admission
+        permitted, reason = server_admission(session, state=self.state)
+        if not permitted:
+            self._send_redirect(f"/app?auth_error={reason}", cookie=[
                 self._session_cookie("", clear=True),
                 self._oidc_state_cookie(clear=True),
             ])
