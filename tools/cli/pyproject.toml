@@ -16,8 +16,6 @@ dependencies = [
 ]
 
 [project.scripts]
-factortester = "traderesearch_cli_bootstrap:main"
-factortester-manager = "traderesearch_cli_bootstrap:manager_main"
 traderesearch = "traderesearch_cli_bootstrap:main"
 traderesearch-manager = "traderesearch_cli_bootstrap:manager_main"
 

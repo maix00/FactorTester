@@ -1,4 +1,4 @@
-"""TradeResearch application commands for ``factortester-manager``.
+"""TradeResearch application commands for ``traderesearch-manager``.
 
 These commands use the Manager control/data planes only.  They do not operate
 the host, Docker, WireGuard, SSH, or any other infrastructure transport.
@@ -249,11 +249,11 @@ _service_action("restart-bundle", "Restart one complete TradeResearch service.")
 _service_action("force-stop", "Force-stop one TradeResearch service.")
 
 
-def register_factor_tester_commands() -> None:
+def register_traderesearch_commands() -> None:
     """Import-time Click registration seam for the Manager entrypoint."""
     # Keep server/application operations in a separate semantic module while
     # registering them on the same independent Manager command tree.
     from tools.cli.manager import operations_commands  # noqa: F401
 
 
-__all__ = ["register_factor_tester_commands"]
+__all__ = ["register_traderesearch_commands"]

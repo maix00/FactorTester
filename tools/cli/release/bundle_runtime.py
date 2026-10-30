@@ -21,16 +21,17 @@ from tools.cli.local_sources.locations import validate_local_sources_root
 from .locations import validate_client_root
 from .materialize import (
     install_stable_launchers,
+    remove_generated_legacy_launchers,
     stable_launchers_are_current,
 )
 from .storage import json_hash, read_json, utc_now
 
 
 COMMANDS = (
-    "factortester",
-    "factortester-manager",
+    "traderesearch",
+    "traderesearch-manager",
 )
-REGISTERED_SKILL_NAME = "factortester-research-skill"
+REGISTERED_SKILL_NAME = "traderesearch-research-skill"
 _SKILL_RELATIVE = Path("skills") / REGISTERED_SKILL_NAME / "SKILL.md"
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 _VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$")
@@ -132,6 +133,9 @@ def _activate_locked(
         _write_json_durable(staging / "receipt.json", receipt)
         _fsync_directory(staging)
         _checkpoint(checkpoint, "before_publish")
+        # Fail before publishing the new pointer if an old alias is user-owned.
+        # The current canonical launcher remains usable while migration proceeds.
+        remove_generated_legacy_launchers(root)
         os.replace(staging, target)
         _fsync_directory(releases)
         _checkpoint(checkpoint, "before_pointer")

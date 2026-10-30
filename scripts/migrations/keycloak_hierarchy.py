@@ -7,12 +7,16 @@ plans stable paths; it does not create groups or policies in a live realm.
 
 from __future__ import annotations
 
-import hashlib
-import re
+from server.identity.realm_groups import (
+    GROUP_ROOT,
+    component as _component,
+    level_group_path,
+    organization_admin_group_path,
+    organization_group_path,
+    level_admin_group_path,
+)
 
 
-GROUP_ROOT = "/traderesearch"
-DEFAULT_ORGANIZATION_ID = "default"
 SCOPED_GROUP_SCOPES = ["view", "view-members", "manage-members", "manage-membership"]
 
 
@@ -42,26 +46,9 @@ def complete_group_tree(paths: list[str] | set[str]) -> list[str]:
 
 
 def _admin_scope_group(org_id: str, level_id: str = "") -> str:
-    org_component = _component("org", org_id)
     if not level_id:
-        return (
-            f"{GROUP_ROOT}/admin-scopes/organizations/{org_component}/"
-            "organization-admins"
-        )
-    return (
-        f"{GROUP_ROOT}/admin-scopes/organizations/{org_component}/"
-        f"levels/{_component('level', level_id)}-administrators"
-    )
-
-
-def _component(kind: str, value: str) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        raise ValueError(f"{kind} id is required")
-    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", raw).strip("-_").lower()[:32]
-    slug = slug or "id"
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
-    return f"{kind}-{slug}-{digest}"
+        return organization_admin_group_path(org_id)
+    return level_admin_group_path(org_id, level_id)
 
 
 def hierarchy_group_paths(
@@ -117,7 +104,7 @@ def hierarchy_group_paths(
             errors.append({"kind": "level", "id": level_id, "reason": "missing_organization"})
             visiting.remove(level_id)
             return None
-        org_path = f"{GROUP_ROOT}/organizations/{_component('org', org_id)}"
+        org_path = organization_group_path(org_id)
         parent_id = str(item.get("parent_level_id") or "").strip()
         if parent_id:
             parent = by_id.get(parent_id)
@@ -135,7 +122,7 @@ def hierarchy_group_paths(
                 return None
             result = f"{parent_path}/{_component('level', level_id)}"
         else:
-            result = f"{org_path}/levels/{_component('level', level_id)}"
+            result = level_group_path(org_id, level_id)
         visiting.remove(level_id)
         paths[level_id] = result
         return result
@@ -249,8 +236,8 @@ def scoped_admin_mapping(
 
 
 def membership_group(account: dict, level_paths: dict[str, str]) -> str | None:
-    organization_id = (
-        str(account.get("organization_id") or "").strip() or DEFAULT_ORGANIZATION_ID
-    )
+    organization_id = str(account.get("organization_id") or "").strip()
+    if not organization_id:
+        return None
     level_id = str(account.get("level_id") or "").strip() or f"{organization_id}__ROOT"
     return level_paths.get(level_id) if level_id else None

@@ -463,7 +463,7 @@ def mirror_family_source_to_workspace(username: str, factor_id: str, source_code
         "path": target,
         "workspace_root": str(root),
         "overwrote_divergent": diverged,
-        "refresh_hint": "factortester factor-library workspace user download",
+        "refresh_hint": "traderesearch factor-library workspace user download",
     }
 
 

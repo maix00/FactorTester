@@ -7,17 +7,24 @@ from pathlib import Path
 import sys
 
 
-CLIENT_ROOT_ENV = "FACTORTESTER_CLIENT_ROOT"
+CLIENT_ROOT_ENV = "TRADERESEARCH_CLIENT_ROOT"
+_LEGACY_CLIENT_ROOT_ENV = "FACTORTESTER_CLIENT_ROOT"
 
 
 def default_client_root() -> Path:
-    configured = os.environ.get(CLIENT_ROOT_ENV)
+    configured = os.environ.get(CLIENT_ROOT_ENV) or os.environ.get(
+        _LEGACY_CLIENT_ROOT_ENV
+    )
     if configured:
         return validate_client_root(Path(configured).expanduser())
     if sys.platform == "darwin":
-        root = Path.home() / "Library" / "Application Support" / "FactorTester"
+        root = Path.home() / "Library" / "Application Support" / "TradeResearch"
+        legacy_root = Path.home() / "Library" / "Application Support" / "FactorTester"
     else:
-        root = Path.home() / ".local" / "share" / "factortester"
+        root = Path.home() / ".local" / "share" / "traderesearch"
+        legacy_root = Path.home() / ".local" / "share" / "factortester"
+    if not root.exists() and legacy_root.exists():
+        root = legacy_root
     return validate_client_root(root)
 
 

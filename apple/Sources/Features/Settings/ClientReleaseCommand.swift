@@ -161,7 +161,7 @@ enum ReleaseCommand {
         }
         let installed = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(
-                "Library/Application Support/FactorTester/bin"
+                "Library/Application Support/TradeResearch/bin"
             )
             .appendingPathComponent(executable)
         if FileManager.default.isExecutableFile(atPath: installed.path) {

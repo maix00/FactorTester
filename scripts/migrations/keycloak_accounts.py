@@ -3,8 +3,8 @@
 
 Password material is deliberately excluded. The exporter opens SQLite in
 read-only mode and never creates missing tables or normalizes the source in
-place. Synthetic default organization/root-level records mirror the legacy
-application defaults and are marked as such in the export.
+place. Missing organization assignments stay missing so the reviewed cutover
+plan can block or explicitly remap them instead of inventing a default org.
 """
 
 from __future__ import annotations
@@ -15,10 +15,26 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Any
+from uuid import UUID, uuid5
 
 
-DEFAULT_ORGANIZATION_ID = "default"
-DEFAULT_ORGANIZATION_NAME = "默认机构"
+# Stable across Manager snapshots of the same legacy directory. The namespace
+# is part of the migration contract; usernames are not exported into the ID.
+_IDENTITY_NAMESPACE = UUID("fc21b813-8a88-5b1f-9f34-6fc88c0b09f7")
+
+
+def stable_legacy_identity_id(username: str) -> str:
+    """Derive a cutover ID from the legacy account's immutable primary key.
+
+    The legacy account table is keyed by username and has no stable identity
+    column. The reviewed export freezes this mapping as ``tr_identity_id``;
+    later Keycloak username or organization changes do not re-derive it. The
+    case-collision report remains a hard preflight gate across Manager exports.
+    """
+    account = str(username or "").strip().casefold()
+    if not account:
+        return ""
+    return str(uuid5(_IDENTITY_NAMESPACE, account))
 
 
 def _open_readonly(db_path: str | Path) -> sqlite3.Connection:
@@ -87,21 +103,9 @@ def export_directory(db_path: str | Path) -> dict[str, list[dict[str, Any]]]:
         str(row.get("id") or "").strip(): row
         for row in organizations if str(row.get("id") or "").strip()
     }
-    if DEFAULT_ORGANIZATION_ID not in organization_by_id:
-        default = {
-            "id": DEFAULT_ORGANIZATION_ID,
-            "name": DEFAULT_ORGANIZATION_NAME,
-            "description": "系统默认机构",
-            "synthetic": True,
-        }
-        organizations.append(default)
-        organization_by_id[DEFAULT_ORGANIZATION_ID] = default
-
     normalized_levels: list[dict[str, Any]] = []
     for row in levels:
-        organization_id = (
-            str(row.get("organization_id") or "").strip() or DEFAULT_ORGANIZATION_ID
-        )
+        organization_id = str(row.get("organization_id") or "").strip()
         normalized_levels.append({
             "id": str(row.get("id") or "").strip(),
             "organization_id": organization_id,
@@ -128,12 +132,11 @@ def export_directory(db_path: str | Path) -> dict[str, list[dict[str, Any]]]:
     accounts: list[dict[str, Any]] = []
     for row in raw_accounts:
         username = str(row.get("username") or "").strip()
-        organization_id = (
-            str(row.get("organization_id") or "").strip() or DEFAULT_ORGANIZATION_ID
-        )
+        organization_id = str(row.get("organization_id") or "").strip()
         organization = organization_by_id.get(organization_id, {})
         accounts.append({
             "username": username,
+            "tr_identity_id": stable_legacy_identity_id(username),
             "alias": str(row.get("alias") or ""),
             "role": str(row.get("role") or "user").strip(),
             "is_admin": _safe_flag(row.get("is_admin")),

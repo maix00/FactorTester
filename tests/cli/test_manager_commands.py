@@ -36,9 +36,7 @@ def test_remote_manager_configuration_requires_https() -> None:
         raise AssertionError("remote HTTP Manager URL was accepted")
 
 
-def test_manager_login_saves_returned_session(
-    tmp_path, monkeypatch
-) -> None:
+def test_manager_login_reuses_keycloak_desktop_session(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "manager.json"
     monkeypatch.setenv("FACTORTESTER_MANAGER_CONFIG", str(config_path))
     CliRunner().invoke(manager_cli, [
@@ -46,13 +44,15 @@ def test_manager_login_saves_returned_session(
     ])
     saved = []
     monkeypatch.setattr(
-        "tools.cli.manager.commands.ManagerClient.login",
-        lambda _self, username, password: {
+        "tools.cli.native_session.load_token",
+        lambda endpoint: "session-token" if endpoint == "http://127.0.0.1:7998" else "",
+    )
+    monkeypatch.setattr(
+        "tools.cli.manager.commands.ManagerClient.require_manager",
+        lambda _self: {
             "success": True,
-            "username": username,
-            "role": "super_admin",
+            "username": "root@1",
             "capabilities": {"manager": True},
-            "token": "session-token",
         },
     )
     monkeypatch.setattr(
@@ -62,8 +62,6 @@ def test_manager_login_saves_returned_session(
 
     result = CliRunner().invoke(manager_cli, [
         "login",
-        "--username", "root@1",
-        "--password", "secret",
         "--json",
     ])
 
@@ -72,61 +70,31 @@ def test_manager_login_saves_returned_session(
     assert "session-token" not in result.output
 
 
-def test_manager_login_accepts_ui_credentials_on_stdin(
-    tmp_path, monkeypatch
-) -> None:
+def test_manager_login_does_not_offer_password_authentication(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv(
         "FACTORTESTER_MANAGER_CONFIG",
         str(tmp_path / "manager.json"),
     )
     CliRunner().invoke(manager_cli, ["configure"])
-    received = []
-    monkeypatch.setattr(
-        "tools.cli.manager.commands.ManagerClient.login",
-        lambda _self, username, password: (
-            received.append((username, password))
-            or {
-                "success": True,
-                "capabilities": {"manager": True},
-                "token": "session-token",
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "tools.cli.manager.commands.ManagerCredentialStore.write",
-        lambda _self, _token: None,
-    )
-
-    result = CliRunner().invoke(
-        manager_cli,
-        [
-            "login",
-            "--username", "root",
-            "--credentials-stdin",
-            "--json",
-        ],
-        input='{"username":"root","password":"secret"}',
-    )
-
-    assert result.exit_code == 0, result.output
-    assert received == [("root", "secret")]
+    monkeypatch.setattr("tools.cli.native_session.load_token", lambda _endpoint: "")
+    result = CliRunner().invoke(manager_cli, ["login", "--username", "root"])
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
 
 
-def test_manager_login_rejects_non_manager_principal(tmp_path, monkeypatch) -> None:
+def test_manager_login_does_not_persist_non_manager_session(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv(
         "FACTORTESTER_MANAGER_CONFIG",
         str(tmp_path / "manager.json"),
     )
     CliRunner().invoke(manager_cli, ["configure"])
     saved = []
+    monkeypatch.setattr("tools.cli.native_session.load_token", lambda _endpoint: "bad-token")
+    def reject_non_manager(_self):
+        raise PermissionError("当前账号没有 Manager 管理权限（需要 super_admin）")
     monkeypatch.setattr(
-        "tools.cli.manager.commands.ManagerClient.login",
-        lambda _self, _username, _password: {
-            "success": True,
-            "role": "user",
-            "capabilities": {"manager": False},
-            "token": "must-not-be-saved",
-        },
+        "tools.cli.manager.commands.ManagerClient.require_manager",
+        reject_non_manager,
     )
     monkeypatch.setattr(
         "tools.cli.manager.commands.ManagerCredentialStore.write",
@@ -134,7 +102,7 @@ def test_manager_login_rejects_non_manager_principal(tmp_path, monkeypatch) -> N
     )
 
     result = CliRunner().invoke(manager_cli, [
-        "login", "--username", "user", "--password", "secret",
+        "login",
     ])
 
     assert result.exit_code != 0

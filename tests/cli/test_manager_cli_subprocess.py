@@ -18,7 +18,7 @@ def _resolve_cli(name: str) -> list[str]:
     return [sys.executable, "-m", "tools.cli.manager_app"]
 
 
-CLI = _resolve_cli("factortester-manager")
+CLI = _resolve_cli("traderesearch-manager")
 
 
 def _run(args: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -51,7 +51,7 @@ def test_group_help_is_discoverable() -> None:
 def test_configure_is_real_one_shot_command(tmp_path) -> None:
     config_path = tmp_path / "manager.json"
     env = dict(os.environ)
-    env["FACTORTESTER_MANAGER_CONFIG"] = str(config_path)
+    env["TRADERESEARCH_MANAGER_CONFIG"] = str(config_path)
     result = _run([
         "configure",
         "--host", "127.0.0.1",

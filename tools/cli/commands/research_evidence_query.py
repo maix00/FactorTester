@@ -71,7 +71,7 @@ def create(
         "next_actions": [{
             "action": "search_or_bind",
             "argv": [
-                "factortester", "research", "evidence", "search",
+                "traderesearch", "research", "evidence", "search",
                 "--json",
             ],
         }],
@@ -319,13 +319,13 @@ def _guide(topic: str) -> dict[str, Any]:
         "bind": ["用 evidence admit 对主体与环境记录资格"],
     }[topic]
     next_action = {
-        "overview": ["factortester", "research", "evidence", "guide", "search", "--json"],
-        "search": ["factortester", "research", "evidence", "search", "--json"],
-        "capture": ["factortester", "research", "evidence", "source", "--help"],
-        "fragment": ["factortester", "research", "evidence", "fragment", "add", "--help"],
-        "create": ["factortester", "research", "evidence", "create", "--help"],
-        "tag": ["factortester", "research", "evidence", "tag", "list", "--json"],
-        "bind": ["factortester", "research", "evidence", "admit", "--help"],
+        "overview": ["traderesearch", "research", "evidence", "guide", "search", "--json"],
+        "search": ["traderesearch", "research", "evidence", "search", "--json"],
+        "capture": ["traderesearch", "research", "evidence", "source", "--help"],
+        "fragment": ["traderesearch", "research", "evidence", "fragment", "add", "--help"],
+        "create": ["traderesearch", "research", "evidence", "create", "--help"],
+        "tag": ["traderesearch", "research", "evidence", "tag", "list", "--json"],
+        "bind": ["traderesearch", "research", "evidence", "admit", "--help"],
     }[topic]
     return {
         "topic": topic,

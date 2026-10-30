@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import getpass
-
 import click
 
 from tools.cli.core.context import client_from_config
@@ -38,33 +36,24 @@ def configure(host: str, port: int | None, base_url: str, server_id: str) -> Non
 
 
 @click.command()
-@click.option("--username", default="", help="已有客户端会话时无需重复输入账号。")
-@click.option("--password", default="", help="不传则安全提示输入。")
-@click.option(
-    "--keep-login/--no-keep-login",
-    default=True,
-    show_default=True,
-    help="持久保存本地 session；默认跳过十分钟空闲退出，服务端最长保留三十天。",
-)
 @friendly_errors
-def login(username: str, password: str, keep_login: bool) -> None:
-    """Login through the configured remote server."""
-    client = client_from_config(persist_cookies=keep_login)
-    if client.session.bearer_token and client.session.agent_capability is None:
+def login() -> None:
+    """Verify the existing Keycloak-backed desktop/web session for this Manager."""
+    client = client_from_config(persist_cookies=True)
+    if client.session.agent_capability is not None:
+        raise click.ClickException("Profile 助手能力不能用作用户登录会话")
+    try:
         data = client.current_principal()
-        observed = str(data.get("username") or "")
-        if username and username not in {observed, str(data.get("alias") or "")}:
-            raise ValueError("当前客户端已登录其他身份；请先在客户端切换账号")
-        click.echo(f"已使用客户端认证会话: {observed}")
-        return
-    if not username:
-        username = click.prompt("Username")
-    if not password:
-        password = getpass.getpass("Password: ")
-    data = client.login(username, password)
+    except Exception as exc:
+        raise click.ClickException(
+            "CLI 不再收集本地密码。请先在 TradeResearch 网页或桌面端通过 Keycloak 登录，"
+            "再运行 traderesearch login 验证当前服务器会话。"
+        ) from exc
+    observed = str(data.get("username") or "").strip()
+    if not observed:
+        raise click.ClickException("当前服务器没有返回已验证的 Keycloak 用户身份")
     click.echo(
-        f"已登录: {data.get('username') or username} "
-        f"keep_login={str(keep_login).lower()}"
+        f"已验证 TradeResearch Keycloak 会话: {observed}"
     )
     state = load_state()
     state.reset()

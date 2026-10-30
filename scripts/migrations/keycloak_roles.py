@@ -118,7 +118,7 @@ def role_mappings_for_accounts(
         else:
             unmapped_memberships.append({
                 "username": username,
-                "organization_id": str(account.get("organization_id") or "default"),
+                "organization_id": str(account.get("organization_id") or ""),
                 "level_id": str(account.get("level_id") or ""),
                 "reason": "no_valid_level_group_path",
             })

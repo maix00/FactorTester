@@ -99,6 +99,7 @@ def test_frozen_publisher_delegates_complete_release_to_host_python(
     calls = []
     monkeypatch.setenv("FTCLIENT_RELEASE_PYTHON", "/host/python3")
     monkeypatch.setenv("FACTORTESTER_ENTRYPOINT", "factortester-manager")
+    monkeypatch.setenv("TRADERESEARCH_ENTRYPOINT", "traderesearch-manager")
     monkeypatch.setattr(
         commands.subprocess,
         "run",
@@ -125,6 +126,7 @@ def test_frozen_publisher_delegates_complete_release_to_host_python(
     assert kwargs["cwd"] == source_root
     assert kwargs["check"] is True
     assert "FACTORTESTER_ENTRYPOINT" not in kwargs["env"]
+    assert "TRADERESEARCH_ENTRYPOINT" not in kwargs["env"]
 
 
 def test_profile_cannot_replace_packaged_release_trust_anchor(

@@ -11,7 +11,7 @@ private enum RendererError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidArguments:
-            return "usage: factortester-report-renderer --input REPORT.md --output REPORT.pdf"
+            return "usage: traderesearch-report-renderer --input REPORT.md --output REPORT.pdf"
         case .pdfContextUnavailable:
             return "unable to create PDF document"
         case .imageUnavailable(let path):
@@ -279,5 +279,5 @@ do {
     exit(EXIT_FAILURE)
 }
 #else
-fatalError("factortester-report-renderer requires macOS")
+fatalError("traderesearch-report-renderer requires macOS")
 #endif

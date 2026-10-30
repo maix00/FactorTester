@@ -14,6 +14,7 @@ import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 try:
     from .keycloak_hierarchy import hierarchy_group_paths
@@ -24,7 +25,7 @@ except ImportError:  # pragma: no cover - direct script entrypoint
 
 
 ACCOUNT_FIELDS = (
-    "alias", "role", "is_admin", "is_developer", "active",
+    "username", "alias", "role", "is_admin", "is_developer", "active",
     "organization_id", "organization_name", "level_id", "parent_username",
 )
 ORGANIZATION_FIELDS = ("name", "description")
@@ -42,6 +43,7 @@ def _rows(snapshot: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
 def _account(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "username": str(row.get("username") or "").strip(),
+        "tr_identity_id": str(row.get("tr_identity_id") or "").strip(),
         "alias": str(row.get("alias") or ""),
         "role": str(row.get("role") or "user").strip(),
         "is_admin": row.get("is_admin"),
@@ -49,7 +51,7 @@ def _account(row: dict[str, Any]) -> dict[str, Any]:
         # A missing legacy column has the same behavior as the old session
         # verifier: accounts are active unless explicitly deactivated.
         "active": row.get("active", True),
-        "organization_id": str(row.get("organization_id") or "default").strip(),
+        "organization_id": str(row.get("organization_id") or "").strip(),
         "organization_name": str(
             row.get("organization_name") or row.get("organization") or ""
         ),
@@ -70,49 +72,73 @@ def _reference_rows(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> dict
 def _compare_users(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> dict[str, Any]:
     normalized = [[_account(row) for row in side] for side in (left, right)]
     indexes: list[dict[str, dict[str, Any]]] = []
-    collisions = []
+    duplicate_identity_ids = []
+    missing_identity_ids = []
     for rows in normalized:
         buckets: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            username = row["username"]
-            if username:
-                buckets.setdefault(username.casefold(), []).append(row)
-        collisions.append(sum(len(items) > 1 for items in buckets.values()))
+            identity_id = row["tr_identity_id"]
+            if not identity_id:
+                continue
+            try:
+                if str(UUID(identity_id)) != identity_id.lower():
+                    continue
+            except (TypeError, ValueError, AttributeError):
+                continue
+            buckets.setdefault(identity_id, []).append(row)
+        duplicate_identity_ids.append(sum(len(items) > 1 for items in buckets.values()))
+        missing_identity_ids.append(sum(not row["tr_identity_id"] for row in rows))
         indexes.append({key: items[0] for key, items in buckets.items() if len(items) == 1})
 
     left_index, right_index = indexes
     left_keys, right_keys = set(left_index), set(right_index)
     shared = left_keys & right_keys
     changed = Counter()
-    case_different = 0
+    username_different = 0
     for key in shared:
         lrow, rrow = left_index[key], right_index[key]
-        case_different += lrow["username"] != rrow["username"]
+        username_different += lrow["username"] != rrow["username"]
         for field in ACCOUNT_FIELDS:
             if lrow[field] != rrow[field]:
                 changed[field] += 1
     empty_usernames = [
         sum(not row["username"] for row in side) for side in normalized
     ]
+    invalid_identity_ids = [
+        sum(bool(row["tr_identity_id"]) and not _valid_identity_id(row["tr_identity_id"])
+            for row in side)
+        for side in normalized
+    ]
     exact_set_match = (
-        collisions == [0, 0]
+        duplicate_identity_ids == [0, 0]
+        and missing_identity_ids == [0, 0]
+        and invalid_identity_ids == [0, 0]
         and empty_usernames == [0, 0]
-        and {row["username"] for row in normalized[0] if row["username"]}
-        == {row["username"] for row in normalized[1] if row["username"]}
+        and set(left_index) == set(right_index)
     )
     return {
         "left_count": len(left),
         "right_count": len(right),
-        "casefold_matched_count": len(shared),
+        "stable_identity_matched_count": len(shared),
         "left_only_count": len(left_keys - right_keys),
         "right_only_count": len(right_keys - left_keys),
-        "username_case_difference_count": case_different,
+        "username_difference_count": username_different,
         "empty_username_rows": empty_usernames,
-        "casefold_collision_groups": collisions,
+        "missing_stable_identity_rows": missing_identity_ids,
+        "invalid_stable_identity_rows": invalid_identity_ids,
+        "duplicate_stable_identity_groups": duplicate_identity_ids,
         "exact_identity_set_match": exact_set_match,
         "account_field_differences": dict(sorted(changed.items())),
         "credential_material_exported": False,
     }
+
+
+def _valid_identity_id(value: str) -> bool:
+    try:
+        selected = str(UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return selected == str(value).lower()
 
 
 def _compare_references(
@@ -172,6 +198,7 @@ def _integrity(snapshot: dict[str, Any]) -> dict[str, Any]:
             level_organization_mismatches += 1
     return {
         "empty_username_rows": sum(not row["username"] for row in accounts),
+        "missing_stable_identity_rows": sum(not row["tr_identity_id"] for row in accounts),
         "missing_account_organizations": missing_organizations,
         "missing_account_levels": missing_levels,
         "account_level_organization_mismatches": level_organization_mismatches,
@@ -232,7 +259,7 @@ def compare_directories(left_snapshot: dict[str, Any], right_snapshot: dict[str,
         "legacy_directory_preflight_passes": bool(
             users["exact_identity_set_match"]
             and not users["account_field_differences"]
-            and not users["username_case_difference_count"]
+            and not users["username_difference_count"]
             and organizations["exact_id_set_match"]
             and not organizations["field_differences"]
             and levels["exact_id_set_match"]

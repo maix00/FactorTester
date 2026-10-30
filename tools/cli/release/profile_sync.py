@@ -36,7 +36,7 @@ def manager_url_for_profile(
         configured = load_config()
     except FileNotFoundError as exc:
         raise ValueError(
-            "client has no configured server; run `factortester configure` "
+            "client has no configured server; run `traderesearch configure` "
             "or pass --manager-url"
         ) from exc
     return ManagerConfig.from_url(configured.base_url).base_url

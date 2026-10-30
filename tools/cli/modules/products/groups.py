@@ -69,7 +69,7 @@ def product_group_subjects(ctx: click.Context) -> None:
     """Manage factors and factor sets associated with a product group."""
     if ctx.invoked_subcommand is None:
         click.echo(
-            "可用功能: factortester product-library groups subjects list|add|remove"
+            "可用功能: traderesearch product-library groups subjects list|add|remove"
         )
 
 

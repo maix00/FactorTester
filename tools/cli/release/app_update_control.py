@@ -40,7 +40,10 @@ def installed_client_app() -> Path | None:
     """Return the canonical installed app, avoiding stale URL registrations."""
     if sys.platform != "darwin":
         return None
-    configured = os.environ.get("FACTORTESTER_CLIENT_APP")
+    configured = (
+        os.environ.get("TRADERESEARCH_CLIENT_APP")
+        or os.environ.get("FACTORTESTER_CLIENT_APP")
+    )
     candidates = (
         Path(configured).expanduser() if configured else None,
         Path("/Applications/FTClient.app"),
