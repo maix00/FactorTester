@@ -71,6 +71,14 @@ def normalise_public_key(value: object) -> dict[str, str]:
     }
 
 
+def device_public_key_digest(value: object) -> str:
+    """Full canonical digest for binding an authorization to one device key."""
+    return hashlib.sha256(json.dumps(
+        normalise_public_key(value), ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
 def _normalise_record(
     value: object,
     *,
@@ -113,14 +121,7 @@ def _public_record(value: dict[str, object]) -> dict[str, object]:
         for key, item in value.items()
         if key != "public_key"
     } | {
-        "public_key_fingerprint": hashlib.sha256(
-            json.dumps(
-                value["public_key"],
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()[:16],
+        "public_key_fingerprint": device_public_key_digest(value["public_key"])[:16],
     }
 
 
