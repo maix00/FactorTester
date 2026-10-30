@@ -157,7 +157,7 @@ function ReportBlock({ component, assets, bindings, resources, target }: { compo
 }
 
 /** Read one authorized branch at a time, retaining only the selected chapter. */
-export function ReportBranchReader({ target }: { target: ReportExportTarget }): React.ReactElement {
+export function ReportBranchReader({ target, initialChapterID = "", onChapterChange }: { target: ReportExportTarget; initialChapterID?:string; onChapterChange?:(id:string) => void }): React.ReactElement {
   const { t } = useTranslation();
   const indexURL = reportResourceURL(target,["index"]);
   const [index,setIndex] = useState<Row | null>(null), [chapterID,setChapterID] = useState(""), [chapter,setChapter] = useState<Row | null>(null);
@@ -169,7 +169,8 @@ export function ReportBranchReader({ target }: { target: ReportExportTarget }): 
     void request(indexURL,{signal:controller.signal}).then(result => {
       if (controller.signal.aborted) return;
       if (!Array.isArray(result.chapters)) throw new Error(t("researchDetail.invalidResponse"));
-      setIndex(result); setChapterID(String(result.chapters[0]?.component_id || ""));
+      const chosen = result.chapters.some((item:Row) => item.component_id === initialChapterID) ? initialChapterID : String(result.chapters[0]?.component_id || "");
+      setIndex(result); setChapterID(chosen);
     }).catch(reason => {if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason));})
       .finally(() => {if (!controller.signal.aborted) setLoading(false);});
     return () => controller.abort();
@@ -196,7 +197,7 @@ export function ReportBranchReader({ target }: { target: ReportExportTarget }): 
     return result;
   }, [chapter]);
   return <section className="tr-report-reading" aria-label={t("report.read")}>
-    {index?.chapters?.length ? <label className="tr-report-reading-choice"><span>{t("report.chapter")}</span><Select aria-label={t("report.chapter")} value={chapterID || undefined} onChange={setChapterID} options={index.chapters.map((item:Row) => ({value:String(item.component_id || ""),label:String(item.title || item.component_id || "")})).filter((item:Row) => item.value)} /></label> : null}
+    {index?.chapters?.length ? <label className="tr-report-reading-choice"><span>{t("report.chapter")}</span><Select aria-label={t("report.chapter")} value={chapterID || undefined} onChange={value => {setChapterID(value);onChapterChange?.(value);}} options={index.chapters.map((item:Row) => ({value:String(item.component_id || ""),label:String(item.title || item.component_id || "")})).filter((item:Row) => item.value)} /></label> : null}
     {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} action={<Button onClick={() => index ? setChapterRevision(value => value + 1) : setIndexRevision(value => value + 1)}>{t("retry")}</Button>} /> : chapter ? <article>{chapter.components.map((component:Row,index:number) => <ReportBlock key={String(component.component_id || index)} component={component} assets={chapter.assets || []} bindings={bindingsByComponent.get(String(component.component_id || "")) || []} resources={chapter.local_resources || []} target={target} />)}</article> : index ? <Empty description={t("empty")} /> : null}
   </section>;
 }

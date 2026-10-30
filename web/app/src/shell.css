@@ -289,7 +289,7 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-trading-tests button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
 .tr-catalog-reference { display: grid; gap: 8px; grid-column: 1 / -1; }
 .tr-catalog-reference select, .tr-catalog-reference input { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
-.tr-report-editor { padding: 16px; overflow: auto; height: 100%; }
+.tr-report-editor { padding: 16px; }
 .tr-report-source-picker { display: grid; gap: 6px; max-width: 520px; margin: 0 16px 14px; color: var(--muted); font-size: 12px; }
 .tr-report-source-picker .ant-select { width: 100%; }
 .tr-quota-subheading { margin: 18px 0 8px; color: var(--text); font-size: 14px; font-weight: 600; }

@@ -30,6 +30,8 @@ export function ResearchPage(): React.ReactElement {
   const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<unknown>(null), [editor, setEditor] = useState(false);
   const [editingResearch, setEditingResearch] = useState(false);
   const [selectedPublicationID, setSelectedPublicationID] = useState("");
+  const [reportRevision, setReportRevision] = useState(0);
+  const [readingChapter, setReadingChapter] = useState({publicationID:"",chapterID:""});
   const rowID = (row: Row, view = tab): string => view === "reports" ? reportRowID(row) : researchRowID(row);
   useEffect(() => {
     const controller = new AbortController(); setLoading(true); setError("");
@@ -73,7 +75,7 @@ export function ResearchPage(): React.ReactElement {
           {selectedReportBranch ? <ReportExport target={{...selected, ...selectedReportBranch, title:selected.title || selectedReportBranch.title}} /> : null}
         </div> : null}
         {selectedPublicationBranch?.publication_id
-          ? <><ReportEditor key={selectedPublicationBranch.publication_id} publicationID={selectedPublicationBranch.publication_id} /><ReportMarkdown key={selectedPublicationBranch.publication_id} publicationID={selectedPublicationBranch.publication_id} /></>
+          ? <><ReportBranchReader key={`reader:${selectedPublicationBranch.publication_id}:${reportRevision}`} target={{...selected,...selectedPublicationBranch}} initialChapterID={readingChapter.publicationID === selectedPublicationBranch.publication_id ? readingChapter.chapterID : ""} onChapterChange={chapterID => setReadingChapter({publicationID:selectedPublicationBranch.publication_id || "",chapterID})} /><ReportEditor key={`editor:${selectedPublicationBranch.publication_id}`} publicationID={selectedPublicationBranch.publication_id} onUpdated={() => setReportRevision(value => value + 1)} /><ReportMarkdown key={`markdown:${selectedPublicationBranch.publication_id}:${reportRevision}`} publicationID={selectedPublicationBranch.publication_id} /></>
           : selectedReportBranch?.publication_id && ["client", "server_agent"].includes(String(selectedReportBranch.source_kind))
             ? <><Alert type="info" showIcon message={t("report.branchReadOnly")} /><ReportBranchReader key={selectedReportBranch.publication_id} target={{...selected,...selectedReportBranch}} /></>
             : <Alert type="info" showIcon message={t("research.reportVersionUnavailable")} description={selectedReportBranch ? t(`research.reportSources.${selectedReportBranch.source_kind || "unknown"}`) : selected.build_source === "workspace" ? t("research.reportSources.workspace") : undefined} />}
