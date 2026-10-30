@@ -10,8 +10,8 @@ services:
       dockerfile: deploy/docker/factortester-public/FactorTester.Dockerfile
       additional_contexts:
         native-wheels: ${TR_NATIVE_WHEEL_CONTEXT:-./runtime-wheels}
-      cache_from:
-        - ${FACTORTESTER_PUBLIC_CACHE_FROM:-}
+      # The bounded BuildKit container owns its reusable local cache; host
+      # image tags are not registry cache references visible to this driver.
       args:
         DEBIAN_MIRROR: ${FACTORTESTER_DEBIAN_MIRROR:-https://deb.debian.org/debian}
         DEBIAN_SECURITY_MIRROR: ${FACTORTESTER_DEBIAN_SECURITY_MIRROR:-https://deb.debian.org/debian-security}

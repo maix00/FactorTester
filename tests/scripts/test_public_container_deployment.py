@@ -342,9 +342,7 @@ def test_public_compose_exposes_reproducible_package_mirror_inputs() -> None:
         assert "DEBIAN_MIRROR" in args
         assert "DEBIAN_SECURITY_MIRROR" in args
     assert "PIP_INDEX_URL" in app_args
-    assert "FACTORTESTER_PUBLIC_CACHE_FROM" in (
-        services["factortester-public"]["build"]["cache_from"][0]
-    )
+    assert "cache_from" not in services["factortester-public"]["build"]
     assert "DEBIAN_BOOTSTRAP_MIRROR" in database_args
     assert "DEBIAN_BOOTSTRAP_SECURITY_MIRROR" in database_args
 
