@@ -80,7 +80,7 @@ class ResearchCatalog(ResearchBranchesMixin):
         self._schedule_refresh = schedule_refresh
 
     @contextmanager
-    def _write(self, research_id: str):
+    def _write(self, research_id: str, *, after_commit: Callable[[], None] | None = None):
         owner = ""
         with connect_sqlite(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -90,6 +90,11 @@ class ResearchCatalog(ResearchBranchesMixin):
                 publish_research(self._synchronizer, conn, research_id)
                 row = conn.execute("SELECT owner_ref FROM research_catalog_researches WHERE research_id=?", (research_id,)).fetchone()
                 owner = str(row["owner_ref"]) if row else ""
+            if after_commit is not None:
+                # Mark the actual database commit before either connection
+                # cleanup or the post-commit sync scheduler can fail.
+                conn.commit()
+                after_commit()
         if owner and self._schedule_refresh is not None:
             self._schedule_refresh(owner)
 
@@ -393,6 +398,10 @@ class ResearchCatalog(ResearchBranchesMixin):
 
         caller = manager.create_research_resource(actor=owner, research_id=research_id)
         created = [("research", research_id)]
+        committed = False
+        def mark_committed() -> None:
+            nonlocal committed
+            committed = True
         try:
             for profile in profiles:
                 ref = profile_resource_ref(research_id, caller.identity_id, profile)
@@ -403,8 +412,12 @@ class ResearchCatalog(ResearchBranchesMixin):
                     actor=owner, research_id=research_id, identity_id=caller.identity_id,
                     subject=caller.subject, profile_ref=profile, role="owner", status="active",
                 )
-            yield
+            yield mark_committed
         except BaseException as exc:
+            if committed:
+                # A scheduler or connection-close failure after SQLite commit
+                # must never revoke the resources of an already visible row.
+                raise
             failed = False
             for kind, ref in reversed(created):
                 try:
@@ -438,7 +451,8 @@ class ResearchCatalog(ResearchBranchesMixin):
         profiles = ["self"]
         if profile_ref and _profile(profile_ref) != "self":
             profiles.append(_profile(profile_ref))
-        with self._new_research_policy(owner=owner, research_id=research_id, profiles=profiles), self._write(research_id) as conn:
+        with self._new_research_policy(owner=owner, research_id=research_id, profiles=profiles) as mark_committed, \
+                self._write(research_id, after_commit=mark_committed) as conn:
             conn.execute(
                 """INSERT INTO research_catalog_researches
                    (research_id, owner_ref, title, description, status,

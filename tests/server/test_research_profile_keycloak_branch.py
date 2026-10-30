@@ -390,3 +390,41 @@ def test_new_research_registers_owner_profiles_and_cleans_up_failed_registration
     ]
     with sqlite3.connect(catalog.db_path) as db:
         assert db.execute("SELECT COUNT(*) FROM research_catalog_researches WHERE title='Failed'").fetchone()[0] == 0
+
+
+def test_research_creation_keeps_keycloak_resources_after_database_commit(tmp_path, monkeypatch):
+    from server.manager.storage.account_domain import research_sync
+    class Authorization:
+        def profile_membership_access_many(self, **_kwargs):
+            return {}
+    class Grants:
+        def __init__(self):
+            self.removed = []
+        def create_research_resource(self, **_kwargs):
+            return ResearchRequestIdentity("token", "issuer", "alice-subject", "alice", "alice-id")
+        def set_profile_membership(self, **_kwargs):
+            pass
+        def delete_resource(self, **kwargs):
+            self.removed.append(kwargs)
+    grants = Grants()
+    catalog = ResearchCatalog(tmp_path / "research.sqlite", profile_authorizer=Authorization(),
+                              profile_grant_manager=grants)
+    catalog._synchronizer = object()
+    monkeypatch.setattr(research_sync, "publish_research", lambda *_args: None)
+    def failed_schedule(_owner):
+        raise RuntimeError("sync scheduler failed after commit")
+    catalog._schedule_refresh = failed_schedule
+    with pytest.raises(RuntimeError, match="after commit"):
+        catalog.create_research(owner_ref="alice", title="Committed")
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_catalog_researches WHERE title='Committed'").fetchone()[0] == 1
+    assert grants.removed == []
+
+    def failed_outbox(*_args):
+        raise RuntimeError("outbox failed before commit")
+    monkeypatch.setattr(research_sync, "publish_research", failed_outbox)
+    with pytest.raises(RuntimeError, match="before commit"):
+        catalog.create_research(owner_ref="alice", title="Rolled back")
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_catalog_researches WHERE title='Rolled back'").fetchone()[0] == 0
+    assert [item["resource_type"] for item in grants.removed] == ["research_profile", "research"]
