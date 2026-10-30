@@ -50,11 +50,29 @@ def main() -> int:
             if expected_role and session.get("role") != expected_role:
                 raise SystemExit("Manager role does not match migration acceptance")
             checks = ["manager_login", "verified_session"]
-            if "admin_console:manage" in session.get("admin_capabilities", []):
-                directory = context.request.get(manager + "/api/admin/account-directory")
-                if directory.status != 200:
-                    raise SystemExit(f"Administrator directory failed (HTTP {directory.status})")
+            directory = context.request.get(manager + "/api/admin/account-directory")
+            is_admin = session.get('role') in {'super_admin', 'org_admin', 'level_admin'}
+            if directory.status != (200 if is_admin else 403):
+                raise SystemExit(f"Administrator boundary failed (HTTP {directory.status})")
+            if is_admin:
                 checks.append("administrator_directory")
+            else:
+                checks.append("administrator_denied")
+            for variable, expected in [('KEYCLOAK_ALLOWED_USER_ID', 200),
+                                       ('KEYCLOAK_DENIED_USER_ID', 403)]:
+                target = os.environ.get(variable)
+                if target:
+                    from urllib.parse import quote
+                    token = next(c['value'] for c in context.cookies(manager)
+                                 if c['name'] == 'ft-manager-session')
+                    realm = session['keycloak_issuer'].rsplit('/', 1)[-1]
+                    response = context.request.get(
+                        manager + '/identity/admin/realms/' + quote(realm, safe='')
+                        + '/users/' + quote(target, safe=''),
+                        headers={'Authorization': 'Bearer ' + token})
+                    if response.status != expected:
+                        raise SystemExit(f"Keycloak scoped user boundary failed (expected {expected}, HTTP {response.status})")
+                    checks.append('scoped_user_' + str(expected))
             logout = context.request.post(manager + "/auth/logout", headers={"Origin": manager})
             if logout.status != 200:
                 raise SystemExit(f"Manager logout failed (HTTP {logout.status})")
@@ -70,4 +88,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        # Playwright exceptions can contain authorization URLs and cookies.
+        # Keep only a safe failure category in the public acceptance output.
+        raise SystemExit(f"Browser acceptance failed: {type(exc).__name__}") from None

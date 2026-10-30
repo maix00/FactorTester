@@ -8,6 +8,7 @@ import sys
 from urllib.parse import parse_qs, urlparse
 
 from server.manager.http.responses import json_response
+from server.manager.http.visitor_access import clear_visitor_cookie
 from server.manager.storage.control_db import ControlDatabaseError
 
 
@@ -43,6 +44,8 @@ class WriteRoutesMixin:
         if self._redirect_plain_http_to_https():
             return
         parsed = urlparse(self.path)
+        if self._proxy_keycloak(parsed, method="POST"):
+            return
         # Authentication is the one public POST route in the protected
         # instance.  Registration itself is rejected by _register when the
         # server disables public account creation.
@@ -53,6 +56,8 @@ class WriteRoutesMixin:
             self._register()
             return
         if not self._public_login_gate(parsed, method="POST"):
+            return
+        if self._reject_retired_local_identity_route(parsed):
             return
         if parsed.path == "/api/catalog/refresh":
             session = self._session()
@@ -82,6 +87,7 @@ class WriteRoutesMixin:
                 if "admin_console:manage" not in _admin_capabilities(
                     str(browser_session.get("username") or ""),
                     str(browser_session.get("role") or ""),
+                    browser_session.get("keycloak_roles", ()),
                 ):
                     json_response(self, {"success": False, "error": "admin console manage permission required"}, 403)
                     return
@@ -142,11 +148,8 @@ class WriteRoutesMixin:
         if parsed.path == "/api/devices/revoke":
             self._device_revoke()
             return
-        if parsed.path == "/api/admin/public-visitor-allowlist":
-            self._admin_add_visitor_allowlist()
-            return
-        if parsed.path == "/api/admin/access-control/devices/revoke":
-            self._admin_revoke_device()
+        if parsed.path == "/api/admin/devices/revoke":
+            self._admin_device_revoke()
             return
         if parsed.path == "/api/admin/users":
             self._admin_create_user()
@@ -162,7 +165,38 @@ class WriteRoutesMixin:
             return
         if self._serve_sqlite_web(parsed, method="POST"):
             return
-        if self.path == "/auth/logout":
+        if parsed.path == "/auth/logout":
+            from server.identity.auth_mode import keycloak_enabled
+            if self._visitor_mode() is not None:
+                json_response(
+                    self,
+                    {"success": True},
+                    headers={"Set-Cookie": [
+                        self._session_cookie("", clear=True),
+                        clear_visitor_cookie(secure=self._is_secure_transport()),
+                    ]},
+                )
+                return
+            if keycloak_enabled():
+                redirect_uri = str(
+                    getattr(self.state, "manager_public_endpoint", "") or ""
+                ).strip().rstrip("/")
+                if not redirect_uri.startswith("https://"):
+                    redirect_uri = str(self._request_origin() or "").rstrip("/")
+                logout_target = ""
+                if redirect_uri:
+                    try:
+                        from server.identity.manager_oidc import logout_url
+                        logout_target = logout_url(
+                            post_logout_redirect_uri=redirect_uri + "/app",
+                        )
+                    except (OSError, ValueError, TypeError):
+                        logout_target = ""
+                json_response(self, {
+                    "success": True,
+                    **({"logout_url": logout_target} if logout_target else {}),
+                }, headers={"Set-Cookie": self._session_cookie("", clear=True)})
+                return
             token = self._bearer_token()
             if self.state.session_principal(token) is None:
                 self._require_capability()
@@ -511,6 +545,7 @@ class WriteRoutesMixin:
             capabilities = _admin_capabilities(
                 str(browser_session.get("username") or ""),
                 str(browser_session.get("role") or ""),
+                browser_session.get("keycloak_roles", ()),
             )
             if "admin_console:manage" not in capabilities:
                 json_response(self, {
@@ -561,7 +596,11 @@ class WriteRoutesMixin:
         if self._redirect_plain_http_to_https():
             return
         parsed = urlparse(self.path)
+        if self._proxy_keycloak(parsed, method="PATCH"):
+            return
         if not self._public_login_gate(parsed, method="PATCH"):
+            return
+        if self._reject_retired_local_identity_route(parsed):
             return
         if self._mihomo_write(parsed, "PATCH"):
             return
@@ -587,7 +626,11 @@ class WriteRoutesMixin:
         if self._redirect_plain_http_to_https():
             return
         parsed = urlparse(self.path)
+        if self._proxy_keycloak(parsed, method="PUT"):
+            return
         if not self._public_login_gate(parsed, method="PUT"):
+            return
+        if self._reject_retired_local_identity_route(parsed):
             return
         if self._mihomo_write(parsed, "PUT"):
             return
@@ -596,6 +639,9 @@ class WriteRoutesMixin:
             return
         if parsed.path == "/api/federation/config":
             self._update_federation_config()
+            return
+        if parsed.path == "/api/admin/federation/settings":
+            self._update_admin_federation_settings()
             return
         if self._serve_manager_application(parsed, method="PUT"):
             return
@@ -615,7 +661,11 @@ class WriteRoutesMixin:
         if self._redirect_plain_http_to_https():
             return
         parsed = urlparse(self.path)
+        if self._proxy_keycloak(parsed, method="DELETE"):
+            return
         if not self._public_login_gate(parsed, method="DELETE"):
+            return
+        if self._reject_retired_local_identity_route(parsed):
             return
         if self._mihomo_write(parsed, "DELETE"):
             return
@@ -635,10 +685,6 @@ class WriteRoutesMixin:
         if self._delete_research_object_routes(parsed):
             return
         if self._proxy_service_write(parsed, method="DELETE"):
-            return
-        # Manager-owned policy must be handled before the broad /api/admin/ proxy.
-        if parsed.path == "/api/admin/public-visitor-allowlist":
-            self._admin_remove_visitor_allowlist()
             return
         if self._proxy_authenticated_local_service(parsed, method="DELETE"):
             return

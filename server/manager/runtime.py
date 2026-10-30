@@ -8,7 +8,6 @@ This module composes the Manager state and canonical HTTP route modules.
 from __future__ import annotations
 
 import ipaddress
-import inspect
 import os
 import socket
 import subprocess
@@ -30,10 +29,11 @@ from server.manager.config import (
 )
 from server.manager.http.gateway import GatewayResponse, ServiceGateway
 from server.manager.http.device_routes import DeviceNetworkRoutesMixin
-from server.manager.http.access_control_routes import AccessControlRoutesMixin
+from server.manager.http.device_admin_routes import DeviceAdministrationRoutesMixin
 from server.manager.http.account_admin_routes import AccountAdministrationRoutesMixin
 from server.manager.http.control_database_routes import ControlDatabaseRoutesMixin
 from server.manager.http.request_security import RequestSecurityMixin
+from server.manager.http.keycloak_proxy import KeycloakProxyRoutesMixin
 from server.manager.http.federation_routes import FederationRoutesMixin
 from server.manager.http.catalog_routes import CatalogRoutesMixin
 from server.manager.http.strategy_library_routes import StrategyLibraryRoutesMixin
@@ -69,12 +69,6 @@ from server.manager.services.profile_directory import ProfileDirectoryService
 from server.manager.services.federated_public_data import (
     FederatedPublicDataService,
 )
-from server.manager.domain.accounts import (
-    account_role as _account_role,
-    authenticate_user as _authenticate_user,
-    manager_subordinate_users as _manager_subordinate_users,
-)
-from server.manager.domain.organization_scope import configured_managed_organizations
 from server.manager.storage.preferences import UserPreferenceStore
 from server.manager.storage.job_index import ManagerJobIndex
 from server.manager.storage.local_run_projection import LocalRunProjection
@@ -128,7 +122,6 @@ from server.manager.http.security import (
 from server.manager.http.visitor_access import (
     VisitorAccessStore,
     configured_manager_endpoint,
-    configured_public_visitor_login_allowlist,
     configured_visitor_origins,
 )
 from server.manager.state.models import (
@@ -275,27 +268,20 @@ class ManagerState(
         self.require_login_for_ui = _env_bool(
             "FACTORTESTER_REQUIRE_LOGIN_FOR_UI", False,
         )
-        self.public_registration_enabled = _env_bool(
-            "FACTORTESTER_ALLOW_PUBLIC_REGISTRATION",
-            not self.require_login_for_ui,
-        )
         self.require_device_auth = _env_bool(
             "FACTORTESTER_REQUIRE_DEVICE_AUTH", False,
         )
         self.public_server = _env_bool(
             "FACTORTESTER_PUBLIC_SERVER", self.require_device_auth,
         )
-        self.managed_organizations = configured_managed_organizations(
-            public_server=self.public_server,
-            server_role=self.server_role,
-            explicit=managed_organizations,
-        )
+        # Organization and user authority lives in Keycloak Realm Groups.
+        # This empty compatibility projection is not used for authorization;
+        # deployments must not infer a local account hierarchy from Manager
+        # environment variables.
+        self.managed_organizations: tuple[str, ...] = ()
         self.trusted_proxy_networks = configured_trusted_proxy_networks()
         self.local_client_networks = configured_local_client_networks()
         self.visitor_entry_origins = configured_visitor_origins()
-        self.public_visitor_login_allowlist = (
-            configured_public_visitor_login_allowlist()
-        )
         self.manager_public_endpoint = configured_manager_endpoint()
         # Server-side Profile Agents use this endpoint for local FactorTester
         # CLI traffic.  The app bootstrap replaces the fallback with the
@@ -371,14 +357,9 @@ class ManagerState(
             self.control_database_settings.effective_environ()
         )
         self.control_store = control_store_from_env(control_database_environ)
-        self.research_catalog.set_account_provider(
-            lambda: [] if self.control_store is None else [
-                dict(item) for item in self.control_store.load_accounts()
-            ],
-        )
         self.strategy_library = StrategyLibraryService(
             self.sessions_db_path,
-            account_provider=lambda: self.client_state._local_account_rows(),
+            account_provider=None,
         )
         self.device_registry = DeviceRegistry(
             self.state_root / "device-registry.json",
@@ -538,37 +519,6 @@ class ManagerState(
         )
         self.sqlite_web = ManagerSQLiteWeb(self)
 
-    def _authenticate_credentials(
-        self,
-        username: str,
-        password: str,
-        *,
-        control_store: object | None = None,
-    ) -> tuple[str, str]:
-        """Invoke the composition-root authentication seam."""
-        kwargs = {}
-        try:
-            if "managed_organizations" in inspect.signature(
-                _authenticate_user
-            ).parameters:
-                kwargs["managed_organizations"] = self.managed_organizations
-        except (TypeError, ValueError):
-            # Keep the small two-argument seam usable for injected test and
-            # compatibility authenticators.
-            pass
-        if control_store is None:
-            return _authenticate_user(username, password, **kwargs)
-        return _authenticate_user(
-            username,
-            password,
-            control_store=control_store,
-            **kwargs,
-        )
-
-    @staticmethod
-    def _role_for_account(account: dict[str, object]) -> str:
-        return _account_role(account)
-
     @staticmethod
     def _port_is_in_use(port: int) -> bool:
         """Centralize the port-availability seam used by Manager state."""
@@ -576,9 +526,10 @@ class ManagerState(
 
 class Handler(
     RequestSecurityMixin,
+    KeycloakProxyRoutesMixin,
     AccountAdministrationRoutesMixin,
-    AccessControlRoutesMixin,
     DeviceNetworkRoutesMixin,
+    DeviceAdministrationRoutesMixin,
     ControlDatabaseRoutesMixin,
     FederationRoutesMixin,
     CatalogRoutesMixin,
@@ -631,10 +582,6 @@ class Handler(
     @staticmethod
     def _runtime_lan_ip() -> str:
         return _lan_ip()
-
-    @staticmethod
-    def _subordinate_users(owner: str) -> list[dict[str, str]]:
-        return _manager_subordinate_users(owner)
 
     def log_message(self, fmt: str, *args: object) -> None:
         sys.stderr.write("[manager] " + (fmt % args) + "\n")
