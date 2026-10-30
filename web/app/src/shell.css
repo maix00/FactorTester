@@ -497,6 +497,14 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-library-filters { display:flex; gap:12px; margin:8px 0 24px; }
 .tr-library-filters .ant-input-search { flex:1; min-width:180px; }
 .tr-library-filters .ant-select { width:210px; flex-shrink:0; }
+.tr-research-mobile-meta { display:flex; flex-wrap:wrap; gap:4px 14px; padding-top:6px; font-size:12px; }
+.tr-research-mobile-reference { display:inline-flex; align-items:baseline; gap:4px; min-width:0; max-width:100%; }
+.tr-research-mobile-reference > span:first-child { color:var(--muted); flex-shrink:0; }
+.tr-research-mobile-reference > span:last-child { min-width:0; overflow-wrap:anywhere; }
+@media(max-width:760px) {
+  .tr-research-table .ant-table-content > table { width:100% !important; table-layout:fixed; }
+  .tr-research-table .tr-table-link { max-width:100%; overflow-wrap:anywhere; white-space:normal; }
+}
 .tr-version-ref { display:inline-block; max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; font-variant-numeric:tabular-nums; }
 .tr-library-detail { border-top:1px solid #e8ecf2; padding-top:24px; margin-top:24px; }
 .tr-library-detail > header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
