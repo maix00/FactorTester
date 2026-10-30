@@ -16,6 +16,7 @@ x-node: &node
     TR_NODE_DESCRIPTOR_FILE: /config/node.json
     TR_NODE_STATE_DIR: /node-state
     TR_OIDC_ISSUER: ${TR_OIDC_ISSUER:?set Keycloak issuer}
+    TR_OIDC_BACKCHANNEL_URL: ${TR_OIDC_BACKCHANNEL_URL:-}
     TR_OIDC_CLIENT_ID: ${TR_OIDC_CLIENT_ID:?set scoped node client}
     TR_OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc
     FACTORTESTER_FEDERATION_CA_FILE: ${TR_CA_FILE_IN_CONTAINER:-}

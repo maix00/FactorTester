@@ -46,6 +46,8 @@ class WriteRoutesMixin:
         parsed = urlparse(self.path)
         if self._proxy_keycloak(parsed, method="POST"):
             return
+        if self._dispatch_execution_node(parsed.path):
+            return
         # Authentication is the one public POST route in the protected
         # instance.  Registration itself is rejected by _register when the
         # server disables public account creation.
