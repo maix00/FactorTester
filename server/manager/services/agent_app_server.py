@@ -611,6 +611,24 @@ class AgentAppServerSupervisor:
             )
         return page
 
+    def assistance_turn_binding(self, principal: str, profile_id: str) -> dict[str, str] | None:
+        """Internal, ephemeral user delegation for this Profile's active turn."""
+        with self._lock:
+            active = self._processing_turns.get(self._key(principal, profile_id)) or {}
+            binding = active.get("assistance_context")
+            return dict(binding) if isinstance(binding, dict) else None
+
+    def release_assistance_workspace(self, principal: str, profile_id: str, workspace_id: str) -> None:
+        """Atomically revoke a workspace lease and its live turn delegation."""
+        from server.manager.http.page_assistance_routes import _STORE
+        key = self._key(principal, profile_id)
+        with self._lock:
+            _STORE.release_workspace(principal, profile_id, workspace_id)
+            active = self._processing_turns.get(key) or {}
+            binding = active.get("assistance_context")
+            if isinstance(binding, dict) and binding.get("workspace_id") == workspace_id:
+                active.pop("assistance_context", None)
+
     def request(
         self,
         principal: str,
@@ -619,6 +637,7 @@ class AgentAppServerSupervisor:
         params: Mapping[str, object] | None = None,
         *,
         conversation_id: str = "",
+        assistance_context: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         key = self._key(principal, profile_id)
         identifier = str(conversation_id or "").strip()
@@ -660,6 +679,7 @@ class AgentAppServerSupervisor:
         if session is None:
             raise AgentAppServerError("Profile Agent could not be started")
         request_params = dict(params or {})
+        request_marker = object()
         with self._lock:
             processing = dict(self._processing_turns.get(key) or {})
         requested_method = method
@@ -670,6 +690,12 @@ class AgentAppServerSupervisor:
                 "Profile Agent is already processing a turn; use turn/steer"
             )
         if method == "turn/steer":
+            bound = processing.get("assistance_context")
+            if isinstance(bound, dict):
+                if (not isinstance(assistance_context, Mapping)
+                        or any(str(assistance_context.get(field) or "") != str(bound.get(field) or "")
+                               for field in ("workspace_id", "subject", "issuer", "identity_id"))):
+                    raise AgentAppServerError("active turn belongs to another assistance workspace")
             expected_conversation = str(processing.get("conversation_id") or "")
             expected_turn = str(processing.get("turn_id") or "")
             requested_turn = str(
@@ -682,6 +708,23 @@ class AgentAppServerSupervisor:
                 raise AgentAppServerError("active Profile Agent turn binding is invalid")
             if expected_turn and requested_turn != expected_turn:
                 raise AgentAppServerError("active Profile Agent turn binding is invalid")
+            if expected_conversation and expected_turn and isinstance(assistance_context, Mapping):
+                # A same-workspace steer may refresh the browser's delegated
+                # token. Recheck the lease under the same lock used by release,
+                # so an in-flight steer cannot restore a revoked delegation.
+                with self._lock:
+                    active = self._processing_turns.get(key) or {}
+                    if (active.get("conversation_id") != expected_conversation
+                            or active.get("turn_id") != expected_turn):
+                        raise AgentAppServerError("active Profile Agent turn binding changed")
+                    from server.manager.http.page_assistance_routes import _STORE
+                    _STORE.workspace_scope(key[0], key[1], str(assistance_context.get("workspace_id") or ""))
+                    current = active.get("assistance_context")
+                    if (not isinstance(current, dict)
+                            or any(str(assistance_context.get(field) or "") != str(current.get(field) or "")
+                                   for field in ("workspace_id", "subject", "issuer", "identity_id"))):
+                        raise AgentAppServerError("active Profile Agent turn binding changed")
+                    active["assistance_context"] = dict(assistance_context)
             if not expected_conversation or not expected_turn:
                 if require_active_turn:
                     raise AgentAppServerError("Steer target turn has ended")
@@ -716,9 +759,17 @@ class AgentAppServerSupervisor:
                 return
             event_after = int(session.status().get("event_sequence") or 0)
             with self._lock:
+                previous = self._processing_turns.get(key)
+                if previous and previous.get("_request_marker") is not request_marker:
+                    raise AgentAppServerError("Profile Agent is already processing a turn; use turn/steer")
+                if assistance_context:
+                    from server.manager.http.page_assistance_routes import _STORE
+                    _STORE.workspace_scope(key[0], key[1], str(assistance_context.get("workspace_id") or ""))
                 self._processing_turns[key] = {
                     "conversation_id": str(conversation["conversation_id"]),
                     "event_after": event_after,
+                    "_request_marker": request_marker,
+                    **({"assistance_context": dict(assistance_context)} if assistance_context else {}),
                 }
         # Reserve the exact live session before issuing a request. Without
         # this check a reaper could detach it after the initial running probe.
@@ -806,7 +857,9 @@ class AgentAppServerSupervisor:
         except Exception:
             if method == "turn/start":
                 with self._lock:
-                    self._processing_turns.pop(key, None)
+                    active = self._processing_turns.get(key) or {}
+                    if active.get("_request_marker") is request_marker:
+                        self._processing_turns.pop(key, None)
             raise
         finally:
             with self._condition:

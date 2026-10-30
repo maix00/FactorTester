@@ -25,6 +25,16 @@ def test_verified_client_roles_and_cache():
     assert client.calls == 1
 
 
+def test_delegated_agent_token_can_require_fresh_introspection():
+    client = Client()
+    verifier = UserSessionVerifier(client, issuer='https://id/realms/tr', audience='manager')
+    assert verifier.session('token') is not None
+    client.claims = {**client.claims, 'active': False}
+    assert verifier.session('token', use_cache=False) is None
+    assert verifier.session('token') is None
+    assert client.calls == 3
+
+
 def test_oidc_settings_keep_public_issuer_separate_from_private_backchannel(monkeypatch, tmp_path):
     import server.identity.user_session as user_session
 

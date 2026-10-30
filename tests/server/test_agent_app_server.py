@@ -2017,6 +2017,50 @@ def test_assisted_rpc_preserves_user_message_without_prompt_injection(monkeypatc
     assert captured == [{"input": [{"type": "text", "text": "请添加图片\n保持原文"}]}] * 2
 
 
+def test_turn_binds_exact_workspace_and_never_sends_user_token_to_provider(tmp_path, monkeypatch):
+    from server.manager.http import page_assistance_routes as assistance
+    store = assistance.PageAssistanceStore()
+    monkeypatch.setattr(assistance, "_STORE", store)
+    workspace_id = store.issue_workspace(PRINCIPAL, PROFILE_ID)
+    service, _provider = _claimed_agent_service(tmp_path, monkeypatch)
+    supervisor = AgentAppServerSupervisor(service, codex_binary=_fake_codex(tmp_path / "fake-codex"))
+    supervisor.start(PRINCIPAL, PROFILE_ID)
+    try:
+        conversation = service.create_conversation(PRINCIPAL, PROFILE_ID)
+        supervisor.request(PRINCIPAL, PROFILE_ID, "thread/start", {}, conversation_id=conversation["conversation_id"])
+        binding = {"workspace_id": workspace_id, "token": "private-user-token", "subject": "subject",
+                   "issuer": "issuer", "identity_id": "stable"}
+        response = supervisor.request(PRINCIPAL, PROFILE_ID, "turn/start", {
+            "threadId": "provider-thread-1", "input": [{"type": "text", "text": "hello"}]},
+            conversation_id=conversation["conversation_id"], assistance_context=binding)
+        assert "private-user-token" not in json.dumps(response)
+        assert workspace_id not in json.dumps(response)
+        assert supervisor.assistance_turn_binding(PRINCIPAL, PROFILE_ID) == binding
+        with pytest.raises(AgentAppServerError, match="another assistance workspace"):
+            supervisor.request(PRINCIPAL, PROFILE_ID, "turn/steer", {
+                "threadId": "provider-thread-1", "turnId": "turn-active",
+                "input": [{"type": "text", "text": "hello"}]},
+                conversation_id=conversation["conversation_id"],
+                assistance_context={**binding, "workspace_id": "x" * 32})
+        renewed = {**binding, "token": "renewed-private-user-token"}
+        supervisor.request(PRINCIPAL, PROFILE_ID, "turn/steer", {
+            "threadId": "provider-thread-1", "turnId": "turn-active",
+            "input": [{"type": "text", "text": "continue"}]},
+            conversation_id=conversation["conversation_id"], assistance_context=renewed)
+        assert supervisor.assistance_turn_binding(PRINCIPAL, PROFILE_ID) == renewed
+        supervisor.release_assistance_workspace(PRINCIPAL, PROFILE_ID, workspace_id)
+        assert supervisor.assistance_turn_binding(PRINCIPAL, PROFILE_ID) is None
+        with pytest.raises(assistance.WorkspaceLeaseExpired):
+            supervisor.request(PRINCIPAL, PROFILE_ID, "turn/steer", {
+                "threadId": "provider-thread-1", "turnId": "turn-active",
+                "input": [{"type": "text", "text": "continue"}]},
+                conversation_id=conversation["conversation_id"], assistance_context=renewed)
+        assert supervisor.assistance_turn_binding(PRINCIPAL, PROFILE_ID) is None
+    finally:
+        supervisor.stop(PRINCIPAL, PROFILE_ID)
+    assert supervisor.assistance_turn_binding(PRINCIPAL, PROFILE_ID) is None
+
+
 def test_live_sse_supplements_persisted_tools_without_provider_item_events():
     class Supervisor(_SSESupervisor):
         def status(self, *args):

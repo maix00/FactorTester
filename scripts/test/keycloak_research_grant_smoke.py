@@ -12,6 +12,7 @@ import secrets
 import sqlite3
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlencode
 
@@ -113,6 +114,36 @@ def run(sandbox):
         with identity_request():
             bind_verified_identity(*sessions["member"])
             assert len(catalog.list_researches(viewer="member")) == 1
+            # Exercise the actual page-assistance workspace handler against
+            # the same live Keycloak grant. Agent runtime admission is a test
+            # double here; the authorization and workspace store are real.
+            from server.manager.http import page_assistance_routes as routes
+            store, replies = routes.PageAssistanceStore(), []
+            class Handler(routes.PageAssistanceRoutesMixin):
+                body = {"profile_id": "self"}
+                def _agent_app_profile(self, _profile): return "member", "self"
+                def _assistance_profile(self, _profile, workspace_id):
+                    return "member", "self", workspace_id
+                def _json_body(self, _maximum): return self.body
+                def _research_catalog_service(self): return catalog
+                def _agent_app_error(self, exc): raise exc
+            handler = Handler()
+            with patch.object(routes, "_STORE", store), patch.object(routes, "json_response",
+                    lambda _handler, value, status=200: replies.append((value, status))):
+                handler._post_page_assistance_routes(SimpleNamespace(
+                    path="/api/client/profile-agent/assistance/workspaces"))
+                workspace_id = replies[-1][0]["workspace_id"]
+                handler.body = {"profile_id": "self", "workspace_id": workspace_id, "tab_id": "page",
+                    "workspace": {"client_revision": 1, "active_tab_id": "page", "tabs": [{
+                        "tab_id": "page", "research_id": ref, "assistance": {"schema_version": 1,
+                            "page_kind": "research", "revision": 0,
+                            "navigation": {"schema_version": 1, "root_id": "root", "nodes": {
+                                "root": {"id": "root", "kind": "page", "children": []}}},
+                            "document_schema": {"type": "object", "readOnly": True},
+                            "document": {"research_id": ref}}}]}}
+                handler._post_page_assistance_routes(SimpleNamespace(
+                    path="/api/client/profile-agent/assistance/publish"))
+                assert replies[-1][1] == 200 and replies[-1][0]["page"] is not None
         with identity_request():
             bind_verified_identity(*sessions["owner"])
             catalog.set_explicit_grant(ref, actor="owner", principal_ref="member", scopes=[])
@@ -121,10 +152,17 @@ def run(sandbox):
             # Deliberately reuse the same previously issued token after revoke.
             bind_verified_identity(*sessions["member"])
             assert catalog.list_researches(viewer="member") == []
+            with patch.object(routes, "_STORE", store), patch.object(routes, "json_response",
+                    lambda _handler, value, status=200: replies.append((value, status))):
+                handler._get_page_assistance_routes(SimpleNamespace(
+                    path="/api/client/profile-agent/assistance",
+                    query=urlencode({"profile_id": "self", "workspace_id": workspace_id})))
+                assert replies[-1][1] == 200 and replies[-1][0]["page"] is None
         with sqlite3.connect(database) as db:
             assert db.execute("SELECT authorized_users_json FROM research_catalog_researches").fetchone()[0] == "[]"
     return {"real_keycloak": True, "real_catalog": True, "same_token_revocation": True,
-            "legacy_acl_written": False, "profile_membership_provider": "denial-only test double"}
+            "revoked_page_context_removed": True, "legacy_acl_written": False,
+            "profile_membership_provider": "denial-only test double", "agent_runtime_admission": "test double"}
 
 
 if __name__ == "__main__":

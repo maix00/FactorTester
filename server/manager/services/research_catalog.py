@@ -2179,6 +2179,21 @@ class ResearchCatalog(ResearchBranchesMixin):
             raise KeyError("research not found")
         return row
 
+    def research_statuses(self, research_ids) -> dict[str, str]:
+        """Fetch bounded metadata candidates; this never grants access."""
+        refs = sorted({_text(ref, "research_id", maximum=512) for ref in research_ids})
+        if len(refs) > 1000:
+            raise ValueError("too many Research references")
+        result = {}
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            for offset in range(0, len(refs), 256):
+                batch = refs[offset:offset + 256]
+                placeholders = ",".join("?" for _ in batch)
+                for row in conn.execute(f"SELECT research_id,status FROM research_catalog_researches "
+                                        f"WHERE research_id IN ({placeholders})", batch):
+                    result[str(row["research_id"])] = str(row["status"])
+        return result
+
     def _report_row(self, report_id: str):
         target = _text(report_id, "report_id", maximum=256)
         with connect_sqlite(self.db_path, readonly=True) as conn:

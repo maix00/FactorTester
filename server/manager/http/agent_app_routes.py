@@ -123,7 +123,9 @@ class AgentAppServerRoutesMixin:
         )
         if isinstance(exc, (sqlite3.Error, OSError)):
             code = "agent_state_unavailable"
-        if code == "permission_denied":
+        if code == "assistance_workspace_expired":
+            status = 403
+        elif code == "permission_denied":
             status = 401 if lowered == "login required" else 403
         elif code == "agent_state_unavailable":
             status = 503
@@ -411,13 +413,38 @@ class AgentAppServerRoutesMixin:
             params = payload.get("params") or {}
             if not isinstance(params, dict):
                 raise AgentAppServerError("params must be an object")
-            response = supervisor.request(
-                principal,
-                identifier,
-                method,
-                params,
-                conversation_id=str(payload.get("conversation_id") or "").strip(),
-            )
+            request_options = {"conversation_id": str(payload.get("conversation_id") or "").strip()}
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if workspace_id and method in {"turn/start", "turn/steer"}:
+                from server.identity.keycloak_research import verified_research_request
+                from server.manager.http.page_assistance_routes import _STORE, WorkspaceLeaseExpired
+                identity = verified_research_request(principal)
+                if identity is None:
+                    raise AgentAppServerError("verified Keycloak session required", code="permission_denied")
+                try:
+                    _STORE.workspace_scope(principal, identifier, workspace_id)
+                except WorkspaceLeaseExpired as exc:
+                    raise AgentAppServerError(str(exc), code="assistance_workspace_expired") from exc
+                # Only this active turn retains the user bearer, in memory.
+                # The provider never receives it or the workspace capability.
+                request_options["assistance_context"] = {
+                    "workspace_id": workspace_id, "token": identity.token,
+                    "issuer": identity.issuer, "subject": identity.subject,
+                    "identity_id": identity.identity_id,
+                }
+            try:
+                response = supervisor.request(
+                    principal,
+                    identifier,
+                    method,
+                    params,
+                    **request_options,
+                )
+            except PermissionError as exc:
+                from server.manager.http.page_assistance_routes import WorkspaceLeaseExpired
+                if isinstance(exc, WorkspaceLeaseExpired):
+                    raise AgentAppServerError(str(exc), code="assistance_workspace_expired") from exc
+                raise AgentAppServerError(str(exc), code="permission_denied") from exc
             json_response(self, {
                 "success": True,
                 "response": _public_value(response),
