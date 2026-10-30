@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from "react";
-import { Alert, Button, Form, Input, Select } from "antd";
+import React, { useEffect, useRef, useState } from "react";
+import { Alert, Button, Form, Input, Popconfirm, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { DetailsCancelButton, DetailsPanel } from "./details-panel.tsx";
 import { useCompactLayout } from "../configuration/layout.ts";
+import { notify } from "../notifications/core.ts";
 
 type Group = Record<string, any>;
 
@@ -23,8 +24,8 @@ export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
   const [categoryError, setCategoryError] = useState("");
   const [categoryRevision, setCategoryRevision] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
+  const mutation = useRef(false);
   const groupRef = String(group?.group_ref || group?.ref || "");
   useEffect(() => {
     const controller = new AbortController();
@@ -40,29 +41,33 @@ export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
     return () => controller.abort();
   }, [categoryRevision, t]);
   const remove = async (): Promise<void> => {
+    if (mutation.current) return;
+    mutation.current = true;
     setBusy(true); setError("");
     try {
       await request(`/api/product-library/product-groups/${encodeURIComponent(groupRef)}`, { method: "DELETE" });
-      onDeleted();
+      notify({code:"productGroup.delete.success",type:"success",message:t("operations.deleted")}); onDeleted();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally { setBusy(false); setConfirming(false); }
+      notify({code:"productGroup.delete.failed",type:"error",message:t("operations.deleteFailed"),description:reason instanceof Error ? reason.message : String(reason)});
+    } finally { mutation.current = false; setBusy(false); }
   };
   const save = async (): Promise<void> => {
+    if (mutation.current) return;
+    const pathValues = paths.split("\n").map((value) => value.trim()).filter(Boolean);
+    const categoryValues = categories.map((value) => value.trim()).filter(Boolean);
+    if (!name.trim() || !pathValues.length) { setError(t("productGroup.required")); return; }
+    if (groupRef && !categoryValues.length) { setError(t("productGroup.categoryRequired")); return; }
+    mutation.current = true;
     setBusy(true); setError("");
     try {
-      const pathValues = paths.split("\n").map((value) => value.trim()).filter(Boolean);
-      const categoryValues = categories.map((value) => value.trim()).filter(Boolean);
-      if (!name.trim() || !pathValues.length) throw new Error(t("productGroup.required"));
-      if (groupRef && !categoryValues.length) throw new Error(t("productGroup.categoryRequired"));
       const result = await request(
         groupRef ? `/api/product-library/product-groups/${encodeURIComponent(groupRef)}` : "/api/product-library/product-groups",
         { method: groupRef ? "PUT" : "POST", body: JSON.stringify({ name: name.trim(), paths: pathValues, category_ids: categoryValues }) },
       );
-      onSaved(result.group || result);
+      notify({code:"productGroup.save.success",type:"success",message:t("operations.saved")}); onSaved(result.group || result);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally { setBusy(false); }
+      notify({code:"productGroup.save.failed",type:"error",message:t("operations.saveFailed"),description:reason instanceof Error ? reason.message : String(reason)});
+    } finally { mutation.current = false; setBusy(false); }
   };
   const content = <div className="tr-library-create">
     {groupRef ? <div className="tr-inline-editor-heading"><h2>{t("productGroup.edit")}</h2></div> : null}
@@ -76,8 +81,7 @@ export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
         <Select mode="multiple" showSearch optionFilterProp="label" loading={categoryLoading} disabled={categoryLoading || !!categoryError} aria-label={t("productGroup.categories")} value={categories} options={categoryOptions} onChange={setCategories} />
       </Form.Item>
       {categoryError ? <Alert type="error" showIcon message={t("productGroup.categoriesLoadFailed")} description={categoryError} action={<Button onClick={() => setCategoryRevision((value) => value + 1)}>{t("retry")}</Button>} /> : null}
-      {confirming ? <Alert type="warning" showIcon message={t("productGroup.deleteTitle")} description={t("productGroup.deleteHint")} action={<div className="tr-inline-actions"><Button danger loading={busy} onClick={() => void remove()}>{t("productGroup.deleteConfirm")}</Button><Button onClick={() => setConfirming(false)}>{t("configuration.cancel")}</Button></div>} /> : null}
-      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={categoryLoading || !!categoryError} onClick={() => void save()}>{t("configuration.save")}</Button><DetailsCancelButton disabled={busy} closePanel={mobile && !groupRef} onCancel={onCancel}/>{groupRef && !confirming ? <Button danger loading={busy} onClick={() => setConfirming(true)}>{t("productGroup.delete")}</Button> : null}</div>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={categoryLoading || !!categoryError} onClick={() => void save()}>{t("configuration.save")}</Button><DetailsCancelButton disabled={busy} closePanel={mobile && !groupRef} onCancel={onCancel}/>{groupRef ? <Popconfirm title={t("productGroup.deleteTitle")} description={t("productGroup.deleteHint")} onConfirm={() => void remove()} okText={t("productGroup.deleteConfirm")} cancelText={t("configuration.cancel")}><Button danger loading={busy}>{t("productGroup.delete")}</Button></Popconfirm> : null}</div>
     </Form>
   </div>;
   return mobile && !groupRef ? <DetailsPanel title={t("productGroup.create")} onClose={onCancel}>{content}</DetailsPanel> : content;

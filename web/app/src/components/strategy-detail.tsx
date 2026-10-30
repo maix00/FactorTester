@@ -8,6 +8,7 @@ import { PropertyGroups } from "./property-groups.tsx";
 import { ResultView } from "./result-view.tsx";
 import { ObjectReference } from "./object-reference.tsx";
 import { formatDate } from "../format.ts";
+import { notify } from "../notifications/core.ts";
 type Row = Record<string, any>;
 export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row | null; onUpdated: (strategy: Row) => void; onRemoved: () => void }): React.ReactElement {
   const { t } = useTranslation(); const strategy = detail?.strategy || detail;
@@ -17,6 +18,7 @@ export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row |
   const [expanded, setExpanded] = useState<string[]>([]), [editing, setEditing] = useState<Row | null>(null);
   const [principal, setPrincipal] = useState("");
   const editRequest = useRef<AbortController | null>(null);
+  const actionPending = useRef(false);
   useEffect(() => () => editRequest.current?.abort(), []);
   const [sharePage, setSharePage] = useState(1), [shareSize, setShareSize] = useState(20);
   const [retry, setRetry] = useState(0);
@@ -37,14 +39,18 @@ export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row |
     setLoading(true); setError("");
     editRequest.current?.abort(); const controller = new AbortController(); editRequest.current = controller;
     try { const data = await request(`/api/strategy-library/strategies/${encodeURIComponent(strategy.strategy_ref)}?include_source=1`, { signal: controller.signal }); if (!controller.signal.aborted) setEditing(data.strategy); }
-    catch (reason) { if (!controller.signal.aborted) setError((reason as Error).message); } finally { if (!controller.signal.aborted) setLoading(false); }
+    catch (reason) { if (!controller.signal.aborted) notify({code:"strategy.edit.load.failed",type:"error",message:t("loadFailed"),description:(reason as Error).message}); } finally { if (!controller.signal.aborted) setLoading(false); }
   };
   const action = async (suffix: string, method: string, body?: Row): Promise<void> => {
+    if (actionPending.current) return;
+    actionPending.current = true;
     setLoading(true); setError("");
     try { await request(`/api/strategy-library/strategies/${encodeURIComponent(strategy.strategy_ref)}${suffix}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
-      if (method === "DELETE" && !suffix) onRemoved();
-      else { const response = await request(`/api/strategy-library/strategies/${encodeURIComponent(strategy.strategy_ref)}?include_source=0`); onUpdated(response.strategy); setPrincipal(""); }
-    } catch (reason) { setError((reason as Error).message); } finally { setLoading(false); }
+      if (method === "DELETE" && !suffix) { notify({code:"strategy.action.success",type:"success",message:t("strategyDetail.archived")}); onRemoved(); }
+      else { try { const response = await request(`/api/strategy-library/strategies/${encodeURIComponent(strategy.strategy_ref)}?include_source=0`); onUpdated(response.strategy); setPrincipal(""); notify({code:"strategy.action.success",type:"success",message:t(method === "DELETE" ? "strategyDetail.shareRevoked" : "strategyDetail.shareSaved")}); }
+        catch (reason) { notify({code:"strategy.refresh.failed",type:"warning",message:t("operations.refreshFailed"),description:(reason as Error).message}); } }
+    } catch (reason) { notify({code:"strategy.action.failed",type:"error",message:t(method === "DELETE" ? "operations.deleteFailed" : "operations.saveFailed"),description:(reason as Error).message}); }
+    finally { actionPending.current = false; setLoading(false); }
   };
   if (!strategy) return <Spin />;
   if (editing) return <LibraryCreate kind="strategy" strategy={editing} onCancel={() => setEditing(null)} onCreated={(value) => { setEditing(null); setSelectedRef(""); setSource(null); onUpdated(value); }} />;

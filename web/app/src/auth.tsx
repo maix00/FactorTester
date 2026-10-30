@@ -5,7 +5,7 @@ import { CloseOutlined } from "@ant-design/icons";
 import { loadScript } from "./assets.ts";
 import { request } from "./configuration/api.ts";
 import { notify } from "./notifications/core.ts";
-import { managerRegistrationEnabled } from "./auth-model.ts";
+import { keycloakErrorKey, managerRegistrationEnabled } from "./auth-model.ts";
 
 export type AuthSession = {
   username?: string;
@@ -159,15 +159,8 @@ function AuthOverlay({ entry, unavailable, authError, onAuthenticated, mode:init
   const startKeycloakLogin = (): void => {
     location.assign(`/auth/oidc/start?next=${encodeURIComponent(currentPath())}`);
   };
-  const keycloakErrorMessage = authError === "provider"
-    ? t("auth.keycloakErrors.provider")
-    : authError === "unverified"
-      ? t("auth.keycloakErrors.unverified")
-      : authError === "public_login_denied"
-        ? t("auth.keycloakErrors.publicLoginDenied")
-        : authError === "device"
-          ? t("auth.keycloakErrors.deviceRejected")
-      : authError ? t("auth.keycloakErrors.invalid") : "";
+  const errorKey = keycloakErrorKey(authError);
+  const keycloakErrorMessage = errorKey ? t(`auth.keycloakErrors.${errorKey}`) : "";
 
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
@@ -218,7 +211,6 @@ function AuthOverlay({ entry, unavailable, authError, onAuthenticated, mode:init
           <p>{displayMode==="register"?t("auth.registerHint"):t("auth.hint")}</p>
         </header>
         {keycloakMode ? <div className="tr-auth-form">
-          <p>{t("auth.keycloakManaged")}</p>
           <button type="button" className="tr-auth-submit" onClick={startKeycloakLogin}>{t("auth.keycloakSignIn")}</button>
           {publicGate?<a className="tr-auth-redirect" href={fullCompliance}>{t("auth.publicVisitorEntry")}</a>:null}
           {keycloakErrorMessage ? <p className="tr-auth-error" role="alert">{keycloakErrorMessage}</p> : null}
@@ -252,7 +244,6 @@ function AuthOverlay({ entry, unavailable, authError, onAuthenticated, mode:init
           {unavailable ? <p className="tr-auth-error" role="alert">{t("auth.unavailable")}</p> : null}
         </form>}</>}
         <footer>
-          <span>{t("auth.managedAccess")}</span>
           <details className="tr-auth-access"><summary>{t("auth.accessInformation")}</summary>
             <p>{compliance}</p>
             {entry?.registration_notice?<p>{entry.registration_notice}</p>:null}

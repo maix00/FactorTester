@@ -871,3 +871,8 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
   .tr-library-create .ant-alert-with-description { flex-wrap:wrap; }
   .tr-library-create .ant-alert-action { margin:12px 0 0; width:100%; }
 }
+
+.tr-research-relations-actions { display: flex; justify-content: flex-end; margin: 0 0 16px; }
+.tr-research-relations .ant-tabs-nav { margin-bottom: 16px; }
+.tr-research-relations > .ant-tabs > .ant-tabs-nav .ant-tabs-tab + .ant-tabs-tab { margin-left: 16px; }
+.tr-reference-chip-list { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: -12px 0 18px; }

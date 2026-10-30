@@ -1,6 +1,7 @@
 export type ResearchRecord = {
   research_id?: string;
   report_id?: string;
+  source_ref?: string;
   publication_id?: string;
   branches?: ReportBranch[];
 };
@@ -19,7 +20,7 @@ export function researchRowID(row: ResearchRecord): string {
 }
 
 export function reportRowID(row: ResearchRecord): string {
-  return String(row.report_id || row.publication_id || "");
+  return String(row.report_id || row.source_ref || row.publication_id || "");
 }
 
 export function linkedResearchID(row: ResearchRecord & { research?: { research_id?: string } }): string {
@@ -42,4 +43,16 @@ export function selectReportBranch(
   return branches.find((branch) => branch.publication_id === publicationID)
     || branches.find((branch) => branch.selected)
     || branches[0];
+}
+
+/** Only offer addressable profiles and avoid recreating an existing relation. */
+export function researchRelationCandidates(kind: "profile" | "workspace" | "report", rows: Record<string, any>[], existing: Record<string, any>, owner: string): Record<string, any>[] {
+  const bound = new Set((existing.members || []).map((row: Record<string, any>) => String(row.profile_ref || "").replace(/^profile:/, "")));
+  const workspaces = new Set((existing.workspaces || []).filter((row: Record<string, any>) => String(row.status || "active") === "active").map((row: Record<string, any>) => JSON.stringify([row.principal_ref, row.profile_ref])));
+  return rows.filter(row => {
+    const profile = String(row.profile_ref || row.profile_id || "");
+    const principal = String(row.principal_ref || row.owner_ref || owner || "");
+    if (!profile || !principal) return false;
+    return kind === "profile" ? !bound.has(profile.replace(/^profile:/, "")) : String(row.status || "active") === "active" && (kind !== "workspace" || !workspaces.has(JSON.stringify([principal, profile])));
+  });
 }
