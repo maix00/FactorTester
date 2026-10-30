@@ -9,6 +9,7 @@ from server.identity.keycloak_research import (
     ResearchRequestIdentity,
     legacy_authorization_snapshot_sha256,
     profile_resource_ref,
+    resolve_keycloak_research_member,
     verified_research_request,
 )
 
@@ -17,6 +18,29 @@ def _identity(viewer):
     if viewer != "alice":
         return None
     return ResearchRequestIdentity("verified-token", "https://issuer", "subject-a", "alice", "identity-a")
+
+
+def test_member_lookup_requires_exact_effective_name_and_unique_stable_identity(monkeypatch):
+    from server.identity import federation_identity_sync
+    row = {"id": "subject-a", "username": "canonical", "enabled": True,
+           "attributes": {"tr_identity_id": ["identity-a"], "legacy_username": ["Alice"]}}
+    class Directory:
+        def user_representation(self, _name):
+            return None
+        def _page(self, _path, *, max_items):
+            return [row]
+        def user_by_identity_id(self, _stable):
+            return row
+    monkeypatch.setattr(federation_identity_sync, "manager_keycloak_admin_adapter", Directory)
+    assert resolve_keycloak_research_member("Alice") == {"identity_id": "identity-a", "subject": "subject-a"}
+    with pytest.raises(LookupError, match="missing or ambiguous"):
+        resolve_keycloak_research_member("Alic")
+    class Duplicate(Directory):
+        def _page(self, _path, *, max_items):
+            return [row, {**row, "id": "other-subject"}]
+    monkeypatch.setattr(federation_identity_sync, "manager_keycloak_admin_adapter", Duplicate)
+    with pytest.raises(LookupError, match="missing or ambiguous"):
+        resolve_keycloak_research_member("Alice")
 
 
 def test_keycloak_decisions_have_no_owner_or_username_bypass():

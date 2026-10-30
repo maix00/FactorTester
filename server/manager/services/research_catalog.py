@@ -320,6 +320,40 @@ class ResearchCatalog(ResearchBranchesMixin):
     # ------------------------------------------------------------------
     # Research, membership, workspace, and report records
 
+    @contextmanager
+    def _new_research_policy(self, *, owner: str, research_id: str, profiles: list[str]):
+        if self._profile_authorizer is None:
+            yield
+            return
+        manager = self._profile_grant_manager
+        if manager is None:
+            raise RuntimeError("Keycloak Research creation is not configured")
+        from server.identity.keycloak_research import profile_resource_ref
+
+        caller = manager.create_research_resource(actor=owner, research_id=research_id)
+        created = [("research", research_id)]
+        try:
+            for profile in profiles:
+                ref = profile_resource_ref(research_id, caller.identity_id, profile)
+                # The Research ID was checked absent and is random. Record the
+                # child before the remote call, which can fail after creation.
+                created.append(("research_profile", ref))
+                manager.set_profile_membership(
+                    actor=owner, research_id=research_id, identity_id=caller.identity_id,
+                    subject=caller.subject, profile_ref=profile, role="owner", status="active",
+                )
+            yield
+        except BaseException as exc:
+            failed = False
+            for kind, ref in reversed(created):
+                try:
+                    manager.delete_resource(resource_type=kind, resource_ref=ref, owner_subject=caller.subject)
+                except Exception:
+                    failed = True
+            if failed:
+                raise RuntimeError(f"Research creation failed; Keycloak resource cleanup needs review: {research_id}") from exc
+            raise
+
     def create_research(
         self,
         *,
@@ -340,7 +374,10 @@ class ResearchCatalog(ResearchBranchesMixin):
         research_id = "research:v1:" + secrets.token_urlsafe(18)
         now = time.time()
         initial_workspace = None
-        with self._write(research_id) as conn:
+        profiles = ["self"]
+        if profile_ref and _profile(profile_ref) != "self":
+            profiles.append(_profile(profile_ref))
+        with self._new_research_policy(owner=owner, research_id=research_id, profiles=profiles), self._write(research_id) as conn:
             conn.execute(
                 """INSERT INTO research_catalog_researches
                    (research_id, owner_ref, title, description, status,
@@ -352,9 +389,6 @@ class ResearchCatalog(ResearchBranchesMixin):
                     clean_visibility, _json(users), now, now,
                 ),
             )
-            profiles = ["self"]
-            if profile_ref and _profile(profile_ref) != "self":
-                profiles.append(_profile(profile_ref))
             initial_workspaces = []
             for profile in profiles:
                 self._upsert_membership(

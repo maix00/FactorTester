@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from server.identity.keycloak_authorization import AuthorizationUnavailable, keycloak_resource_uri
-from server.identity.keycloak_research import KeycloakResearchAuthorization, profile_resource_ref
+from server.identity.keycloak_research import KeycloakResearchAuthorization, ResearchRequestIdentity, profile_resource_ref
 from server.identity.request_context import bind_verified_identity, identity_request
 from server.manager.services.research_catalog import ResearchCatalog
 
@@ -247,3 +247,42 @@ def test_report_registration_checks_owners_exact_keycloak_profile(tmp_path):
         allowed.clear()
         with pytest.raises(PermissionError, match="Profile write"):
             catalog.register_report(research_id, actor="alice", report_id="b", profile_ref="self")
+
+
+def test_new_research_registers_owner_profiles_and_cleans_up_failed_registration(tmp_path):
+    class Authorization:
+        def profile_membership_access_many(self, **_kwargs):
+            return {}
+    class Grants:
+        def __init__(self):
+            self.events, self.fail = [], False
+        def create_research_resource(self, *, actor, research_id):
+            self.events.append(("create", research_id))
+            if actor != "alice":
+                raise PermissionError("verified identity required")
+            return ResearchRequestIdentity("token", "issuer", "alice-subject", "alice", "alice-id")
+        def set_profile_membership(self, *, research_id, profile_ref, role, status, **_kwargs):
+            self.events.append(("profile", profile_ref))
+            assert (role, status) == ("owner", "active")
+            if self.fail and profile_ref == "work":
+                raise AuthorizationUnavailable("Keycloak unavailable")
+        def delete_resource(self, *, resource_type, resource_ref, owner_subject):
+            assert owner_subject == "alice-subject"
+            self.events.append(("delete", resource_type, resource_ref))
+    grants = Grants()
+    catalog = ResearchCatalog(tmp_path / "research.sqlite", profile_authorizer=Authorization(),
+                              profile_grant_manager=grants)
+    created = catalog.create_research(owner_ref="alice", title="Research", profile_ref="work")
+    assert [event for event in grants.events if event[0] == "profile"] == [("profile", "self"), ("profile", "work")]
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_catalog_memberships WHERE research_id=?",
+                          (created["research_id"],)).fetchone()[0] == 2
+    grants.events.clear()
+    grants.fail = True
+    with pytest.raises(AuthorizationUnavailable):
+        catalog.create_research(owner_ref="alice", title="Failed", profile_ref="work")
+    assert [event[1] for event in grants.events if event[0] == "delete"] == [
+        "research_profile", "research_profile", "research",
+    ]
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM research_catalog_researches WHERE title='Failed'").fetchone()[0] == 0

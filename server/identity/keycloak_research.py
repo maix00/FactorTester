@@ -19,6 +19,7 @@ from server.identity.keycloak_authorization import (
     _backchannel,
     _protection_request,
     clear_authorization_cache,
+    delete_keycloak_resource,
     ensure_keycloak_resource,
     keycloak_authorized_many,
     keycloak_request_identity,
@@ -258,6 +259,48 @@ def _keycloak_user(subject: str) -> dict[str, Any]:
     return result
 
 
+def resolve_keycloak_research_member(principal: str) -> dict[str, str]:
+    """Resolve one exact legacy/display principal to a stable KC identity.
+
+    The caller's Research share authorization must be checked first. Exact
+    post-filtering prevents Keycloak's attribute query syntax from turning a
+    supplied name into a broader match. Ambiguity never picks the first user.
+    """
+    selected = str(principal or "").strip()
+    if not selected or len(selected) > 256 or "\x00" in selected:
+        raise ValueError("invalid Research principal")
+    from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+    adapter = manager_keycloak_admin_adapter()
+    direct = adapter.user_representation(selected)
+    query = "users?" + urlencode({"q": f"legacy_username:{selected}"})
+    rows = adapter._page(query, max_items=20_000)
+    if direct is not None:
+        rows.append(direct)
+    matches: dict[str, dict] = {}
+    for row in rows:
+        attributes = row.get("attributes") if isinstance(row, dict) else None
+        identities = attributes.get("tr_identity_id") if isinstance(attributes, dict) else None
+        legacy = attributes.get("legacy_username") if isinstance(attributes, dict) else None
+        if not isinstance(identities, list) or len(identities) != 1 or not isinstance(identities[0], str) or not identities[0]:
+            continue
+        if legacy is not None and (not isinstance(legacy, list) or len(legacy) != 1 or not isinstance(legacy[0], str)):
+            raise LookupError("Research member's Keycloak name is ambiguous")
+        effective = legacy[0] if legacy else str(row.get("username") or "")
+        subject = str(row.get("id") or "")
+        if effective == selected and subject:
+            matches[subject] = row
+    if len(matches) != 1:
+        raise LookupError("Research member's Keycloak identity is missing or ambiguous")
+    subject, row = next(iter(matches.items()))
+    if type(row.get("enabled")) is not bool:
+        raise LookupError("Research member's Keycloak status is unavailable")
+    stable_id = row["attributes"]["tr_identity_id"][0]
+    verified = adapter.user_by_identity_id(stable_id)
+    if not isinstance(verified, dict) or verified.get("id") != subject:
+        raise LookupError("Research member's stable identity is missing or ambiguous")
+    return {"identity_id": stable_id, "subject": subject}
+
+
 class KeycloakResearchGrantManager:
     """Manage one independently revocable user grant via Keycloak UMA.
 
@@ -274,6 +317,7 @@ class KeycloakResearchGrantManager:
                  request: Callable = _protection_request,
                  user_provider: Callable = _keycloak_user,
                  ensure_resource: Callable = ensure_keycloak_resource,
+                 delete_resource: Callable = delete_keycloak_resource,
                  clear_cache: Callable = clear_authorization_cache) -> None:
         if settings_provider is None:
             from server.identity.user_session import oidc_settings
@@ -285,6 +329,7 @@ class KeycloakResearchGrantManager:
         self.request = request
         self.user_provider = user_provider
         self.ensure_resource = ensure_resource
+        self.delete_resource = delete_resource
         self.clear_cache = clear_cache
 
     @staticmethod
@@ -322,6 +367,24 @@ class KeycloakResearchGrantManager:
             raise AuthorizationUnavailable("Research Keycloak owner is unavailable")
         return self.ensure_resource(resource_type="research_profile", resource_ref=ref,
                                     owner_subject=owners[0], owner_scopes=("share",))
+
+    def create_research_resource(self, *, actor: str, research_id: str) -> ResearchRequestIdentity:
+        """Register a new random Research identity only for its verified owner."""
+        caller = self.identity_provider(actor)
+        if caller is None:
+            raise PermissionError("Research creation requires a verified Keycloak identity")
+        settings = self.settings_provider()
+        pat = self.token_provider(settings)
+        name = keycloak_resource_name("research", research_id)
+        query = urlencode({"name": name, "first": 0, "max": 10, "deep": "true"})
+        _, found, _ = self.request(settings, pat, "GET", f"resource_set?{query}")
+        rows = found if isinstance(found, list) else found.get("resources", []) if isinstance(found, dict) else None
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise AuthorizationUnavailable("invalid Keycloak Research resource search")
+        if any(row.get("name") == name for row in rows):
+            raise AuthorizationUnavailable("new Research identity already exists in Keycloak")
+        self.ensure_resource(resource_type="research", resource_ref=research_id, owner_subject=caller.subject)
+        return caller
 
     def require_membership_manager(self, *, actor: str, research_id: str) -> None:
         """Require current Research share permission before creating an intent."""
