@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { formatDate } from "../format.ts";
 import { notify } from "../notifications/core.ts";
+import { downloadBlob } from "../download.ts";
+import { evidenceFile } from "../research-evidence-download.ts";
 import { reportRowID, researchRelationCandidates } from "../research-model.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { ObjectReference } from "./object-reference.tsx";
@@ -15,7 +17,7 @@ type Row = Record<string, any>;
 type CreateKind = "profile" | "workspace" | "report";
 
 /** Research relations use the same authorized catalog endpoints as the legacy view. */
-export function ResearchRelations({ research, overview, onReport }: { research: Row; overview: React.ReactNode; onReport: (value: Row) => void }): React.ReactElement {
+export function ResearchRelations({ research, overview, onReport, onResearch }: { research: Row; overview: React.ReactNode; onReport: (value: Row) => void; onResearch: (value: Row) => void }): React.ReactElement {
   const { t } = useTranslation();
   const id = String(research.research_id || "");
   const base = `/api/research/${encodeURIComponent(id)}`;
@@ -123,23 +125,65 @@ export function ResearchRelations({ research, overview, onReport }: { research: 
         <Button type="primary" htmlType="submit" aria-label={t("configuration.add")} loading={busy} disabled={choiceLoading || !!choiceError || !choice || create === "report" && !title.trim()}>{t("configuration.add")}</Button>
       </Form>
     </Modal>
-    {evidence ? <ResearchEvidence evidence={evidence} onClose={() => setEvidence(null)} /> : null}
+    {evidence ? <ResearchEvidence evidence={evidence} onClose={() => setEvidence(null)} onReport={onReport} onResearch={onResearch} /> : null}
   </section>;
 }
 
-function ResearchEvidence({ evidence, onClose }: { evidence: Row; onClose: () => void }): React.ReactElement {
+function ResearchEvidence({ evidence, onClose, onReport, onResearch }: { evidence: Row; onClose: () => void; onReport: (value: Row) => void; onResearch: (value: Row) => void }): React.ReactElement {
   const { t } = useTranslation(); const ref = String(evidence.evidence_ref || "");
   const [tab, setTab] = useState("overview"), [value, setValue] = useState<unknown>(null), [error, setError] = useState("");
   const [canManage, setCanManage] = useState(false), [editing, setEditing] = useState(false), [revision, setRevision] = useState(0);
+  const [canDownload, setCanDownload] = useState(false), [page, setPage] = useState(1), [size, setSize] = useState(20), [busy, setBusy] = useState(false);
+  const pending = useRef(false), mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
-    const controller = new AbortController(); setValue(null); setError(""); setCanManage(false);
-    const endpoint = tab === "overview" ? `/api/research-evidence/catalog/${encodeURIComponent(ref)}/summary` : tab === "relationships" ? `/api/research-evidence/catalog/${encodeURIComponent(ref)}/relationships?page=1&page_size=20` : `/api/research-evidence/${encodeURIComponent(ref)}`;
-    void request(endpoint, {signal:controller.signal}).then(result => {if (!controller.signal.aborted) { setValue(tab === "relationships" ? result.relationships : result.evidence); setCanManage(result.access?.can_manage === true); }}).catch(reason => {if (!controller.signal.aborted) setError(String(reason.message || reason));});
+    const controller = new AbortController(); setValue(null); setError(""); setCanManage(false); setCanDownload(false);
+    const endpoint = tab === "overview" ? `/api/research-evidence/catalog/${encodeURIComponent(ref)}/summary` : tab === "relationships" ? `/api/research-evidence/catalog/${encodeURIComponent(ref)}/relationships?page=${page}&page_size=${size}` : `/api/research-evidence/${encodeURIComponent(ref)}`;
+    void request(endpoint, {signal:controller.signal}).then(result => {if (!controller.signal.aborted) { setValue(tab === "relationships" ? result.relationships : result.evidence); setCanManage(result.access?.can_manage === true); setCanDownload(result.access?.can_download === true); }}).catch(reason => {if (!controller.signal.aborted) setError(String(reason.message || reason));});
     return () => controller.abort();
-  }, [ref,tab,revision]);
+  }, [ref,tab,revision,tab === "relationships" ? page : 0,tab === "relationships" ? size : 0]);
+  const run = async (action: () => Promise<void>): Promise<void> => {
+    if (pending.current) return;
+    pending.current = true; setBusy(true);
+    try { await action(); } catch (reason) {
+      const text = reason instanceof Error ? reason.message : String(reason);
+      const description = text === "invalid_transfer_access" ? t("researchEvidence.invalidTransfer") : text === "evidence_size_mismatch" ? t("researchEvidence.sizeMismatch") : text;
+      notify({code:"research.evidence.action.failed",type:"error",message:t("researchDetail.operationFailed"),description});
+    }
+    finally { pending.current = false; if (mounted.current) setBusy(false); }
+  };
+  const openReport = (row: Row): void => { void run(async () => {
+    if (!row.research_id || !row.report_id) throw new Error(t("researchEvidence.reportUnavailable"));
+    const result = await request(`/api/research/${encodeURIComponent(String(row.research_id))}/reports`);
+    const report = Array.isArray(result.reports) ? result.reports.find((item: Row) => item.report_id === row.report_id) : null;
+    if (!report) throw new Error(t("researchEvidence.reportUnavailable"));
+    onReport({...report,research_id:row.research_id});
+  }); };
+  const download = (row: Row): void => { void run(async () => {
+    const result = await evidenceFile(ref, String(row.source_ref || ""));
+    downloadBlob(result.blob, result.filename || String(row.source?.identity?.filename || "evidence-file"));
+  }); };
+  const fragments = tab === "fragments" && Array.isArray((value as Row | null)?.fragments) ? (value as Row).fragments as Row[] : [];
+  const relationships = tab === "relationships" && value && Array.isArray((value as Row).items) ? value as Row : null;
   return <DetailsPanel title={evidence.title_zh || ref} onClose={onClose}>{editing
     ? <ResearchEvidenceEditor evidenceRef={ref} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); setRevision(current => current + 1); }} />
-    : <><Tabs activeKey={tab} onChange={setTab} items={[{key:"overview",label:t("jobs.overview")},{key:"fragments",label:t("researchDetail.fragments")},{key:"relationships",label:t("researchDetail.relationships") }]} />
-      {error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} /> : value ? <>{tab === "overview" && canManage ? <Button onClick={() => setEditing(true)}>{t("researchEvidence.edit")}</Button> : null}<ResultView value={tab === "fragments" ? (value as Row).fragments || [] : value} /></> : <Spin />}</>}
+    : <><Tabs activeKey={tab} onChange={next => {setTab(next);setPage(1);setSize(20);}} items={[{key:"overview",label:t("jobs.overview")},{key:"fragments",label:t("researchDetail.fragments")},{key:"relationships",label:t("researchDetail.relationships") }]} />
+      {error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} /> : value ? <>
+        {tab === "overview" ? <>{canManage ? <Button onClick={() => setEditing(true)}>{t("researchEvidence.edit")}</Button> : null}<ResultView value={value} /></> : null}
+        {tab === "fragments" ? <TRDataTable<Row> rows={fragments.slice((page-1)*size,page*size)} rowKey={row => String(row.fragment_ref || row.source_ref)} pagination={{page,pageSize:size,total:fragments.length,onChange:(next,nextSize) => {setPage(next);setSize(nextSize);}}} columns={[
+          {title:t("researchEvidence.fragment"),key:"title",render:(_:unknown,row:Row) => row.title_zh || row.fragment_ref || "—"},
+          {title:t("researchEvidence.sourceType"),key:"kind",render:(_:unknown,row:Row) => row.source?.source_kind || "—"},
+          {title:t("researchDetail.summary"),dataIndex:"summary_zh"},
+          {title:t("researchEvidence.selector"),key:"selector",render:(_:unknown,row:Row) => row.selector ? <details><summary>{t("details")}</summary><ResultView value={row.selector} /></details> : "—"},
+          {title:t("jobs.action"),key:"action",render:(_:unknown,row:Row) => row.source?.source_kind !== "file" ? "—" : !canDownload ? t("researchEvidence.previewOnly") : !row.source_ref || !row.source?.identity?.object_id || !row.source?.identity?.storage_server_id ? t("researchEvidence.fileUnavailable") : <Button disabled={busy} onClick={() => download(row)}>{t("jobs.download")}</Button>},
+        ]} /> : null}
+        {tab === "relationships" ? relationships ? <TRDataTable<Row> rows={relationships.items} rowKey={row => String(row.link_ref)} pagination={{page,pageSize:size,total:Number(relationships.total || 0),onChange:(next,nextSize) => {setPage(next);setSize(nextSize);}}} columns={[
+          {title:t("researchDetail.reports"),key:"report",render:(_:unknown,row:Row) => row.report_id && row.research_id ? <button type="button" className="tr-table-link" disabled={busy} onClick={() => openReport(row)}>{row.report_title || row.report_id}</button> : row.report_title || row.report_id || "—"},
+          {title:t("research.tabResearches"),key:"research",render:(_:unknown,row:Row) => row.research_id ? <button type="button" className="tr-table-link" onClick={() => onResearch({research_id:row.research_id,title:row.research_title || row.research_id})}>{row.research_title || row.research_id}</button> : "—"},
+          {title:t("researchEvidence.purpose"),dataIndex:"purpose"},
+          {title:t("research.profile"),key:"profile",render:(_:unknown,row:Row) => row.profile_ref ? <ObjectReference value={{kind:"profile",ref:String(row.profile_ref)}} /> : "—"},
+          {title:t("jobs.updated"),key:"time",render:(_:unknown,row:Row) => row.created_at ? formatDate(row.created_at, {dateStyle:"medium",timeStyle:"short"}) : "—"},
+        ]} /> : <Alert type="error" showIcon message={t("researchDetail.invalidResponse")} /> : null}
+      </> : <Spin />}</>}
   </DetailsPanel>;
 }

@@ -3,6 +3,7 @@ import { Button, Dropdown } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { notify } from "../notifications/core.ts";
+import { downloadBlob } from "../download.ts";
 import { reportExportName, reportExportPayload, reportExportURL, type ReportExportFormat, type ReportExportTarget } from "../report-export.ts";
 
 export function ReportExport({ target }: { target: ReportExportTarget }): React.ReactElement {
@@ -23,9 +24,7 @@ export function ReportExport({ target }: { target: ReportExportTarget }): React.
     try {
       const response = await fetch(url, {credentials:"same-origin"});
       if (!response.ok) { const value = await response.json().catch(() => ({})); throw new Error(value.error || `HTTP ${response.status}`); }
-      const objectURL = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a"); anchor.href = objectURL; anchor.download = reportExportName(target.title, format); document.body.append(anchor); anchor.click(); anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000);
+      downloadBlob(await response.blob(), reportExportName(target.title, format));
     } catch (reason) { notify({code:"report.export.failed",type:"error",message:t("report.exportFailed"),description:reason instanceof Error ? reason.message : String(reason)}); }
     finally { pending.current = false; setBusy(false); }
   };
