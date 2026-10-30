@@ -67,6 +67,7 @@ Keycloak multi-cluster v2 可在满足同步数据库和低延迟条件的高可
 - 公网真实登录发现旧的全局设备认证门禁在 Keycloak 成功认证后仍返回 401。交互登录应由 Keycloak 身份及公网登录角色决定；设备白名单只约束自动登录。修正后聚焦 HTTP 测试覆盖有效身份进入与伪造 Cookie 拒绝。
 - 旧密码登录页、自建用户目录与主要 ACL 运行路径已移除，但不能宣称所有授权路径均迁移完成：`ResearchCatalog` 仍读取 memberships、authorized_users、superiors，并提供基于 SQLite 的 share-links。这些研究协作授权须逐对象迁入 Keycloak、对账后删除，不能简单删除字段或关闭共享功能。迁移与备份脚本保留到现有对象授权和同步核对完成。
 - 联邦身份变更流、按公网许可的登录时懒同步、撤权/离线/重放、已有业务对象授权映射及真实跨 Manager 执行验收尚未全部完成。禁止以两端初始用户集合一致声称联邦同步已完成。
+- 隔离的 Keycloak 26.8.1 浏览器试验验证了原生身份代理的一条候选路径：来源角色限定 client scope，机构同步标志映射到 ID token，目标 IdP 检查必需 claim；符合条件的用户在首次代理登录时创建，撤销角色或关闭机构同步后下一次代理登录被拒绝，已有同名不同身份的用户不会自动链接。详细试验可运行 `scripts/test/keycloak_lazy_sync_smoke.py`。这不代表现网同步已经接通；目标端本地密码登录、跨主机 issuer 与 TLS、机构/层级及对象权限映射仍需实现并验收。Keycloak 的[身份代理文档](https://www.keycloak.org/docs/26.8.1/server_admin/)说明，代理首次登录的用户创建与 realm 自助注册开关彼此独立。
 
 ## 验收标准
 
