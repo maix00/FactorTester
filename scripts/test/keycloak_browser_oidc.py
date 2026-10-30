@@ -73,6 +73,16 @@ def main() -> int:
                     if response.status != expected:
                         raise SystemExit(f"Keycloak scoped user boundary failed (expected {expected}, HTTP {response.status})")
                     checks.append('scoped_user_' + str(expected))
+            for variable, expected in [("KEYCLOAK_OWN_RESOURCE", True),
+                                       ("KEYCLOAK_OTHER_RESOURCE", False)]:
+                resource_id = os.environ.get(variable)
+                if resource_id:
+                    from server.identity.keycloak_authorization import keycloak_authorized
+                    token = next(c["value"] for c in context.cookies(manager)
+                                 if c["name"] == "ft-manager-session")
+                    if keycloak_authorized(token, resource_id=resource_id, scope="read") != expected:
+                        raise SystemExit("Keycloak object ownership boundary failed")
+                    checks.append("object_allowed" if expected else "object_denied")
             logout = context.request.post(manager + "/auth/logout", headers={"Origin": manager})
             if logout.status != 200:
                 raise SystemExit(f"Manager logout failed (HTTP {logout.status})")

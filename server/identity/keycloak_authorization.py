@@ -324,7 +324,7 @@ def _protection_request(settings: dict[str, str], token: str, method: str,
 def ensure_keycloak_resource(
     *, resource_type: str, resource_ref: str, owner_subject: str,
 ) -> str:
-    """Idempotently register an owner-managed object in Keycloak.
+    """Idempotently register a user-authorized object in Keycloak.
 
     A Keycloak client with service-account ``uma_protection`` is required.
     Existing object grants remain managed by Keycloak; this function only
@@ -340,11 +340,11 @@ def ensure_keycloak_resource(
         _backchannel(settings), settings["realm"], settings["authz_client_id"],
         client_secret=settings["authz_client_secret"], timeout=3.0,
     )
-    pat = str(client.client_credentials(scope="uma_protection").get("access_token") or "")
+    pat = str(client.client_credentials().get("access_token") or "")
     if not pat:
         raise AuthorizationUnavailable("Keycloak did not issue a Protection API token")
 
-    query = urlencode({"name": resource_name, "first": 0, "max": 10})
+    query = urlencode({"name": resource_name, "first": 0, "max": 10, "deep": "true"})
     try:
         _, result, _ = _protection_request(settings, pat, "GET", f"resource_set?{query}")
     except Exception as exc:
@@ -357,10 +357,7 @@ def ensure_keycloak_resource(
             resource_id = str(row.get("_id") or row.get("id") or "").strip()
             if not resource_id:
                 continue
-            resource_owner = row.get("owner")
-            if isinstance(resource_owner, dict):
-                resource_owner = resource_owner.get("name") or resource_owner.get("id")
-            if resource_owner and str(resource_owner) != owner_subject:
+            if row.get("attributes", {}).get("traderesearch_owner_subject") != [owner_subject]:
                 raise AuthorizationUnavailable("Keycloak resource is owned by a different subject")
             uris = row.get("uris") or ([row.get("uri")] if row.get("uri") else [])
             if resource_uri not in {str(uri) for uri in uris if uri}:
@@ -368,11 +365,10 @@ def ensure_keycloak_resource(
                     "_id": resource_id,
                     "name": resource_name,
                     "type": f"urn:traderesearch:resource:{str(resource_type).strip()}",
-                    "owner": owner_subject,
-                    "ownerManagedAccess": True,
+                                        "ownerManagedAccess": True,
                     "uris": [resource_uri],
                     "resource_scopes": list(_RESOURCE_SCOPES),
-                    "attributes": {"traderesearch_ref_hash": [hashlib.sha256(
+                    "attributes": {"traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
                         str(resource_ref).encode("utf-8")
                     ).hexdigest()]},
                 }
@@ -399,11 +395,10 @@ def ensure_keycloak_resource(
     body = {
         "name": resource_name,
         "type": f"urn:traderesearch:resource:{str(resource_type).strip()}",
-        "owner": owner_subject,
-        "ownerManagedAccess": True,
+                "ownerManagedAccess": True,
         "uris": [resource_uri],
         "resource_scopes": list(_RESOURCE_SCOPES),
-        "attributes": {"traderesearch_ref_hash": [hashlib.sha256(
+        "attributes": {"traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
             str(resource_ref).encode("utf-8")
         ).hexdigest()]},
     }
@@ -447,10 +442,10 @@ def delete_keycloak_resource(
         client_secret=settings["authz_client_secret"], timeout=3.0,
     )
     try:
-        pat = str(client.client_credentials(scope="uma_protection").get("access_token") or "")
+        pat = str(client.client_credentials().get("access_token") or "")
         if not pat:
             raise AuthorizationUnavailable("Keycloak did not issue a Protection API token")
-        query = urlencode({"name": resource_name, "first": 0, "max": 10})
+        query = urlencode({"name": resource_name, "first": 0, "max": 10, "deep": "true"})
         _, result, _ = _protection_request(settings, pat, "GET", f"resource_set?{query}")
         rows = result if isinstance(result, list) else result.get("resources", []) if isinstance(result, dict) else []
         matches = [row for row in rows if isinstance(row, dict)
@@ -460,10 +455,9 @@ def delete_keycloak_resource(
         if not matches:
             return False
         resource_id = str(matches[0].get("_id") or matches[0].get("id") or "").strip()
-        resource_owner = matches[0].get("owner")
-        if isinstance(resource_owner, dict):
-            resource_owner = resource_owner.get("name") or resource_owner.get("id")
-        if expected_owner and resource_owner and str(resource_owner) != expected_owner:
+        if expected_owner and matches[0].get("attributes", {}).get(
+            "traderesearch_owner_subject"
+        ) != [expected_owner]:
             raise AuthorizationUnavailable("refusing to delete a resource owned by another subject")
         if not resource_id:
             raise AuthorizationUnavailable("Keycloak resource has no identity")
@@ -478,6 +472,19 @@ def delete_keycloak_resource(
 def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
                          resource_name: str, owner_subject: str) -> None:
     """Ensure the Keycloak subject owning a private resource can manage it."""
+    # Keycloak 26.8 pins Protection API ownership to the resource server.
+    # User ownership is expressed by a stable subject attribute and UMA policy.
+    _, resource, _ = _protection_request(
+        settings, token, "GET", f"resource_set/{resource_id}",
+    )
+    if resource.get("attributes", {}).get("traderesearch_owner_subject") != [owner_subject]:
+        raise AuthorizationUnavailable("Keycloak resource owner was not confirmed")
+    from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+
+    user = manager_keycloak_admin_adapter()._get(f"users/{owner_subject}")
+    if not isinstance(user, dict) or user.get("id") != owner_subject or not user.get("username"):
+        raise AuthorizationUnavailable("Keycloak owner identity was not confirmed")
+    owner_labels = {owner_subject, str(user["username"])}
     policy_name = f"{resource_name}:owner"
     query = urlencode({"resource": resource_id, "first": 0, "max": 100})
     try:
@@ -496,7 +503,7 @@ def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
         policy = matches[0]
         users = sorted(str(value) for value in policy.get("users", []) if value)
         scopes = sorted(str(value) for value in policy.get("scopes", []) if value)
-        if users != [owner_subject] or scopes != expected_scopes:
+        if (len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes:
             raise AuthorizationUnavailable("conflicting Keycloak owner policy")
         return
     body = {
@@ -522,5 +529,5 @@ def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
         raise AuthorizationUnavailable("Keycloak owner policy was not confirmed")
     users = sorted(str(value) for value in matches[0].get("users", []) if value)
     scopes = sorted(str(value) for value in matches[0].get("scopes", []) if value)
-    if users != [owner_subject] or scopes != expected_scopes:
+    if (len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes:
         raise AuthorizationUnavailable("Keycloak owner policy verification failed")

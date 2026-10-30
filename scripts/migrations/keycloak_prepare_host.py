@@ -38,6 +38,7 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
     imports.mkdir(mode=0o755)  # parent remains private; container can read bind mount
     manager_secret, migration_secret = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
     directory_secret, visitor_secret = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
+    resource_secret = secrets.token_urlsafe(48)
     db_secret, bootstrap_secret = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
     roles = ['admin_console:read', 'admin_console:manage', 'public_server:login', 'factor:develop',
              'agent_assistant:use']
@@ -45,6 +46,7 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
     mappers = identity_mappers()
     definition = {'realm': realm, 'enabled': True, 'registrationAllowed': False,
                   'resetPasswordAllowed': False, 'adminPermissionsEnabled': True,
+                  'userManagedAccessAllowed': True,
                   'roles': {'client': {'tr-manager': [{'name': role} for role in roles],
                                        'tr-visitor': [{'name': 'access'}]}},
                   'clients': [
@@ -62,6 +64,13 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
                       {'clientId': 'tr-directory', 'enabled': True, 'publicClient': False,
                        'secret': directory_secret, 'standardFlowEnabled': False,
                        'directAccessGrantsEnabled': False, 'serviceAccountsEnabled': True},
+                      {'clientId': 'tr-resources', 'enabled': True, 'publicClient': False,
+                       'secret': resource_secret, 'standardFlowEnabled': False,
+                       'directAccessGrantsEnabled': False, 'serviceAccountsEnabled': True,
+                       'authorizationServicesEnabled': True,
+                       'authorizationSettings': {'allowRemoteResourceManagement': True,
+                           'policyEnforcementMode': 'ENFORCING', 'decisionStrategy': 'UNANIMOUS',
+                           'resources': [], 'policies': [], 'scopes': []}},
                       {'clientId': 'tr-visitor', 'enabled': True, 'publicClient': False,
                        'secret': visitor_secret, 'standardFlowEnabled': False,
                        'directAccessGrantsEnabled': False, 'serviceAccountsEnabled': True,
@@ -74,7 +83,10 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
                              'clientRoles': {'realm-management': ['query-users', 'query-groups', 'view-users']}},
                             {'username': 'service-account-tr-visitor', 'enabled': True,
                              'serviceAccountClientId': 'tr-visitor',
-                             'clientRoles': {'tr-visitor': ['access']}}]}
+                             'clientRoles': {'tr-visitor': ['access']}},
+                            {'username': 'service-account-tr-resources', 'enabled': True,
+                             'serviceAccountClientId': 'tr-resources',
+                             'clientRoles': {'tr-resources': ['uma_protection']}}]}
     (imports / 'realm.json').write_text(json.dumps(definition))
     os.chmod(imports / 'realm.json', 0o644)
     def write(name: str, contents: str) -> None:
@@ -99,6 +111,8 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
         output.write('\n'.join([
             'TRADERESEARCH_KEYCLOAK_ADMIN_CLIENT_ID=tr-directory',
             f'TRADERESEARCH_KEYCLOAK_ADMIN_CLIENT_SECRET={directory_secret}',
+            'TR_KEYCLOAK_AUTHZ_CLIENT_ID=tr-resources',
+            f'TR_KEYCLOAK_AUTHZ_CLIENT_SECRET={resource_secret}',
             f'TR_KEYCLOAK_VISITOR_ISSUER={public_url.rstrip("/")}/identity/realms/{realm}',
             'TR_KEYCLOAK_VISITOR_CLIENT_ID=tr-visitor',
             f'TR_KEYCLOAK_VISITOR_CLIENT_SECRET={visitor_secret}', '']))

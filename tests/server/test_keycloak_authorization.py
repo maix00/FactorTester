@@ -41,13 +41,19 @@ def test_authorization_is_cached_for_short_bounded_window(monkeypatch):
 
 def test_resource_creation_reuses_registered_resource(monkeypatch):
     policy = {}
+    from server.identity import federation_identity_sync
+    class Directory:
+        def _get(self, path):
+            assert path == "users/subject-alice"
+            return {"id": "subject-alice", "username": "alice"}
+    monkeypatch.setattr(federation_identity_sync, "manager_keycloak_admin_adapter", Directory)
 
     class Client:
         def __init__(self, *args, **kwargs):
             pass
 
-        def client_credentials(self, *, scope):
-            assert scope == "uma_protection"
+        def client_credentials(self, *, scope=""):
+            assert scope == ""
             return {"access_token": "pat"}
 
     monkeypatch.setattr(authz, "oidc_settings", lambda: {
@@ -60,13 +66,16 @@ def test_resource_creation_reuses_registered_resource(monkeypatch):
             return 200, [{
                 "_id": "kc-resource-1",
                 "name": authz.keycloak_resource_name("factor_version", "factor:v2:x"),
-                "owner": "subject-alice",
+                "attributes": {"traderesearch_owner_subject": ["subject-alice"]},
                 "uris": [authz.keycloak_resource_uri("factor_version", "factor:v2:x")],
             }], ""
+        if method == "GET" and path == "resource_set/kc-resource-1":
+            return 200, {"attributes": {"traderesearch_owner_subject": ["subject-alice"]}}, ""
         if method == "GET" and path.startswith("uma-policy?"):
             return 200, [dict(policy)] if policy else [], ""
         if method == "POST" and path == "uma-policy/kc-resource-1":
             policy.update(body)
+            policy["users"] = ["alice"]  # Real UMA responses use canonical usernames.
             return 201, dict(policy), ""
         raise AssertionError((method, path, body))
 
@@ -76,7 +85,7 @@ def test_resource_creation_reuses_registered_resource(monkeypatch):
         resource_type="factor_version", resource_ref="factor:v2:x",
         owner_subject="subject-alice",
     ) == "kc-resource-1"
-    assert policy["users"] == ["subject-alice"]
+    assert policy["users"] == ["alice"]
     assert "read" in policy["scopes"]
     assert "manage" in policy["scopes"]
 
@@ -86,7 +95,7 @@ def test_resource_creation_rejects_mismatched_existing_owner(monkeypatch):
         def __init__(self, *args, **kwargs):
             pass
 
-        def client_credentials(self, *, scope):
+        def client_credentials(self, *, scope=""):
             return {"access_token": "pat"}
 
     monkeypatch.setattr(authz, "oidc_settings", lambda: {
