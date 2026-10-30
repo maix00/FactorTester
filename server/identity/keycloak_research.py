@@ -160,7 +160,7 @@ class KeycloakResearchAuthorization:
         identity = self._identity_provider(viewer)
         if identity is None:
             return {ref: _access(ref, False, False, False, "none") for ref, _status in rows}
-        values = self._decisions_for(identity, [("research", ref, ("read", "use", "manage")) for ref, _status in rows])
+        values = self._decisions_for(identity, [("research", ref, ("read", "use", "manage")) for ref, _status in rows], fresh=True)
         result = {}
         for research_id, status in rows:
             uri = keycloak_resource_uri("research", research_id)
@@ -174,24 +174,34 @@ class KeycloakResearchAuthorization:
 
     def report_access(self, *, report_id: str, viewer: str | None,
                       inherited: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.report_access_many(viewer=viewer, reports=[(report_id, inherited)])[report_id]
+
+    def report_access_many(self, *, viewer: str | None,
+                           reports: Iterable[tuple[str, dict[str, Any] | None]]) -> dict[str, dict[str, Any]]:
+        """Evaluate one bounded batch of exact report resources for the user."""
+        rows = list(reports)
         identity = self._identity_provider(viewer)
         if identity is None:
-            return _access(report_id, False, False, False, "none")
-        uri = keycloak_resource_uri("research_report", report_id)
-        values = self._decisions_for(identity, [("research_report", report_id, ("read", "use", "manage"))])
-        direct = _access(report_id, values.get((uri, "read", identity.subject), False),
-                         values.get((uri, "use", identity.subject), False),
-                         values.get((uri, "manage", identity.subject), False), "report")
-        parent = inherited or {}
-        return {
-            "can_view": bool(direct["can_view"] or parent.get("can_view")),
-            "can_preview": bool(direct["can_preview"] or parent.get("can_preview")),
-            "can_download": bool(direct["can_download"] or parent.get("can_download")),
-            "can_manage": bool(direct["can_manage"] or parent.get("can_manage")),
-            "access_basis": (str(parent.get("access_basis")) if parent.get("can_view") else
-                             "owner" if direct["can_manage"] else direct["access_basis"]),
-            "object_ref": report_id,
-        }
+            return {ref: _access(ref, False, False, False, "none") for ref, _parent in rows}
+        values = self._decisions_for(identity, [("research_report", ref, ("read", "use", "manage"))
+                                                for ref, _parent in rows], fresh=True)
+        result = {}
+        for report_id, inherited in rows:
+            uri = keycloak_resource_uri("research_report", report_id)
+            direct = _access(report_id, values.get((uri, "read", identity.subject), False),
+                             values.get((uri, "use", identity.subject), False),
+                             values.get((uri, "manage", identity.subject), False), "report")
+            parent = inherited or {}
+            result[report_id] = {
+                "can_view": bool(direct["can_view"] or parent.get("can_view")),
+                "can_preview": bool(direct["can_preview"] or parent.get("can_preview")),
+                "can_download": bool(direct["can_download"] or parent.get("can_download")),
+                "can_manage": bool(direct["can_manage"] or parent.get("can_manage")),
+                "access_basis": (str(parent.get("access_basis")) if parent.get("can_view") else
+                                 "owner" if direct["can_manage"] else direct["access_basis"]),
+                "object_ref": report_id,
+            }
+        return result
 
     def may_write_profile(self, *, research_id: str, viewer: str | None, profile_ref: str) -> bool:
         identity = self._identity_provider(viewer)
@@ -219,7 +229,7 @@ class KeycloakResearchAuthorization:
         refs = {pair: profile_resource_ref(pair[0], identity.identity_id, pair[1]) for pair in pairs}
         values = self._decisions_for(identity, [
             ("research_profile", ref, ("read", "use")) for ref in refs.values()
-        ])
+        ], fresh=True)
         result = {}
         for pair, ref in refs.items():
             uri = keycloak_resource_uri("research_profile", ref)

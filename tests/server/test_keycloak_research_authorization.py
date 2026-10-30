@@ -115,6 +115,23 @@ def test_research_and_report_scopes_preserve_inherited_download():
     assert not provider.research_access(research_id="r", status="archived", viewer="alice")["can_view"]
 
 
+def test_research_and_report_permissions_are_fresh_on_each_decision(monkeypatch):
+    from server.identity import keycloak_research as module
+    calls = []
+    granted = {"value": True}
+    def live_authorize(_token, *, permissions, use_cache):
+        calls.append(use_cache)
+        return {(uri, scope): granted["value"] for uri, _name, scope in permissions}
+    monkeypatch.setattr(module, "keycloak_authorized_many", live_authorize)
+    provider = module.KeycloakResearchAuthorization(identity_provider=_identity, authorize_many=live_authorize)
+    assert provider.research_access(research_id="r", status="active", viewer="alice")["can_view"]
+    assert provider.report_access(report_id="p", viewer="alice")["can_view"]
+    granted["value"] = False
+    assert not provider.research_access(research_id="r", status="active", viewer="alice")["can_view"]
+    assert not provider.report_access(report_id="p", viewer="alice")["can_view"]
+    assert calls == [False, False, False, False]
+
+
 def test_profile_writing_is_per_stable_identity_and_exact_profile():
     ref = profile_resource_ref("r", "identity-a", "work")
     uri = keycloak_resource_uri("research_profile", ref)

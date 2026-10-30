@@ -35,12 +35,19 @@ class ResearchCatalog(ResearchBranchesMixin):
         db_path: str | Path,
         *,
         account_provider: Callable[[], list[dict[str, Any]]] | None = None,
+        research_authorizer=None,
         profile_authorizer=None,
         profile_grant_manager=None,
         profile_identity_resolver=None,
     ) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
         self._account_provider = account_provider
+        if research_authorizer is not None and profile_authorizer is None:
+            raise ValueError("Keycloak Research access requires Profile membership authorization")
+        # Callers may select this only after migration and parity validation.
+        # Once selected, Research and Report decisions never fall back to ACL
+        # columns, same-name ownership, or a local hierarchy projection.
+        self._research_authorizer = research_authorizer
         # A runtime may supply this only after the Profile migration proof has
         # passed. Until then legacy Profile semantics remain the authority.
         self._profile_authorizer = profile_authorizer
@@ -542,6 +549,9 @@ class ResearchCatalog(ResearchBranchesMixin):
             ).fetchall()
             profile_pairs = self._profile_pairs(conn, viewer_ref)
         profile_access = self._profile_membership_access(viewer_ref, profile_pairs)
+        research_access = (self._research_authorizer.research_access_many(
+            viewer=viewer_ref, researches=[(str(row["research_id"]), str(row["status"])) for row in rows])
+            if self._research_authorizer is not None else {})
         result = []
         for row in rows:
             if not include_archived and row["status"] == "archived":
@@ -561,6 +571,7 @@ class ResearchCatalog(ResearchBranchesMixin):
                 viewer=viewer_ref,
                 membership=membership,
                 profile_access=profile_access.get(str(row["research_id"]), {}),
+                keycloak_access=research_access.get(str(row["research_id"])),
             )
             if not access["can_view"]:
                 continue
@@ -861,6 +872,13 @@ class ResearchCatalog(ResearchBranchesMixin):
             profile_pairs = self._profile_pairs(conn, viewer_ref)
 
         profile_access = self._profile_membership_access(viewer_ref, profile_pairs)
+        research_access_by_id = (self._research_authorizer.research_access_many(
+            viewer=viewer_ref, researches=list(dict.fromkeys(
+                (str(row["research_id"]), str(row["research_status"])) for row in rows)))
+            if self._research_authorizer is not None else {})
+        report_access_by_id = (self._research_authorizer.report_access_many(
+            viewer=viewer_ref, reports=[(str(row["report_id"]), None) for row in rows])
+            if self._research_authorizer is not None else {})
 
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -883,9 +901,11 @@ class ResearchCatalog(ResearchBranchesMixin):
                 viewer=viewer_ref,
                 membership=memberships.get(str(row["research_id"])),
                 profile_access=profile_access.get(str(row["research_id"]), {}),
+                keycloak_access=research_access_by_id.get(str(row["research_id"])),
             )
             report_access = self._report_access(
                 row, viewer_ref, research_access=research_access,
+                keycloak_access=report_access_by_id.get(str(row["report_id"])),
             )
             if not research_access["can_view"] and not report_access["can_view"]:
                 continue
@@ -1555,6 +1575,8 @@ class ResearchCatalog(ResearchBranchesMixin):
         mode: str = "permanent",
         expires_at: float = 0,
     ) -> dict[str, Any]:
+        if self._research_authorizer is not None:
+            raise RuntimeError("Research links require Keycloak grant migration")
         if target_kind not in {"research", "report"}:
             raise ValueError("target_kind must be research or report")
         if mode not in {"one_time", "permanent"}:
@@ -1632,6 +1654,8 @@ class ResearchCatalog(ResearchBranchesMixin):
         return self._share_link_value(updated)
 
     def redeem_share_link(self, token: str, *, actor: str) -> dict[str, Any]:
+        if self._research_authorizer is not None:
+            raise RuntimeError("Research links require Keycloak grant migration")
         clean_token = _text(token, "token", maximum=512)
         digest = hashlib.sha256(clean_token.encode("utf-8")).hexdigest()
         now = time.time()
@@ -1809,7 +1833,8 @@ class ResearchCatalog(ResearchBranchesMixin):
         if not links:
             return _access(False, False, False, False, "none", target)
         viewer_ref = str(viewer or "").strip()
-        if any(str(item["evidence_owner_ref"]) == viewer_ref for item in links):
+        if (self._research_authorizer is None
+                and any(str(item["evidence_owner_ref"]) == viewer_ref for item in links)):
             return _access(True, True, True, True, "owner", target)
 
         for link in links:
@@ -2190,7 +2215,20 @@ class ResearchCatalog(ResearchBranchesMixin):
         viewer: str,
         membership=None,
         profile_access=None,
+        keycloak_access=None,
     ) -> dict[str, Any]:
+        if self._research_authorizer is not None:
+            direct = keycloak_access if keycloak_access is not None else self._research_authorizer.research_access(
+                research_id=research_id, status=status, viewer=viewer)
+            # A Profile membership itself may grant read/use to its Research.
+            # Archived Research remains visible only to its Keycloak manager.
+            if status == "active" and (profile_access or {}).get("can_view"):
+                return _access(True, True,
+                    bool(direct.get("can_download") or profile_access.get("can_download")),
+                    bool(direct.get("can_manage")),
+                    str(direct.get("access_basis") or "research") if direct.get("can_view") else "research",
+                    research_id)
+            return direct
         if viewer and viewer == owner:
             return _access(True, True, True, True, "owner", research_id)
         if status == "archived":
@@ -2212,9 +2250,27 @@ class ResearchCatalog(ResearchBranchesMixin):
         return _access(False, False, False, False, "none", research_id)
 
     def _report_access(
-        self, row, viewer: str | None, *, research_access=None,
+        self, row, viewer: str | None, *, research_access=None, keycloak_access=None,
     ) -> dict[str, Any]:
         viewer_ref = str(viewer or "").strip()
+        if self._research_authorizer is not None:
+            if research_access is None:
+                try:
+                    research = self._research_row(str(row["research_id"]))
+                except KeyError:
+                    research = None
+                if research is not None:
+                    research_access = self._research_access(research, viewer_ref)
+            if keycloak_access is None:
+                return self._research_authorizer.report_access(
+                    report_id=str(row["report_id"]), viewer=viewer_ref, inherited=research_access)
+            direct, parent = keycloak_access, research_access or {}
+            return _access(bool(direct.get("can_view") or parent.get("can_view")),
+                bool(direct.get("can_preview") or parent.get("can_preview")),
+                bool(direct.get("can_download") or parent.get("can_download")),
+                bool(direct.get("can_manage") or parent.get("can_manage")),
+                str(parent.get("access_basis")) if parent.get("can_view") else str(direct.get("access_basis") or "none"),
+                str(row["report_id"]))
         if viewer_ref and viewer_ref == str(row["owner_ref"]):
             return _access(True, True, True, True, "owner", str(row["report_id"]))
         if research_access is None:
@@ -2282,7 +2338,7 @@ class ResearchCatalog(ResearchBranchesMixin):
             "visibility": str(row["visibility"]),
             "authorized_users": (
                 _loads_list(row["authorized_users_json"])
-                if resolved_access["can_manage"]
+                if resolved_access["can_manage"] and self._research_authorizer is None
                 else []
             ),
             "created_at": float(row["created_at"]),
@@ -2346,7 +2402,7 @@ class ResearchCatalog(ResearchBranchesMixin):
             "can_delete": self._report_is_local(row),
         }
         value["access"] = access or self._report_access(row, viewer)
-        if value["access"]["can_manage"]:
+        if value["access"]["can_manage"] and self._research_authorizer is None:
             value["authorized_users"] = _loads_list(row["authorized_users_json"])
         return value
 
