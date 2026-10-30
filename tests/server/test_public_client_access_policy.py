@@ -443,3 +443,25 @@ def test_public_shell_is_served_without_a_session_for_the_login_overlay(tmp_path
     assert "data-tr-web-app" in shell
     assert response.status == 200
     assert script
+
+
+def test_keycloak_login_on_new_browser_does_not_require_autologin_device(tmp_path, monkeypatch):
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.require_login_for_ui = True
+    state.require_device_auth = True
+    state.public_server = True
+    identity = {"username": "reviewed-user", "role": "user",
+                "keycloak_subject": "verified-subject",
+                "keycloak_issuer": "https://identity.example/realms/research"}
+    monkeypatch.setattr(state, "session", lambda token: identity if token == "verified" else None)
+    monkeypatch.setattr(RequestSecurityMixin, "_visitor_mode", lambda self: None)
+    monkeypatch.setattr(RequestSecurityMixin, "_is_loopback_client", lambda self: False)
+    with _running_manager(state) as base_url:
+        with urlopen(Request(base_url + "/api/session", headers=_headers(
+            cookie="ft-manager-session=verified"))) as response:
+            assert response.status == 200
+            assert json.loads(response.read())["keycloak_subject"] == "verified-subject"
+        with pytest.raises(HTTPError) as denied:
+            urlopen(Request(base_url + "/api/session", headers=_headers(
+                cookie="ft-manager-session=forged")))
+        assert denied.value.code == 401
