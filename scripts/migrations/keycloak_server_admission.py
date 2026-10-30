@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 from urllib.parse import quote, urlencode
 import urllib.error
 import urllib.request
@@ -40,7 +41,7 @@ def _group(adapter, path):
     attributes = value.get("attributes") or {}
     if not isinstance(attributes, dict):
         raise ValueError("Keycloak group attributes are invalid")
-    for key in ("tr_internal_manager_id", "tr_organization_id"):
+    for key in ("tr_internal_manager_id", "tr_organization_id", "tr_node_key_fingerprint"):
         field = attributes.get(key)
         if field is not None and (not isinstance(field, list)
                                   or any(not isinstance(item, str) for item in field)):
@@ -76,11 +77,14 @@ def _policy_names(server_id):
     return "tr-manager-admission-user-" + suffix, "tr-manager-admission-client-view-" + suffix
 
 
-def inspect_internal(adapter, *, server_id, organization_id):
+def inspect_internal(adapter, *, server_id, organization_id, node_fingerprint=""):
     server_id = str(server_id or "").strip()
     if not server_id or len(server_id) > 256:
         raise ValueError("stable server ID is required")
     org = normalize_organization_id(organization_id)
+    fingerprint = str(node_fingerprint or "")
+    if fingerprint and not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise ValueError("node public-key fingerprint must be a SHA-256 hex digest")
     org_path = organization_group_path(org)
     manager_path = manager_binding_group_path(server_id)
     parent_path = manager_path.rpartition("/")[0]
@@ -95,6 +99,7 @@ def inspect_internal(adapter, *, server_id, organization_id):
     if manager is not None and (
         manager["attributes"].get("tr_internal_manager_id") not in (None, [], [server_id])
         or manager["attributes"].get("tr_organization_id") not in (None, [], [org])
+        or (fingerprint and manager["attributes"].get("tr_node_key_fingerprint") not in (None, [], [fingerprint]))
     ):
         conflicts.append("manager_already_bound")
     # Verify the one-to-one contract against every other existing binding.
@@ -121,9 +126,11 @@ def inspect_internal(adapter, *, server_id, organization_id):
         changes.append("bind_organization_to_manager")
     if manager is None or manager["attributes"].get("tr_internal_manager_id") != [server_id] or manager["attributes"].get("tr_organization_id") != [org]:
         changes.append("bind_manager_to_organization")
+    if fingerprint and (manager is None or manager["attributes"].get("tr_node_key_fingerprint") != [fingerprint]):
+        changes.append("bind_manager_node_fingerprint")
     result = {"version": 1, "mode": "internal", "server_id": server_id,
               "realm": adapter.realm, "keycloak_base": adapter.base_url,
-              "organization_id": org, "organization": organization,
+              "organization_id": org, "node_fingerprint": fingerprint, "organization": organization,
               "manager": manager, "parent": parent, "changes": changes,
               "conflicts": sorted(set(conflicts))}
     result["sha256"] = _digest(result)
@@ -195,7 +202,8 @@ def inspect_public(adapter, *, server_id, directory_client_id, login_client_id, 
 def _inspect_again(adapter, plan):
     if plan["mode"] == "internal":
         return inspect_internal(adapter, server_id=plan["server_id"],
-                                organization_id=plan["organization_id"])
+                                organization_id=plan["organization_id"],
+                                node_fingerprint=plan.get("node_fingerprint", ""))
     if plan["mode"] == "public":
         return inspect_public(adapter, server_id=plan["server_id"],
                               directory_client_id=plan["directory_client_id"],
@@ -262,13 +270,17 @@ def apply(adapter, plan, *, expected_sha256, receipt):
             _set_attrs(adapter, org_path, plan["organization"]["attributes"],
                        {"tr_internal_manager_id": [plan["server_id"]]})
             _record(receipt, {"completed": "bind_organization"})
-        if "bind_manager_to_organization" in plan["changes"]:
+        if ({"bind_manager_to_organization", "bind_manager_node_fingerprint"}
+                & set(plan["changes"])):
             before = plan["manager"]["attributes"] if plan["manager"] else {}
             _record(receipt, {"intent": "bind_manager"})
-            _set_attrs(adapter, manager_path, before, {
+            updates = {
                 "tr_internal_manager_id": [plan["server_id"]],
                 "tr_organization_id": [plan["organization_id"]],
-            })
+            }
+            if plan.get("node_fingerprint"):
+                updates["tr_node_key_fingerprint"] = [plan["node_fingerprint"]]
+            _set_attrs(adapter, manager_path, before, updates)
             _record(receipt, {"completed": "bind_manager"})
     else:
         subject, realm = plan["service_subject"], plan["realm_management_uuid"]
@@ -346,10 +358,13 @@ def rollback(adapter, plan, *, expected_sha256, record):
         if plan["manager"] and (manager is None or manager["id"] != plan["manager"]["id"]):
             raise ValueError("Manager group identity changed")
         manager_before = plan["manager"]["attributes"] if plan["manager"] else {}
-        manager_attrs = None if manager is None else _restore_attrs(adapter, manager, manager_before, {
+        intended = {
             "tr_internal_manager_id": [plan["server_id"]],
             "tr_organization_id": [plan["organization_id"]],
-        })
+        }
+        if plan.get("node_fingerprint"):
+            intended["tr_node_key_fingerprint"] = [plan["node_fingerprint"]]
+        manager_attrs = None if manager is None else _restore_attrs(adapter, manager, manager_before, intended)
         # A newly created group can be removed only if no user or sub-group
         # appeared after migration. Check before any other rollback writes.
         if manager is not None and plan["manager"] is None:
@@ -420,6 +435,7 @@ def main(argv=None):
     parser.add_argument("--mode", choices=("internal", "public"), required=True)
     parser.add_argument("--server-id", required=True)
     parser.add_argument("--organization-id", default="")
+    parser.add_argument("--node-fingerprint", default="")
     parser.add_argument("--directory-client-id", default="")
     parser.add_argument("--login-client-id", default="")
     parser.add_argument("--roles-client-id", default="")
@@ -451,7 +467,8 @@ def main(argv=None):
         if not args.output:
             parser.error("--output is required for a read-only plan")
         if args.mode == "internal":
-            plan = inspect_internal(adapter, server_id=args.server_id, organization_id=args.organization_id)
+            plan = inspect_internal(adapter, server_id=args.server_id, organization_id=args.organization_id,
+                                    node_fingerprint=args.node_fingerprint)
         else:
             plan = inspect_public(adapter, server_id=args.server_id,
                                   directory_client_id=args.directory_client_id,

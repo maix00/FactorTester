@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import os
+import re
 import threading
 import time
 from urllib.parse import quote, urlencode
@@ -70,12 +71,40 @@ def _group(adapter, path):
     return attributes
 
 
-def _internal_binding(adapter, server_id, organization_id):
+def _internal_binding(adapter, server_id, organization_id, fingerprint=""):
     organization = _group(adapter, organization_group_path(organization_id))
     manager = _group(adapter, manager_binding_group_path(server_id))
     return (organization.get("tr_internal_manager_id") == [server_id]
             and manager.get("tr_internal_manager_id") == [server_id]
-            and manager.get("tr_organization_id") == [organization_id])
+            and manager.get("tr_organization_id") == [organization_id]
+            and (not fingerprint or manager.get("tr_node_key_fingerprint") == [fingerprint]))
+
+
+def federated_manager_binding(server_id, organization_id, fingerprint, *, use_cache=True):
+    """Verify an internal Manager against the public realm's Keycloak binding.
+
+    The caller must first verify the node's signed advertisement. The public
+    key fingerprint in that verified advertisement is then matched against
+    the administrator-owned Keycloak record, including on first registration.
+    """
+    from server.manager.domain.organization_scope import normalize_organization_id
+
+    try:
+        server_id = str(server_id or "").strip()
+        org = normalize_organization_id(organization_id)
+        fingerprint = str(fingerprint or "")
+        if not server_id or len(server_id) > 256 or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            return False
+        settings = oidc_settings()
+        issuer = str(settings["issuer"]).rstrip("/")
+        from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+        resolve = lambda: _internal_binding(manager_keycloak_admin_adapter(),
+                                            server_id, org, fingerprint)
+        if not use_cache:
+            return bool(resolve())
+        return bool(_cached(("federation-binding", issuer, server_id, org, fingerprint), resolve))
+    except Exception:
+        return False
 
 
 def _organization_roots(groups):
@@ -121,16 +150,35 @@ def _roles_client(adapter, client_id):
     return str(matches[0]["id"])
 
 
-def _public_user(adapter, subject, client_id, issuer):
+def _effective_client_role(adapter, subject, client_uuid, role_name):
     if not _user(adapter, subject):
         return False
-    client_uuid = _cached(("client", issuer, client_id), lambda: _roles_client(adapter, client_id))
     path = ("users/" + quote(subject, safe="") + "/role-mappings/clients/"
             + quote(client_uuid, safe="") + "/composite")
     rows = adapter._get(path)
     if not isinstance(rows, list):
         raise ValueError("Keycloak effective role response is invalid")
-    return any(isinstance(row, dict) and row.get("name") == "public_server:login" for row in rows)
+    return any(isinstance(row, dict) and row.get("name") == role_name for row in rows)
+
+
+def current_manager_role(session, role_name):
+    """Check a sensitive administrator action against live Keycloak roles."""
+    if not isinstance(session, dict) or role_name not in (session.get("keycloak_roles") or ()):
+        return False
+    try:
+        subject = str(session.get("keycloak_subject") or "").strip()
+        issuer = str(session.get("keycloak_issuer") or "").strip().rstrip("/")
+        settings = oidc_settings()
+        client_id = settings["roles_client_id"]
+        if (not subject or issuer != settings["issuer"].rstrip("/")
+                or client_id != settings["client_id"]):
+            return False
+        from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+        adapter = manager_keycloak_admin_adapter()
+        client_uuid = _cached(("client", issuer, client_id), lambda: _roles_client(adapter, client_id))
+        return _effective_client_role(adapter, subject, client_uuid, str(role_name))
+    except Exception:
+        return False
 
 
 def _environment_value(name, convert):
@@ -210,8 +258,14 @@ def server_admission(session, *, state=None):
             # a different client's secret merely to inspect role mappings.
             if client_id != settings["client_id"]:
                 return False, "server_authorization_unavailable"
+            # Resolve the shared client projection before entering the
+            # per-user cache. Nested striped locks can self-deadlock on a hash
+            # collision or deadlock across two concurrent requests.
+            client_uuid = _cached(("client", issuer, client_id),
+                                  lambda: _roles_client(provider(), client_id))
             allowed = _cached(("public-user", issuer, subject, client_id),
-                              lambda: _public_user(provider(), subject, client_id, issuer))
+                              lambda: _effective_client_role(provider(), subject, client_uuid,
+                                                             "public_server:login"))
             return bool(allowed), "" if allowed else "public_login_denied"
         binding = _cached(("binding", issuer, server_id, org),
                           lambda: _internal_binding(provider(), server_id, org))

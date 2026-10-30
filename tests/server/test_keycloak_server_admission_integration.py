@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import time
 from types import SimpleNamespace
 import urllib.error
 import urllib.parse
@@ -25,6 +26,12 @@ from server.identity.keycloak_hierarchy_admin import KeycloakHierarchyProvisione
 from server.identity.keycloak_profile import configure_identity_mappers, protect_identity_attributes
 from server.identity.realm_groups import organization_group_path
 from server.identity.user_session import UserSessionVerifier
+from server.manager.domain.federation.registry import FederatedServerRegistry
+from server.manager.http.federation import admin as federation_admin
+from server.manager.http.federation.admin import FederationAdminRoutesMixin
+from server.manager.transfers.node_advertisements import signed_advertisement
+from server.manager.transfers.node_keys import NodeKey
+from tests.federation_fixtures import federation_registration
 
 
 @pytest.mark.skipif(
@@ -105,6 +112,9 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         admin._post("clients/" + login + "/roles", {"name": "public_server:login"})
         role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("public_server:login", safe=""))
         admin._post("users/" + user + "/role-mappings/clients/" + login, [role])
+        admin._post("clients/" + login + "/roles", {"name": "admin_console:manage"})
+        admin_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("admin_console:manage", safe=""))
+        admin._post("users/" + user + "/role-mappings/clients/" + login, [admin_role])
         directory_adapter = KeycloakAdminAdapter(base, realm, client_id="tr-directory", client_secret=directory_secret)
         with urllib.request.urlopen(base + "/realms/" + realm + "/.well-known/openid-configuration",
                                     timeout=10) as response:
@@ -134,27 +144,43 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         assert identity["organization_id"] == "org-a"
         assert orgpath in identity["keycloak_groups"]
         assert "public_server:login" in identity["keycloak_roles"]
+        assert "admin_console:manage" in identity["keycloak_roles"]
         internal = SimpleNamespace(public_server=False, server_id="internal-a", managed_organizations=("org-a",))
         public = SimpleNamespace(public_server=True, server_id="public-a", managed_organizations=())
 
         access.clear_server_admission_cache()
         assert not access.server_admission(identity, state=internal)[0]
-        plan = migration.inspect_internal(admin, server_id="internal-a", organization_id="org-a")
+        node_key = NodeKey.load_or_create(tmp_path / "node-key.json", node_id="internal-a")
+        node_fingerprint = node_key.fingerprint
+        plan = migration.inspect_internal(admin, server_id="internal-a", organization_id="org-a",
+                                          node_fingerprint=node_fingerprint)
         assert not plan["conflicts"]
         assert migration.apply(admin, plan, expected_sha256=plan["sha256"],
                                receipt=tmp_path / "internal.jsonl")["status"] == "verified"
-        assert not migration.inspect_internal(admin, server_id="internal-a", organization_id="org-a")["changes"]
+        assert not migration.inspect_internal(admin, server_id="internal-a", organization_id="org-a",
+                                              node_fingerprint=node_fingerprint)["changes"]
         access.clear_server_admission_cache()
         assert access.server_admission(identity, state=internal) == (True, "")
+        assert access.federated_manager_binding("internal-a", "org-a", node_fingerprint)
+        assert not access.federated_manager_binding("internal-a", "org-a", secrets.token_hex(32))
         migration._delete(admin, "users/" + user + "/groups/" + org_id)
         access.clear_server_admission_cache()
         assert not access.server_admission(identity, state=internal)[0]
+
         admin._put("users/" + user + "/groups/" + org_id, {})
         assert migration.rollback(admin, plan, expected_sha256=plan["sha256"],
                                   record=lambda _: None)["status"] == "rolled_back"
         assert migration._group(admin, access.manager_binding_group_path("internal-a")) is None
         access.clear_server_admission_cache()
         assert not access.server_admission(identity, state=internal)[0]
+
+        # Keep the real org/key authority for the live manager-binding route
+        # after exercising rollback; the prior signed advertisement is offline.
+        internal_plan = migration.inspect_internal(admin, server_id="internal-a",
+                                                   organization_id="org-a",
+                                                   node_fingerprint=node_fingerprint)
+        assert migration.apply(admin, internal_plan, expected_sha256=internal_plan["sha256"],
+                               receipt=tmp_path / "internal-again.jsonl")["status"] == "verified"
 
         plan = migration.inspect_public(admin, server_id="public-a", directory_client_id="tr-directory",
                                         login_client_id="tr-manager", roles_client_id="tr-manager")
@@ -178,6 +204,59 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         directory_adapter._token_value = ""  # refresh service role claims
         access.clear_server_admission_cache()
         assert access.server_admission(identity, state=public) == (True, "")
+        assert access.current_manager_role(identity, "admin_console:manage")
+
+        # Drive the real admin handler against the real isolated Keycloak
+        # bindings and a real registry/SQLite audit, without changing either
+        # deployment's realm or identity database.
+        import settings
+        monkeypatch.setattr(settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+        registry = FederatedServerRegistry(tmp_path / "registry.json")
+        advertisement = signed_advertisement({
+            "schema_version": 2, "node_id": "internal-a", "identity": node_key.public_record(),
+            "client_control_endpoint": "https://node.example:7998",
+            "client_data_endpoint": "https://node.example:7997",
+            "peer_control_endpoint": "https://node.example:17998",
+            "peer_data_endpoint": "https://node.example:17997",
+            "issued_at": time.time() - 3600, "lease_seconds": 30.0,
+            "nonce": "0123456789abcdef",
+        }, node_key=node_key)
+        row = federation_registration("internal-a", latency_ms=1, load=0)
+        row.update(role="feat", public_server=False, managed_organizations=[],
+                   transfer_node=advertisement)
+        registry.register(row)
+        state = SimpleNamespace(public_server=True, federation_registry=registry,
+                                node_identities=SimpleNamespace(require=lambda _: node_key))
+        replies = []
+        monkeypatch.setattr(federation_admin, "json_response",
+                            lambda _, value, status=200, **kw: replies.append((status, value)))
+
+        class Handler(FederationAdminRoutesMixin):
+            def __init__(self):
+                self.state = state
+                self.payload = {"server_id": "internal-a", "organization_id": "org-a",
+                                "fingerprint": node_fingerprint}
+            def _session(self):
+                return identity
+            def _has_secure_ui_transport(self):
+                return True
+            def _json_body(self, _):
+                return self.payload
+
+        handler = Handler()
+        handler._bind_legacy_internal_manager()
+        assert replies[-1][0] == 200 and replies[-1][1]["dry_run"]
+        reviewed = replies[-1][1]["plan"]["record_sha256"]
+        handler.payload.update(dry_run=False, expected_sha256=reviewed)
+        handler._bind_legacy_internal_manager()
+        assert replies[-1][0] == 200
+        assert registry.describe("internal-a")["managed_organizations"] == ["org-a"]
+        handler._bind_legacy_internal_manager()
+        assert replies[-1][1]["binding"]["status"] == "already_bound"
+        migration._delete(admin, "users/" + user + "/role-mappings/clients/" + login, [admin_role])
+        assert not access.current_manager_role(identity, "admin_console:manage")
+        handler._bind_legacy_internal_manager()
+        assert replies[-1][0] == 403
         migration._delete(admin, "users/" + user + "/role-mappings/clients/" + login, [role])
         access.clear_server_admission_cache()
         assert not access.server_admission(identity, state=public)[0]

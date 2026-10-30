@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import math
 import re
@@ -147,9 +149,10 @@ def verify_advertisement(
         raise PermissionError("transfer node advertisement signature is invalid")
     signature = _decode_signature(raw_signature)
     try:
-        Ed25519PublicKey.from_public_bytes(
-            decode_public_key(identity["public_key"])
-        ).verify(signature, _canonical_payload(value))
+        public_key = decode_public_key(identity["public_key"])
+        if not hmac.compare_digest(hashlib.sha256(public_key).hexdigest(), identity["fingerprint"]):
+            raise ValueError("node public key fingerprint does not match")
+        Ed25519PublicKey.from_public_bytes(public_key).verify(signature, _canonical_payload(value))
     except (InvalidSignature, TypeError, ValueError) as exc:
         raise PermissionError("transfer node advertisement signature is invalid") from exc
     return VerifiedNodeAdvertisement(

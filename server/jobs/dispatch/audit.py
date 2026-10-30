@@ -8,8 +8,13 @@ from pathlib import Path
 
 
 def append_audit(db_path: str | Path, *, action: str, actor: str,
-                 job_id: str = "", attempt: int = 0, detail: str = "") -> None:
+                 job_id: str = "", attempt: int = 0, detail: str = "",
+                 idempotent: bool = False) -> None:
+    if idempotent and not str(job_id or "").strip():
+        raise ValueError("idempotent audit requires an operation identity")
     with sqlite3.connect(db_path) as conn:
+        if idempotent:
+            conn.execute("BEGIN IMMEDIATE")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS job_dispatch_audit (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,6 +26,15 @@ def append_audit(db_path: str | Path, *, action: str, actor: str,
                 created_at REAL NOT NULL
             )
         """)
+        if idempotent:
+            row = conn.execute(
+                "SELECT detail FROM job_dispatch_audit WHERE action=? AND actor=? AND job_id=? LIMIT 1",
+                (str(action), str(actor), str(job_id)),
+            ).fetchone()
+            if row is not None:
+                if row[0] != str(detail):
+                    raise ValueError("audit operation identity was reused with different details")
+                return
         conn.execute(
             "INSERT INTO job_dispatch_audit (action,actor,job_id,attempt,detail,created_at) "
             "VALUES (?,?,?,?,?,?)",

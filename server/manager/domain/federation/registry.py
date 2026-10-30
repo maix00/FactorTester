@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import ipaddress
 import os
 import secrets
@@ -12,12 +13,22 @@ from pathlib import Path
 
 from server.manager.domain.organization_scope import (
     configured_managed_organizations,
+    normalize_organization_id,
 )
 
 from .models import ServiceRoute, TargetNotFound, TargetUnavailable
 
 REGISTRY_SCHEMA_VERSION = 1
 DEFAULT_LEASE_SECONDS = 30.0
+
+
+class FederationRegistrationConflict(ValueError):
+    """A persistent Manager binding prevents a federation registration."""
+
+    def __init__(self, code: str):
+        self.code = str(code)
+        super().__init__("federation Manager binding conflict: " + self.code)
+
 
 def _string(value: object, *, field: str, required: bool = True) -> str:
     result = str(value or "").strip()
@@ -120,11 +131,16 @@ def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
     role = _string(payload.get("role"), field="role")
     if role not in {"main", "feat"}:
         raise ValueError("role must be main or feat")
-    public_server = bool(payload.get("public_server", role == "main"))
+    public_server = payload.get("public_server", role == "main")
+    if not isinstance(public_server, bool):
+        raise ValueError("public_server must be a boolean")
     managed_organizations = configured_managed_organizations(
         public_server=public_server,
         server_role=role,
-        explicit=payload.get("managed_organizations"),
+        # Missing remote metadata must never inherit this Manager's local
+        # deployment environment and thereby acquire a guessed organization.
+        explicit=([] if payload.get("managed_organizations") is None
+                  else payload["managed_organizations"]),
     )
     endpoint = _string(payload.get("endpoint"), field="endpoint").rstrip("/")
     proxy_token = _string(payload.get("proxy_token"), field="proxy_token")
@@ -182,29 +198,39 @@ class FederatedServerRegistry:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lease_seconds = max(5.0, min(300.0, float(lease_seconds)))
         self._lock = threading.RLock()
+        self._load_error = ""
         self._servers: dict[str, dict[str, object]] = self._load()
 
     def _load(self) -> dict[str, dict[str, object]]:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            self._load_error = "federation registry cannot be read"
             return {}
         if not isinstance(payload, dict):
+            self._load_error = "federation registry is invalid"
             return {}
         if payload.get("schema_version") != REGISTRY_SCHEMA_VERSION:
+            self._load_error = "federation registry version is invalid"
             return {}
         servers = payload.get("servers")
         if not isinstance(servers, dict):
+            self._load_error = "federation registry entries are invalid"
             return {}
         result: dict[str, dict[str, object]] = {}
         for server_id, value in servers.items():
             if not isinstance(value, dict):
+                self._load_error = "federation registry contains invalid entries"
                 continue
             try:
                 normalised = _normalise_registration(value)
             except (TypeError, ValueError):
+                self._load_error = "federation registry contains invalid entries"
                 continue
             if normalised["server_id"] != str(server_id):
+                self._load_error = "federation registry contains conflicting identities"
                 continue
             result[str(server_id)] = normalised
         return result
@@ -224,14 +250,124 @@ class FederatedServerRegistry:
         os.chmod(temporary, 0o600)
         os.replace(temporary, self.path)
 
-    def register(self, payload: dict[str, object]) -> dict[str, object]:
+    def register(self, payload: dict[str, object], *,
+                 enforce_single_organization: bool = False,
+                 before_commit=None) -> dict[str, object]:
         normalised = self.validate(payload)
         normalised["last_seen"] = time.time()
         normalised["lease_seconds"] = self.lease_seconds
         with self._lock:
-            self._servers[str(normalised["server_id"])] = normalised
-            self._save()
+            if enforce_single_organization:
+                self._require_unique_internal_organization(normalised)
+            # Check conflicts while holding the same lock used for the write;
+            # failed registrations cannot install a new node key or endpoint.
+            if before_commit is not None:
+                before_commit()
+            identifier = str(normalised["server_id"])
+            previous = self._servers.get(identifier)
+            self._servers[identifier] = normalised
+            try:
+                self._save()
+            except BaseException:
+                if previous is None:
+                    self._servers.pop(identifier, None)
+                else:
+                    self._servers[identifier] = previous
+                raise
         return self.describe(str(normalised["server_id"])) or normalised
+
+    def _require_unique_internal_organization(self, candidate):
+        if self._load_error:
+            raise FederationRegistrationConflict("registry_needs_repair")
+        if candidate["public_server"]:
+            raise FederationRegistrationConflict("another_public_manager")
+        orgs = candidate["managed_organizations"]
+        if len(orgs) != 1:
+            raise FederationRegistrationConflict("internal_manager_requires_one_organization")
+        selected_id = str(candidate["server_id"])
+        for identifier, previous in self._servers.items():
+            if previous.get("public_server"):
+                continue
+            previous_orgs = previous.get("managed_organizations") or []
+            if len(previous_orgs) != 1:
+                # An unreviewed legacy record cannot be silently assigned or
+                # treated as an available organization, including offline.
+                raise FederationRegistrationConflict("legacy_binding_needs_review")
+            if identifier == selected_id and previous_orgs != orgs:
+                raise FederationRegistrationConflict("manager_organization_changed")
+            if identifier != selected_id and previous_orgs == orgs:
+                raise FederationRegistrationConflict("organization_already_registered")
+
+    @staticmethod
+    def _record_digest(value):
+        # Heartbeat time, load and port metrics do not identify the binding.
+        # Preserve the endpoint, token and signed node identity in the digest
+        # so an administrative review cannot be replayed after those change.
+        transfer = value.get("transfer_node") or {}
+        stable = {key: value.get(key) for key in (
+            "server_id", "role", "public_server", "managed_organizations", "endpoint", "proxy_token",
+        )}
+        stable["node_identity"] = transfer.get("identity") if isinstance(transfer, dict) else None
+        encoded = json.dumps(stable, ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def legacy_binding_plan(self, server_id, organization_id):
+        """Review one existing record without assigning or releasing it."""
+        identifier = _string(server_id, field="server_id")
+        org = normalize_organization_id(organization_id)
+        with self._lock:
+            if self._load_error:
+                raise FederationRegistrationConflict("registry_needs_repair")
+            value = self._servers.get(identifier)
+            if value is None or value.get("public_server"):
+                raise FederationRegistrationConflict("internal_manager_not_registered")
+            current = value.get("managed_organizations") or []
+            if current not in ([], [org]):
+                raise FederationRegistrationConflict("manager_organization_changed")
+            for other_id, other in self._servers.items():
+                if (other_id != identifier and not other.get("public_server")
+                        and org in (other.get("managed_organizations") or [])):
+                    raise FederationRegistrationConflict("organization_already_registered")
+            return {"server_id": identifier, "organization_id": org,
+                    "status": "already_bound" if current else "reviewed_unbound",
+                    "record_sha256": self._record_digest(value)}
+
+    def bind_reviewed_legacy(self, server_id, organization_id, *, expected_sha256,
+                             verify, audit):
+        """Explicitly bind one reviewed record, preserving every other field."""
+        with self._lock:
+            plan = self.legacy_binding_plan(server_id, organization_id)
+            accepted = {plan["record_sha256"]}
+            if plan["status"] == "already_bound":
+                # A retry of the same reviewed operation is a no-op even if
+                # the first response was lost after the atomic file replace.
+                current = self._servers[plan["server_id"]]
+                accepted.add(self._record_digest({**current, "managed_organizations": []}))
+            if not expected_sha256 or expected_sha256 not in accepted:
+                raise FederationRegistrationConflict("registry_record_changed")
+            if not verify():
+                raise PermissionError("Keycloak or enrolled node binding changed")
+            if plan["status"] == "already_bound":
+                # A prior attempt may have committed the registry change but
+                # failed to append its completion receipt. Idempotent audit
+                # callbacks repair that receipt without changing the record.
+                audit("intent", plan)
+                audit("applied", plan)
+                return plan
+            audit("intent", plan)
+            identifier = plan["server_id"]
+            previous = self._servers[identifier]
+            updated = {**previous, "managed_organizations": [plan["organization_id"]]}
+            self._servers[identifier] = updated
+            try:
+                self._save()
+            except BaseException:
+                self._servers[identifier] = previous
+                raise
+            applied = {**plan, "status": "bound", "record_sha256": self._record_digest(updated)}
+            audit("applied", applied)
+            return applied
 
     @staticmethod
     def validate(payload: dict[str, object]) -> dict[str, object]:

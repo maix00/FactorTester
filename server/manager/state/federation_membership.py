@@ -169,6 +169,18 @@ class FederationMembershipStateMixin:
             raise ValueError(
                 "federation endpoint does not match signed client endpoint"
             )
+        enforce_organization = bool(getattr(self, "public_server", False))
+        if enforce_organization:
+            from server.manager.domain.federation.registry import FederationRegistrationConflict
+            if candidate["public_server"]:
+                raise FederationRegistrationConflict("another_public_manager")
+            organizations = candidate["managed_organizations"]
+            if len(organizations) != 1:
+                raise FederationRegistrationConflict("internal_manager_requires_one_organization")
+            from server.identity.server_admission import federated_manager_binding
+            if not federated_manager_binding(server_id, organizations[0],
+                                              verified.identity["fingerprint"]):
+                raise PermissionError("Keycloak denied the Manager organization or node key binding")
         if observed_latency_ms is None:
             candidate["latency_ms"] = None
         else:
@@ -176,12 +188,13 @@ class FederationMembershipStateMixin:
         # Install the replay-protected signed identity before making the
         # service route visible.  A stale/replayed advertisement can never
         # refresh the route lease.
-        self.install_transfer_node_advertisement(
-            verified,
-            endpoints,
-            now=current,
+        return self.federation_registry.register(
+            candidate,
+            enforce_single_organization=enforce_organization,
+            before_commit=lambda: self.install_transfer_node_advertisement(
+                verified, endpoints, now=current,
+            ),
         )
-        return self.federation_registry.register(candidate)
 
     def _catalog_registration_url(
         self,

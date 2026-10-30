@@ -61,6 +61,9 @@ class WriteRoutesMixin:
             return
         if self._reject_retired_local_identity_route(parsed):
             return
+        if parsed.path == "/api/admin/federation/legacy-manager-binding":
+            self._bind_legacy_internal_manager()
+            return
         if parsed.path == "/api/catalog/refresh":
             session = self._session()
             if session is None:

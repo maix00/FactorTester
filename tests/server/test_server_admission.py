@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import threading
 from urllib.parse import unquote
 
 import pytest
@@ -129,6 +130,23 @@ def test_public_requires_both_token_role_and_current_keycloak_role(auth):
     session["keycloak_roles"] = ["admin_console:manage"]
     admission.clear_server_admission_cache()
     assert admission.server_admission(session, state=public) == (False, "public_login_denied")
+
+
+def test_public_cache_same_stripe_concurrency_cannot_deadlock(auth, monkeypatch):
+    provider, session, _, public = auth
+    # Force all cache keys to the same non-reentrant lock. Nested lookups
+    # deadlock deterministically, irrespective of Python's random hash seed.
+    monkeypatch.setattr(admission, "_STRIPES", (threading.Lock(),))
+    output = []
+    workers = [threading.Thread(target=lambda: output.append(
+        admission.server_admission(session, state=public)), daemon=True) for _ in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=2)
+    assert not any(worker.is_alive() for worker in workers)
+    assert output == [(True, "")] * 8
+    assert len(provider.calls) == 3  # client, user and effective roles once
 
 
 def test_unavailable_keycloak_fails_closed_after_cache_expiry(auth):
