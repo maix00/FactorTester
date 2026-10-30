@@ -103,9 +103,7 @@ class AgentAppServerRoutesMixin:
         if session is None:
             raise AgentAppServerError("login required")
         principal = self._agent_principal(session)
-        if not can_use_agent_assistant(
-            principal, str(session.get("role") or ""), session.get("keycloak_roles", ()),
-        ):
+        if not can_use_agent_assistant(session):
             raise AgentAppServerError(
                 "Agent Assistant use is not permitted",
                 code="permission_denied",

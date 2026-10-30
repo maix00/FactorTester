@@ -31,6 +31,7 @@ from server.manager.http.federation import admin as federation_admin
 from server.manager.http.federation.admin import FederationAdminRoutesMixin
 from server.manager.transfers.node_advertisements import signed_advertisement
 from server.manager.transfers.node_keys import NodeKey
+from server.permissions.agent_assistant import can_use_agent_assistant
 from tests.federation_fixtures import federation_registration
 
 
@@ -115,6 +116,9 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         admin._post("clients/" + login + "/roles", {"name": "admin_console:manage"})
         admin_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("admin_console:manage", safe=""))
         admin._post("users/" + user + "/role-mappings/clients/" + login, [admin_role])
+        admin._post("clients/" + login + "/roles", {"name": "agent_assistant:use"})
+        agent_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("agent_assistant:use", safe=""))
+        admin._post("users/" + user + "/role-mappings/clients/" + login, [agent_role])
         directory_adapter = KeycloakAdminAdapter(base, realm, client_id="tr-directory", client_secret=directory_secret)
         with urllib.request.urlopen(base + "/realms/" + realm + "/.well-known/openid-configuration",
                                     timeout=10) as response:
@@ -205,6 +209,12 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         access.clear_server_admission_cache()
         assert access.server_admission(identity, state=public) == (True, "")
         assert access.current_manager_role(identity, "admin_console:manage")
+        assert can_use_agent_assistant(identity)
+        migration._delete(admin, "users/" + user + "/role-mappings/clients/" + login, [agent_role])
+        # The same already-issued token still contains its old role, but the
+        # assistant gate must reject it as soon as Keycloak revokes the role.
+        assert "agent_assistant:use" in verifier.session(user_token)["keycloak_roles"]
+        assert not can_use_agent_assistant(identity)
 
         # Drive the real admin handler against the real isolated Keycloak
         # bindings and a real registry/SQLite audit, without changing either

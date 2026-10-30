@@ -127,9 +127,17 @@ def test_reject_wrong_audience_and_revoked_token():
 
 def test_keycloak_permission_does_not_use_local_super_admin(monkeypatch):
     from server.permissions.agent_assistant import can_use_agent_assistant
-    monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'keycloak')
-    assert not can_use_agent_assistant('alice', 'super_admin')
-    assert can_use_agent_assistant('alice', 'user', ('agent_assistant:use',))
+    from server.identity import server_admission
+    calls = []
+    monkeypatch.setattr(server_admission, 'current_manager_role',
+                        lambda session, role: calls.append((session, role)) or False)
+    session = {'username': 'alice', 'role': 'super_admin',
+               'keycloak_roles': ('agent_assistant:use',)}
+    assert not can_use_agent_assistant(session)
+    assert calls == [(session, 'agent_assistant:use')]
+    monkeypatch.setattr(server_admission, 'current_manager_role',
+                        lambda current, role: current is session and role == 'agent_assistant:use')
+    assert can_use_agent_assistant(session)
 
 
 def test_manager_keycloak_mode_uses_verified_session(monkeypatch):
