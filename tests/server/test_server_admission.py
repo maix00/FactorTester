@@ -184,3 +184,31 @@ def test_gateway_capability_is_verified_for_each_request(monkeypatch):
                                       "X-FactorTester-Manager": "gateway-fixture"}).json["user"] == "alice"
     # The preceding response can set a Flask cookie; it is not authority.
     assert client.get("/who").json["user"] is None
+
+
+def test_oidc_callback_checks_the_same_internal_admission(auth, monkeypatch):
+    from urllib.parse import urlsplit
+    from server.manager.http.auth_routes import AuthenticationRoutesMixin
+    import server.identity.manager_oidc as oidc
+
+    provider, identity, internal, _ = auth
+    monkeypatch.setattr(oidc, "finish_login", lambda **_: ("token", identity, "/app", ""))
+
+    class Handler(AuthenticationRoutesMixin):
+        state = internal
+        def _cookie_value(self, _name):
+            return "expected"
+        def _is_secure_transport(self):
+            return False
+        def _send_redirect(self, path, *, cookie):
+            self.result = (path, cookie)
+
+    handler = Handler()
+    callback = urlsplit("/auth/oidc/callback?state=expected&code=example")
+    handler._oidc_login_callback(callback)
+    assert handler.result[0] == "/app"
+    provider.groups.clear()
+    admission.clear_server_admission_cache()
+    handler._oidc_login_callback(callback)
+    assert handler.result[0] == "/app?auth_error=organization_login_denied"
+    assert "Max-Age=0" in handler.result[1][0]

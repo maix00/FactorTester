@@ -168,7 +168,14 @@ def server_admission(session, *, state=None):
         if settings["issuer"].rstrip("/") != issuer:
             return False, "unverified"
         from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
-        adapter = manager_keycloak_admin_adapter()
+        adapter = None
+
+        def provider():
+            nonlocal adapter
+            if adapter is None:
+                adapter = manager_keycloak_admin_adapter()
+            return adapter
+
         if public:
             client_id = settings["roles_client_id"]
             # FGAP view permission can expose the selected client's own
@@ -177,14 +184,14 @@ def server_admission(session, *, state=None):
             if client_id != settings["client_id"]:
                 return False, "server_authorization_unavailable"
             allowed = _cached(("public-user", issuer, subject, client_id),
-                              lambda: _public_user(adapter, subject, client_id, issuer))
+                              lambda: _public_user(provider(), subject, client_id, issuer))
             return bool(allowed), "" if allowed else "public_login_denied"
         binding = _cached(("binding", issuer, server_id, org),
-                          lambda: _internal_binding(adapter, server_id, org))
+                          lambda: _internal_binding(provider(), server_id, org))
         if not binding:
             return False, "server_organization_conflict"
         allowed = _cached(("internal-user", issuer, subject, org),
-                          lambda: _internal_user(adapter, subject, org))
+                          lambda: _internal_user(provider(), subject, org))
         return bool(allowed), "" if allowed else "organization_login_denied"
     except Exception:
         # No Keycloak error, timeout or malformed result is an authorization.
