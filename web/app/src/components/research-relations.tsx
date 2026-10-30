@@ -17,7 +17,7 @@ type Row = Record<string, any>;
 type CreateKind = "profile" | "workspace" | "report";
 
 /** Research relations use the same authorized catalog endpoints as the legacy view. */
-export function ResearchRelations({ research, overview, onReport, onResearch }: { research: Row; overview: React.ReactNode; onReport: (value: Row) => void; onResearch: (value: Row) => void }): React.ReactElement {
+export function ResearchRelations({ research, overview, onReport, onResearch, onSectionChange }: { research: Row; overview: React.ReactNode; onReport: (value: Row) => void; onResearch: (value: Row) => void; onSectionChange?: (section:string) => void }): React.ReactElement {
   const { t } = useTranslation();
   const id = String(research.research_id || "");
   const base = `/api/research/${encodeURIComponent(id)}`;
@@ -84,7 +84,7 @@ export function ResearchRelations({ research, overview, onReport, onResearch }: 
       setCreate(null);
     });
   };
-  const selectTab = (value: string): void => { setTab(value); setRows([]); setPage(1); setSize(20); setError(""); };
+  const selectTab = (value: string): void => { setTab(value); setRows([]); setPage(1); setSize(20); setError(""); onSectionChange?.(value); };
   const visible = tab === "evidence" ? rows : rows.slice((page - 1) * size, page * size);
   const table = (columns: any[], rowKey: (row: Row) => string): React.ReactElement => <TRDataTable rows={visible} columns={columns} rowKey={rowKey} loading={loading} error={error} pagination={{ page, pageSize: size, total, onChange: (next, nextSize) => { setPage(next); setSize(nextSize); } }} />;
   return <section className="tr-research-relations">

@@ -13,6 +13,8 @@ import { PropertyGroups } from "../components/property-groups.tsx";
 import { ObjectReference } from "../components/object-reference.tsx";
 import { ResearchCreate } from "../components/research-create.tsx";
 import { useAuth } from "../auth.tsx";
+import { usePageInstance } from "../page-instance.ts";
+import { assistantResearchContexts } from "../assistant-research-context.ts";
 import { ReportEditor } from "../components/report-editor.tsx";
 import { ReportMarkdown } from "../components/report-markdown.tsx";
 import { ReportExport } from "../components/report-export.tsx";
@@ -24,6 +26,7 @@ type Row = Record<string, any>;
 export function ResearchPage(): React.ReactElement {
   const { t } = useTranslation();
   const { session, openAuth } = useAuth();
+  const instance = usePageInstance();
   const compact = useCompactLayout();
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState("researches"), [rows, setRows] = useState<Row[]>([]), [query, setQuery] = useState("");
@@ -31,11 +34,25 @@ export function ResearchPage(): React.ReactElement {
   const [page, setPage] = useState(1), [size, setSize] = useState(20), [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<unknown>(null), [editor, setEditor] = useState(false);
+  const [detailPrincipal, setDetailPrincipal] = useState<string | null>(null);
   const [editingResearch, setEditingResearch] = useState(false);
   const [selectedPublicationID, setSelectedPublicationID] = useState("");
   const [reportRevision, setReportRevision] = useState(0);
   const [readingChapter, setReadingChapter] = useState({publicationID:"",chapterID:""});
+  const [researchLocation, setResearchLocation] = useState({id:"",section:"details"});
   const rowID = (row: Row, view = tab): string => view === "reports" ? reportRowID(row) : researchRowID(row);
+  const selectedResearchID = tab === "researches" && selected ? researchRowID(selected) : "";
+  const researchSection = researchLocation.id === selectedResearchID ? researchLocation.section : "details";
+  const principal = session?.username || "";
+  useEffect(() => { setResearchLocation(value => value.id === selectedResearchID ? value : {id:selectedResearchID,section:"details"}); }, [selectedResearchID]);
+  useEffect(() => {
+    const value = detail as Row | null;
+    const allowed = instance.active !== false && principal && detailPrincipal === principal && selectedResearchID && value?.research_id === selectedResearchID && value?.access?.can_view === true;
+    assistantResearchContexts.set(instance.id, allowed ? {
+      researchId:selectedResearchID,title:String(value.title || selectedResearchID),section:researchSection,
+    } : null);
+  }, [detail,detailPrincipal,instance.active,instance.id,principal,researchSection,selectedResearchID]);
+  useEffect(() => () => assistantResearchContexts.set(instance.id, null), [instance.id]);
   useEffect(() => {
     const controller = new AbortController(); setLoading(true); setError("");
     const endpoint = tab === "reports" ? "/api/research/reports" : "/api/research";
@@ -43,10 +60,10 @@ export function ResearchPage(): React.ReactElement {
     return () => controller.abort();
   }, [tab, scope, revision]);
   useEffect(() => {
-    const controller = new AbortController(); setDetail(null); setEditingResearch(false); if (!selected) return;
-    if (tab !== "reports") void request(`/api/research/${encodeURIComponent(researchRowID(selected))}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data.research || data); }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
+    const controller = new AbortController(); setDetail(null); setDetailPrincipal(null); setEditingResearch(false); if (!selected) return;
+    if (tab !== "reports") void request(`/api/research/${encodeURIComponent(researchRowID(selected))}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) { setDetail(data.research || data); setDetailPrincipal(principal); } }).catch((reason) => { if (!controller.signal.aborted) setDetail({ error: reason.message }); });
     return () => controller.abort();
-  }, [selected, tab]);
+  }, [selected, tab, principal]);
   const filtered = useMemo(() => rows.filter((row) => !query || `${row.title || ""} ${row.owner_ref || row.owner || ""} ${row.research?.title || row.research_title || ""} ${row.profile_ref || row.profile_id || ""}`.toLowerCase().includes(query.toLowerCase())), [rows, query]);
   const availableReportBranches = tab === "reports" && selected ? reportBranches(selected) : [];
   const selectedReportBranch = tab === "reports" && selected ? selectReportBranch(selected, selectedPublicationID) : undefined;
@@ -63,7 +80,7 @@ export function ResearchPage(): React.ReactElement {
     return id ? <button type="button" className="tr-table-link" onClick={() => openResearch(id,title)}>{title}</button> : "—";
   };
   const mobileMeta = (label:string, value:React.ReactNode):React.ReactElement => <span className="tr-research-mobile-reference"><span>{label}</span><span>{value}</span></span>;
-  return <FunctionPage title={t("nav.research")} actions={<>{tab === "researches" ? <Button type="primary" onClick={() => session ? setCreating(true) : openAuth("login")}>{t("research.create")}</Button> : null}<Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} /></>}>
+  return <div className="tr-research-page" onPointerDownCapture={() => assistantResearchContexts.activate(instance.id)} onFocusCapture={() => assistantResearchContexts.activate(instance.id)}><FunctionPage title={t("nav.research")} actions={<>{tab === "researches" ? <Button type="primary" onClick={() => session ? setCreating(true) : openAuth("login")}>{t("research.create")}</Button> : null}<Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} /></>}>
     <Tabs activeKey={tab} onChange={(value) => { setTab(value); setRows([]); setPage(1); setSelected(null); setSelectedPublicationID(""); setEditor(false); }} items={[{ key: "researches", label: t("research.tabResearches") }, { key: "reports", label: t("research.tabReports") }]} />
     <div className="tr-library-filters"><Select aria-label={t("research.scope")} value={scope} onChange={value => {setScope(value);setRows([]);setPage(1);}} options={["all","mine","subordinates","shared"].map(value => ({value,label:t(`research.scopes.${value}`)}))} /><Input.Search allowClear aria-label={t("library.search")} placeholder={t("library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} /></div>
     <div className="tr-research-table"><TRDataTable rows={filtered.slice((page - 1) * size, page * size)} rowKey={(row) => rowID(row)} loading={loading} error={error} pagination={{ page, pageSize: size, total: filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
@@ -99,9 +116,9 @@ export function ResearchPage(): React.ReactElement {
             : <Alert type="info" showIcon message={t("research.reportVersionUnavailable")} description={selectedReportBranch ? t(`research.reportSources.${selectedReportBranch.source_kind || "unknown"}`) : selected.build_source === "workspace" ? t("research.reportSources.workspace") : undefined} />}
       </>
         : editingResearch ? <ResearchEdit research={selected as Row} onCancel={() => setEditingResearch(false)} onArchived={() => { setSelected(null); setEditingResearch(false); setRevision((value) => value + 1); }} onSaved={(value) => { setSelected({ ...selected, ...value }); setDetail(value); setEditingResearch(false); setRevision((revision) => revision + 1); }} />
-        : editor ? <><Button onClick={() => setEditor(false)}>{t("research.backToSummary")}</Button><iframe className="tr-artifact-frame" title={selected.title || rowID(selected)} src={`/researches/${encodeURIComponent(researchRowID(selected))}?presentation=embedded`} /></> : detail && !(detail as Row).error ? <ResearchRelations key={researchRowID(selected)} research={detail as Row} overview={<><ResearchSummary value={detail as Row} /><div className="tr-inline-actions">{(detail as Row).access?.can_manage ? <Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button> : null}<Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></div></>} onReport={(report) => { setTab("reports"); setRows([]); setPage(1); setSelected(report); setSelectedPublicationID(selectReportBranch(report)?.publication_id || ""); }} onResearch={(research) => { setTab("researches"); setSelected(research); setEditingResearch(false); setEditor(false); }} /> : <ResearchSummary value={detail as Row | null} />}
+        : editor ? <><Button onClick={() => setEditor(false)}>{t("research.backToSummary")}</Button><iframe className="tr-artifact-frame" title={selected.title || rowID(selected)} src={`/researches/${encodeURIComponent(researchRowID(selected))}?presentation=embedded`} /></> : detail && !(detail as Row).error ? <ResearchRelations key={researchRowID(selected)} research={detail as Row} onSectionChange={section => setResearchLocation({id:selectedResearchID,section})} overview={<><ResearchSummary value={detail as Row} /><div className="tr-inline-actions">{(detail as Row).access?.can_manage ? <Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button> : null}<Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></div></>} onReport={(report) => { setTab("reports"); setRows([]); setPage(1); setSelected(report); setSelectedPublicationID(selectReportBranch(report)?.publication_id || ""); }} onResearch={(research) => { setTab("researches"); setSelected(research); setEditingResearch(false); setEditor(false); }} /> : <ResearchSummary value={detail as Row | null} />}
     </DetailsPanel> : null}
-  </FunctionPage>;
+  </FunctionPage></div>;
 }
 
 

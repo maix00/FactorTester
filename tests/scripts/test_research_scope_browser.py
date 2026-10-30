@@ -22,13 +22,16 @@ import React from {json.dumps(str(APP / 'node_modules/react/index.js'))};
 import {{createRoot}} from {json.dumps(str(APP / 'node_modules/react-dom/client.js'))};
 import {{ResearchPage}} from {json.dumps(str(APP / 'src/pages/research.tsx'))};
 import {{ObjectReferenceContext}} from {json.dumps(str(APP / 'src/components/object-reference.tsx'))};
+import {{assistantResearchContexts}} from {json.dumps(str(APP / 'src/assistant-research-context.ts'))};
+import {{AuthGate}} from {json.dumps(str(APP / 'src/auth.tsx'))};
 import i18n from {json.dumps(str(APP / 'src/i18n.ts'))};
 import {json.dumps(str(APP / 'src/shell.css'))};
 window.fixture.setLanguage = language => i18n.changeLanguage(language);
+window.fixture.context = () => assistantResearchContexts.snapshot();
 createRoot(document.getElementById('root')!).render(
-  <ObjectReferenceContext.Provider value={{value => window.fixture.opened.push(value)}}>
+  <AuthGate><ObjectReferenceContext.Provider value={{value => window.fixture.opened.push(value)}}>
     <ResearchPage />
-  </ObjectReferenceContext.Provider>
+  </ObjectReferenceContext.Provider></AuthGate>
 );
 """, encoding="utf-8")
     subprocess.run([str(APP / "node_modules/.bin/esbuild"), str(harness), "--bundle",
@@ -47,15 +50,18 @@ createRoot(document.getElementById('root')!).render(
                     page.set_default_timeout(5000)
                     page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
                     page.evaluate("""() => {
-                      const fixture = window.fixture = {requests:[],opened:[],releaseMine:null};
+                      const fixture = window.fixture = {requests:[],opened:[],releaseMine:null,allowResearch:true};
                       window.fetch = (input, options = {}) => {
                         const url = new URL(String(input), location.origin);
                         fixture.requests.push(url.pathname + url.search);
                         const response = body => new Response(JSON.stringify(body),
                           {status:200,headers:{'Content-Type':'application/json'}});
+                        if (url.pathname === '/api/session') return Promise.resolve(response({session:{username:'alice'}}));
+                        if (url.pathname === '/api/public/entry') return Promise.resolve(response({}));
                         if (url.pathname === '/api/research/r1') return Promise.resolve(response({research:{
-                          research_id:'r1',title:'研究甲',owner_ref:'alice',access:{can_manage:false}
+                          research_id:'r1',title:'研究甲',owner_ref:'alice',access:{can_view:fixture.allowResearch,can_manage:false}
                         }}));
+                        if (url.pathname === '/api/research/r1/members') return Promise.resolve(response({members:[]}));
                         const report = url.pathname === '/api/research/reports';
                         if (url.pathname !== '/api/research' && !report) throw Error('unexpected path: ' + url.pathname);
                         const scope = url.searchParams.get('scope');
@@ -99,6 +105,29 @@ createRoot(document.getElementById('root')!).render(
                     page.get_by_role("button", name="研究甲", exact=True).click()
                     page.get_by_role("dialog").wait_for()
                     assert "/api/research/r1" in page.evaluate("window.fixture.requests")
+                    page.wait_for_function("window.fixture.context()?.researchId === 'r1'")
+                    assert page.evaluate("window.fixture.context().section") == "details"
+                    page.get_by_role("dialog").get_by_role("tab",name="研究身份").click()
+                    page.wait_for_function("window.fixture.context()?.section === 'members'")
+                    if viewport["width"] <= 760:
+                        page.get_by_role("dialog").get_by_role("button",name="返回").click()
+                    else:
+                        page.locator(".ant-modal-close").click()
+                    page.wait_for_function("window.fixture.context() === null")
+                    scope.focus(); scope.press("ArrowDown")
+                    page.locator(".ant-select-dropdown:visible").get_by_text("全部可见", exact=True).click()
+                    page.get_by_role("button", name="研究甲", exact=True).first.click()
+                    page.wait_for_function("window.fixture.context()?.section === 'details'")
+                    if viewport["width"] <= 760:
+                        page.get_by_role("dialog").get_by_role("button",name="返回").click()
+                    else:
+                        page.locator(".ant-modal-close").click()
+                    page.wait_for_function("window.fixture.context() === null")
+                    page.evaluate("window.fixture.allowResearch = false")
+                    page.get_by_role("button", name="研究甲", exact=True).first.click()
+                    page.get_by_role("dialog").wait_for()
+                    page.wait_for_timeout(100)
+                    assert page.evaluate("window.fixture.context()") is None
                     page.close()
             finally:
                 browser.close()
