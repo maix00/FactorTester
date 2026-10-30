@@ -28,14 +28,14 @@ def _bundle(root: Path, version: str, *, payload: bytes = b"runtime") -> Path:
         path.write_bytes(binary)
         path.chmod(0o755)
         files[f"bin/{command}"] = sha256(binary).hexdigest()
-    skill = resources / "skills/factortester-research-skill/SKILL.md"
+    skill = resources / "skills/traderesearch-research-skill/SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text(
-        "---\nname: factortester-research-skill\n"
+        "---\nname: traderesearch-research-skill\n"
         "description: Test skill.\n---\n\n# Test\n",
         encoding="utf-8",
     )
-    files["skills/factortester-research-skill/SKILL.md"] = sha256(
+    files["skills/traderesearch-research-skill/SKILL.md"] = sha256(
         skill.read_bytes()
     ).hexdigest()
     source = resources / "sources/Tiger/source.json"
@@ -154,22 +154,22 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
         for command in bundle_runtime.COMMANDS
     }
     assert (
-        skill_root / "factortester-research-skill/SKILL.md"
+        skill_root / "traderesearch-research-skill/SKILL.md"
     ).read_bytes() == (
-        resources / "skills/factortester-research-skill/SKILL.md"
+        resources / "skills/traderesearch-research-skill/SKILL.md"
     ).read_bytes()
-    launcher = (root / "bin" / "factortester").read_text()
+    launcher = (root / "bin" / "traderesearch").read_text()
     assert launcher.startswith("#!/bin/sh\n")
-    assert "/runtime/standalone/bin/factortester" in launcher
-    assert "/runtime/python/bin/factortester" in launcher
+    assert "/runtime/standalone/bin/traderesearch" in launcher
+    assert "/runtime/python/bin/traderesearch" in launcher
     assert "python3" not in launcher
-    environment = (root / "bin" / "factortester-env.sh").read_text()
-    assert "FACTORTESTER_CLI=" in environment
-    assert "FACTORTESTER_MANAGER_CLI=" in environment
-    assert "FACTORTESTER_CLIENT_BIN=" in environment
+    environment = (root / "bin" / "traderesearch-env.sh").read_text()
+    assert "TRADERESEARCH_CLI=" in environment
+    assert "TRADERESEARCH_MANAGER_CLI=" in environment
+    assert "TRADERESEARCH_CLIENT_BIN=" in environment
 
-    (root / "bin" / "factortester").write_text("tampered")
-    registered = skill_root / "factortester-research-skill/SKILL.md"
+    (root / "bin" / "traderesearch").write_text("tampered")
+    registered = skill_root / "traderesearch-research-skill/SKILL.md"
     registered.write_text("stale", encoding="utf-8")
     pointer_before_repair = (root / "current.json").read_bytes()
     repaired = activate_bundled_runtime(
@@ -179,15 +179,36 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
     assert repaired["activated"] is True
     assert copied == len(bundle_runtime.COMMANDS)
     assert (root / "current.json").read_bytes() == pointer_before_repair
-    assert "/runtime/standalone/bin/factortester" in (
-        root / "bin" / "factortester"
+    assert "/runtime/standalone/bin/traderesearch" in (
+        root / "bin" / "traderesearch"
     ).read_text()
     assert registered.read_bytes() == (
-        resources / "skills/factortester-research-skill/SKILL.md"
+        resources / "skills/traderesearch-research-skill/SKILL.md"
     ).read_bytes()
     assert (
         tmp_path / "local-sources/Tiger/source.json"
     ).read_bytes() == (resources / "sources/Tiger/source.json").read_bytes()
+
+
+def test_user_owned_legacy_alias_does_not_advance_bundle_pointer(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "support"
+    first_bundle = _bundle(tmp_path / "bundles", "1.0.0")
+    activate_bundled_runtime(first_bundle, root)
+    pointer_before = (root / "current.json").read_bytes()
+    stable_cli_before = (root / "bin/traderesearch").read_bytes()
+    legacy_alias = root / "bin/factortester"
+    legacy_alias.write_text("#!/bin/sh\n# user-owned\n", encoding="utf-8")
+
+    second_bundle = _bundle(tmp_path / "bundles", "2.0.0")
+    with pytest.raises(ValueError, match="non-generated legacy CLI launcher"):
+        activate_bundled_runtime(second_bundle, root)
+
+    assert (root / "current.json").read_bytes() == pointer_before
+    assert (root / "bin/traderesearch").read_bytes() == stable_cli_before
+    assert legacy_alias.read_text(encoding="utf-8") == "#!/bin/sh\n# user-owned\n"
+    assert not (root / "releases/2.0.0").exists()
 
 
 def test_bundle_activation_preserves_unrelated_user_sources(tmp_path: Path) -> None:
@@ -217,14 +238,14 @@ def test_environment_script_exposes_active_app_commands(tmp_path: Path) -> None:
         local_source_root=tmp_path / "local-sources",
     )
 
-    environment = root / "bin" / "factortester-env.sh"
+    environment = root / "bin" / "traderesearch-env.sh"
     result = subprocess.run(
         [
             "sh",
             "-c",
             "source_path=$1; . \"$source_path\"; "
-            "printf '%s\\n' \"$FACTORTESTER_CLI\" "
-            "\"$FACTORTESTER_MANAGER_CLI\" \"$FACTORTESTER_CLIENT_BIN\" "
+            "printf '%s\\n' \"$TRADERESEARCH_CLI\" "
+            "\"$TRADERESEARCH_MANAGER_CLI\" \"$TRADERESEARCH_CLIENT_BIN\" "
             "\"$PATH\"",
             "sh",
             str(environment),
@@ -235,8 +256,8 @@ def test_environment_script_exposes_active_app_commands(tmp_path: Path) -> None:
     )
     values = result.stdout.splitlines()
     assert values[:3] == [
-        str(root / "bin" / "factortester"),
-        str(root / "bin" / "factortester-manager"),
+        str(root / "bin" / "traderesearch"),
+        str(root / "bin" / "traderesearch-manager"),
         str(root / "bin"),
     ]
     assert values[3].split(":", 1)[0] == str(root / "bin")
@@ -290,8 +311,8 @@ def test_bundle_identity_hash_and_installed_tamper_fail_closed(
 ) -> None:
     resources = _bundle(tmp_path / "bundles", "2.0.0")
     root = tmp_path / "support"
-    factortester = resources / "bin" / "factortester"
-    factortester.write_bytes(b"\xcf\xfa\xed\xfetampered")
+    traderesearch = resources / "bin" / "traderesearch"
+    traderesearch.write_bytes(b"\xcf\xfa\xed\xfetampered")
     with pytest.raises(ValueError, match="checksum"):
         activate_bundled_runtime(resources, root)
     assert not (root / "current.json").exists()
@@ -300,7 +321,7 @@ def test_bundle_identity_hash_and_installed_tamper_fail_closed(
     activate_bundled_runtime(resources, root)
     installed = (
         root / "releases" / "2.0.0"
-        / "runtime" / "standalone" / "bin" / "factortester"
+        / "runtime" / "standalone" / "bin" / "traderesearch"
     )
     installed.write_bytes(b"\xcf\xfa\xed\xfetampered")
     pointer = (root / "current.json").read_bytes()

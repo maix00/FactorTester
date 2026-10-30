@@ -1536,7 +1536,7 @@ def test_all_pages_share_responsive_inline_padding_without_width_caps() -> None:
     for selector in (
         ".job-detail", ".detail-stack", ".library-page",
         ".profile-directory", ".settings-content", ".manager-page",
-        ".manager-access-section", ".manager-directory-section",
+        ".manager-mihomo-section",
         ".test-workbench",
     ):
         rule = styles.split(f"{selector} {{", 1)[1].split("}", 1)[0]

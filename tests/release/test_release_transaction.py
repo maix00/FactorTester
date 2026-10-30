@@ -21,7 +21,7 @@ def _release(
 ) -> tuple[dict, Path]:
     root.mkdir(parents=True, exist_ok=True)
     content = _wheel(version)
-    filename = f"factortester-{version}-py3-none-any.whl"
+    filename = f"traderesearch-{version}-py3-none-any.whl"
     asset = root / filename
     asset.write_bytes(content)
     manifest, public_key = signed_manifest(
@@ -60,7 +60,7 @@ def _release(
 
 def _wheel(version: str) -> bytes:
     output = BytesIO()
-    dist_info = f"factortester-{version}.dist-info"
+    dist_info = f"traderesearch-{version}.dist-info"
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("tools/__init__.py", "")
         archive.writestr("tools/cli/__init__.py", "")
@@ -72,7 +72,7 @@ def _wheel(version: str) -> bytes:
         archive.writestr(
             f"{dist_info}/METADATA",
             "Metadata-Version: 2.1\n"
-            f"Name: factortester\nVersion: {version}\n",
+            f"Name: traderesearch\nVersion: {version}\n",
         )
         archive.writestr(
             f"{dist_info}/WHEEL",
@@ -82,7 +82,7 @@ def _wheel(version: str) -> bytes:
         archive.writestr(
             f"{dist_info}/entry_points.txt",
             "[console_scripts]\n"
-            "factortester = tools.cli.app:cli\n",
+            "traderesearch = tools.cli.app:cli\n",
         )
         archive.writestr(f"{dist_info}/RECORD", "")
     return output.getvalue()
@@ -119,9 +119,9 @@ def test_install_update_status_and_cleanup_are_atomic(
     assert retry == first_receipt
     assert store.status()["current_version"] == "1.0.0"
     assert first_receipt["materialized"]["python"]["commands"] == [
-        "factortester"
+        "traderesearch"
     ]
-    launcher = store.root / "bin" / "factortester"
+    launcher = store.root / "bin" / "traderesearch"
     assert subprocess.check_output([launcher], text=True).strip().endswith(
         "1.0.0"
     )
@@ -143,7 +143,7 @@ def test_install_update_status_and_cleanup_are_atomic(
     assert not list((store.root / "releases").glob(".staging-*"))
     (
         store.root / "releases" / "1.1.0"
-        / "runtime" / "python" / "bin" / "factortester"
+        / "runtime" / "python" / "bin" / "traderesearch"
     ).unlink()
     assert store.status()["healthy"] is False
 

@@ -29,7 +29,7 @@ def test_known_module_selects_cross_module_consumers():
 
 
 def test_skill_change_checks_activation_and_skill_tests():
-    assert selector.select({"skills/factortester-research-skill/SKILL.md"}) == (
+    assert selector.select({"skills/traderesearch-research-skill/SKILL.md"}) == (
         "SCOPED",
         ["tests/release/test_bundled_runtime_activation.py", "tests/skills"],
     )
@@ -67,7 +67,7 @@ def test_alpha_gitlink_and_adapter_extraction_stay_scoped():
         "native/nautilus_factor_bridge/examples/bench.rs",
         "native/traderesearch_nautilus_runtime/Cargo.toml"})
     assert mode == "SCOPED"
-    assert set(targets) == set(selector.ALPHA_RUNTIME_TESTS)
+    assert set(targets) == set(selector.ALPHA_RUNTIME_TESTS) | set(selector.FACTOR_WARMUP_TESTS)
 
 
 def test_rename_considers_both_paths():
