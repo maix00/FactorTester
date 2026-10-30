@@ -16,6 +16,15 @@ def test_configuration_editor_selects_schema_and_real_frontend_checks():
     )
 
 
+def test_job_configuration_restore_selects_its_focused_contract_tests():
+    assert selector.select({"server/services/job_configuration_restore.py"}) == (
+        "SCOPED", ["tests/server/test_job_configuration_restore.py"],
+    )
+    mode, targets = selector.select({"server/manager/services/test_authoring.py"})
+    assert mode == "SCOPED"
+    assert "tests/server/test_job_configuration_restore.py" in targets
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=repo, text=True).strip()
 

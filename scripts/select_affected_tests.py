@@ -47,7 +47,14 @@ EXACT_PATH_TESTS = {
     "tools/testers/settings/json_schema.py": ("tests/server/test_configuration_editor_schema.py",),
     "server/manager/services/test_authoring.py": (
         "tests/server/test_configuration_editor_schema.py",
+        "tests/server/test_job_configuration_restore.py",
         "tests/server/test_strategy_library.py",
+    ),
+    "server/services/job_configuration_restore.py": (
+        "tests/server/test_job_configuration_restore.py",
+    ),
+    "tests/server/test_job_configuration_restore.py": (
+        "tests/server/test_job_configuration_restore.py",
     ),
     "vendor/nautilus_trader": ("tests/scripts/test_nautilus_extension_build.py",),
     "environment.yml": ("tests/scripts/test_nautilus_extension_build.py",),

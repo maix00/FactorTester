@@ -49,6 +49,7 @@ class TestAuthoringService:
         r"/api/test-authoring/workspaces/([^/]{1,128})/configuration/load-template"
     )
     _TEMPLATE_RE = re.compile(r"/api/test-authoring/configuration-templates/([^/]{1,128})")
+    _RESTORE_JOB_RE = re.compile(r"/api/test-authoring/jobs/([^/]{1,128})/restore")
     _SETTINGS_RE = re.compile(r"/api/test-authoring/modules/([^/]{1,128})")
     _SETTINGS_SUMMARY_RE = re.compile(
         r"/api/test-authoring/modules/([^/]{1,128})/summary"
@@ -86,6 +87,7 @@ class TestAuthoringService:
                 or cls._LOAD_TEMPLATE_RE.fullmatch(path)
                 or cls._STRATEGIES_RE.fullmatch(path)
                 or cls._SNAPSHOT_RE.fullmatch(path)
+                or cls._RESTORE_JOB_RE.fullmatch(path)
             )
         if method == "PUT":
             return bool(
@@ -282,6 +284,34 @@ class TestAuthoringService:
         trusted_context: bool = False,
     ) -> TestAuthoringResponse:
         from server.services import research_configurations, research_workspaces
+
+        if method == "POST" and (match := self._RESTORE_JOB_RE.fullmatch(path)):
+            from server.identity.keycloak_authorization import keycloak_request_identity
+            from server.jobs.repository import JobRepository
+            from server.services.job_configuration_restore import (
+                HistoricalConfigurationUnavailable, restore_payload,
+            )
+
+            job_id = unquote(match.group(1))
+            record = JobRepository().load(job_id, owner=owner)
+            if record is None:
+                raise TestAuthoringError("Job not found", 404)
+            try:
+                restored = restore_payload(record, keycloak_request_identity(), owner=owner)
+            except HistoricalConfigurationUnavailable as exc:
+                raise TestAuthoringError(str(exc), 409, code=exc.code) from exc
+            title = str(record.job_spec.get("task_name") or record.kind or "Test").strip()
+            workspace = research_workspaces.create_workspace(
+                owner=owner, title=title, payload=restored,
+            )
+            return TestAuthoringResponse({
+                "success": True, "workspace": workspace,
+                "source_job_id": record.job_id,
+                "source_run_spec_hash": record.run_spec_hash,
+                "execution_selection_restored": isinstance(
+                    record.job_spec.get("execution_selection"), dict,
+                ),
+            }, 201)
 
         if method == "POST" and path in {"/api/runs", "/api/runs/preview"}:
             # Adapt the existing control API functions; never start a Flask
