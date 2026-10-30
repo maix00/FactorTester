@@ -38,8 +38,8 @@ services:
       retries: 16
       start_period: 60s
     security_opt: [no-new-privileges:true]
-  # Optional only when the host has no PostgreSQL service. Public deployments
-  # use a separate database/role in their existing PostgreSQL instance.
+  # Optional dedicated identity PostgreSQL, including public installations
+  # where reusing the control database would require unrelated TLS/HBA changes.
   identity-db:
     profiles: [bundled-db]
     image: postgres:17-alpine
