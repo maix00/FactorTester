@@ -56,3 +56,13 @@ def test_headroom_fails_before_host_pressure_and_does_not_count_swap(tmp_path):
         require_host_headroom(meminfo)
     meminfo.write_text('MemAvailable: 3000000 kB\n')
     require_host_headroom(meminfo)
+
+
+def test_keycloak_requires_reserved_address_on_manager_network():
+    import yaml
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    services = yaml.safe_load((root/'deploy/docker/keycloak/compose.yaml').read_text())['services']
+    network = services['keycloak']['networks']['manager']
+    assert 'TR_IDENTITY_MANAGER_IPV4:?' in network['ipv4_address']
+    assert network['aliases'] == ['tr-keycloak']

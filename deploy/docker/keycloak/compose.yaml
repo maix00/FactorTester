@@ -29,6 +29,7 @@ services:
         read_only: true
     networks:
       manager:
+        ipv4_address: ${TR_IDENTITY_MANAGER_IPV4:?reserve a dedicated Keycloak IP outside Manager static addresses}
         aliases: [tr-keycloak]
       database: {}
     healthcheck:
