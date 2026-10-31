@@ -65,18 +65,25 @@ class DeviceNetworkRoutesMixin:
         # Server-wide administration has dedicated /api/admin/access-control APIs.
         owner = str(session["username"])
         try:
-            devices = self.state.device_registry.list(
-                username=owner,
-                include_disabled=True,
-            )
-            public_device_total_count = self.state.device_registry.public_device_total_count(
-                username=owner,
-            )
-            public_user_count = (
-                (1 if public_device_total_count else 0)
-                if owner
-                else self.state.device_registry.public_user_count()
-            )
+            from server.identity.keycloak_device import may_use_devices
+            from server.manager.domain.devices import _public_record
+            records = self.state.device_registry.authorization_records(username=owner)
+            allowed = may_use_devices(token=self._bearer_token(), session=session,
+                                      server_id=self.state.server_id, records=records)
+            # A registry mutation during the remote Keycloak request must not
+            # turn an obsolete key decision into a current device status.
+            current = self.state.device_registry.authorization_records(username=owner)
+            def identity(rows):
+                if any(type(row.get('enabled')) is not bool or row.get('username') != owner for row in rows):
+                    raise DeviceRegistryError('invalid device registry binding')
+                return sorted((str(row['device_id']), str(row['username']), row['enabled'],
+                               str(row['source_server_id']), json.dumps(row['public_key'], sort_keys=True)) for row in rows)
+            if identity(records) != identity(current):
+                raise DeviceRegistryError('device registry changed during authorization check')
+            devices = sorted(({**_public_record(row), 'keycloak_authorized': row['device_id'] in allowed}
+                              for row in current), key=lambda row: (str(row.get('device_name') or ''), str(row['device_id'])))
+            public_device_total_count = len(allowed)
+            public_user_count = 1 if allowed else 0
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device list failed: {exc}\n")
             json_response(self, {
@@ -84,12 +91,21 @@ class DeviceNetworkRoutesMixin:
                 "error": "device registry is unavailable",
             }, 503)
             return
+        except (PermissionError, DeviceRegistryError, ValueError, KeyError, TypeError):
+            json_response(self, {"success": False, "error": "device authorization could not be verified"}, 503)
+            return
+        except Exception:
+            json_response(self, {"success": False, "code": "keycloak_authorization_unavailable",
+                                 "error": "Keycloak authorization is unavailable"}, 503)
+            return
         json_response(self, {
             "success": True,
             "devices": devices,
             "public_device_count": public_device_total_count,
             "public_device_total_count": public_device_total_count,
             "public_user_count": public_user_count,
+            "registered_device_count": sum(bool(row['enabled']) for row in current),
+            "count_basis": "current_keycloak_use",
             "server_id": self.state.server_id,
             "public_server": bool(getattr(self.state, "public_server", False)),
             "device_policy": (
@@ -98,7 +114,7 @@ class DeviceNetworkRoutesMixin:
                 else "organization_device_auto_login"
             ),
             **self.state.device_registry.backend_status(),
-        })
+        }, headers={"Cache-Control": "private, no-store"})
 
     def _device_summary(self) -> None:
         session = self._session()
@@ -135,6 +151,7 @@ class DeviceNetworkRoutesMixin:
             "public_device_count": total_count,
             "public_device_total_count": total_count,
             "public_user_count": user_count,
+            "count_basis": "enabled_device_records",
             "scope": scope,
             **self.state.device_registry.backend_status(),
         }, headers={"Cache-Control": "no-store"})

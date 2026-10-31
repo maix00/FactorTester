@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import secrets
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlencode
 
@@ -11,6 +14,8 @@ from scripts.test.keycloak_cross_realm_smoke import Sandbox
 from server.identity import keycloak_authorization, keycloak_device
 from server.identity.keycloak import KeycloakAdminAdapter
 from scripts.migrations.keycloak_device_inventory import read_keycloak_directory
+from server.manager.domain.devices import DeviceRegistry
+from server.manager.http import device_routes
 
 
 def run(sandbox: Sandbox) -> dict[str, str]:
@@ -62,19 +67,38 @@ def run(sandbox: Sandbox) -> dict[str, str]:
     device_id = "device-1234567890123456"
     owner_token, other_token = token("owner"), token("other")
     args = {"server_id": "manager-1", "device_id": device_id, "public_key": key}
+    replies = []
     with patch.object(keycloak_device, "oidc_settings", return_value=settings), \
          patch.object(keycloak_authorization, "oidc_settings", return_value=settings), \
-         patch("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", return_value=admin):
+         patch("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", return_value=admin), \
+         patch.object(device_routes, 'json_response', side_effect=lambda _h, payload, status=200, **_kw: replies.append((status, payload))), \
+         tempfile.TemporaryDirectory(prefix='tr-device-status-') as temp:
         directory = read_keycloak_directory('owner')
         assert directory['accounts'] == [{'username': 'owner', 'tr_identity_id': 'stable-owner',
                                            'keycloak_subject': users['owner']['id'], 'active': True}]
         assert read_keycloak_directory('missing') == {'accounts': []}
         keycloak_device.register_device(session=owner, **args)
+        registry = DeviceRegistry(Path(temp) / 'devices.json', server_id='manager-1')
+        registry.enroll(username='owner', device_id=device_id, public_key=key)
+        missing_id = 'device-unregistered-123456'
+        registry.enroll(username='owner', device_id=missing_id, public_key=key)
+        route = device_routes.DeviceNetworkRoutesMixin()
+        route.state = SimpleNamespace(device_registry=registry, server_id='manager-1', public_server=True)
+        route._session, route._bearer_token = lambda: owner, lambda: owner_token
+        route._device_list()
+        status = {row['device_id']: row['keycloak_authorized'] for row in replies[-1][1]['devices']}
+        assert replies[-1][0] == 200 and status == {device_id: True, missing_id: False}
         assert keycloak_device.may_use_device(token=owner_token, session=owner, **args)
+        records = [{"username": "owner", "device_id": device_id, "public_key": key, "enabled": True}]
+        assert keycloak_device.may_use_devices(token=owner_token, session=owner, server_id="manager-1", records=records) == {device_id}
         assert not keycloak_device.may_use_device(token=other_token, session=other, **args)
         assert not keycloak_device.may_use_device(token=owner_token, session=owner, **{**args, "public_key": other_key})
         assert keycloak_device.revoke_device(session=owner, **args)
         assert not keycloak_device.may_use_device(token=owner_token, session=owner, **args)
+        assert not keycloak_device.may_use_devices(token=owner_token, session=owner, server_id="manager-1", records=records)
+        route._device_list()
+        assert replies[-1][0] == 200 and all(not row['keycloak_authorized'] for row in replies[-1][1]['devices'])
+        assert replies[-1][1]['registered_device_count'] == 2 and replies[-1][1]['public_device_count'] == 0
         assert not keycloak_device.revoke_device(session=owner, **args)
     return {"owner": "allowed", "other_user": "denied", "other_key": "denied", "live_inventory": "verified",
             "same_token_after_revoke": "denied"}

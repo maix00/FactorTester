@@ -135,6 +135,7 @@ class DeviceAdministrationRoutesMixin:
             "public_device_count": total,
             "public_device_total_count": total,
             "public_user_count": 1 if total else 0,
+            "count_basis": "enabled_device_records",
             "scope": "realm" if is_super else "keycloak-group",
             **self.state.device_registry.backend_status(),
         }, headers={"Cache-Control": "private, no-store"})

@@ -58,6 +58,29 @@ def may_use_device(*, token: str, session: dict, server_id: str, device_id: str,
                                                scope="use", use_cache=False)
 
 
+def may_use_devices(*, token: str, session: dict, server_id: str, records: list[dict]) -> set[str]:
+    """Batch-check one verified owner's enabled device keys against Keycloak."""
+    if not token:
+        raise PermissionError("verified Keycloak token is required")
+    _subject, identity = _verified_binding(session)
+    owner = str(session.get("username") or "").strip()
+    if not owner or not isinstance(records, list) or len(records) > 10000:
+        raise ValueError("device authorization inventory is invalid or too large")
+    refs, seen = [], set()
+    for record in records:
+        if not isinstance(record, dict) or record.get("username") != owner or type(record.get("enabled")) is not bool:
+            raise ValueError("device authorization owner or state is invalid")
+        identifier = normalise_device_id(record.get("device_id"))
+        if identifier in seen:
+            raise ValueError("device authorization contains duplicate identities")
+        seen.add(identifier)
+        if record['enabled']:
+            refs.append((device_resource_ref(server_id=server_id, identity_id=identity,
+                                             device_id=identifier, public_key=record.get("public_key")), identifier))
+    return keycloak_authorized_objects(token, resource_type="device", refs=refs,
+                                      scope="use", use_cache=False)
+
+
 def revoke_device(*, session: dict, server_id: str, device_id: str, public_key: object) -> bool:
     """Revoke the exact key grant; never recreate it during a later check."""
     subject, identity = _verified_binding(session)

@@ -66,3 +66,19 @@ def test_only_explicit_enrollment_registers_and_revocation_uses_owner(monkeypatc
     with pytest.raises(ValueError):
         keycloak_device.revoke_device_for_owner(owner_subject="", identity_id="stable-1",
             server_id="manager-1", device_id=DEVICE, public_key=KEY)
+
+
+def test_batch_device_check_is_owner_scoped_and_never_uses_cached_grants(monkeypatch):
+    calls = []
+    def authorized(token, **kwargs):
+        calls.append((token, kwargs))
+        return {kwargs['refs'][0][1]}
+    monkeypatch.setattr(keycloak_device, 'keycloak_authorized_objects', authorized)
+    rows = [{'device_id': DEVICE, 'username': 'alice', 'public_key': KEY, 'enabled': True},
+            {'device_id': 'device-1234567890123457', 'username': 'alice', 'public_key': OTHER_KEY, 'enabled': False}]
+    assert keycloak_device.may_use_devices(token='verified', session=SESSION, server_id='manager-1', records=rows) == {DEVICE}
+    assert len(calls) == 1 and len(calls[0][1]['refs']) == 1 and calls[0][1]['use_cache'] is False
+    with pytest.raises(ValueError):
+        keycloak_device.may_use_devices(token='verified', session=SESSION, server_id='manager-1', records=[{**rows[0], 'username': 'bob'}])
+    with pytest.raises(ValueError):
+        keycloak_device.may_use_devices(token='verified', session=SESSION, server_id='manager-1', records=[rows[0], rows[0]])

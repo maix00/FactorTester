@@ -43,8 +43,9 @@ def test_personal_devices_and_revoke_always_use_current_owner(role, monkeypatch)
     responses = []
     monkeypatch.setattr(device_routes, 'json_response',
                         lambda handler, payload, status=200, **kw: responses.append((status, payload)))
-    records = [{'device_id': 'mine', 'username': 'alice'},
-               {'device_id': 'other', 'username': 'bob'}]
+    key = {'kty':'EC','crv':'P-256','x':'A'*43,'y':'A'*43}
+    records = [{'device_id': 'device-mine-123456', 'username': 'alice', 'public_key': key, 'enabled': True, 'source_server_id': 'public'},
+               {'device_id': 'device-other-12345', 'username': 'bob', 'public_key': key, 'enabled': True, 'source_server_id': 'public'}]
     revoked = []
     queried = []
     def listing(*, username, include_disabled):
@@ -52,6 +53,7 @@ def test_personal_devices_and_revoke_always_use_current_owner(role, monkeypatch)
         return [r for r in records if r['username'] == username]
     registry = SimpleNamespace(
         list=listing,
+        authorization_records=lambda *, username: listing(username=username, include_disabled=True),
         key_binding=lambda **kw: {'public_key': 'key'},
         public_device_total_count=lambda **kw: len(listing(include_disabled=False, **kw)),
         backend_status=lambda: {'backend': 'postgresql'},
@@ -60,18 +62,22 @@ def test_personal_devices_and_revoke_always_use_current_owner(role, monkeypatch)
     route = device_routes.DeviceNetworkRoutesMixin()
     route.state = SimpleNamespace(device_registry=registry, server_id='public')
     route._session = lambda: {'username': 'alice', 'role': role}
+    route._bearer_token = lambda: 'token'
+    monkeypatch.setattr('server.identity.keycloak_device.may_use_devices', lambda **kw: {records[0]['device_id']})
     monkeypatch.setattr('server.identity.keycloak_device.revoke_device', lambda **kw: True)
     route._device_list()
-    assert responses[-1][1]['devices'] == [records[0]]
+    assert len(responses[-1][1]['devices']) == 1
+    assert responses[-1][1]['devices'][0]['keycloak_authorized'] is True
+    assert 'public_key' not in responses[-1][1]['devices'][0]
     assert responses[-1][1]['public_device_total_count'] == 1
-    route._json_body = lambda limit: {'device_id': 'other'}
+    route._json_body = lambda limit: {'device_id': records[1]['device_id']}
     route._device_revoke()
     assert responses[-1][0] == 403
     assert revoked == []
-    route._json_body = lambda limit: {'device_id': 'mine'}
+    route._json_body = lambda limit: {'device_id': records[0]['device_id']}
     route._device_revoke()
     assert responses[-1][0] == 200
-    assert revoked == ['mine']
+    assert revoked == [records[0]['device_id']]
     assert set(queried) == {'alice'}
 
 
@@ -92,6 +98,38 @@ def test_revoke_does_not_report_success_if_keycloak_fails(monkeypatch):
     route._device_revoke()
     assert responses[-1] == 503
     assert revoked == []
+
+
+def test_personal_device_list_uses_current_keycloak_grants_and_detects_races(monkeypatch):
+    responses = []
+    monkeypatch.setattr(device_routes, 'json_response', lambda _h, payload, status=200, **_kw: responses.append((status, payload)))
+    key = {'kty':'EC','crv':'P-256','x':'A'*43,'y':'A'*43}
+    row = {'device_id':'device-mine-123456','username':'alice','public_key':key,'enabled':True,'source_server_id':'public'}
+    state = {'calls': 0, 'race': False, 'outage': False}
+    def records(*, username):
+        assert username == 'alice'
+        state['calls'] += 1
+        return [{**row, 'enabled': False}] if state['race'] and state['calls'] == 2 else [row]
+    def check(**_kwargs):
+        if state['outage']: raise RuntimeError('Keycloak offline')
+        return set()  # The local row remains enabled, but the grant was revoked.
+    monkeypatch.setattr('server.identity.keycloak_device.may_use_devices', check)
+    route = device_routes.DeviceNetworkRoutesMixin()
+    route.state = SimpleNamespace(server_id='public', device_registry=SimpleNamespace(
+        authorization_records=records, backend_status=lambda: {}))
+    route._session = lambda: {'username':'alice'}
+    route._bearer_token = lambda: 'token'
+    route._device_list()
+    status, payload = responses[-1]
+    assert status == 200 and payload['devices'][0]['keycloak_authorized'] is False
+    assert payload['registered_device_count'] == 1 and payload['public_device_total_count'] == 0
+    assert 'public_key' not in payload['devices'][0]
+    state.update(calls=0, race=True)
+    route._device_list()
+    assert responses[-1][0] == 503
+    state.update(calls=0, race=False, outage=True)
+    route._device_list()
+    assert responses[-1][0] == 503 and responses[-1][1]['code'] == 'keycloak_authorization_unavailable'
 
 
 def test_enrollment_disables_record_if_keycloak_grant_fails(monkeypatch):

@@ -512,6 +512,20 @@ class DeviceRegistry:
             ),
         )
 
+    def authorization_records(self, *, username: str) -> list[dict[str, object]]:
+        """Return a single owner's key bindings for an internal Keycloak check.
+
+        Public HTTP responses must use ``_public_record`` and never expose the
+        raw public-key material or historical permission fields.
+        """
+        owner = str(username or "").strip()
+        if not owner:
+            raise DeviceRegistryError("a device owner is required")
+        if self.control_store is not None:
+            return self.control_store.list_devices(username=owner, include_disabled=True)
+        with self._lock:
+            return [item for item in self._all_locked() if item.get("username") == owner]
+
     def snapshot(self) -> dict[str, object]:
         if self.control_store is not None:
             records = self.control_store.list_devices(include_disabled=True)
