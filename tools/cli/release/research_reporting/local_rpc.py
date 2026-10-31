@@ -39,6 +39,7 @@ class LocalResearchRPC:
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
             'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
+            'get_report': {'action', 'profile_id', 'research_id', 'report_id'},
         }
         if not isinstance(action, str) or action not in keys or set(message) != keys[action]:
             raise ValueError('invalid local Research message')
@@ -66,7 +67,10 @@ class LocalResearchRPC:
         elif action == 'create':
             value = {'research': self.store.create(profile_id=message['profile_id'], title=message['title'],
                      description=message['description'], operation_id=message['operation_id'])}
-        else:
+        elif action == 'create_report':
             value = {'report': self.store.create_report(profile_id=message['profile_id'], research_id=message['research_id'],
                      title=message['title'], operation_id=message['operation_id'])}
+        else:
+            value = self.store.get_report_index(profile_id=message['profile_id'], research_id=message['research_id'],
+                     report_id=message['report_id'])
         return {'success': True, 'schema': SCHEMA, **value}

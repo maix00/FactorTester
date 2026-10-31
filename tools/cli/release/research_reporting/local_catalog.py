@@ -162,6 +162,28 @@ class LocalResearchCatalog:
             items = [self._report_public(row) for row in rows[:limit]]
             return {'reports': items, 'next_offset': offset + len(items) if len(rows) > limit else None}
 
+    def get_report_index(self, *, profile_id: str, research_id: str, report_id: str) -> dict:
+        from .authoring.tree_projection import load_report_index
+        from .public_research.projection import build_upload_index
+        from .report_workspace_identity import report_workspace_id_for
+
+        profile = self._profile(profile_id)
+        with self._connect() as db:
+            row = db.execute('''SELECT * FROM reports WHERE profile_id=? AND research_id=?
+                AND report_id=? AND ready=1''', (profile, research_id, report_id)).fetchone()
+            if row is None:
+                raise ValueError('report is unavailable')
+            report = self._report_public(row)
+        if self.workspace_root.is_symlink():
+            raise ValueError('local report directory cannot be a symlink')
+        root = self.workspace_root / 'research' / report_workspace_id_for(report_id)
+        if root.is_symlink() or root.parent.is_symlink():
+            raise ValueError('local report workspace cannot be a symlink')
+        index = build_upload_index(load_report_index(package_root=root, branch_id='main'))
+        if index.get('report_id') != report_id:
+            raise ValueError('local report identity is invalid')
+        return {'report': report, 'index': index}
+
     @staticmethod
     def _report_public(row) -> dict:
         return {key: row[key] for key in ('report_id', 'research_id', 'profile_id', 'title', 'created_at')}

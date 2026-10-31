@@ -18,6 +18,7 @@ export type LocalResearchCapabilities = { binding: LocalResearchBinding; actions
 export type LocalResearchCreate = { profile_id: string; title: string; description: string; operation_id: string };
 export type LocalResearchPage = { researches: LocalResearch[]; next_offset: number | null };
 export type LocalReport = { report_id: string; research_id: string; profile_id: string; title: string; created_at: number };
+export type LocalReportIndex = { report:LocalReport; chapters:{component_id:string;title:string;preview:string}[] };
 
 type NativeHandler = { postMessage: (message: Record<string, unknown>) => unknown };
 type NativeHost = { webkit?: { messageHandlers?: { tradeResearchLocalResearch?: unknown } } };
@@ -189,6 +190,23 @@ export class LocalResearchClient {
     const value=report(reply.report);
     if(value.profile_id!==profile_id||value.research_id!==research_id||value.title!==title) throw new LocalResearchBridgeError("local_research_invalid_response");
     return value;
+  }
+
+  async getReport(profileId:string,researchId:string,reportId:string):Promise<LocalReportIndex> {
+    this.requireAction("get_report");
+    const profile_id=inputText(profileId,512),research_id=inputText(researchId,512),report_id=inputText(reportId,512);
+    this.requireProfile(profile_id);
+    const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"get_report",profile_id,research_id,report_id});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    const value=report(reply.report),index=reply.index;
+    if(value.profile_id!==profile_id||value.research_id!==research_id||value.report_id!==report_id||!isRecord(index)||index.report_id!==report_id||!Array.isArray(index.chapters)) throw new LocalResearchBridgeError("local_research_invalid_response");
+    const chapters=index.chapters.map(chapter=>{
+      if(!isRecord(chapter)) throw new LocalResearchBridgeError("local_research_invalid_response");
+      return {component_id:identifier(chapter.component_id),title:text(chapter.title,512,true),preview:text(chapter.preview,512,true)};
+    });
+    if(new Set(chapters.map(chapter=>chapter.component_id)).size!==chapters.length) throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {report:value,chapters};
   }
 
   /** The caller retains operation_id for retries; this client never retries writes. */

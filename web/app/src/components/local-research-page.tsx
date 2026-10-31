@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Button, Form, Input, Select, Spin } from "antd";
+import { Alert, Button, Empty, Form, Input, Select, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { formatDate } from "../format.ts";
-import { LocalResearchBridgeError, type LocalResearch, type LocalReport, type LocalResearchCapabilities, type LocalResearchClient } from "../local-research-bridge.ts";
+import { LocalResearchBridgeError, type LocalResearch, type LocalReport, type LocalReportIndex, type LocalResearchCapabilities, type LocalResearchClient } from "../local-research-bridge.ts";
 import { notify } from "../notifications/core.ts";
 import { DetailsCancelButton, DetailsPanel } from "./details-panel.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
@@ -22,14 +22,15 @@ export function LocalResearchDetail({client,capabilities,item,onClose}:{client:L
     return()=>{active=false;};
   },[client,item.profile_id,item.research_id,t]);
   return <DetailsPanel title={item.title} onClose={onClose} width={680}>{error?<Alert type="error" showIcon message={error}/>:value?<><p className="tr-research-origin">{t("localResearch.privateNote")}</p><PropertyGroups groups={[{key:"research",title:t("details"),items:[
-    {key:"title",label:t("editor.name"),value:value.title},{key:"description",label:t("library.description"),value:value.description,wide:true},
+    {key:"title",label:t("editor.name"),value:value.title},...(value.description ? [{key:"description",label:t("library.description"),value:value.description,wide:true}] : []),
     {key:"id",label:t("objectReference.reference"),value:value.research_id,wide:true},{key:"updated",label:t("jobs.updated"),value:value.updated_at,render:amount=>formatDate(amount as number,{dateStyle:"medium",timeStyle:"short"})},
-  ]}]} />{capabilities.actions.includes("list_reports")&&capabilities.actions.includes("create_report")?<LocalReports client={client} item={value}/>:null}</>:<Spin tip={t("loading")} />}</DetailsPanel>;
+  ]}]} />{capabilities.actions.includes("list_reports")&&capabilities.actions.includes("create_report")?<LocalReports client={client} item={value} canOpen={capabilities.actions.includes("get_report")}/>:null}</>:<Spin tip={t("loading")} />}</DetailsPanel>;
 }
 
-function LocalReports({client,item}:{client:LocalResearchClient;item:LocalResearch}):React.ReactElement {
+function LocalReports({client,item,canOpen}:{client:LocalResearchClient;item:LocalResearch;canOpen:boolean}):React.ReactElement {
   const {t}=useTranslation();
   const [rows,setRows]=useState<LocalReport[]>([]),[page,setPage]=useState(1),[pageSize,setPageSize]=useState(20),[hasMore,setHasMore]=useState(false),[loading,setLoading]=useState(true),[revision,setRevision]=useState(0),[creating,setCreating]=useState(false),[busy,setBusy]=useState(false);
+  const [selected,setSelected]=useState<LocalReport|null>(null),[index,setIndex]=useState<LocalReportIndex|null>(null);
   const operation=useRef<{title:string;id:string}|null>(null),pending=useRef(false),mounted=useRef(true);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   useEffect(()=>{
@@ -40,6 +41,13 @@ function LocalReports({client,item}:{client:LocalResearchClient;item:LocalResear
       .finally(()=>{if(active&&client.isCurrent(snapshot))setLoading(false);});
     return()=>{active=false;};
   },[client,item.profile_id,item.research_id,page,pageSize,revision,t]);
+  useEffect(()=>{
+    if(!selected)return;
+    let active=true;const snapshot=client.snapshot();setIndex(null);
+    void client.getReport(item.profile_id,item.research_id,selected.report_id).then(value=>{if(active&&client.isCurrent(snapshot))setIndex(value);})
+      .catch(reason=>{if(active&&client.isCurrent(snapshot)){setSelected(null);notify({code:"research.local.report.load",type:"error",message:errorMessage(reason,t)});}});
+    return()=>{active=false;};
+  },[client,item.profile_id,item.research_id,selected,t]);
   const create=async({title}:{title:string})=>{
     if(pending.current)return;
     title=title.trim();if(!operation.current||operation.current.title!==title)operation.current={title,id:crypto.randomUUID()};
@@ -50,9 +58,10 @@ function LocalReports({client,item}:{client:LocalResearchClient;item:LocalResear
     }catch(reason){if(mounted.current&&client.isCurrent(snapshot))notify({code:"research.local.report.create",type:"error",message:`${t("localResearch.writeUnconfirmed")} ${errorMessage(reason,t)}`});}
     finally{pending.current=false;if(mounted.current&&client.isCurrent(snapshot))setBusy(false);}
   };
+  if(selected)return <section><div className="tr-inline-actions"><Button aria-label={t("back")} onClick={()=>setSelected(null)}>{t("back")}</Button><h3>{selected.title}</h3></div>{index ? index.chapters.length ? <ul>{index.chapters.map(chapter=><li key={chapter.component_id}>{chapter.title}</li>)}</ul> : <Empty description={t("empty")} /> : <Spin tip={t("loading")} />}</section>;
   return <section><div className="tr-inline-actions"><h3>{t("researchDetail.reports")}</h3><Button onClick={()=>setCreating(true)} disabled={creating}>{t("researchDetail.create.reports")}</Button></div>
     {creating?<Form layout="inline" onFinish={create}><Form.Item name="title" rules={[{required:true,whitespace:true,max:256}]}><Input aria-label={t("editor.name")} placeholder={t("editor.name")} maxLength={256}/></Form.Item><Button type="primary" htmlType="submit" loading={busy}>{t("researchDetail.create.reports")}</Button><Button disabled={busy} onClick={()=>setCreating(false)}>{t("cancel")}</Button></Form>:null}
-    <TRDataTable<LocalReport> rowKey="report_id" rows={rows} loading={loading} columns={[{title:t("editor.name"),dataIndex:"title",key:"title"},{title:t("localResearch.reportCreatedAt"),dataIndex:"created_at",key:"created_at",render:(value:number)=>formatDate(value,{dateStyle:"medium",timeStyle:"short"})}]} pagination={{page,pageSize,total:0,mode:"cursor",hasMore,onChange:(next,size)=>{setPage(next);setPageSize(size);}}}/>
+    <TRDataTable<LocalReport> rowKey="report_id" rows={rows} loading={loading} columns={[{title:t("editor.name"),dataIndex:"title",key:"title",render:(title:string,row:LocalReport)=>canOpen?<button type="button" className="tr-table-link" onClick={()=>setSelected(row)}>{title}</button>:title},{title:t("localResearch.reportCreatedAt"),dataIndex:"created_at",key:"created_at",render:(value:number)=>formatDate(value,{dateStyle:"medium",timeStyle:"short"})}]} pagination={{page,pageSize,total:0,mode:"cursor",hasMore,onChange:(next,size)=>{setPage(next);setPageSize(size);}}}/>
   </section>;
 }
 

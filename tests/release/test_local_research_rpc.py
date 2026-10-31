@@ -69,9 +69,18 @@ def test_local_report_uses_existing_report_tree_and_retry_recovers(tmp_path, mon
     root = rpc.store.workspace_root / 'research' / report_workspace_id_for(values[0]['report_id'])
     assert load_snapshot(package_root=root, branch_id='main')['head']['report_id'] == values[0]['report_id']
     assert (root / '.git').is_dir()
+    read = {'action': 'get_report', 'profile_id': 'self', 'research_id': research['research_id'],
+            'report_id': values[0]['report_id']}
+    result = rpc.request(read)
+    assert result['report'] == values[0]
+    assert result['index']['report_id'] == values[0]['report_id']
+    assert result['index']['chapters'] == []
+    assert 'paths' not in result['index']
     other = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='other',
                              profiles=[{'profile_id': 'self', 'display_name': 'Other'}])
     with pytest.raises(ValueError):
         other.request(listing)
+    with pytest.raises(ValueError):
+        other.request(read)
     with pytest.raises(ValueError):
         rpc.request({**request, 'title': 'Different'})
