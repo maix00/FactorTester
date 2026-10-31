@@ -3,6 +3,16 @@ import XCTest
 @testable import FTClient
 
 final class SessionCredentialStoreTests: XCTestCase {
+    func testCredentialsAreNeverReplayedToAnotherManager() throws {
+        let saved = SavedSessionCredentials(username: "alice", password: "secret", serverURL: "https://Manager.EXAMPLE")
+        XCTAssertTrue(SessionCredentialStore.matchesManager(saved, endpoint: URL(string: "https://manager.example:443/")))
+        XCTAssertFalse(SessionCredentialStore.matchesManager(saved, endpoint: URL(string: "https://manager.example:7998")))
+        XCTAssertFalse(SessionCredentialStore.matchesManager(saved, endpoint: URL(string: "http://manager.example")))
+        XCTAssertFalse(SessionCredentialStore.matchesManager(saved, endpoint: URL(string: "https://other.example")))
+        let legacy = SavedSessionCredentials(username: "alice", password: "secret", serverURL: nil)
+        XCTAssertFalse(SessionCredentialStore.matchesManager(legacy, endpoint: URL(string: "https://manager.example")))
+    }
+
     func testLegacyServerBoundCredentialRemainsDecodable() throws {
         let data = try XCTUnwrap(
             """

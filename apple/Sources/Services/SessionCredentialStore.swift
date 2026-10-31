@@ -19,11 +19,13 @@ enum SessionCredentialStore {
         guard ProcessInfo.processInfo.environment[
             "XCTestConfigurationFilePath"
         ] == nil else { return true }
+        guard let endpoint = ManagerConfig.shared.baseURL,
+              endpointIdentity(endpoint.absoluteString) != nil else { return false }
         guard let data = try? JSONEncoder().encode(
                 SavedSessionCredentials(
                     username: username,
                     password: password,
-                    serverURL: nil
+                    serverURL: endpoint.absoluteString
                 )
               ),
               let value = String(data: data, encoding: .utf8) else { return false }
@@ -34,9 +36,10 @@ enum SessionCredentialStore {
         guard ProcessInfo.processInfo.environment[
             "XCTestConfigurationFilePath"
         ] == nil else { return nil }
-        return decode(
+        guard let credentials = decode(
             KeychainStore.read(account: account, serviceName: service)
-        )
+        ), matchesManager(credentials, endpoint: ManagerConfig.shared.baseURL) else { return nil }
+        return credentials
     }
 
     static func hasSavedCredentials() -> Bool {
@@ -58,12 +61,34 @@ enum SessionCredentialStore {
             serviceName: protectedService,
             reason: reason
         ) else { return nil }
-        return decode(value)
+        guard let credentials = decode(value),
+              matchesManager(credentials, endpoint: ManagerConfig.shared.baseURL) else { return nil }
+        return credentials
     }
 
     static func clear() {
         KeychainStore.delete(account: account, serviceName: service)
         KeychainStore.delete(account: account, serviceName: protectedService)
+    }
+
+    /// Passwords saved for one Manager must never be replayed to another.
+    /// Legacy credentials without an endpoint require an explicit login.
+    static func matchesManager(_ credentials: SavedSessionCredentials, endpoint: URL?) -> Bool {
+        guard let saved = credentials.serverURL, let endpoint,
+              let left = endpointIdentity(saved),
+              let right = endpointIdentity(endpoint.absoluteString) else { return false }
+        return left == right
+    }
+
+    private static func endpointIdentity(_ raw: String) -> String? {
+        guard let value = URLComponents(string: raw),
+              let scheme = value.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = value.host?.lowercased(), !host.isEmpty,
+              value.user == nil, value.password == nil, value.query == nil, value.fragment == nil,
+              value.path.isEmpty || value.path == "/" else { return nil }
+        let port = value.port ?? (scheme == "https" ? 443 : 80)
+        guard (1...65535).contains(port) else { return nil }
+        return "\(scheme)|\(host)|\(port)"
     }
 
     private static func decode(_ value: String?) -> SavedSessionCredentials? {
