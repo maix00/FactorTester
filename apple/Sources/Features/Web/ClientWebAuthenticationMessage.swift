@@ -4,7 +4,7 @@ import Foundation
 /// in FTClient. Credentials never cross the JavaScript bridge; Web only asks
 /// the native app to synchronize or clear its shared session.
 enum ClientWebAuthenticationMessage {
-    static let handlerName = "factorTesterAuthentication"
+    static let handlerName = "tradeResearchAuthentication"
 
     enum Action: String {
         case logout

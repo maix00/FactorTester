@@ -22,6 +22,8 @@ import WebKit
 final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
     private weak var session: SessionStore?
     private let endpoint: URL
+    private var boundIdentity: LocalResearchIdentity?
+    private var handshakeGeneration: UInt64 = 0
 
     init(session: SessionStore, endpoint: URL) {
         self.session = session
@@ -39,23 +41,56 @@ final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
               LocalResearchBridgeContract.sameOrigin(scheme: origin.protocol, host: origin.host,
                                                      port: origin.port, endpoint: endpoint),
               ManagerConfig.shared.baseURL == endpoint,
-              let user = session?.user, let identity = user.localResearchIdentity,
-              let name = user.username, !name.isEmpty,
               let request = message.body as? [String: Any] else {
             replyHandler(["success": false, "code": "local_research_session_unverified"], nil)
             return
         }
-        // `self` is an in-memory owner scope, not a new research Profile.
-        // Existing username-bound local Profiles are not automatically adopted.
-        let envelope: [String: Any] = [
-            "binding": ["issuer": identity.issuer, "identity_id": identity.stableID],
-            "profile": ["profile_id": "self", "display_name": user.alias ?? name],
-            "request": request,
-        ]
+        let webView = message.webView
+        let isHandshake = request["action"] as? String == "capabilities"
+        if isHandshake {
+            handshakeGeneration &+= 1
+            boundIdentity = nil
+        }
+        let handshake = handshakeGeneration
         Task { @MainActor [weak self] in
+            guard let self, let session = self.session else {
+                replyHandler(["success": false, "code": "local_research_session_unverified"], nil)
+                return
+            }
+            // OAuth redirects restore the Web cookie asynchronously. Import it
+            // and verify /api/session before negotiating local capabilities.
+            if isHandshake {
+                if let webView {
+                    await WebSessionCookieSynchronizer.importManagerSession(from: webView, endpoint: self.endpoint)
+                }
+                guard ManagerConfig.shared.baseURL == self.endpoint,
+                      await session.confirmWebIdentity(), handshake == self.handshakeGeneration else {
+                    replyHandler(["success": false, "code": "local_research_session_unverified"], nil)
+                    return
+                }
+            }
+            guard let user = session.user, let identity = user.localResearchIdentity,
+                  let name = user.username, !name.isEmpty, self.isCurrent(identity) else {
+                replyHandler(["success": false, "code": "local_research_session_unverified"], nil)
+                return
+            }
+            if isHandshake {
+                self.boundIdentity = identity
+            } else if self.boundIdentity != identity {
+                replyHandler(["success": false, "code": "local_research_session_unverified"], nil)
+                return
+            }
+            // `self` is an in-memory owner scope, not a new research Profile.
+            // Existing username-bound Profiles are not automatically adopted.
+            let envelope: [String: Any] = [
+                "binding": ["issuer": identity.issuer, "identity_id": identity.stableID],
+                "profile": ["profile_id": "self", "display_name": user.alias ?? name],
+                "request": request,
+            ]
             do {
                 try await BundledRuntimeActivator.waitUntilReady()
-                guard let self, self.isCurrent(identity) else {
+                guard self.isCurrent(identity), self.boundIdentity == identity,
+                      handshake == self.handshakeGeneration else {
                     replyHandler(["success": false, "code": "local_research_session_changed"], nil)
                     return
                 }
@@ -63,7 +98,8 @@ final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
                     ["client", "local-research-request"],
                     executable: ClientCLIResolution.executable(), stdinJSON: envelope
                 )
-                guard self.isCurrent(identity) else {
+                guard self.isCurrent(identity), self.boundIdentity == identity,
+                      handshake == self.handshakeGeneration else {
                     replyHandler(["success": false, "code": "local_research_session_changed"], nil)
                     return
                 }

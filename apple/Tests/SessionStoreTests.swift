@@ -52,6 +52,27 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(store.isManagerLoggedIn)
     }
 
+    func testWebIdentityConfirmationRequiresVerifiedIdentityAndDoesNotReplayCredentials() async throws {
+        let fields: [String: Any] = ["username": "alice", "keep_login": true,
+            "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject",
+            "tr_identity_id": "stable-alice"]
+        let verified = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: fields))
+        let api = FakeSessionAPI(user: verified)
+        let store = SessionStore(api: api, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true },
+                                 credentialLoader: { SavedSessionCredentials(username: "alice", password: "secret", serverURL: nil) })
+        let accepted = await store.confirmWebIdentity()
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(store.user?.localResearchIdentity?.stableID, "stable-alice")
+        XCTAssertEqual(api.events, ["me"])
+
+        let legacy = FakeSessionAPI(user: try user(username: "alice"))
+        let unverifiedStore = SessionStore(api: legacy, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true })
+        let rejected = await unverifiedStore.confirmWebIdentity()
+        XCTAssertFalse(rejected)
+        XCTAssertNil(unverifiedStore.user)
+        XCTAssertEqual(legacy.events, ["me"])
+    }
+
     func testManagerChangeRequiresMatchingVerifiedIdentityWithoutPasswordLogin() async throws {
         let fields: [String: Any] = ["username": "alice", "keep_login": true,
             "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject",

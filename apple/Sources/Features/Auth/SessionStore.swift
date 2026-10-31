@@ -130,6 +130,28 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// Confirm the WebView's imported Manager session without retrying saved
+    /// passwords. This is used before giving Web content local data access.
+    @discardableResult
+    func confirmWebIdentity() async -> Bool {
+        let generation = authenticationGeneration
+        let endpoint = ManagerConfig.shared.baseURL
+        do {
+            let candidate = try await api.me()
+            guard generation == authenticationGeneration, endpoint == ManagerConfig.shared.baseURL,
+                  candidate.localResearchIdentity != nil else { return false }
+            if user?.localResearchIdentity != candidate.localResearchIdentity {
+                authenticationGeneration &+= 1
+                restoreTask?.cancel()
+                restoreTask = nil
+            }
+            user = candidate
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Validate an already-selected Manager without replaying saved passwords.
     /// A denied, unavailable, or different account never retains the old UI identity.
     @discardableResult

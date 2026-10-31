@@ -90,7 +90,9 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
       setEntry(entryPayload as PublicEntry);
       if (sessionResponse.ok) {
         const value = await readJSON(sessionResponse);
-        setSession((value.session ?? value) as AuthSession);
+        const restored = (value.session ?? value) as AuthSession;
+        if (restored?.username && !restored.visitor_login) notifyNative("session-updated");
+        setSession(restored);
       } else if (sessionResponse.status !== 401) {
         setUnavailable(true);
       }
