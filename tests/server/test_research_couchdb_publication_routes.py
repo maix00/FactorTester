@@ -39,6 +39,39 @@ def test_http_route_publishes_selected_report(monkeypatch):
     assert store.writes == 1
 
 
+def test_catalog_report_publication_keeps_verified_editable_source(tmp_path, monkeypatch):
+    import base64
+    import hashlib
+    from tools.cli.release.research_reporting.workspace import initialize_report_workspace
+    from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
+    from tools.cli.release.research_reporting.authoring.tree_bundle import bundle_from_snapshot
+    from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+
+    workspace = initialize_report_workspace(workspace_root=tmp_path, report_workspace_id='workspace',
+        branch_id='main', report_id='report-1', workspace_id='research-1', title='Report', branch_ref='report-branch:main')
+    root = workspace['package_root']
+    snapshot = load_snapshot(package_root=root, branch_id='main')
+    bundle = bundle_from_snapshot(snapshot, package_root=root, branch_id='main')
+    authoring = {'sha256': hashlib.sha256(bundle).hexdigest(), 'root_ref': snapshot['head']['root_ref'],
+                 'content_base64': base64.b64encode(bundle).decode('ascii')}
+    body = {'branch_ref': 'main', 'projection': build_upload_projection(snapshot),
+            'expected_revision': None, 'authoring': authoring}
+    (status, response), store = _request(monkeypatch, body=body)
+    assert status == 201
+    service, catalog, _unused, _auth = harness()
+    service.store = store
+    result = service.read(session=SESSION, research_id='research-1', report_id='report-1',
+                          publication_ref=response['publication']['publication_id'], metadata_only=True,
+                          requires_edit=True)
+    assert result['authoring']['sha256'] == authoring['sha256'] and result['edit_authorized'] is True
+    (status, _response), denied_store = _request(monkeypatch, body=body,
+        change=lambda _catalog, auth: auth.update(write=False))
+    assert status == 403 and denied_store.writes == 0
+    bad = {**body, 'authoring': {**authoring, 'sha256': '0' * 64}}
+    (status, _response), rejected_store = _request(monkeypatch, body=bad)
+    assert status == 400 and rejected_store.writes == 0
+
+
 def test_http_route_denies_live_public_access_revoke(monkeypatch):
     (status, _response), store = _request(monkeypatch, change=lambda _catalog, auth: auth.update(admit=False))
     assert status == 403 and store.writes == 0

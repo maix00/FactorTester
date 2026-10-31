@@ -471,12 +471,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {'success': True, 'publication': value}, 201)
                 return True
             if publication:
-                if set(data) - {"branch_ref", "projection", "expected_revision"}:
+                if set(data) - {"branch_ref", "projection", "expected_revision", "authoring"}:
                     raise ValueError("unsupported report publication fields")
                 value = self._research_couch_service().publish(
                     session=session, research_id=unquote(publication.group(1)), report_id=unquote(publication.group(2)),
                     branch_ref=str(data.get("branch_ref") or ""), projection=data.get("projection"),
-                    expected_revision=data.get("expected_revision"))
+                    expected_revision=data.get("expected_revision"),
+                    **({'authoring': data['authoring']} if 'authoring' in data else {}))
                 json_response(self, {"success": True, "publication": value}, 201)
                 return True
             if self._post_report_branch_route(parsed, actor, data):

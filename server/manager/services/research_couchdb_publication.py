@@ -108,13 +108,21 @@ class ResearchCouchPublicationService:
         return resource_id, owner_id, owner_ref, authorize_now
 
     def publish(self, *, session: dict, research_id: str, report_id: str, branch_ref: str,
-                projection: dict, expected_revision: str | None, _prepared=None, _authoring=None) -> dict:
+                projection: dict, expected_revision: str | None, authoring: dict | None = None,
+                _prepared=None, _authoring=None) -> dict:
         resource_id, owner_id, owner_ref, authorize_now = self._context(
             session=session, research_id=research_id, report_id=report_id, scopes=('write', 'share'))
 
         # Fail before reading or preparing untrusted report bytes as well as
         # immediately before the compare-and-set write.
         authorize_now()
+        if authoring is not None:
+            if _prepared is not None or _authoring is not None:
+                raise ValueError('report authoring cannot be prepared twice')
+            from server.jobs.storage.couchdb_research_publication import prepare_authoring, prepare_projection
+            _prepared = prepare_projection(projection, report_id=report_id)
+            _authoring = prepare_authoring(authoring, report_id=report_id,
+                generation=_prepared[0]['generation'], branch_ref=branch_ref)
         return commit_shared_report(self.store, manager_id=self.state.server_id, owner_id=owner_id,
             owner_ref=owner_ref, research_id=research_id, report_id=report_id, branch_ref=branch_ref,
             keycloak_resource_id=resource_id, projection=projection, expected_revision=expected_revision,
