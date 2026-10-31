@@ -141,11 +141,16 @@ class LocalResearchCatalog:
         self.workspace_root.chmod(0o700)
         workspace_id = report_workspace_id_for(report['report_id'])
         with report_workspace_lock(self.workspace_root / '.locks' / workspace_id):
-            initialize_report_workspace(workspace_root=self.workspace_root, report_workspace_id=workspace_id,
-                report_id=report['report_id'], branch_id='main', workspace_id=research_id,
-                title=title, branch_ref='report-branch:main')
-        with self._connect() as db:
-            db.execute('UPDATE reports SET ready=1 WHERE report_id=?', (report['report_id'],))
+            with self._connect() as db:
+                current = db.execute('SELECT ready FROM reports WHERE report_id=?', (report['report_id'],)).fetchone()
+            if not current:
+                raise ValueError('report reservation is unavailable')
+            if not current['ready']:
+                initialize_report_workspace(workspace_root=self.workspace_root, report_workspace_id=workspace_id,
+                    report_id=report['report_id'], branch_id='main', workspace_id=research_id,
+                    title=title, branch_ref='report-branch:main')
+                with self._connect() as db:
+                    db.execute('UPDATE reports SET ready=1 WHERE report_id=?', (report['report_id'],))
         return self._report_public(report)
 
     def list_reports(self, *, profile_id: str, research_id: str, limit: int, offset: int) -> dict:
@@ -165,8 +170,16 @@ class LocalResearchCatalog:
     def get_report_index(self, *, profile_id: str, research_id: str, report_id: str) -> dict:
         from .authoring.tree_projection import load_report_index
         from .public_research.projection import build_upload_index
-        from .report_workspace_identity import report_workspace_id_for
+        report, root = self._report_root(profile_id, research_id, report_id)
+        snapshot = load_report_index(package_root=root, branch_id='main')
+        index = build_upload_index(snapshot)
+        if index.get('report_id') != report_id:
+            raise ValueError('local report identity is invalid')
+        return {'report': report, 'index': index,
+                'version': {'generation': snapshot['head']['generation'], 'root_ref': snapshot['head']['root_ref']}}
 
+    def _report_root(self, profile_id: str, research_id: str, report_id: str):
+        from .report_workspace_identity import report_workspace_id_for
         profile = self._profile(profile_id)
         with self._connect() as db:
             row = db.execute('''SELECT * FROM reports WHERE profile_id=? AND research_id=?
@@ -179,10 +192,56 @@ class LocalResearchCatalog:
         root = self.workspace_root / 'research' / report_workspace_id_for(report_id)
         if root.is_symlink() or root.parent.is_symlink():
             raise ValueError('local report workspace cannot be a symlink')
-        index = build_upload_index(load_report_index(package_root=root, branch_id='main'))
-        if index.get('report_id') != report_id:
+        return report, root
+
+    def get_report_chapter(self, *, profile_id: str, research_id: str, report_id: str, chapter_id: str) -> dict:
+        from .authoring.tree_projection import load_chapter_snapshot
+        from .authoring.tree_schema import identifier
+        from .public_research.projection import build_upload_projection
+
+        _report, root = self._report_root(profile_id, research_id, report_id)
+        snapshot = load_chapter_snapshot(package_root=root, branch_id='main', chapter_id=identifier(chapter_id, 'chapter_id'))
+        if snapshot['head']['report_id'] != report_id:
             raise ValueError('local report identity is invalid')
-        return {'report': report, 'index': index}
+        projection = build_upload_projection(snapshot, include_asset_bytes=False, include_local_resource_bytes=False)
+        return {'chapter': {'chapter_id': chapter_id, 'components': projection['components']},
+                'version': {'generation': snapshot['head']['generation'], 'root_ref': snapshot['head']['root_ref']}}
+
+    def add_report_component(self, *, profile_id: str, research_id: str, report_id: str,
+                             component_id: str, kind: str, parent_id: str, title: str, body: str,
+                             generation: int, root_ref: str) -> dict:
+        """Apply one bounded additive edit through the shared versioned tree transaction."""
+        from .authoring.tree_operations import apply_operation
+        from .authoring.tree_paths import report_tree_paths
+        from .authoring.tree_schema import identifier, node_reference
+        from .authoring.tree_transactions import mutate_batch
+        from .generation import report_workspace_lock
+        from .git import commit_report_workspace
+        from .report_workspace_identity import report_workspace_id_for
+
+        _report, root = self._report_root(profile_id, research_id, report_id)
+        if kind not in {'chapter', 'entry'} or type(generation) is not int or generation < 0:
+            raise ValueError('invalid report edit')
+        identifier(component_id, 'component_id')
+        node_reference(root_ref)
+        if kind == 'chapter':
+            if parent_id or body or not title.strip():
+                raise ValueError('invalid chapter')
+            parent = None
+        else:
+            parent = identifier(parent_id, 'parent_id')
+            if not body.strip():
+                raise ValueError('invalid paragraph')
+        operation = {'op': 'add', 'component_id': component_id, 'kind': kind,
+                     'title': title, 'body': body, 'parent_id': parent, 'content': None,
+                     'display_kind': '', 'bindings': []}
+        expected = {'report_id': report_id, 'generation': generation, 'root_ref': root_ref}
+        lock = self.workspace_root / '.locks' / report_workspace_id_for(report_id)
+        with report_workspace_lock(lock):
+            head = mutate_batch(report_tree_paths(root, 'main'), [operation], apply_operation,
+                                expected_head=expected)
+            commit_report_workspace(root, message='Edit report')
+        return {'version': {'generation': head['generation'], 'root_ref': head['root_ref']}}
 
     @staticmethod
     def _report_public(row) -> dict:

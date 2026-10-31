@@ -40,13 +40,16 @@ class LocalResearchRPC:
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
             'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
             'get_report': {'action', 'profile_id', 'research_id', 'report_id'},
+            'get_report_chapter': {'action', 'profile_id', 'research_id', 'report_id', 'chapter_id'},
+            'add_report_component': {'action', 'profile_id', 'research_id', 'report_id', 'component_id', 'kind',
+                                     'parent_id', 'title', 'body', 'generation', 'root_ref'},
         }
         if not isinstance(action, str) or action not in keys or set(message) != keys[action]:
             raise ValueError('invalid local Research message')
-        for key in keys[action] - {'action', 'limit', 'offset'}:
+        for key in keys[action] - {'action', 'limit', 'offset', 'generation'}:
             value = message[key]
-            if (not isinstance(value, str) or len(value) > (10000 if key == 'description' else 512)
-                    or any((ord(char) < 32 and not (key == 'description' and char in '\n\r\t'))
+            if (not isinstance(value, str) or len(value) > (10000 if key in {'description', 'body'} else 512)
+                    or any((ord(char) < 32 and not (key in {'description', 'body'} and char in '\n\r\t'))
                            or ord(char) == 127 for char in value)):
                 raise ValueError('invalid local Research message')
         if action == 'capabilities':
@@ -70,7 +73,16 @@ class LocalResearchRPC:
         elif action == 'create_report':
             value = {'report': self.store.create_report(profile_id=message['profile_id'], research_id=message['research_id'],
                      title=message['title'], operation_id=message['operation_id'])}
-        else:
+        elif action == 'get_report':
             value = self.store.get_report_index(profile_id=message['profile_id'], research_id=message['research_id'],
                      report_id=message['report_id'])
+        elif action == 'get_report_chapter':
+            value = self.store.get_report_chapter(profile_id=message['profile_id'], research_id=message['research_id'],
+                     report_id=message['report_id'], chapter_id=message['chapter_id'])
+        else:
+            from .authoring.tree_transactions import ReportVersionConflict
+            try:
+                value = self.store.add_report_component(**{key: message[key] for key in keys[action] - {'action'}})
+            except ReportVersionConflict:
+                return {'success': False, 'code': 'local_report_version_conflict'}
         return {'success': True, 'schema': SCHEMA, **value}

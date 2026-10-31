@@ -69,6 +69,14 @@ def test_local_report_uses_existing_report_tree_and_retry_recovers(tmp_path, mon
     root = rpc.store.workspace_root / 'research' / report_workspace_id_for(values[0]['report_id'])
     assert load_snapshot(package_root=root, branch_id='main')['head']['report_id'] == values[0]['report_id']
     assert (root / '.git').is_dir()
+    import subprocess
+    before = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    (root / 'private-draft.txt').write_text('unfinished draft', encoding='utf-8')
+    assert rpc.request(request)['report'] == values[0]
+    after = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    assert before == after
+    assert 'private-draft.txt' in subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain'], text=True)
+    (root / 'private-draft.txt').unlink()
     read = {'action': 'get_report', 'profile_id': 'self', 'research_id': research['research_id'],
             'report_id': values[0]['report_id']}
     result = rpc.request(read)
@@ -76,6 +84,20 @@ def test_local_report_uses_existing_report_tree_and_retry_recovers(tmp_path, mon
     assert result['index']['report_id'] == values[0]['report_id']
     assert result['index']['chapters'] == []
     assert 'paths' not in result['index']
+    edit = {'action': 'add_report_component', 'profile_id': 'self', 'research_id': research['research_id'],
+            'report_id': values[0]['report_id'], 'component_id': 'chapter-1', 'kind': 'chapter',
+            'parent_id': '', 'title': 'Chapter', 'body': '', **result['version']}
+    next_version = rpc.request(edit)['version']
+    assert next_version['generation'] == result['version']['generation'] + 1
+    assert rpc.request({**edit, 'component_id': 'chapter-2'}) == {'success': False, 'code': 'local_report_version_conflict'}
+    paragraph = {**edit, **next_version, 'component_id': 'entry-1', 'kind': 'entry',
+                 'parent_id': 'chapter-1', 'title': '', 'body': 'First\nsecond'}
+    latest = rpc.request(paragraph)['version']
+    chapter = rpc.request({'action': 'get_report_chapter', 'profile_id': 'self',
+        'research_id': research['research_id'], 'report_id': values[0]['report_id'], 'chapter_id': 'chapter-1'})
+    assert chapter['version'] == latest
+    assert [(x['kind'], x['body']) for x in chapter['chapter']['components']] == [('chapter', ''), ('entry', 'First\nsecond')]
+    assert subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain'], text=True).strip() == ''
     other = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='other',
                              profiles=[{'profile_id': 'self', 'display_name': 'Other'}])
     with pytest.raises(ValueError):
