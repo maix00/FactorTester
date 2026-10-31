@@ -55,7 +55,7 @@ function ResearchPageForSession(): React.ReactElement {
   const syncLocalReports = local.requestSync;
   useEffect(() => { if (local.syncRevision) setRevision(value => value + 1); }, [local.syncRevision]);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
-  const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<unknown>(null), [editor, setEditor] = useState(false);
+  const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<unknown>(null);
   const [detailPrincipal, setDetailPrincipal] = useState<string | null>(null);
   const [editingResearch, setEditingResearch] = useState(false);
   const [selectedPublicationID, setSelectedPublicationID] = useState("");
@@ -168,7 +168,7 @@ function ResearchPageForSession(): React.ReactElement {
   const selectedReportBranch = tab === "reports" && selected ? selectReportBranch(selected, selectedPublicationID) : undefined;
   const selectedPublicationBranch = selectedReportBranch?.source_kind === "publication" ? selectedReportBranch : undefined;
   const linkedResearch = selected ? linkedResearchID(selected) : "";
-  const openResearch = (id:string, title:string): void => {setTab("researches");setRows([]);setPage(1);setSelected({research_id:id,title});setSelectedPublicationID("");setEditor(false);setEditingResearch(false);};
+  const openResearch = (id:string, title:string): void => {setTab("researches");setRows([]);setPage(1);setSelected({research_id:id,title});setSelectedPublicationID("");setEditingResearch(false);};
   const owner = (row:Row): React.ReactNode => row.owner_ref || row.owner ? <ObjectReference value={{kind:"user",ref:row.owner_ref || row.owner,label:row.owner_alias || row.owner_ref || row.owner}} /> : "—";
   const profile = (row:Row): React.ReactNode => {
     const ref = row.profile_ref || row.profile_id || row.selected_branch?.profile_ref;
@@ -178,16 +178,16 @@ function ResearchPageForSession(): React.ReactElement {
   const researchLink = (row:Row): React.ReactNode => {
     const id = linkedResearchID(row), title = String(row.research?.title || row.research_title || id);
     return id ? <button type="button" className="tr-table-link" onClick={() => {
-      if(row.__local && row.research){setTab("researches");setRows([]);setPage(1);setSelected({...row.research,__local:true,owner_ref:principal});setEditor(false);}
+      if(row.__local && row.research){setTab("researches");setRows([]);setPage(1);setSelected({...row.research,__local:true,owner_ref:principal});}
       else openResearch(id,title);
     }}>{title}</button> : "—";
   };
   const activateServer=():void=>{assistantResearchContexts.activate(instance.id);};
   const canCreateLocal=local.phase==="ready" && local.capabilities?.actions.includes("create");
   return <div className="tr-research-page" onPointerDownCapture={activateServer} onFocusCapture={activateServer}><FunctionPage title={t("nav.research")} actions={<>{tab === "researches" ? canCreateLocal && session ? <Dropdown trigger={["click"]} menu={{items:[{key:"local",label:t("localResearch.local")},{key:"server",label:t("localResearch.server")}],onClick:({key})=>key==="local" ? setCreatingLocal(true) : setCreating(true)}}><Button type="primary">{t("research.create")} <DownOutlined /></Button></Dropdown> : <Button type="primary" onClick={() => session ? setCreating(true) : openAuth("login")}>{t("research.create")}</Button> : null}<Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} /></>}>
-    <Tabs activeKey={tab} onChange={(value) => { setTab(value); setRows([]); setPage(1); setSelected(null); setSelectedPublicationID(""); setEditor(false); }} items={[{ key: "researches", label: t("research.tabResearches") }, { key: "reports", label: t("research.tabReports") }]} />
+    <Tabs activeKey={tab} onChange={(value) => { setTab(value); setRows([]); setPage(1); setSelected(null); setSelectedPublicationID(""); }} items={[{ key: "researches", label: t("research.tabResearches") }, { key: "reports", label: t("research.tabReports") }]} />
     <div className="tr-research-table"><TRDataTable clientFiltering rows={filtered} rowKey={(row) => `${row.__local ? "local" : "server"}:${rowID(row)}`} loading={loading} pagination={{ page, pageSize: size, total: filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
-      { title: t("editor.name"), key: "title", render: (_, row) => row.__local && tab === "reports" && !local.capabilities?.actions.includes("get_report") ? row.title : <button className="tr-table-link" onClick={() => { setSelected(row); setSelectedPublicationID(tab === "reports" ? selectReportBranch(row)?.publication_id || "" : ""); setEditor(false); }}>{row.title || rowID(row)}</button> },
+      { title: t("editor.name"), key: "title", render: (_, row) => row.__local && tab === "reports" && !local.capabilities?.actions.includes("get_report") ? row.title : <button className="tr-table-link" onClick={() => { setSelected(row); setSelectedPublicationID(tab === "reports" ? selectReportBranch(row)?.publication_id || "" : "");  }}>{row.title || rowID(row)}</button> },
       ...(tab === "reports" ? [{title:t("research.linkedResearch"),key:"research",render:(_:unknown,row:Row) => researchLink(row)}] : []),
       {title:t("research.profile"),key:"profile",className:"tr-research-profile-column",filters:Array.from(new Set(filtered.map(row=>String(row.profile_ref || row.profile_id || row.selected_branch?.profile_ref || "")).filter(Boolean))).map(value=>({text:value,value})),onFilter:(value:React.Key | boolean,row:Row)=>String(row.profile_ref || row.profile_id || row.selected_branch?.profile_ref || "")===String(value),render:(_:unknown,row:Row) => profile(row)},
       {title:t("localResearch.location"),key:"location",filters:[{text:t("localResearch.local"),value:"local"},{text:t("localResearch.server"),value:"server"}],onFilter:(value:React.Key | boolean,row:Row)=>value==="local" ? !!(row.__local || row.__hasLocal) : !row.__local,render:(_:unknown,row:Row)=>row.__hasLocal ? `${t("localResearch.local")} / ${t("localResearch.server")}` : t(row.__local ? "localResearch.local" : "localResearch.server")},
@@ -200,7 +200,7 @@ function ResearchPageForSession(): React.ReactElement {
     {creatingLocal && local.client && local.capabilities?.profiles.length ? <LocalResearchCreate client={local.client} profiles={local.capabilities.profiles} initialProfile={local.capabilities.profiles[0].profile_id} operation={localAttempt} onClose={()=>setCreatingLocal(false)} onCreated={()=>{localAttempt.current=null;setCreatingLocal(false);setRevision(value=>value+1);}} />:null}
     {localProfile ? <DetailsPanel title={t("research.profile")} onClose={()=>setLocalProfile(null)} width={520}><PropertyGroups groups={[{key:"profile",title:t("research.profile"),items:[{key:"name",label:t("editor.name"),value:local.capabilities?.profiles.find(value=>value.profile_id===localProfile)?.display_name || localProfile},{key:"id",label:t("objectReference.reference"),value:localProfile}]}]} /></DetailsPanel>:null}
     {creating ? <ResearchCreate onClose={() => setCreating(false)} onCreated={(value) => {
-      setCreating(false);setSelected(value);setEditor(false);setRevision(current=>current+1);
+      setCreating(false);setSelected(value);setRevision(current=>current+1);
       const client=local.client,profile=local.capabilities?.profiles.find(item=>item.profile_id==="self");
       if(local.phase==="ready" && client && profile){
         if(!local.capabilities?.actions.includes("import_research")){notify({code:"research.import.pending",type:"warning",message:t("research.importPending")});return;}
@@ -211,7 +211,7 @@ function ResearchPageForSession(): React.ReactElement {
       }
     }} /> : null}
     {selected?.__local && local.client && local.capabilities ? <LocalResearchDetail key={`${selected.profile_id}:${rowID(selected)}`} client={local.client} capabilities={local.capabilities} item={(tab === "reports" ? selected.research : selected) as any} initialReport={tab === "reports" ? selected as any : undefined} onSaved={()=>{setLocalRevision(value=>value+1);syncLocalReports();}} onClose={()=>setSelected(null)} /> : null}
-    {selected && !selected.__local ? <DetailsPanel title={selected.title || rowID(selected)} onClose={() => { setSelected(null); setSelectedPublicationID(""); setEditor(false); }}>
+    {selected && !selected.__local ? <DetailsPanel title={selected.title || rowID(selected)} onClose={() => { setSelected(null); setSelectedPublicationID(""); }}>
       {tab === "reports" ? <>
         {linkedResearch ? <Button type="link" onClick={() => openResearch(linkedResearch,selected.research?.title || selected.research_title || linkedResearch)}>{t("research.openLinkedResearch")}</Button> : null}
         {linkedResearch && selected.report_id ? <Collapse className="tr-report-sharing" ghost items={[{key:"sharing",label:t("researchSharing.title"),children:<ResearchSharing key={`${linkedResearch}:${selected.report_id}`} target={{researchId:linkedResearch,reportId:String(selected.report_id)}} />}]} /> : null}
@@ -235,7 +235,7 @@ function ResearchPageForSession(): React.ReactElement {
             : <Alert type="info" showIcon message={t("research.reportVersionUnavailable")} description={selectedReportBranch ? t(`research.reportSources.${selectedReportBranch.source_kind || "unknown"}`) : selected.build_source === "workspace" ? t("research.reportSources.workspace") : undefined} />}
       </>
         : editingResearch ? <ResearchEdit research={selected as Row} onCancel={() => setEditingResearch(false)} onArchived={() => { setSelected(null); setEditingResearch(false); setRevision((value) => value + 1); }} onSaved={(value) => { setSelected({ ...selected, ...value }); setDetail(value); setEditingResearch(false); setRevision((revision) => revision + 1); }} />
-        : editor ? <><Button onClick={() => setEditor(false)}>{t("research.backToSummary")}</Button><iframe className="tr-artifact-frame" title={selected.title || rowID(selected)} src={`/researches/${encodeURIComponent(researchRowID(selected))}?presentation=embedded`} /></> : detail && !(detail as Row).error ? <ResearchRelations key={researchRowID(selected)} research={detail as Row} showLegacyVisibility={authority === "legacy"} onSectionChange={section => setResearchLocation({id:selectedResearchID,section})} overview={<><ResearchSummary value={detail as Row} showLegacyVisibility={authority === "legacy"} /><div className="tr-inline-actions">{(detail as Row).access?.can_manage ? <Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button> : null}<Button onClick={() => setEditor(true)}>{t("research.openEditor")}</Button></div></>} onReport={(report) => { setTab("reports"); setRows([]); setPage(1); setSelected(report); setSelectedPublicationID(selectReportBranch(report)?.publication_id || ""); }} onResearch={(research) => { setTab("researches"); setSelected(research); setEditingResearch(false); setEditor(false); }} /> : <ResearchSummary value={detail as Row | null} showLegacyVisibility={authority === "legacy"} />}
+        : detail && !(detail as Row).error ? <ResearchRelations key={researchRowID(selected)} research={detail as Row} showLegacyVisibility={authority === "legacy"} onSectionChange={section => setResearchLocation({id:selectedResearchID,section})} overview={<><ResearchSummary value={detail as Row} showLegacyVisibility={authority === "legacy"} />{(detail as Row).access?.can_manage ? <div className="tr-inline-actions"><Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button></div> : null}</>} onReport={(report) => { setTab("reports"); setRows([]); setPage(1); setSelected(report); setSelectedPublicationID(selectReportBranch(report)?.publication_id || ""); }} onResearch={(research) => { setTab("researches"); setSelected(research); setEditingResearch(false); }} /> : <ResearchSummary value={detail as Row | null} showLegacyVisibility={authority === "legacy"} />}
     </DetailsPanel> : null}
   </FunctionPage></div>;
 }

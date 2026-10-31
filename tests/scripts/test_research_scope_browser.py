@@ -63,6 +63,9 @@ createRoot(document.getElementById('root')!).render(
                           research_id:'r1',title:'研究甲',owner_ref:'alice',access:{can_view:fixture.allowResearch,can_manage:false}
                         }}));
                         if (url.pathname === '/api/research/r1/members') return Promise.resolve(response({members:[]}));
+                        if (url.pathname === '/api/research/r1/workspaces') return Promise.resolve(response({workspaces:[]}));
+                        if (url.pathname === '/api/research/r1/reports') return Promise.resolve(response({reports:[]}));
+                        if (url.pathname === '/api/research-evidence/catalog/research/r1') return Promise.resolve(response({catalog:{items:[],total:0}}));
                         const report = url.pathname === '/api/research/reports';
                         if (url.pathname !== '/api/research' && !report) throw Error('unexpected path: ' + url.pathname);
                         const scope = url.searchParams.get('scope');
@@ -100,8 +103,22 @@ createRoot(document.getElementById('root')!).render(
                     page.get_by_role("button", name="研究甲", exact=True).click()
                     page.get_by_role("dialog").wait_for()
                     assert "/api/research/r1" in page.evaluate("window.fixture.requests")
+                    dialog = page.get_by_role("dialog")
+                    for label in ("详情", "研究报告", "证据", "研究身份", "研究工作区"):
+                        assert dialog.get_by_role("tab", name=label, exact=True).is_visible()
+                    assert dialog.get_by_role("button", name="打开编辑器").count() == 0
+                    assert dialog.locator('iframe[src*="/researches/"]').count() == 0
                     page.wait_for_function("window.fixture.context()?.researchId === 'r1'")
                     assert page.evaluate("window.fixture.context().section") == "details"
+                    page.screenshot(path=str(tmp_path / f"research-{viewport['width']}.png"), animations="disabled")
+                    for label, endpoint in (("研究报告", "/api/research/r1/reports"),
+                                            ("证据", "/api/research-evidence/catalog/research/r1"),
+                                            ("研究工作区", "/api/research/r1/workspaces")):
+                        dialog.get_by_role("tab", name=label, exact=True).click()
+                        try:
+                            page.wait_for_function("url => window.fixture.requests.some(r => r.startsWith(url))", arg=endpoint)
+                        except Exception as exc:
+                            raise AssertionError(f"viewport={viewport} tab={label} requests={page.evaluate('window.fixture.requests')}") from exc
                     page.get_by_role("dialog").get_by_role("tab",name="研究身份").click()
                     page.wait_for_function("window.fixture.context()?.section === 'members'")
                     if viewport["width"] <= 760:
