@@ -42,8 +42,11 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             browser = playwright.chromium.launch(channel="chrome", headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 900}, locale="zh-CN")
             page.set_default_timeout(10000)
-            published, pulled = [], []
+            published, pulled, synced = [], [], []
             def native(request):
+                if request.get('action') == 'sync_reports':
+                    synced.append(request['after_report_id'])
+                    return {'success': True, 'schema': 'tr-local-research-bridge:v1', 'reports': [], 'next_report_id': None}
                 if request.get('action') == 'publish_report':
                     published.append(request['report_id'])
                     return {'success': True, 'schema': 'tr-local-research-bridge:v1', 'publication': {
@@ -96,11 +99,16 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             assert dialog.get_by_text("本机报告验收").is_visible()
             dialog.get_by_text("暂无数据").wait_for()
             dialog.get_by_role("button", name="编辑报告内容").click()
+            prior_syncs = len(synced)
             dialog.get_by_label("新章节标题").fill("研究方法")
             dialog.get_by_role("button", name="新增章节").click()
             dialog.get_by_label("段落正文").fill("真实存储的段落内容")
             dialog.get_by_role("button", name="添加段落").click()
             dialog.get_by_text("真实存储的段落内容").wait_for()
+            for _ in range(30):
+                if len(synced) > prior_syncs: break
+                page.wait_for_timeout(100)
+            assert len(synced) > prior_syncs
             open_page()
             page.get_by_role("button", name="本机真实存储验收").click()
             dialog = page.get_by_role("dialog")

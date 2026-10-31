@@ -24,6 +24,7 @@ import { ResearchRelations } from "../components/research-relations.tsx";
 import { ResearchSharing } from "../components/research-sharing.tsx";
 import { LocalResearchCreate, LocalResearchDetail } from "../components/local-research-page.tsx";
 import { useLocalResearch } from "../use-local-research.ts";
+import { useLocalReportSync } from "../use-local-report-sync.ts";
 import { notify } from "../notifications/core.ts";
 import { linkedResearchID, reportBranches, reportRowID, researchRowID, selectReportBranch } from "../research-model.ts";
 type Row = Record<string, any>;
@@ -47,6 +48,8 @@ function ResearchPageForSession(): React.ReactElement {
   const [authority, setAuthority] = useState<"legacy"|"keycloak"|null>(null);
   const [tab, setTab] = useState("researches"), [rows, setRows] = useState<Row[]>([]);
   const [page, setPage] = useState(1), [size, setSize] = useState(20), [revision, setRevision] = useState(0);
+  const syncLocalReports = useLocalReportSync(local.client, local.capabilities, instance.active !== false,
+    () => setRevision(value => value + 1));
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<unknown>(null), [editor, setEditor] = useState(false);
   const [detailPrincipal, setDetailPrincipal] = useState<string | null>(null);
@@ -158,7 +161,7 @@ function ResearchPageForSession(): React.ReactElement {
     {creatingLocal && local.client && local.capabilities?.profiles.length ? <LocalResearchCreate client={local.client} profiles={local.capabilities.profiles} initialProfile={local.capabilities.profiles[0].profile_id} operation={localAttempt} onClose={()=>setCreatingLocal(false)} onCreated={()=>{localAttempt.current=null;setCreatingLocal(false);setRevision(value=>value+1);}} />:null}
     {localProfile ? <DetailsPanel title={t("research.profile")} onClose={()=>setLocalProfile(null)} width={520}><PropertyGroups groups={[{key:"profile",title:t("research.profile"),items:[{key:"name",label:t("editor.name"),value:local.capabilities?.profiles.find(value=>value.profile_id===localProfile)?.display_name || localProfile},{key:"id",label:t("objectReference.reference"),value:localProfile}]}]} /></DetailsPanel>:null}
     {creating ? <ResearchCreate onClose={() => setCreating(false)} onCreated={(value) => { setCreating(false); setSelected(value); setEditor(false); setRevision(revision => revision + 1); }} /> : null}
-    {selected?.__local && local.client && local.capabilities ? <LocalResearchDetail client={local.client} capabilities={local.capabilities} item={selected as any} onClose={()=>setSelected(null)} /> : null}
+    {selected?.__local && local.client && local.capabilities ? <LocalResearchDetail client={local.client} capabilities={local.capabilities} item={selected as any} onSaved={syncLocalReports} onClose={()=>setSelected(null)} /> : null}
     {selected && !selected.__local ? <DetailsPanel title={selected.title || rowID(selected)} onClose={() => { setSelected(null); setSelectedPublicationID(""); setEditor(false); }}>
       {tab === "reports" ? <>
         {linkedResearch ? <Button type="link" onClick={() => openResearch(linkedResearch,selected.research?.title || selected.research_title || linkedResearch)}>{t("research.openLinkedResearch")}</Button> : null}

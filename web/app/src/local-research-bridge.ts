@@ -252,6 +252,24 @@ export class LocalResearchClient {
     return {status:reply.status,local_modified:reply.local_modified};
   }
 
+  async syncReports(profileId:string,afterReportId="",limit=4):Promise<{reports:{report_id:string;research_id:string;status:string}[];next_report_id:string|null}> {
+    this.requireAction("sync_reports");const profile_id=inputText(profileId,512),after_report_id=inputText(afterReportId,160,true);
+    this.requireProfile(profile_id);
+    if(!Number.isSafeInteger(limit)||limit<1||limit>16)throw new LocalResearchBridgeError("local_research_invalid_input");
+    const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"sync_reports",profile_id,after_report_id,limit});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    if(!Array.isArray(reply.reports)||reply.reports.length>limit)throw new LocalResearchBridgeError("local_research_invalid_response");
+    const reports=reply.reports.map(value=>{
+      if(!isRecord(value)||!["unchanged","updated","published","conflict","denied","unavailable"].includes(String(value.status)))throw new LocalResearchBridgeError("local_research_invalid_response");
+      return {report_id:identifier(value.report_id),research_id:identifier(value.research_id),status:String(value.status)};
+    });
+    if(reports.some((value,index)=>value.report_id <= (index ? reports[index-1].report_id : after_report_id)))throw new LocalResearchBridgeError("local_research_invalid_response");
+    const next=reply.next_report_id;
+    if(next!==null&&(typeof next!=="string"||!reports.length||next!==reports.at(-1)?.report_id||next<=after_report_id))throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {reports,next_report_id:next as string|null};
+  }
+
   /** The caller retains operation_id for retries; this client never retries writes. */
   async create(input: LocalResearchCreate): Promise<LocalResearch> {
     this.requireAction("create");
