@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 
 from server.manager.http.responses import json_response
@@ -37,18 +38,21 @@ class FederationPublicDataRoutesMixin:
             operation = str(request.get("operation") or "").strip()
             principal = str(request.get("principal") or "").strip()
             payload = request.get("payload")
-            if kind == "execution":
+            if kind in {"execution", "shared-report"}:
                 from server.identity.federated_peer_delegation import accept_from_peer, bound_peer
                 from server.manager.http.federation.node_auth import authenticated_node
                 node = authenticated_node(self, method="POST", body=body)
                 if str(request.get("requester_server_id") or "") != node.node_id:
                     raise PermissionError("requesting Manager does not match the signed node")
-                if operation not in {"targets", "resolve-selection", "preview", "submit", "job"}:
-                    raise ValueError("unsupported execution operation")
+                operations = ({"targets", "resolve-selection", "preview", "submit", "job"}
+                              if kind == "execution" else {"read"})
+                if operation not in operations:
+                    raise ValueError("unsupported delegated operation")
                 if not isinstance(payload, dict):
                     raise TypeError("federated execution payload must be an object")
-                scope = "write" if operation == "submit" or (
-                    operation == "job" and payload.get("suffix") == "/cancel") else "read"
+                write_operation = kind == 'execution' and (operation == 'submit' or
+                    (operation == 'job' and payload.get('suffix') == '/cancel'))
+                scope = 'write' if write_operation else 'read'
                 delegated = accept_from_peer(self.state, bound_peer(self.state, node.node_id),
                     assertion=str(request.get("delegation_assertion") or ""),
                     stable_id=str(request.get("identity_id") or ""), target_scope=scope)
@@ -61,7 +65,7 @@ class FederationPublicDataRoutesMixin:
                 raise ValueError("federated public-data request is incomplete")
             if not isinstance(payload, dict):
                 raise TypeError("federated public-data payload must be an object")
-            if kind == "execution":
+            if kind in {"execution", "shared-report"}:
                 from server.identity.request_context import bind_verified_identity, identity_request
                 with identity_request():
                     bind_verified_identity(delegated.target_token, delegated.target_session)
@@ -91,6 +95,23 @@ class FederationPublicDataRoutesMixin:
         payload: dict[str, object],
     ) -> dict[str, object]:
         viewer = None if principal == VISITOR_PRINCIPAL else principal
+        if kind == "shared-report":
+            from server.identity.request_context import current_verified_identity
+            from server.manager.services.local_report_publication import LocalReportPublicationService
+            from server.manager.services.research_couchdb_publication import report_store_from_environment
+            context = current_verified_identity()
+            if (operation != 'read' or not context or not isinstance(context[1], dict)
+                    or context[1].get('username') != principal
+                    or set(payload) - {'research_id', 'report_id', 'publication_ref', 'branch_ref', 'attachment'}):
+                raise PermissionError('verified report reader is required')
+            service = LocalReportPublicationService(state=self.state, store=report_store_from_environment())
+            result = service.read(session=context[1], research_id=payload.get('research_id'),
+                report_id=payload.get('report_id'), publication_ref=str(payload.get('publication_ref') or ''),
+                branch_ref=str(payload.get('branch_ref') or ''), attachment=str(payload.get('attachment') or ''))
+            if payload.get('attachment'):
+                return {'content_base64': base64.b64encode(result['content']).decode('ascii'),
+                        'content_type': result['content_type']}
+            return result
         if kind == "execution":
             if viewer is None:
                 raise PermissionError("execution nodes require an account identity")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 
 from server.identity.keycloak_authorization import (
@@ -12,6 +13,20 @@ from server.identity.server_admission import server_admission
 from server.jobs.storage.couchdb_research_publication import _KEYS, _SAFE_MEDIA, commit_shared_report, publication_id
 from server.jobs.storage.couchdb_research_reports import get_research_report
 from tools.cli.release.research_reporting.public_research.object_uploads import projection_hash
+
+
+def report_store_from_environment():
+    """Build the same bounded report store for browser and signed peer reads."""
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+    couch = str(os.environ.get('TRADERESEARCH_COUCHDB_URL')
+                or os.environ.get('FACTORTESTER_COUCHDB_URL') or '').strip()
+    if not couch:
+        raise OSError('Research report store is unavailable')
+    database = str(os.environ.get('TRADERESEARCH_COUCHDB_DB')
+                   or os.environ.get('FACTORTESTER_COUCHDB_DB') or 'ft_objects').strip()
+    return CouchDBObjectStore(couch, database,
+        username=os.environ.get('TRADERESEARCH_COUCHDB_USER') or os.environ.get('FACTORTESTER_COUCHDB_USER', ''),
+        password=os.environ.get('TRADERESEARCH_COUCHDB_PASSWORD') or os.environ.get('FACTORTESTER_COUCHDB_PASSWORD', ''))
 
 
 class ResearchCouchPublicationService:

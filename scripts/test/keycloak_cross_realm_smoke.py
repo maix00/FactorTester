@@ -114,7 +114,7 @@ def denied(action) -> None:
     raise AssertionError("an invalid or revoked identity unexpectedly gained access")
 
 
-def run(sandbox: Sandbox) -> dict[str, object]:
+def run(sandbox: Sandbox, *, on_ready=None) -> dict[str, object]:
     source_realm, target_realm = "chain-a", "chain-b"
     source_issuer = "http://localhost:8080/realms/" + source_realm
     target_issuer = "http://localhost:8080/realms/" + target_realm
@@ -248,6 +248,14 @@ def run(sandbox: Sandbox) -> dict[str, object]:
     )
     result = verifier.authenticate(assertion(), expected_identity="stable-alice")
     assert result.target_session["username"] == "target-alice"
+    if on_ready is not None:
+        on_ready(sandbox=sandbox, source_realm=source_realm, target_realm=target_realm,
+            source_issuer=source_issuer, target_issuer=target_issuer,
+            source_client=a, source_introspection=introspection, target_client=b,
+            source_client_uuid=a_id, target_client_uuid=b_id, target_secret=b_secret, peer_secret=peer_secret,
+            alice_source=alice_a, alice_target=alice_b, source_resource=source_resource,
+            target_resource=target_resource, target_session=target_session, assertion=assertion, original=original,
+            role_change=role_change)
 
     # The target's individual compute nodes use Keycloak resources, not the
     # Manager grant or Bundle visibility. Check with the same retained user

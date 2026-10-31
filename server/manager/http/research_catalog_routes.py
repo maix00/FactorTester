@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from typing import Any
 from urllib.parse import parse_qs, unquote
@@ -20,19 +22,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         return service
 
     def _research_couch_service(self, *, local=False):
-        import os
-        from server.jobs.storage.couchdb_reports import CouchDBObjectStore
-        from server.manager.services.research_couchdb_publication import ResearchCouchPublicationService
-
-        couch = str(os.environ.get("TRADERESEARCH_COUCHDB_URL")
-                    or os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
-        if not couch:
-            raise OSError("Research report store is unavailable")
-        database = str(os.environ.get("TRADERESEARCH_COUCHDB_DB")
-                       or os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects").strip()
-        store = CouchDBObjectStore(couch, database,
-            username=os.environ.get("TRADERESEARCH_COUCHDB_USER") or os.environ.get("FACTORTESTER_COUCHDB_USER", ""),
-            password=os.environ.get("TRADERESEARCH_COUCHDB_PASSWORD") or os.environ.get("FACTORTESTER_COUCHDB_PASSWORD", ""))
+        from server.manager.services.research_couchdb_publication import ResearchCouchPublicationService, report_store_from_environment
+        store = report_store_from_environment()
         if local:
             from server.manager.services.local_report_publication import LocalReportPublicationService
             return LocalReportPublicationService(state=self.state, store=store)
@@ -118,11 +109,43 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     research_id, report_id = query['research_id'][0], query['report_id'][0]
                     publication_ref, kind, object_id = local_publication.group(1), local_publication.group(2), local_publication.group(3)
                 attachment = (kind + '/' + unquote(object_id)) if kind else ''
-                value = self._research_couch_service(local=bool(local_publication)).read(session=session,
-                    research_id=research_id, report_id=report_id,
-                    publication_ref=publication_ref or '',
-                    branch_ref='' if publication_ref else str(query.get('branch_ref', [''])[0]),
-                    attachment=attachment)
+                if len(query.get('server_id', [])) > 1:
+                    raise ValueError('only one report server may be selected')
+                server_id = str(query.get('server_id', [''])[0] or '').strip()
+                branch_ref = '' if publication_ref else str(query.get('branch_ref', [''])[0])
+                if local_publication and server_id and server_id not in {'local', self.state.server_id}:
+                    from server.identity.server_admission import server_admission
+                    from server.modules.single_factor_test.execution_nodes import peer_execution_route
+                    route = peer_execution_route(self.state, server_id)
+                    value = self.state.federation_gateway.public_data(route, kind='shared-report', operation='read',
+                        principal=viewer, delegated_user_token=self._bearer_token(), payload={
+                            'research_id': research_id, 'report_id': report_id,
+                            'publication_ref': publication_ref or '', 'branch_ref': branch_ref, 'attachment': attachment})
+                    if not server_admission(session, state=self.state, use_cache=False)[0]:
+                        raise PermissionError('current Manager access is not authorized')
+                    if attachment:
+                        try:
+                            raw = base64.b64decode(value['content_base64'], validate=True)
+                        except (KeyError, TypeError, ValueError, binascii.Error):
+                            raise ValueError('peer report attachment is invalid') from None
+                        if len(raw) > 8 * 1024 * 1024:
+                            raise ValueError('peer report attachment exceeds its limit')
+                        from server.jobs.storage.couchdb_research_publication import _SAFE_MEDIA
+                        media = str(value.get('content_type') or '').lower()
+                        value = {'content': raw, 'content_type': media if media in _SAFE_MEDIA else 'application/octet-stream'}
+                    else:
+                        record, projected = value.get('publication'), value.get('projection')
+                        if (not isinstance(record, dict) or not isinstance(projected, dict)
+                                or record.get('report_id') != report_id or projected.get('report_id') != report_id
+                                or record.get('storage_server_id') != server_id
+                                or (publication_ref and record.get('publication_id') != publication_ref)
+                                or (branch_ref and record.get('branch_ref') != branch_ref)):
+                            raise PermissionError('peer report identity does not match')
+                        value = {'publication': record, 'projection': projected}
+                else:
+                    value = self._research_couch_service(local=bool(local_publication)).read(session=session,
+                        research_id=research_id, report_id=report_id,
+                        publication_ref=publication_ref or '', branch_ref=branch_ref, attachment=attachment)
                 if attachment:
                     raw, content_type = value['content'], value['content_type']
                     self.send_response(200)

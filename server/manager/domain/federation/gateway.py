@@ -213,7 +213,7 @@ class FederatedGateway:
         Profile, and factor metadata operations and never accepts source-code
         or device-local path requests.
         """
-        if kind == "execution":
+        if kind in {"execution", "shared-report"}:
             if not route.remote or not route.online or self.state is None:
                 raise ValueError("remote Manager is unavailable")
             from server.identity.federated_peer_delegation import bound_peer, exchange_for_peer
@@ -222,19 +222,20 @@ class FederatedGateway:
             assertion, identity_id = exchange_for_peer(self.state, binding,
                 token=str(delegated_user_token or ""), principal=principal)
             try:
+                options = {'max_response_bytes': 12 * 1024 * 1024} if kind == 'shared-report' else {}
                 return NodeControlClient(binding.endpoint, key=self.state.node_key,
                     transport=self.transport).signed_json("/api/federation/public-data", {
                         "kind": kind, "operation": operation,
                         "requester_server_id": self.state.server_id,
                         "identity_id": identity_id, "delegation_assertion": assertion,
                         "payload": dict(payload or {}),
-                    }, timeout=self.timeout)
+                    }, timeout=self.timeout, **options)
             except HTTPError as exc:
                 if exc.code in (401, 403):
-                    raise PermissionError("federated execution was denied") from exc
-                raise ConnectionError(f"federated execution returned HTTP {exc.code}") from exc
+                    raise PermissionError("federated operation was denied") from exc
+                raise ConnectionError(f"federated operation returned HTTP {exc.code}") from exc
             except (URLError, OSError) as exc:
-                raise ConnectionError("federated execution is unavailable") from exc
+                raise ConnectionError("federated operation is unavailable") from exc
         if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         request_payload = {
