@@ -152,6 +152,24 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// Commit a native Manager switch only if the initiating identity has not
+    /// changed while the target was checked. The target identity comes from
+    /// the target Manager, never from JavaScript.
+    func adoptManagerSession(expected: LocalResearchIdentity?, candidate: UserInfo?) -> Bool {
+        guard user?.localResearchIdentity == expected else { return false }
+        if let candidate {
+            guard let expected, let actual = candidate.localResearchIdentity,
+                  actual.stableID == expected.stableID else { return false }
+        }
+        authenticationGeneration &+= 1
+        restoreTask?.cancel()
+        restoreTask = nil
+        isWorking = false
+        clearAuthentication()
+        user = candidate
+        return true
+    }
+
     /// Validate an already-selected Manager without replaying saved passwords.
     /// A denied, unavailable, or different account never retains the old UI identity.
     @discardableResult

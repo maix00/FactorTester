@@ -62,7 +62,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate>{{window.fixture.m
                         page.screenshot(path=str(Path('/tmp')/f'tr-manager-settings-form-fixture-{int(mobile)}.png'))
                         address.fill("https://user:secret@new.test")
                         page.get_by_role("button",name="切换 Manager").click()
-                        page.get_by_text("请输入不含凭据、查询参数或片段的 HTTP(S) 地址。",exact=True).wait_for()
+                        page.get_by_text("请输入不含路径、凭据、查询参数或片段的 HTTP(S) 地址。",exact=True).wait_for()
                         assert page.evaluate("window.fixture.calls.filter(x=>x.action==='switch').length")==0
                         address.fill("https://new.test")
                         page.get_by_role("button",name="切换 Manager").click()

@@ -17,7 +17,7 @@ export function managerURL(value:unknown):string {
   if(typeof value!=="string" || value.length>2048 || value!==value.trim() || /[\u0000-\u001f\u007f]/.test(value))throw new ManagerBridgeError("manager_invalid_url");
   try {
     const url=new URL(value);
-    if(!["http:","https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)throw new Error("invalid");
+    if(!["http:","https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname!=="/")throw new Error("invalid");
     return url.href.replace(/\/+$/,"");
   }catch{throw new ManagerBridgeError("manager_invalid_url");}
 }

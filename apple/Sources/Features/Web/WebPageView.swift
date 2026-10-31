@@ -37,6 +37,9 @@ final class WebPageSession {
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientWebAuthenticationMessage.handlerName
         )
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: ManagerConnectionBridgeContract.messageName
+        )
         #if os(macOS)
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: LocalResearchBridgeContract.messageName
@@ -373,6 +376,15 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ClientWebAuthenticationMessage.handlerName
             )
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: ManagerConnectionBridgeContract.messageName
+            )
+            if let localResearchSession, let serverOrigin {
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    ManagerConnectionBridge(session: localResearchSession, endpoint: serverOrigin),
+                    contentWorld: .page, name: ManagerConnectionBridgeContract.messageName
+                )
+            }
             #if os(macOS)
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: LocalResearchBridgeContract.messageName
@@ -424,6 +436,12 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             return existing
         }
         let configuration = WKWebViewConfiguration()
+        if let localResearchSession, let serverOrigin {
+            configuration.userContentController.addScriptMessageHandler(
+                ManagerConnectionBridge(session: localResearchSession, endpoint: serverOrigin),
+                contentWorld: .page, name: ManagerConnectionBridgeContract.messageName
+            )
+        }
         #if os(macOS)
         if let localResearchSession, let serverOrigin {
             configuration.userContentController.addScriptMessageHandler(
@@ -526,6 +544,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         )
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientWebAuthenticationMessage.handlerName
+        )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: ManagerConnectionBridgeContract.messageName
         )
         #if os(macOS)
         webView.configuration.userContentController.removeScriptMessageHandler(
@@ -669,7 +690,8 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                    endpoint: serverOrigin, currentEndpoint: ManagerConfig.shared.baseURL
                ) {
                 DispatchQueue.main.async { [weak self] in
-                    self?.onAuthentication?(action)
+                    guard let self, self.serverOrigin == ManagerConfig.shared.baseURL else { return }
+                    self.onAuthentication?(action)
                 }
                 return
             }

@@ -73,6 +73,24 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(legacy.events, ["me"])
     }
 
+    func testAdoptingManagerSessionCannotChangeStableUser() async throws {
+        func verified(_ stable: String) throws -> UserInfo {
+            let fields: [String: Any] = ["username": "alice", "keep_login": true,
+                "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject", "tr_identity_id": stable]
+            return try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: fields))
+        }
+        let alice = try verified("stable-alice")
+        let store = SessionStore(api: FakeSessionAPI(user: alice), managerAPI: FakeManagerSessionAPI(), bridge: { _ in true })
+        let confirmed = await store.confirmWebIdentity()
+        XCTAssertTrue(confirmed)
+        let original = alice.localResearchIdentity
+        XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: try verified("different")))
+        XCTAssertEqual(store.user?.stableIdentityID, "stable-alice")
+        XCTAssertTrue(store.adoptManagerSession(expected: original, candidate: nil))
+        XCTAssertNil(store.user)
+        XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: alice))
+    }
+
     func testManagerChangeRequiresMatchingVerifiedIdentityWithoutPasswordLogin() async throws {
         let fields: [String: Any] = ["username": "alice", "keep_login": true,
             "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject",

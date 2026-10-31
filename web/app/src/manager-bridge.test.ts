@@ -15,7 +15,7 @@ test("only a complete handler is recognized; no web request is sent",()=>{
 test("url validation rejects credentials, queries, fragments and invalid protocols",()=>{
   assert.equal(managerURL("https://example.test:443/"),"https://example.test");
   assert.equal(managerURL("http://127.0.0.1:7998/"),"http://127.0.0.1:7998");
-  for(const bad of [" https://example.test","ftp://example.test","https://u:p@example.test","https://example.test/?secret=x","https://example.test/#x","not-a-url"])assert.throws(()=>managerURL(bad),reason("manager_invalid_url"));
+  for(const bad of [" https://example.test","ftp://example.test","https://u:p@example.test","https://example.test/?secret=x","https://example.test/#x","https://example.test/path","not-a-url"])assert.throws(()=>managerURL(bad),reason("manager_invalid_url"));
 });
 test("capabilities and a validated current response precede changes",async()=>{
   const calls:Record<string,unknown>[]=[];
