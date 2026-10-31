@@ -268,9 +268,8 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS enrollment_ip TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS last_seen_ip TEXT NOT NULL DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS control_devices_username ON control_devices(username, enabled)",
-    "DROP INDEX IF EXISTS control_devices_public_username",
-    "ALTER TABLE control_devices DROP COLUMN IF EXISTS public_access",
-    "ALTER TABLE control_devices DROP COLUMN IF EXISTS quota_exempt",
+    # Existing legacy fields remain migration evidence; routine startup must
+    # not drop them before Keycloak parity, backup and cutover verification.
     "CREATE INDEX IF NOT EXISTS control_devices_source ON control_devices(source_server_id, updated_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS control_user_preferences (
