@@ -120,8 +120,8 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         admin._post("clients/" + login + "/roles", {"name": "admin_console:manage"})
         admin_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("admin_console:manage", safe=""))
         admin._post("users/" + user + "/role-mappings/clients/" + login, [admin_role])
-        admin._post("clients/" + login + "/roles", {"name": "agent_assistant:use"})
-        agent_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("agent_assistant:use", safe=""))
+        admin._post("clients/" + login + "/roles", {"name": "agent_assistant:internal:use"})
+        agent_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("agent_assistant:internal:use", safe=""))
         admin._post("users/" + user + "/role-mappings/clients/" + login, [agent_role])
         admin._post("clients/" + login + "/roles", {"name": "desktop_local_node:download"})
         download_role = admin._get("clients/" + login + "/roles/" + urllib.parse.quote("desktop_local_node:download", safe=""))
@@ -220,12 +220,13 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         migration._delete(admin, "users/" + user + "/groups/" + groups[admin_group])
         assert admin_group in verifier.session(user_token)["keycloak_groups"]
         assert access.current_administrative_groups(identity) == ()
-        assert can_use_agent_assistant(identity)
+        assert can_use_agent_assistant(identity, public_server=False)
+        assert not can_use_agent_assistant(identity, public_server=True)
         migration._delete(admin, "users/" + user + "/role-mappings/clients/" + login, [agent_role])
         # The same already-issued token still contains its old role, but the
         # assistant gate must reject it as soon as Keycloak revokes the role.
-        assert "agent_assistant:use" in verifier.session(user_token)["keycloak_roles"]
-        assert not can_use_agent_assistant(identity)
+        assert "agent_assistant:internal:use" in verifier.session(user_token)["keycloak_roles"]
+        assert not can_use_agent_assistant(identity, public_server=False)
         assert access.current_manager_role(identity, "desktop_local_node:download")
         migration._delete(admin, "users/" + user + "/role-mappings/clients/" + login, [download_role])
         assert "desktop_local_node:download" in verifier.session(user_token)["keycloak_roles"]
