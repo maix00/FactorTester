@@ -584,6 +584,22 @@ EXACT_PATH_TESTS["tools/cli/release/research_reporting/local_publication.py"] = 
     "tests/server/test_client_server_research_import.py",
     "tests/server/test_local_report_publication.py",
 )
+EXACT_PATH_TESTS["server/manager/services/research_couchdb_publication.py"] = (
+    "tests/server/test_research_couchdb_publication.py",
+    "tests/server/test_local_report_publication.py",
+    "tests/server/test_client_local_report_publication.py",
+    "tests/server/test_federated_local_report.py",
+)
+EXACT_PATH_TESTS["server/manager/http/research_catalog_routes.py"] = (
+    "tests/server/test_research_catalog.py",
+    "tests/server/test_research_catalog_keycloak_reads.py",
+    "tests/server/test_research_catalog_keycloak_session.py",
+    "tests/server/test_research_branches.py",
+    "tests/server/test_research_keycloak_share_links.py",
+    "tests/server/test_research_couchdb_publication_routes.py",
+    "tests/server/test_federated_local_report.py",
+    "tests/server/test_federated_public_data.py",
+)
 EXACT_PATH_TESTS["tools/factors/alpha_plan.py"] = (*FACTOR_PLAN_TESTS,"tests/server/test_nautilus_strategy_runspec.py")
 EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)

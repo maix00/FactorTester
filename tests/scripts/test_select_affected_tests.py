@@ -46,6 +46,13 @@ def test_local_research_publication_selects_focused_client_and_server_contracts(
         "tests/server/test_client_server_research_import.py",
         "tests/server/test_local_report_publication.py",
     }
+    mode, targets = selector.select({"server/manager/http/research_catalog_routes.py",
+                                     "server/manager/services/research_couchdb_publication.py"})
+    assert mode == "SCOPED"
+    assert "tests/server/test_federated_local_report.py" in targets
+    assert "tests/server/test_research_catalog_keycloak_session.py" in targets
+    assert "tests/server/test_client_local_report_publication.py" in targets
+    assert "tests/server" not in targets
 
 
 def test_skill_change_checks_activation_and_skill_tests():
