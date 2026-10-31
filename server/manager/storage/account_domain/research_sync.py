@@ -66,7 +66,10 @@ def _legacy_visible(row: dict, owner: str) -> bool:
 
 
 def _legacy_shared(value: dict) -> bool:
-    """Identify explicit sharing in an old snapshot, never grant access."""
+    """Identify a whole-Research share in a snapshot, never grant access.
+
+    A report-only share must not authorize the enclosing Research graph.
+    """
     research = value.get('research') or {}
     owner = str(research.get('owner_ref') or '')
     if not owner:
@@ -76,12 +79,12 @@ def _legacy_shared(value: dict) -> bool:
         raise ValueError('invalid Research synchronization status')
     if status == 'archived':
         return False
-    if _legacy_visible(research, owner):
+    if value.get('sharing_scope') == 'research' or _legacy_visible(research, owner):
         return True
     if any(str(item.get('principal_ref') or '') != owner and item.get('status') in {'active', 'invited'}
            for item in value.get('members', [])):
         return True
-    return any(item.get('status') == 'active' and _legacy_visible(item, owner) for item in value.get('reports', []))
+    return False
 
 
 def _legacy_current_shared(conn, research_id: str, research: dict) -> bool:
@@ -97,17 +100,12 @@ def _legacy_current_shared(conn, research_id: str, research: dict) -> bool:
     if conn.execute('''SELECT 1 FROM research_catalog_memberships WHERE research_id=? AND principal_ref<>?
         AND status IN ('active', 'invited') LIMIT 1''', (research_id, owner)).fetchone() is not None:
         return True
-    for report in conn.execute('''SELECT visibility,authorized_users_json FROM research_catalog_reports
-        WHERE research_id=? AND status='active' AND (visibility NOT IN ('private','authorized')
-            OR authorized_users_json<>'[]')''', (research_id,)):
-        if _legacy_visible(dict(report), owner):
-            return True
     return _legacy_has_live_share_link(conn, research_id)
 
 
 def _legacy_has_live_share_link(conn, research_id: str) -> bool:
     return conn.execute('''SELECT 1 FROM research_catalog_share_links WHERE research_id=?
-        AND mode IN ('one_time', 'permanent') AND revoked_at=0
+        AND target_kind='research' AND mode IN ('one_time', 'permanent') AND revoked_at=0
         AND (expires_at=0 OR expires_at>?) LIMIT 1''', (research_id, time.time())).fetchone() is not None
 
 
@@ -133,11 +131,29 @@ def publish_research(sync, conn, research_id: str) -> str:
     prior_shared = bool(previous and _legacy_shared(prior))
     if not (current_shared or prior_shared):
         return ''
-    value = snapshot(conn, research_id, research_row=research)
+    if current_shared:
+        value = snapshot(conn, research_id, research_row=research)
+    else:
+        # Only previously acknowledged content may accompany a withdrawal.
+        # The current graph may now contain new private reports or edits.
+        base = conn.execute('''SELECT payload_json,deleted FROM account_domain_research_bases
+            WHERE principal=? AND entity_id=?''', (owner, research_id)).fetchone()
+        if base is None or base['deleted']:
+            return ''
+        value = json.loads(base['payload_json'])
+        if not _legacy_shared(value):
+            return ''
+        value = {key: value[key] for key in TABLES}
+        value['research'] = {**value['research'], 'visibility': 'private', 'authorized_users_json': '[]',
+                             'status': str(research['status'])}
+        value['members'] = [{**member, 'status': 'revoked'} for member in value['members']]
+        value['reports'] = [{**report, 'visibility': 'private', 'authorized_users_json': '[]'}
+                            for report in value['reports']]
     payload = public_payload({
         'schema_version': 2, 'visibility': 'public',
         'replication_scope': 'trusted_managers',
         'storage_server_id': prior.get('storage_server_id') or sync.manager_id,
+        **({'sharing_scope': 'research'} if current_shared else {}),
         **value,
     })
     operation = sync.local.upsert_local(

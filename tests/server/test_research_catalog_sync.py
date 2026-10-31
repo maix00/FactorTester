@@ -103,14 +103,14 @@ def test_old_private_outbox_is_retained_for_review_and_cannot_starve_other_kinds
     assert retained[0]['last_error'] == 'research_sync_needs_review'
 
 
-def test_explicit_link_reactivates_the_same_previously_blocked_snapshot(tmp_path):
+def test_explicit_research_link_replaces_a_blocked_private_snapshot(tmp_path):
     ((author, outgoing), _), control = replicas(tmp_path)
     rid = author.create_research(owner_ref='alice', title='private')['research_id']
     operation = _queue_old_private_projection(outgoing, rid)
     assert outgoing.flush(principal='alice')['blocked'] == 1
     author.create_share_link(target_kind='research', research_id=rid, actor='alice')
     pending = outgoing.local.pending(principal='alice')
-    assert len(pending) == 1 and pending[0]['operation_id'] == operation
+    assert len(pending) == 1 and pending[0]['operation_id'] != operation
     assert outgoing.flush(principal='alice')['sent'] == 1
     assert ('alice', 'research_catalog', rid) in control.rows
 
@@ -186,21 +186,41 @@ def test_revoke_serializes_with_in_flight_shared_snapshot(tmp_path):
     assert mirror.list_researches(viewer='bob') == []
 
 
-def test_explicitly_shared_report_and_link_allow_backfill_but_keycloak_never_guesses_from_old_acl(tmp_path):
+def test_single_report_share_never_queues_the_whole_research_graph(tmp_path):
     ((author, outgoing), (_mirror, _incoming)), _control = replicas(tmp_path)
     report_research = author.create_research(owner_ref='alice', title='report')['research_id']
     author.register_report(report_research, actor='alice', report_id='shared-report',
                            visibility='authorized', authorized_users=['bob'])
-    assert len(outgoing.local.pending(principal='alice')) == 1
+    author.register_report(report_research, actor='alice', report_id='private-report', title='private sentinel')
+    author.create_share_link(target_kind='report', research_id=report_research,
+                             report_id='shared-report', actor='alice')
+    assert outgoing.local.pending(principal='alice') == []
+    # An old pending report-only snapshot is retained for review, not sent.
+    _queue_old_private_projection(outgoing, report_research)
+    assert outgoing.flush(principal='alice')['blocked'] == 1
     link_research = author.create_research(owner_ref='alice', title='link')['research_id']
     author.create_share_link(target_kind='research', research_id=link_research, actor='alice')
-    assert {row['entity_id'] for row in outgoing.local.pending(principal='alice')} == {report_research, link_research}
+    assert {row['entity_id'] for row in outgoing.local.pending(principal='alice')} == {link_research}
     assert backfill_researches(outgoing, 'alice') == 0
     outgoing.research_legacy_sharing = False
     strict_research = author.create_research(owner_ref='alice', title='stale legacy ACL',
                                              visibility='authorized', authorized_users=['bob'])['research_id']
     assert not any(row['entity_id'] == strict_research for row in outgoing.local.pending(principal='alice'))
     assert backfill_researches(outgoing, 'alice') == 0
+
+
+def test_research_withdrawal_never_publishes_a_new_private_report(tmp_path):
+    ((author, outgoing), (_mirror, _incoming)), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='shared', visibility='public')['research_id']
+    author.register_report(rid, actor='alice', report_id='previously-shared')
+    assert outgoing.flush(principal='alice')['sent'] == 1
+    author.update_research(rid, actor='alice', visibility='private')
+    author.register_report(rid, actor='alice', report_id='new-private', title='new private sentinel')
+    assert outgoing.flush(principal='alice')['sent'] == 1
+    remote = control.rows[('alice', 'research_catalog', rid)]['payload']
+    assert {item['report_id'] for item in remote['reports']} == {'previously-shared'}
+    assert 'new private sentinel' not in str(remote)
+    assert remote['research']['visibility'] == 'private'
 
 
 def test_archive_sends_one_final_shared_snapshot_even_with_a_live_link(tmp_path):
