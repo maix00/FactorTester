@@ -52,6 +52,23 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(store.isManagerLoggedIn)
     }
 
+    func testConcurrentWebConfirmationsCanShareTheSameIdentity() async throws {
+        let fields: [String: Any] = ["username": "alice", "keep_login": true,
+            "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject", "tr_identity_id": "stable"]
+        let verified = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: fields))
+        let api = ConcurrentSessionAPI(user: verified)
+        let store = SessionStore(api: api, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true }, credentialLoader: { nil })
+        let first = Task { await store.confirmWebIdentity() }
+        let second = Task { await store.confirmWebIdentity() }
+        while api.pending.count < 2 { await Task.yield() }
+        api.completeFirst()
+        let firstResult = await first.value
+        api.completeFirst()
+        let secondResult = await second.value
+        XCTAssertTrue(firstResult)
+        XCTAssertTrue(secondResult)
+    }
+
     func testWebIdentityConfirmationRequiresVerifiedIdentityAndDoesNotReplayCredentials() async throws {
         let fields: [String: Any] = ["username": "alice", "keep_login": true,
             "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject",
@@ -528,4 +545,17 @@ private final class DelayedManagerSessionAPI: ManagerSessionAPI {
     }
     func login(username: String, password: String) async throws {}
     func logout() async {}
+}
+
+@MainActor
+private final class ConcurrentSessionAPI: SessionAPI {
+    let user: UserInfo
+    var pending: [CheckedContinuation<UserInfo, Never>] = []
+    init(user: UserInfo) { self.user = user }
+    func me() async throws -> UserInfo { await withCheckedContinuation { pending.append($0) } }
+    func completeFirst() { pending.removeFirst().resume(returning: user) }
+    func login(username: String, password: String) async throws -> AuthResponse { throw APIError.unauthorized("no") }
+    func register(username: String, password: String, organizationId: String) async throws -> AuthResponse { throw APIError.unauthorized("no") }
+    func logout() async throws {}
+    func setKeepLogin(_ keep: Bool) async throws {}
 }

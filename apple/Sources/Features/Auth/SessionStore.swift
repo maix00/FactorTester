@@ -138,9 +138,15 @@ final class SessionStore: ObservableObject {
         let endpoint = ManagerConfig.shared.baseURL
         do {
             let candidate = try await api.me()
-            guard generation == authenticationGeneration, endpoint == ManagerConfig.shared.baseURL,
-                  candidate.localResearchIdentity != nil else { return false }
-            if user?.localResearchIdentity != candidate.localResearchIdentity {
+            guard endpoint == ManagerConfig.shared.baseURL,
+                  let identity = candidate.localResearchIdentity else { return false }
+            // Another simultaneous Web handshake can have confirmed the same
+            // identity while this request was in flight. Logout/account change
+            // still fails closed because it clears or changes the identity.
+            if generation != authenticationGeneration {
+                return user?.localResearchIdentity == identity
+            }
+            if user?.localResearchIdentity != identity {
                 authenticationGeneration &+= 1
                 restoreTask?.cancel()
                 restoreTask = nil
