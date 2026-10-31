@@ -2,8 +2,10 @@
 import base64
 import hashlib
 import json
+import shutil
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from tests.server.test_local_report_publication import SESSION, harness
@@ -14,8 +16,9 @@ from tools.cli.release.research_reporting.authoring.tree_projection import load_
 from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
 
 
-def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_access(tmp_path):
+def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_access(tmp_path, monkeypatch):
     service, _manager, store, auth = harness(tmp_path / 'manager')
+    transport = {'tamper': False}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args): pass
@@ -24,8 +27,25 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
             self.send_response(status); self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
         def do_GET(self):
             if self.path == '/api/session' and self.headers.get('Authorization') == 'Bearer test-token':
-                self.reply(200, SESSION)
-            else: self.reply(401, {})
+                return self.reply(200, SESSION)
+            if self.headers.get('Authorization') != 'Bearer test-token':
+                return self.reply(401, {})
+            parsed = urlsplit(self.path); query = parse_qs(parsed.query); parts = parsed.path.strip('/').split('/')
+            if not parsed.path.startswith('/api/research/local-report-publication'):
+                return self.reply(404, {})
+            try:
+                args = {'session': SESSION, 'research_id': query['research_id'][0], 'report_id': query['report_id'][0]}
+                if len(parts) == 3:
+                    value = service.read(**args, branch_ref=query['branch_ref'][0])
+                    return self.reply(200, {'success': True, **value})
+                if len(parts) == 7 and parts[4] == 'attachments':
+                    value = service.read(**args, publication_ref=parts[3], attachment=parts[5] + '/' + parts[6])
+                    raw = value['content']
+                    if transport['tamper']: raw = raw[:-1] + bytes([raw[-1] ^ 1])
+                    self.send_response(200); self.send_header('Content-Length', str(len(raw))); self.end_headers(); self.wfile.write(raw); return
+                self.reply(404, {})
+            except PermissionError:
+                self.reply(403, {})
         def do_POST(self):
             if self.path != '/api/research/local-report-publication' or self.headers.get('Authorization') != 'Bearer test-token':
                 return self.reply(401, {})
@@ -74,12 +94,15 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         next_head = rpc.request(edit)['version']
         second = rpc.request(request)['publication']
         assert second['generation'] == 1 and second['revision'] != published['revision']
+        shutil.copytree(tmp_path / 'client', tmp_path / 'client-2')
+        other = LocalResearchRPC(tmp_path / 'client-2', issuer=SESSION['keycloak_issuer'], identity_id=SESSION['tr_identity_id'],
+                                 profiles=[{'profile_id': 'self', 'display_name': 'Alice'}], manager=manager)
         remote = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')['projection']
         with pytest.raises(ResearchPublicationConflict):
             service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
                 branch_ref='main', projection=remote, expected_revision=second['revision'])
-        latest = rpc.request({**edit, **next_head, 'component_id': 'chapter-2', 'title': 'Second'})['version']
-        _report, root = rpc.store._report_root('self', research['research_id'], selected['report_id'])
+        latest = other.request({**edit, **next_head, 'component_id': 'chapter-2', 'title': 'Second'})['version']
+        _report, root = other.store._report_root('self', research['research_id'], selected['report_id'])
         snapshot = load_snapshot(package_root=root, branch_id='main')
         bundle = export_report_bundle(package_root=root, branch_id='main', expected_generation=latest['generation'], expected_root_ref=latest['root_ref'])
         remote = build_upload_projection(snapshot)
@@ -92,8 +115,36 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                 branch_ref='another', projection=remote, expected_revision=None, authoring=authoring)
         service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
             branch_ref='main', projection=remote, expected_revision=second['revision'], authoring=authoring)
-        rpc.request({**edit, **latest, 'component_id': 'chapter-3', 'title': 'Third'})
+        pull = {'action': 'pull_report', 'profile_id': 'self', 'research_id': research['research_id'], 'report_id': selected['report_id']}
+        auth['write'] = False
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_publication_denied'}
+        assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
+        auth['write'] = True
+        transport['tamper'] = True
+        with pytest.raises(ValueError, match='checksum'): rpc.request(pull)
+        assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
+        transport['tamper'] = False
+        from tools.cli.release.research_reporting import local_pull
+        original_commit = local_pull.commit_report_workspace
+        monkeypatch.setattr(local_pull, 'commit_report_workspace', lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('commit failed')))
+        with pytest.raises(OSError, match='commit failed'): rpc.request(pull)
+        assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
+        monkeypatch.setattr(local_pull, 'commit_report_workspace', original_commit)
+        assert rpc.request(pull)['status'] == 'updated'
+        assert rpc.request(pull)['status'] == 'up_to_date'
+        index = rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})
+        assert [chapter['title'] for chapter in index['index']['chapters']] == ['First', 'Second']
+        rpc.request({**edit, **index['version'], 'component_id': 'chapter-3', 'title': 'Third'})
+        divergent = other.request({**edit, **latest, 'component_id': 'remote-3', 'title': 'Remote third'})['version']
+        snapshot = load_snapshot(package_root=root, branch_id='main')
+        bundle = export_report_bundle(package_root=root, branch_id='main', expected_generation=divergent['generation'], expected_root_ref=divergent['root_ref'])
+        authoring = {'sha256': hashlib.sha256(bundle).hexdigest(), 'root_ref': divergent['root_ref'], 'content_base64': base64.b64encode(bundle).decode()}
+        remote_revision = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')['publication']['revision']
+        service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
+            branch_ref='main', projection=build_upload_projection(snapshot), expected_revision=remote_revision, authoring=authoring)
         assert rpc.request(request) == {'success': False, 'code': 'local_report_publication_conflict'}
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First', 'Second', 'Third']
         auth['admit'] = False
         assert rpc.request(request) == {'success': False, 'code': 'local_report_publication_denied'}
         assert len([doc for doc in store.docs.values() if doc['kind'] == 'research_report']) == 1

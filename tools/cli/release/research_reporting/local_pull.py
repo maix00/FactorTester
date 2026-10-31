@@ -1,0 +1,158 @@
+"""Fetch one authorized report branch without overwriting local edits."""
+from __future__ import annotations
+
+import hashlib
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+from urllib.parse import urlencode
+
+from .authoring.tree_bundle import import_report_bundle
+from .authoring.tree_paths import report_tree_paths
+from .authoring.tree_sqlite_index import publish_sqlite_index
+from .authoring.tree_store import atomic_write, load_head, load_node, tree_lock, write_head
+from .authoring.submission_status import require_no_pending
+from .generation import report_workspace_lock
+from .git import commit_report_workspace
+from .local_publication import ensure_publication_table, manager_session
+from .report_workspace_identity import report_workspace_id_for
+
+
+class LocalReportSyncConflict(ValueError):
+    """Local and remote report histories cannot safely be advanced automatically."""
+
+
+def _remote(session, research_id: str, report_id: str) -> dict:
+    from .public_research.object_uploads import projection_hash
+    value = session.get('/api/research/local-report-publication', query={
+        'research_id': research_id, 'report_id': report_id, 'branch_ref': 'main'})
+    record, bundle, projection = value.get('publication'), value.get('authoring'), value.get('projection')
+    if (value.get('success') is not True or not isinstance(record, dict) or not isinstance(bundle, dict) or not isinstance(projection, dict)
+            or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
+            or not re.fullmatch(r'p-[0-9a-f]{64}', str(record.get('publication_id') or ''))
+            or not isinstance(record.get('revision'), str) or not record['revision'] or len(record['revision']) > 256
+            or type(record.get('generation')) is not int or record['generation'] < 0
+            or not re.fullmatch(r'[0-9a-f]{64}', str(record.get('projection_hash') or ''))
+            or projection.get('report_id') != report_id or projection.get('generation') != record['generation']
+            or projection.get('projection_hash') != record['projection_hash'] or projection_hash(projection) != record['projection_hash']
+            or set(bundle) != {'sha256', 'root_ref', 'generation', 'size_bytes'}
+            or not re.fullmatch(r'[0-9a-f]{64}', str(bundle.get('sha256') or ''))
+            or bundle.get('generation') != record['generation']
+            or type(bundle.get('size_bytes')) is not int or not 0 < bundle['size_bytes'] <= 8 * 1024 * 1024):
+        raise ValueError('remote report snapshot is invalid or not editable')
+    from .authoring.tree_schema import node_reference
+    node_reference(bundle['root_ref'])
+    return {'publication': record, 'authoring': bundle}
+
+
+def _copy_files(source: Path, destination: Path, created: list[Path]) -> None:
+    if not source.exists():
+        return
+    for path in source.rglob('*'):
+        if path.is_symlink():
+            raise ValueError('report snapshot contains a symbolic link')
+        if not path.is_file():
+            continue
+        target = destination / path.relative_to(source)
+        for parent in [target, *target.parents]:
+            if parent.is_symlink():
+                raise ValueError('report destination contains a symbolic link')
+            if parent == destination.parent:
+                break
+        data = path.read_bytes()
+        if target.exists():
+            if not target.is_file() or target.read_bytes() != data:
+                raise LocalReportSyncConflict('local report resource differs from remote content')
+        else:
+            created.append(target)
+            atomic_write(target, data)
+
+
+def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
+                      research_id: str, report_id: str) -> dict:
+    endpoint, session = manager_session(binding, manager)
+    _report, root = store._report_root(profile_id, research_id, report_id)
+    manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
+    lock = store.workspace_root / '.locks' / ('publication-' + report_workspace_id_for(report_id) + '-' + manager_hash[:16])
+    ensure_publication_table(store)
+    with report_workspace_lock(lock):
+        remote = _remote(session, research_id, report_id)
+        record, bundle = remote['publication'], remote['authoring']
+        with store._connect() as db:
+            base = db.execute('SELECT * FROM report_publications WHERE report_id=? AND manager_hash=?',
+                              (report_id, manager_hash)).fetchone()
+        if base and base['publication_id'] != record['publication_id']:
+            raise LocalReportSyncConflict('remote publication identity changed')
+        paths = report_tree_paths(root, 'main')
+        with tree_lock(paths):
+            local = load_head(paths)
+            if local['report_id'] != report_id:
+                raise ValueError('local report identity is invalid')
+            if base and base['revision'] == record['revision']:
+                return {'status': 'up_to_date', 'local_modified': (local['generation'] != base['generation'] or local['root_ref'] != base['local_root_ref'])}
+            baseline_ok = bool(base and base['local_root_ref'] and local['generation'] == base['generation'] and local['root_ref'] == base['local_root_ref'])
+            identical = local['generation'] == bundle['generation'] and local['root_ref'] == bundle['root_ref']
+            if not baseline_ok and not identical:
+                raise LocalReportSyncConflict('local report changed since the last confirmed synchronization')
+            require_no_pending(paths, local)
+            expected = (local['generation'], local['root_ref'])
+        publication_id, digest = record['publication_id'], bundle['sha256']
+        query = urlencode({'research_id': research_id, 'report_id': report_id})
+        response = session.download(f'/api/research/local-report-publication/{publication_id}/attachments/report_authoring/{digest}?{query}',
+                                    maximum_bytes=8 * 1024 * 1024)
+        if len(response.content) != bundle['size_bytes'] or hashlib.sha256(response.content).hexdigest() != digest:
+            raise ValueError('remote report bundle checksum or size mismatch')
+        with tempfile.TemporaryDirectory(prefix='report-pull-', dir=store.workspace_root) as temporary:
+            staged_root = Path(temporary) / report_workspace_id_for(report_id)
+            imported = import_report_bundle(payload=response.content, expected_sha256=digest, package_root=staged_root,
+                branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
+            staged_head = imported['head']
+            if _remote(session, research_id, report_id) != remote:
+                raise LocalReportSyncConflict('remote report changed during download')
+            target_lock = store.workspace_root / '.locks' / report_workspace_id_for(report_id)
+            with report_workspace_lock(target_lock), tree_lock(paths):
+                current = load_head(paths)
+                if (current['generation'], current['root_ref']) != expected:
+                    raise LocalReportSyncConflict('local report changed during download')
+                require_no_pending(paths, current)
+                status = subprocess.run(['git', '-C', str(root), 'status', '--porcelain'], capture_output=True, text=True, check=True)
+                if status.stdout.strip():
+                    raise LocalReportSyncConflict('local report workspace has uncommitted files')
+                prior_commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+                staged_branch = staged_root / 'branches' / 'main'
+                target_branch = root / 'branches' / 'main'
+                created: list[Path] = []
+                head_started = False
+                try:
+                    for name in ('resources', 'assets'):
+                        _copy_files(staged_branch / name, target_branch / name, created)
+                    _copy_files(staged_branch / 'authoring' / 'nodes', target_branch / 'authoring' / 'nodes', created)
+                    new_head = {**staged_head, 'locator_generation': 0}
+                    head_started = True
+                    write_head(paths, new_head)
+                    try:
+                        publish_sqlite_index(paths, load_node(paths, new_head['root_ref']), new_head['generation'])
+                        write_head(paths, {**new_head, 'locator_generation': new_head['generation']})
+                    except (OSError, ValueError):
+                        # HEAD remains authoritative; indexes are rebuildable.
+                        pass
+                    commit_report_workspace(root, message='Sync report from Manager')
+                except Exception:
+                    after = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+                    if after == prior_commit:
+                        if head_started:
+                            write_head(paths, current)
+                            publish_sqlite_index(paths, load_node(paths, current['root_ref']), current['generation'])
+                        for path in reversed(created):
+                            path.unlink(missing_ok=True)
+                    raise
+        with store._connect() as db:
+            db.execute('''INSERT INTO report_publications
+                (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(report_id, manager_hash) DO UPDATE SET publication_id=excluded.publication_id,
+                revision=excluded.revision, generation=excluded.generation, projection_hash=excluded.projection_hash,
+                local_root_ref=excluded.local_root_ref''', (report_id, manager_hash, record['publication_id'],
+                    record['revision'], staged_head['generation'], record['projection_hash'], staged_head['root_ref']))
+        return {'status': 'updated', 'local_modified': False}

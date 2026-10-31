@@ -45,9 +45,11 @@ class LocalResearchRPC:
             'add_report_component': {'action', 'profile_id', 'research_id', 'report_id', 'component_id', 'kind',
                                      'parent_id', 'title', 'body', 'generation', 'root_ref'},
             'publish_report': {'action', 'profile_id', 'research_id', 'report_id'},
+            'pull_report': {'action', 'profile_id', 'research_id', 'report_id'},
         }
         if self.manager is None:
             keys.pop('publish_report')
+            keys.pop('pull_report')
         if not isinstance(action, str) or action not in keys or set(message) != keys[action]:
             raise ValueError('invalid local Research message')
         for key in keys[action] - {'action', 'limit', 'offset', 'generation'}:
@@ -89,7 +91,7 @@ class LocalResearchRPC:
                 value = self.store.add_report_component(**{key: message[key] for key in keys[action] - {'action'}})
             except ReportVersionConflict:
                 return {'success': False, 'code': 'local_report_version_conflict'}
-        else:
+        elif action == 'publish_report':
             from tools.cli.http import HttpClientError
             from .local_publication import publish_local_report
             try:
@@ -98,6 +100,18 @@ class LocalResearchRPC:
             except HttpClientError as exc:
                 if exc.status == 409:
                     return {'success': False, 'code': 'local_report_publication_conflict'}
+                if exc.status in {401, 403}:
+                    return {'success': False, 'code': 'local_report_publication_denied'}
+                raise
+        else:
+            from tools.cli.http import HttpClientError
+            from .local_pull import LocalReportSyncConflict, pull_local_report
+            try:
+                value = pull_local_report(self.store, binding=self.binding, manager=self.manager,
+                    profile_id=message['profile_id'], research_id=message['research_id'], report_id=message['report_id'])
+            except LocalReportSyncConflict:
+                return {'success': False, 'code': 'local_report_sync_conflict'}
+            except HttpClientError as exc:
                 if exc.status in {401, 403}:
                     return {'success': False, 'code': 'local_report_publication_denied'}
                 raise

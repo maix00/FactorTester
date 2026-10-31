@@ -17,8 +17,7 @@ from .public_research.projection import build_upload_projection
 from .report_workspace_identity import report_workspace_id_for
 
 
-def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str,
-                         research_id: str, report_id: str) -> dict:
+def manager_session(binding: dict, manager: dict):
     if not isinstance(manager, dict) or set(manager) != {'endpoint', 'token', 'certificate_pem', 'cookies'}:
         raise ValueError('native Manager transport is invalid')
     endpoint, token, certificate, cookies = (manager[key] for key in ('endpoint', 'token', 'certificate_pem', 'cookies'))
@@ -37,6 +36,24 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
     if (str(current.get('keycloak_issuer') or '').rstrip('/') != binding['issuer']
             or current.get('tr_identity_id') != binding['identity_id'] or not current.get('keycloak_subject')):
         raise PermissionError('native Manager identity changed')
+    return endpoint, session
+
+
+def ensure_publication_table(store):
+    with store._connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        db.execute('''CREATE TABLE IF NOT EXISTS report_publications (
+            report_id TEXT NOT NULL, manager_hash TEXT NOT NULL, publication_id TEXT NOT NULL,
+            revision TEXT NOT NULL, generation INTEGER NOT NULL, projection_hash TEXT NOT NULL,
+            local_root_ref TEXT NOT NULL DEFAULT '', PRIMARY KEY(report_id, manager_hash))''')
+        columns = {row['name'] for row in db.execute('PRAGMA table_info(report_publications)')}
+        if 'local_root_ref' not in columns:
+            db.execute("ALTER TABLE report_publications ADD COLUMN local_root_ref TEXT NOT NULL DEFAULT ''")
+
+
+def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str,
+                         research_id: str, report_id: str) -> dict:
+    endpoint, session = manager_session(binding, manager)
 
     _report, root = store._report_root(profile_id, research_id, report_id)
     manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
@@ -58,11 +75,8 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
         encoded_size = len(json.dumps({'projection': projection, 'authoring': authoring}, ensure_ascii=False).encode('utf-8'))
         if encoded_size > 30 * 1024 * 1024:
             raise ValueError('report publication exceeds Manager request limit')
+        ensure_publication_table(store)
         with store._connect() as db:
-            db.execute('''CREATE TABLE IF NOT EXISTS report_publications (
-                report_id TEXT NOT NULL, manager_hash TEXT NOT NULL, publication_id TEXT NOT NULL,
-                revision TEXT NOT NULL, generation INTEGER NOT NULL, projection_hash TEXT NOT NULL,
-                PRIMARY KEY(report_id, manager_hash))''')
             row = db.execute('SELECT revision FROM report_publications WHERE report_id=? AND manager_hash=?',
                              (report_id, manager_hash)).fetchone()
             expected_revision = row['revision'] if row else None
@@ -77,8 +91,11 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
                 or not re.fullmatch(r'[0-9a-f]{64}', str(value.get('projection_hash') or ''))):
             raise ValueError('Manager publication receipt is invalid')
         with store._connect() as db:
-            db.execute('''INSERT INTO report_publications VALUES (?, ?, ?, ?, ?, ?)
+            db.execute('''INSERT INTO report_publications
+                (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(report_id, manager_hash) DO UPDATE SET publication_id=excluded.publication_id,
-                revision=excluded.revision, generation=excluded.generation, projection_hash=excluded.projection_hash''',
-                (report_id, manager_hash, value['publication_id'], value['revision'], value['generation'], value['projection_hash']))
+                revision=excluded.revision, generation=excluded.generation, projection_hash=excluded.projection_hash,
+                local_root_ref=excluded.local_root_ref''',
+                (report_id, manager_hash, value['publication_id'], value['revision'], value['generation'], value['projection_hash'], head['root_ref']))
         return {'publication': {key: value[key] for key in ('publication_id', 'revision', 'generation', 'projection_hash', 'report_id')}}

@@ -95,7 +95,7 @@ final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
             // Existing username-bound Profiles are not automatically adopted.
             var manager: [String: Any] = ["endpoint": self.endpoint.absoluteString,
                                            "token": "", "certificate_pem": "", "cookies": []]
-            if request["action"] as? String == "publish_report" {
+            if ["publish_report", "pull_report"].contains(request["action"] as? String ?? "") {
                 let cookies = (HTTPCookieStorage.shared.cookies(for: self.endpoint) ?? [])
                     .filter { $0.name == "ft-manager-session" }.map { cookie -> [String: Any] in
                         var value: [String: Any] = ["name": cookie.name, "value": cookie.value,
