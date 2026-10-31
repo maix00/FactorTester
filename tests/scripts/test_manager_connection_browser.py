@@ -42,7 +42,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate>{{window.fixture.m
                     page.evaluate("""([mode,mobile,state])=>{
                       const f=window.fixture={mobile,calls:[],requests:[]};
                       const ok=x=>({success:true,schema:'tr-manager-bridge:v1',...x});
-                      const handlers={tradeResearchAuthentication:{postMessage(){}}};
+                      const handlers={factorTesterAuthentication:{postMessage(){}}};
                       if(mode==='native')handlers.tradeResearchManager={postMessage(m){f.calls.push(m);if(m.action==='capabilities')return Promise.resolve(ok({actions:['current','switch']}));if(m.action==='current')return Promise.resolve(ok({url:'https://old.test',auth_state:'authorized'}));if(m.action==='switch')return Promise.resolve(ok({url:m.url,auth_state:state}));throw Error('unexpected');}};
                       if(mode!=='browser')window.webkit={messageHandlers:handlers};
                       window.fetch=(input,options={})=>{const path=new URL(String(input),location.origin).pathname;f.requests.push({path,method:options.method||'GET'});const result=value=>Promise.resolve(new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}}));
@@ -50,10 +50,14 @@ createRoot(document.getElementById('root')!).render(<AuthGate>{{window.fixture.m
                     }""",[mode,mobile,state])
                     page.add_script_tag(path=str(bundle))
                     if not mobile:page.get_by_role("button",name="服务器",exact=True).click()
-                    page.get_by_role("heading",name="Manager 连接").wait_for()
-                    if mode=="browser":page.get_by_text("网页由当前地址提供。",exact=False).wait_for()
-                    elif mode=="unsupported":page.get_by_text("当前客户端暂不支持在此切换 Manager。",exact=True).wait_for()
+                    if mode=="browser":
+                        page.get_by_text("fixture",exact=True).wait_for()
+                        assert page.get_by_role("heading",name="Manager 连接").count()==0
+                    elif mode=="unsupported":
+                        page.get_by_role("heading",name="Manager 连接").wait_for()
+                        page.get_by_text("当前客户端暂不支持在此切换 Manager。",exact=True).wait_for()
                     else:
+                        page.get_by_role("heading",name="Manager 连接").wait_for()
                         address=page.get_by_label("目标 Manager 地址")
                         page.screenshot(path=str(Path('/tmp')/f'tr-manager-settings-form-fixture-{int(mobile)}.png'))
                         address.fill("https://user:secret@new.test")

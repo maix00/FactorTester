@@ -5,9 +5,10 @@ import {useAuth} from "../auth.tsx";
 import {ManagerBridgeError,managerBridge,managerURL,type ManagerClient,type ManagerConnection} from "../manager-bridge.ts";
 
 type Phase="checking"|"browser"|"unsupported"|"ready"|"switching"|"handoff"|"uncertain";
-function nativeShell():boolean {
-  const value=(window as any).webkit?.messageHandlers?.tradeResearchAuthentication;
-  return !!value && typeof value.postMessage==="function";
+export function nativeManagerSettingsAvailable(host:unknown):boolean {
+  const handlers=(host as {webkit?:{messageHandlers?:Record<string,unknown>}} | null)?.webkit?.messageHandlers;
+  return [handlers?.factorTesterAuthentication,handlers?.tradeResearchAuthentication,handlers?.tradeResearchManager]
+    .some(value=>!!value && typeof (value as {postMessage?:unknown}).postMessage==="function");
 }
 
 /** The native client performs the switch and navigation; React never changes sessions itself. */
@@ -23,7 +24,7 @@ export function ManagerConnectionSettings():React.ReactElement {
   useEffect(()=>{
     const active=++generation.current;setConnection(null);setConfirmedKey("");setMessage("");
     const client=managerBridge(window);
-    if(!client){setPhase(nativeShell()?"unsupported":"browser");return;}
+    if(!client){setPhase(nativeManagerSettingsAvailable(window)?"unsupported":"browser");return;}
     bridge.current=client;setPhase("checking");
     const timer=window.setTimeout(()=>{if(generation.current!==active)return;client.close();bridge.current=null;setPhase("unsupported");},12000);
     void client.capabilities().then(()=>client.current()).then(value=>{
@@ -60,7 +61,6 @@ export function ManagerConnectionSettings():React.ReactElement {
     {visiblePhase==="ready"&&connection?<>
       <p>{t("managerConnection.current")}: <strong>{connection.url}</strong></p>
       {connection.auth_state!=="authorized"?<Alert type="warning" showIcon message={t(`managerConnection.currentState.${connection.auth_state}`)}/>:null}
-      <p className="tr-research-origin">{t("managerConnection.switchHint")}</p>
       <Form form={form} layout="vertical" onFinish={switchManager}>
         <Form.Item name="url" label={t("managerConnection.address")} rules={[{required:true,message:t("managerConnection.required")},{validator:async(_,value)=>{try{managerURL(value);}catch{return Promise.reject(new Error(t("managerConnection.invalid")));}}}]}>
           <Input type="url" autoComplete="url" aria-label={t("managerConnection.address")} />

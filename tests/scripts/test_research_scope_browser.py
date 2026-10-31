@@ -76,31 +76,23 @@ createRoot(document.getElementById('root')!).render(
                     }""")
                     page.add_script_tag(path=str(bundle))
                     page.get_by_role("button", name="研究甲", exact=True).wait_for()
-                    scope = page.get_by_role("combobox", name="研究范围")
-                    scope.focus(); scope.press("ArrowDown")
-                    page.locator(".ant-select-dropdown:visible").get_by_text("我的", exact=True).click()
-                    page.wait_for_function("window.fixture.releaseMine !== null")
-                    scope.focus(); scope.press("ArrowDown")
-                    page.locator(".ant-select-dropdown:visible").get_by_text("共享", exact=True).click()
-                    page.get_by_role("button", name="共享研究", exact=True).wait_for()
-                    page.evaluate("window.fixture.releaseMine()")
-                    page.wait_for_timeout(100)
-                    assert page.get_by_role("button", name="研究甲", exact=True).count() == 0
+                    assert page.get_by_role("combobox", name="研究范围").count() == 0
+                    assert "/api/research?scope=all" in page.evaluate("window.fixture.requests")
                     page.get_by_role("tab", name="研究报告").click()
                     page.get_by_role("button", name="报告甲：较长的研究标题在移动端应该完整地换行显示以避免内容被裁切", exact=True).wait_for()
-                    if viewport["width"] < 760:
-                        assert page.locator(".tr-research-table .ant-table-content").evaluate("element => element.scrollWidth <= element.clientWidth + 1")
-                        assert page.locator(".tr-research-mobile-meta").get_by_text("更新时间", exact=True).is_visible()
-                        assert page.locator(".tr-research-mobile-meta").get_by_text("仅自己", exact=True).is_visible()
-                    assert "/api/research/reports?scope=shared" in page.evaluate("window.fixture.requests")
-                    page.get_by_role("button", name="查看 self 的信息").click()
+                    headers = page.locator(".tr-research-table thead tr:not(.ant-table-measure-row) th")
+                    assert headers.filter(has_text="研究身份").count() == 1
+                    assert headers.filter(has_text="所有者").count() == 1
+                    assert headers.filter(has_text="更新时间").count() == 1
+                    assert page.locator(".tr-research-mobile-meta").count() == 0
+                    assert "/api/research/reports?scope=all" in page.evaluate("window.fixture.requests")
+                    page.get_by_role("button", name="查看 self 的信息").first.click()
                     page.get_by_role("button", name="查看 alice 的信息").click()
                     opened = page.evaluate("window.fixture.opened")
                     assert opened[0]["kind"] == "profile" and opened[0]["ref"] == "self"
                     assert opened[0]["profileKey"] == "local::alice::self" and opened[0]["owner"] == "alice"
                     assert opened[1]["kind"] == "user" and opened[1]["ref"] == "alice"
                     page.evaluate("window.fixture.authority='keycloak'; window.fixture.setLanguage('en')")
-                    page.get_by_role("combobox", name="Research scope").wait_for()
                     assert page.get_by_role("tab", name="Reports").is_visible()
                     page.wait_for_function("window.fixture.requests.filter(r => r==='/api/research/capabilities/keycloak-sharing').length>=2")
                     page.wait_for_function("!document.body.innerText.includes('Only me')")
@@ -117,8 +109,6 @@ createRoot(document.getElementById('root')!).render(
                     else:
                         page.locator(".ant-modal-close").click()
                     page.wait_for_function("window.fixture.context() === null")
-                    scope.focus(); scope.press("ArrowDown")
-                    page.locator(".ant-select-dropdown:visible").get_by_text("全部可见", exact=True).click()
                     page.get_by_role("button", name="研究甲", exact=True).first.click()
                     page.wait_for_function("window.fixture.context()?.section === 'details'")
                     if viewport["width"] <= 760:

@@ -14,7 +14,7 @@ export type TRPagination = {
 };
 
 export function TRDataTable<T extends object>({
-  columns, rows, rowKey, loading = false, pagination, error = "", empty, rowSelection, onRow,
+  columns, rows, rowKey, loading = false, pagination, error = "", empty, rowSelection, onRow, clientFiltering = false,
 }: {
   columns: TableProps<T>["columns"];
   rows: T[];
@@ -25,6 +25,7 @@ export function TRDataTable<T extends object>({
   empty?: string;
   rowSelection?: TableProps<T>["rowSelection"];
   onRow?: TableProps<T>["onRow"];
+  clientFiltering?: boolean;
 }): React.ReactElement {
   const { t } = useTranslation();
   if (error) return <Alert type="error" showIcon message={t("loadFailed")} description={error} />;
@@ -42,7 +43,7 @@ export function TRDataTable<T extends object>({
       pagination={pagination.mode === "cursor" ? false : {
         current: pagination.page,
         pageSize: pagination.pageSize,
-        total: pagination.total,
+        ...(clientFiltering ? {} : {total: pagination.total}),
         showSizeChanger: true,
         hideOnSinglePage: pagination.hideOnSinglePage,
         onChange: pagination.onChange,

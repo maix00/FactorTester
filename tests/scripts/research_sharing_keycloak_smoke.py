@@ -352,7 +352,7 @@ def run(sandbox, bundle, stylesheet):
                     creator.get_by_role("textbox", name="名称").fill(
                         "Temporary private research"
                     )
-                    creator.get_by_role("button", name="新建服务器研究").click()
+                    creator.get_by_role("button", name="新建研究").click()
                     creator.wait_for_function(
                         "window.created?.research_id", timeout=30000
                     )

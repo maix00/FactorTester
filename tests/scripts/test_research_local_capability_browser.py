@@ -64,12 +64,8 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                         throw Error('unexpected request '+u.pathname);};
                     }""", [mode, mobile])
                     page.add_script_tag(path=str(bundle))
-                    origin = "当前显示服务器研究；电脑客户端本地研究尚未接通。" if desktop else "当前显示服务器研究。"
-                    page.get_by_text(origin, exact=True).wait_for()
-                    assert page.get_by_text("当前显示服务器研究；电脑客户端本地研究尚未接通。", exact=True).count() == int(desktop)
-                    page.get_by_role("button", name="新建服务器研究").click()
-                    hint = "当前入口在服务器创建研究；电脑客户端本地创建尚未接通。" if desktop else "此入口在服务器创建研究。"
-                    page.get_by_text(hint, exact=True).wait_for()
+                    page.get_by_role("button", name="新建研究").click()
+                    page.get_by_role("dialog").wait_for()
                     assert page.evaluate("window.fixture.nativeCalls.length") == 0
                     assert not page.evaluate("window.fixture.calls.some(c => c.method !== 'GET')")
                     assert page.locator(".ant-modal-content").evaluate("element => element.scrollWidth <= element.clientWidth + 2")

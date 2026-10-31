@@ -307,7 +307,7 @@ createRoot(document.getElementById('root')!).render(<App />);
                     assert page.get_by_role("combobox", name="可见范围").count() == 0
                     page.get_by_role("textbox", name="名称").fill("因子研究")
                     page.get_by_role(
-                        "button", name="新建服务器研究", exact=True
+                        "button", name="新建研究", exact=True
                     ).click()
                     page.wait_for_function("window.fixture.created.length===1")
                     call = page.evaluate(
@@ -322,7 +322,7 @@ createRoot(document.getElementById('root')!).render(<App />);
                     )
                     page.evaluate("window.fixture.switchBeforePost=true")
                     page.get_by_role(
-                        "button", name="新建服务器研究", exact=True
+                        "button", name="新建研究", exact=True
                     ).click()
                     page.wait_for_function(
                         "window.fixture.notices.some(n => n.code==='research.create.failed')"
@@ -340,7 +340,7 @@ createRoot(document.getElementById('root')!).render(<App />);
                     page.get_by_role("combobox", name="可见范围").wait_for()
                     page.get_by_role("textbox", name="名称").fill("旧服务器研究")
                     page.get_by_role(
-                        "button", name="新建服务器研究", exact=True
+                        "button", name="新建研究", exact=True
                     ).click()
                     page.wait_for_function("window.fixture.created.length===2")
                     assert page.evaluate(

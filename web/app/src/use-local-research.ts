@@ -13,7 +13,8 @@ type NativeState = {
 
 /** Native binding, not the presence of a WebKit object, decides capability. */
 export function useLocalResearch(session:SessionProjection,mobile:boolean):NativeState & {retry:()=>void} {
-  const desktop = !mobile && typeof window!=="undefined" && hasDesktopClientBridge(window);
+  // New clients can expose this independently of the legacy catalog/run bridges.
+  const desktop = !mobile && typeof window!=="undefined" && (hasDesktopClientBridge(window) || localResearchBridge(window)!==null);
   const key=JSON.stringify([desktop,session?.username||"",session?.keycloak_issuer||"",session?.tr_identity_id||"",session?.keycloak_subject||"",!!session?.visitor_login]);
   const [state,setState]=useState<NativeState>({key:"",phase:"unsupported",code:"",client:null,capabilities:null});
   const [revision,setRevision]=useState(0);
