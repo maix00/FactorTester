@@ -21,7 +21,7 @@ struct ClientWebShellView: View {
         .id(managerConfig.baseURL?.absoluteString ?? "manager-unconfigured")
         .task(id: "\(session.isLoggedIn)|\(session.user?.organizationId ?? "")") {
             let previousEndpoint = managerConfig.baseURL
-            let previousIdentity = session.user?.stableIdentityID
+            let previousIdentity = session.user?.localResearchIdentity
             let wasLoggedIn = session.isLoggedIn
             let selected = await ManagerEndpointDiscoveryService.shared
                 .selectBestManager(
@@ -29,10 +29,11 @@ struct ClientWebShellView: View {
                     expectedUsername: session.user?.username
                 )
             // Do not send stored credentials to a newly discovered Manager.
-            // Only a target session for the same stable identity is accepted.
-            if wasLoggedIn, session.isLoggedIn, session.user?.stableIdentityID == previousIdentity,
+            // Check the stable ID and same-realm subject. Cross-realm
+            // equivalence still requires a separate federation proof.
+            if wasLoggedIn, session.isLoggedIn, session.user?.localResearchIdentity == previousIdentity,
                selected != nil, previousEndpoint != managerConfig.baseURL {
-                _ = await session.validateManagerChange(expectedIdentityID: previousIdentity)
+                _ = await session.validateManagerChange(expectedIdentity: previousIdentity)
             }
             await releaseController.refresh(force: false)
         }

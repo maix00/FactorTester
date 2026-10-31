@@ -179,9 +179,10 @@ final class SessionStore: ObservableObject {
     }
 
     /// Validate an already-selected Manager without replaying saved passwords.
-    /// A denied, unavailable, or different account never retains the old UI identity.
+    /// A denied, unavailable, different stable ID, or same-realm subject change
+    /// never retains the old UI identity. Cross-realm identity still needs proof.
     @discardableResult
-    func validateManagerChange(expectedIdentityID: String?) async -> Bool {
+    func validateManagerChange(expectedIdentity: LocalResearchIdentity?) async -> Bool {
         authenticationGeneration &+= 1
         let generation = authenticationGeneration
         let target = ManagerConfig.shared.baseURL
@@ -189,14 +190,14 @@ final class SessionStore: ObservableObject {
         restoreTask = nil
         isWorking = false
         clearAuthentication()
-        guard let expected = expectedIdentityID, !expected.isEmpty else { return false }
+        guard let expected = expectedIdentity else { return false }
         do {
             let candidate = try await api.me()
             guard generation == authenticationGeneration, target == ManagerConfig.shared.baseURL else { return false }
             guard candidate.isLoggedIn, !candidate.visitorLogin,
                   candidate.authentication != "agent",
-                  candidate.stableIdentityID == expected,
-                  candidate.localResearchIdentity != nil else { return false }
+                  let actual = candidate.localResearchIdentity,
+                  expected.matchesStableIDAndSameIssuerSubject(actual) else { return false }
             user = candidate
             return true
         } catch {

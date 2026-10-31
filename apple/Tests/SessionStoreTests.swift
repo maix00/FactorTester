@@ -118,14 +118,20 @@ final class SessionStoreTests: XCTestCase {
         let api = FakeSessionAPI(user: verified)
         let store = SessionStore(api: api, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true },
                                  credentialLoader: { SavedSessionCredentials(username: "alice", password: "secret", serverURL: nil) })
-        let mismatched = await store.validateManagerChange(expectedIdentityID: "another-user")
+        let original = try XCTUnwrap(verified.localResearchIdentity)
+        let mismatched = await store.validateManagerChange(expectedIdentity: LocalResearchIdentity(
+            issuer: original.issuer, subject: original.subject, stableID: "another-user"))
         XCTAssertFalse(mismatched)
         XCTAssertNil(store.user)
         XCTAssertEqual(api.events, ["me"])
-        let matched = await store.validateManagerChange(expectedIdentityID: "stable-alice")
+        let differentSubject = await store.validateManagerChange(expectedIdentity: LocalResearchIdentity(
+            issuer: original.issuer + "/", subject: "different-subject", stableID: original.stableID))
+        XCTAssertFalse(differentSubject)
+        XCTAssertNil(store.user)
+        let matched = await store.validateManagerChange(expectedIdentity: original)
         XCTAssertTrue(matched)
         XCTAssertEqual(store.user?.username, "alice")
-        XCTAssertEqual(api.events, ["me", "me"])
+        XCTAssertEqual(api.events, ["me", "me", "me"])
     }
 
     func testNilUsernameIsNotAnAuthenticatedIdentity() async throws {
