@@ -33,7 +33,11 @@ def manager_session(binding: dict, manager: dict):
     session = HttpSession(endpoint, bearer_token=token, certificate_pem=certificate, persist_cookies=False)
     session.import_cookies(cookies)
     current = session.get('/api/session')
-    if (str(current.get('keycloak_issuer') or '').rstrip('/') != binding['issuer']
+    if (not isinstance(current, dict)
+            or not isinstance(current.get('username'), str) or not current['username'].strip()
+            or current.get('visitor_login') is True or current.get('role') == 'visitor'
+            or current.get('authentication') == 'agent'
+            or str(current.get('keycloak_issuer') or '').rstrip('/') != binding['issuer']
             or current.get('tr_identity_id') != binding['identity_id'] or current.get('keycloak_subject') != subject):
         raise PermissionError('native Manager identity changed')
     return endpoint, session

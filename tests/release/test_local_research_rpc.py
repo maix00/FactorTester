@@ -5,6 +5,30 @@ import pytest
 from tools.cli.release.research_reporting.local_rpc import SCHEMA, LocalResearchRPC
 
 
+@pytest.mark.parametrize('overrides', [
+    {'visitor_login': True}, {'role': 'visitor'}, {'authentication': 'agent'},
+    {'username': ''}, {'username': None}, {'tr_identity_id': 'someone-else'},
+    {'keycloak_subject': 'another-subject'}, {'keycloak_issuer': 'https://other/realm'},
+])
+def test_publication_transport_rejects_non_user_or_changed_identity(monkeypatch, overrides):
+    from tools.cli.release.research_reporting import local_publication
+    identity = {'username': 'alice', 'keycloak_issuer': 'https://id.test/realm',
+                'keycloak_subject': 'subject', 'tr_identity_id': 'stable', **overrides}
+
+    class Session:
+        def __init__(self, *args, **kwargs): pass
+        def import_cookies(self, cookies): pass
+        def get(self, path):
+            assert path == '/api/session'
+            return identity
+
+    monkeypatch.setattr(local_publication, 'HttpSession', Session)
+    manager = {'endpoint': 'https://manager.test', 'subject': 'subject', 'token': '',
+               'certificate_pem': '', 'cookies': []}
+    with pytest.raises(PermissionError):
+        local_publication.manager_session({'issuer': 'https://id.test/realm', 'identity_id': 'stable'}, manager)
+
+
 def test_rpc_uses_only_native_binding_and_preserves_idempotency(tmp_path):
     rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm/', identity_id='stable',
                            profiles=[{'profile_id': 'self', 'display_name': 'Self'}])
