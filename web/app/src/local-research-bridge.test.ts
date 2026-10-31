@@ -26,6 +26,22 @@ test("research directory validates revision and profile across pages", async () 
   await assert.rejects(client.listResearches("self",{offset:1}),code("local_research_invalid_input"));
 });
 
+test("server research import validates the returned owner scope and identity", async () => {
+  let response=ok({research:record,status:"imported"});
+  let sent:Record<string,unknown>|undefined;
+  const client=localResearchBridge(host(message=>{
+    if(message.action==="capabilities")return ok({actions:["import_research"],profiles:[{profile_id:"self",display_name:"Self"}]});
+    sent=message;return response;
+  }))!;
+  await client.capabilities(currentBinding);
+  assert.equal((await client.importResearch("self",record.research_id)).status,"imported");
+  assert.deepEqual(sent,{action:"import_research",profile_id:"self",research_id:record.research_id});
+  response=ok({research:{...record,profile_id:"other"},status:"imported"});
+  await assert.rejects(client.importResearch("self",record.research_id),code("local_research_invalid_response"));
+  response=ok({research:record,status:"unexpected"});
+  await assert.rejects(client.importResearch("self",record.research_id),code("local_research_invalid_response"));
+});
+
 test("profile report directory validates its profile and linked research", async () => {
   const {description:_description,...summary}=record;
   const row={report_id:"report:one",research_id:record.research_id,profile_id:"self",title:"Report",created_at:100,research:summary};

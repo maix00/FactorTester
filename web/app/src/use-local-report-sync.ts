@@ -33,6 +33,13 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
             }
           }
         }
+        for(const item of page.researches ?? []){
+          if(item.status==="imported"||item.status==="updated")changed=true;
+          if(["conflict","denied","unavailable"].includes(item.status)){
+            const key=`research-${item.status}`;seen.add(key);
+            if(!warned.has(key)){warned.add(key);notify({code:`research.sync.${item.status}`,type:"warning",message:t("research.importPending")});}
+          }
+        }
         if(changed)callback.current();
         if(page.next_report_id)cursor=page.next_report_id;
         else {cursor="";profileIndex=(profileIndex+1)%profiles.length;}

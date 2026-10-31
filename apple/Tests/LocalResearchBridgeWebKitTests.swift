@@ -50,6 +50,7 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
             return
         }
         XCTAssertTrue((capability["actions"] as? [String])?.contains("publish_report") == true)
+        XCTAssertTrue((capability["actions"] as? [String])?.contains("import_research") == true)
         XCTAssertNil(capability["manager"])
         let created = try await message(view, ["action": "create", "profile_id": "self", "title": "WK test", "description": "", "operation_id": "test-operation"])
         let row = try XCTUnwrap(created["research"] as? [String: Any])

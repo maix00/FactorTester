@@ -295,7 +295,18 @@ export class LocalResearchClient {
     return {status:reply.status,local_modified:reply.local_modified};
   }
 
-  async syncReports(profileId:string,afterReportId="",limit=4):Promise<{reports:{report_id:string;research_id:string;status:string}[];next_report_id:string|null}> {
+  async importResearch(profileId:string,researchId:string):Promise<{research:LocalResearch;status:string}> {
+    this.requireAction("import_research");
+    const profile_id=inputText(profileId,512),research_id=inputText(researchId,512);
+    this.requireProfile(profile_id);const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"import_research",profile_id,research_id});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    const value=research(reply.research);
+    if(value.profile_id!==profile_id||value.research_id!==research_id||!["imported","updated","unchanged"].includes(String(reply.status)))throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {research:value,status:String(reply.status)};
+  }
+
+  async syncReports(profileId:string,afterReportId="",limit=4):Promise<{reports:{report_id:string;research_id:string;status:string}[];researches:{research_id:string;status:string}[];next_report_id:string|null}> {
     this.requireAction("sync_reports");const profile_id=inputText(profileId,512),after_report_id=inputText(afterReportId,160,true);
     this.requireProfile(profile_id);
     if(!Number.isSafeInteger(limit)||limit<1||limit>16)throw new LocalResearchBridgeError("local_research_invalid_input");
@@ -310,7 +321,14 @@ export class LocalResearchClient {
     if(reports.some((value,index)=>value.report_id <= (index ? reports[index-1].report_id : after_report_id)))throw new LocalResearchBridgeError("local_research_invalid_response");
     const next=reply.next_report_id;
     if(next!==null&&(typeof next!=="string"||!reports.length||next!==reports.at(-1)?.report_id||next<=after_report_id))throw new LocalResearchBridgeError("local_research_invalid_response");
-    return {reports,next_report_id:next as string|null};
+    const rawResearches=reply.researches??[];
+    if(!Array.isArray(rawResearches)||rawResearches.length>limit)throw new LocalResearchBridgeError("local_research_invalid_response");
+    const researches=rawResearches.map(value=>{
+      if(!isRecord(value)||!["imported","updated","unchanged","conflict","denied","unavailable"].includes(String(value.status)))throw new LocalResearchBridgeError("local_research_invalid_response");
+      return {research_id:identifier(value.research_id),status:String(value.status)};
+    });
+    if(new Set(researches.map(value=>value.research_id)).size!==researches.length)throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {reports,researches,next_report_id:next as string|null};
   }
 
   /** The caller retains operation_id for retries; this client never retries writes. */

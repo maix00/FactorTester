@@ -53,7 +53,7 @@ export function ResearchCreate({ onClose, onCreated }: { onClose: () => void; on
         title: values.title.trim(), description: values.description?.trim() || "", profile_ref: values.profile_ref || "",
         visibility: authority === "keycloak" ? "private" : values.visibility, authorized_users: authority === "legacy" && values.visibility === "authorized" ? values.authorized_users || [] : [],
       }) });
-      if (!controller.signal.aborted) { notify({code:"research.create.sync",type:"warning",message:t("research.syncPending")}); onCreated(data.research); }
+      if (!controller.signal.aborted) onCreated(data.research);
     } catch (reason) { if (!controller.signal.aborted) notify({code:"research.create.failed",type:"error",message:t("researchDetail.operationFailed"),description:(reason as Error).message}); }
     finally { saving.current = false; if (!controller.signal.aborted) setBusy(false); }
   };

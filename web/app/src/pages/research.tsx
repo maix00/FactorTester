@@ -174,7 +174,17 @@ function ResearchPageForSession(): React.ReactElement {
     ]} /></div>
     {creatingLocal && local.client && local.capabilities?.profiles.length ? <LocalResearchCreate client={local.client} profiles={local.capabilities.profiles} initialProfile={local.capabilities.profiles[0].profile_id} operation={localAttempt} onClose={()=>setCreatingLocal(false)} onCreated={()=>{localAttempt.current=null;setCreatingLocal(false);setRevision(value=>value+1);}} />:null}
     {localProfile ? <DetailsPanel title={t("research.profile")} onClose={()=>setLocalProfile(null)} width={520}><PropertyGroups groups={[{key:"profile",title:t("research.profile"),items:[{key:"name",label:t("editor.name"),value:local.capabilities?.profiles.find(value=>value.profile_id===localProfile)?.display_name || localProfile},{key:"id",label:t("objectReference.reference"),value:localProfile}]}]} /></DetailsPanel>:null}
-    {creating ? <ResearchCreate onClose={() => setCreating(false)} onCreated={(value) => { setCreating(false); setSelected(value); setEditor(false); setRevision(revision => revision + 1); }} /> : null}
+    {creating ? <ResearchCreate onClose={() => setCreating(false)} onCreated={(value) => {
+      setCreating(false);setSelected(value);setEditor(false);setRevision(current=>current+1);
+      const client=local.client,profile=local.capabilities?.profiles.find(item=>item.profile_id==="self");
+      if(local.phase==="ready" && client && profile){
+        if(!local.capabilities?.actions.includes("import_research")){notify({code:"research.import.pending",type:"warning",message:t("research.importPending")});return;}
+        const snapshot=client.snapshot();
+        void client.importResearch(profile.profile_id,String(value.research_id||""))
+          .then(()=>{if(client.isCurrent(snapshot))setLocalRevision(current=>current+1);})
+          .catch(()=>{if(client.isCurrent(snapshot)){notify({code:"research.import.pending",type:"warning",message:t("research.importPending")});syncLocalReports();}});
+      }
+    }} /> : null}
     {selected?.__local && local.client && local.capabilities ? <LocalResearchDetail key={`${selected.profile_id}:${rowID(selected)}`} client={local.client} capabilities={local.capabilities} item={(tab === "reports" ? selected.research : selected) as any} initialReport={tab === "reports" ? selected as any : undefined} onSaved={()=>{setLocalRevision(value=>value+1);syncLocalReports();}} onClose={()=>setSelected(null)} /> : null}
     {selected && !selected.__local ? <DetailsPanel title={selected.title || rowID(selected)} onClose={() => { setSelected(null); setSelectedPublicationID(""); setEditor(false); }}>
       {tab === "reports" ? <>
