@@ -205,6 +205,26 @@ def run(sandbox, *, on_ready=None):
         owner_policy = owners[0]
         original = {"name": owner_policy["name"], "description": owner_policy["description"],
                     "users": [users["owner"]["id"]], "scopes": owner_policy["scopes"], "logic": "POSITIVE"}
+        def owned_refs():
+            cursor = {'updated_at': 0, 'research_id': ''}
+            refs = []
+            while cursor is not None:
+                page = catalog.owned_sync_page(viewer='owner', after_time=cursor['updated_at'],
+                                               after_ref=cursor['research_id'], limit=1)
+                refs.extend(item['research_id'] for item in page['researches'])
+                cursor = page['next_cursor']
+            return refs
+        with identity_request():
+            bind_verified_identity(*sessions['owner'])
+            assert set(owned_refs()) == {ref, created['research_id']}
+        without_read = {**original, 'scopes': [scope for scope in original['scopes'] if scope != 'read']}
+        manager.request(settings, pat, 'PUT', 'uma-policy/' + owner_policy['id'], without_read)
+        with identity_request():
+            # The same token is intentionally reused: ownership alone must
+            # never bypass the current Keycloak read decision.
+            bind_verified_identity(*sessions['owner'])
+            assert ref not in owned_refs()
+        manager.request(settings, pat, 'PUT', 'uma-policy/' + owner_policy['id'], original)
         without_share = {**original, "scopes": [scope for scope in original["scopes"] if scope != "share"]}
         manager.request(settings, pat, "PUT", "uma-policy/" + owner_policy["id"], without_share)
         with identity_request():
@@ -233,6 +253,7 @@ def run(sandbox, *, on_ready=None):
     return {"real_keycloak": True, "real_catalog": True, "same_token_revocation": True,
             "revoked_page_context_removed": True, "real_link_redemption": True,
             "issuer_and_link_revocation": True, "real_research_creation": True, "legacy_acl_written": False,
+            "owned_discovery_real_keycloak_revocation": True,
             "local_redeem_seconds": round(redemption_seconds, 3),
             "profile_membership_provider": "denial-only test double", "agent_runtime_admission": "test double"}
 

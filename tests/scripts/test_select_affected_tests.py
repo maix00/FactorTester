@@ -60,6 +60,8 @@ def test_local_research_publication_selects_focused_client_and_server_contracts(
     assert "tests/server/test_research_catalog_keycloak_reads.py" in targets
     assert "tests/server/test_client_server_research_import.py" in targets
     assert "tests/server" not in targets and "tests/cli" not in targets
+    assert selector.select({"scripts/test/keycloak_research_grant_smoke.py"}) == (
+        "SCOPED", ["tests/server/test_keycloak_research_stage.py", "tests/server/test_research_catalog_keycloak_reads.py"])
 
 
 def test_skill_change_checks_activation_and_skill_tests():

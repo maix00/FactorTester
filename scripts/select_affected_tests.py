@@ -618,6 +618,10 @@ EXACT_PATH_TESTS["tools/cli/commands/research_report_scope_identity.py"] = (
     "tests/release/test_local_research_rpc.py",
     "tests/server/test_client_local_report_publication.py",
 )
+EXACT_PATH_TESTS["scripts/test/keycloak_research_grant_smoke.py"] = (
+    "tests/server/test_research_catalog_keycloak_reads.py",
+    "tests/server/test_keycloak_research_stage.py",
+)
 for _path in (
     "tools/cli/release/research_reporting/local_rpc.py",
     "tools/cli/release/research_reporting/local_server_research.py",
