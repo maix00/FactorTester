@@ -122,15 +122,19 @@ function ResearchPageForSession(): React.ReactElement {
     const client=local.client,profile=local.capabilities?.profiles.find(item=>item.profile_id==="self");
     if(tab!=="researches"||!localDirectoryReady||local.phase!=="ready"||!client||!profile||
        !local.capabilities?.actions.includes("queue_researches"))return;
-    const known=new Set(localRows.map(row=>String(row.research_id||"")));
-    const candidates=[...new Set(rows.filter(row=>row.owner_ref===principal&&row.is_owned===true&&row.access?.can_view===true)
-      .map(row=>String(row.research_id||"")))].filter(id=>/^research:v1:[A-Za-z0-9_-]{24,128}$/.test(id)&&!known.has(id)&&!queuedServerResearch.current.has(id));
+    const known=new Map(localRows.map(row=>[String(row.research_id||""),row]));
+    const eligible=rows.filter(row=>row.owner_ref===principal&&row.is_owned===true&&row.access?.can_view===true)
+      .map(row=>({id:String(row.research_id||""),version:Number(row.updated_at)}));
+    const candidates=[...new Map(eligible.map(item=>[item.id,item])).values()]
+      .filter(({id,version})=>/^research:v1:[A-Za-z0-9_-]{24,128}$/.test(id)&&
+        (!known.has(id)||(Number.isFinite(version)&&version>Number(known.get(id)?.updated_at)))&&
+        !queuedServerResearch.current.has(`${id}:${version}`));
     if(!candidates.length)return;
     let active=true;const snapshot=client.snapshot();
     void (async()=>{
       for(let offset=0;offset<candidates.length&&active;offset+=100){
         const batch=candidates.slice(offset,offset+100);
-        try{await client.queueResearches(profile.profile_id,batch);if(!active||!client.isCurrent(snapshot))return;batch.forEach(id=>queuedServerResearch.current.add(id));syncLocalReports();}
+        try{await client.queueResearches(profile.profile_id,batch.map(item=>item.id));if(!active||!client.isCurrent(snapshot))return;batch.forEach(item=>queuedServerResearch.current.add(`${item.id}:${item.version}`));syncLocalReports();}
         catch{if(active&&client.isCurrent(snapshot))notify({code:"research.import.pending",type:"warning",message:t("research.importPending")});return;}
       }
     })();
