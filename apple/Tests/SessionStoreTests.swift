@@ -59,7 +59,7 @@ final class SessionStoreTests: XCTestCase {
         let verified = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: fields))
         let api = FakeSessionAPI(user: verified)
         let store = SessionStore(api: api, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true },
-                                 credentialLoader: { SavedSessionCredentials(username: "alice", password: "secret") })
+                                 credentialLoader: { SavedSessionCredentials(username: "alice", password: "secret", serverURL: nil) })
         let mismatched = await store.validateManagerChange(expectedIdentityID: "another-user")
         XCTAssertFalse(mismatched)
         XCTAssertNil(store.user)
