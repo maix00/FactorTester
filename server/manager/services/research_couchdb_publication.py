@@ -121,11 +121,12 @@ class ResearchCouchPublicationService:
             authorize_now=authorize_now, prepared=_prepared, authoring=_authoring)
 
     def read(self, *, session: dict, research_id: str, report_id: str, publication_ref: str = '',
-             branch_ref: str = '', attachment: str = '', metadata_only: bool = False, requires_publish: bool = False) -> dict:
-        if (type(metadata_only) is not bool or type(requires_publish) is not bool
-                or (metadata_only and attachment) or (requires_publish and not metadata_only)):
+             branch_ref: str = '', attachment: str = '', metadata_only: bool = False, requires_publish: bool = False,
+             requires_edit: bool = False) -> dict:
+        if (type(metadata_only) is not bool or type(requires_publish) is not bool or type(requires_edit) is not bool
+                or (metadata_only and attachment) or ((requires_publish or requires_edit) and not metadata_only)):
             raise ValueError('invalid report metadata request')
-        scopes = ('read', 'write', 'share') if requires_publish else ('read', 'write') if attachment.startswith('report_authoring/') else ('read',)
+        scopes = ('read', 'write', 'share') if requires_publish else ('read', 'write') if requires_edit or attachment.startswith('report_authoring/') else ('read',)
         resource_id, owner_id, owner_ref, authorize_now = self._context(
             session=session, research_id=research_id, report_id=report_id, scopes=scopes)
         authorize_now()

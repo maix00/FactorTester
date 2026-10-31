@@ -41,7 +41,8 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                     metadata_only = query.get('metadata_only') == ['1']
                     if metadata_only: transport['metadata'] += 1
                     value = service.read(**args, branch_ref=query['branch_ref'][0], metadata_only=metadata_only,
-                                         requires_publish=query.get('requires_publish') == ['1'])
+                                         requires_publish=query.get('requires_publish') == ['1'],
+                                         requires_edit=query.get('requires_edit') == ['1'])
                     return self.reply(200, {'success': True, **value})
                 if len(parts) == 7 and parts[4] == 'attachments':
                     transport['downloads'] += 1
@@ -191,8 +192,26 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
         _local_report, local_root = rpc.store._report_root('self', research['research_id'], selected['report_id'])
         assert subprocess.check_output(['git', '-C', str(local_root), 'status', '--porcelain'], text=True).strip() == ''
+        def exit_after_commit(workspace, **kwargs):
+            original_commit(workspace, **kwargs)
+            raise OSError('process stopped after commit')
+        monkeypatch.setattr(local_pull, 'commit_report_workspace', exit_after_commit)
+        with pytest.raises(OSError, match='after commit'): rpc.request(pull)
         monkeypatch.setattr(local_pull, 'commit_report_workspace', original_commit)
+        downloads_before = transport['downloads']
+        auth['write'] = False
+        assert rpc.request(auto)['reports'][0]['status'] == 'denied'
+        auth['write'] = True
+        # Recovery must not hide a user's uncommitted changes, even when the
+        # report HEAD matches the interrupted pull.
+        (local_root / 'user-note.txt').write_text('keep this change')
+        assert rpc.request(auto)['reports'][0]['status'] == 'conflict'
+        assert (local_root / 'user-note.txt').read_text() == 'keep this change'
+        (local_root / 'user-note.txt').unlink()
         assert rpc.request(auto)['reports'][0]['status'] == 'updated'
+        assert transport['downloads'] == downloads_before + 1  # rejected dirty attempt only
+        with rpc.store._connect() as db:
+            assert db.execute('SELECT count(*) FROM report_pull_recovery').fetchone()[0] == 0
         assert rpc.request(pull)['status'] == 'up_to_date'
         index = rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})
         assert [chapter['title'] for chapter in index['index']['chapters']] == ['First', 'Second']

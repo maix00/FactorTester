@@ -23,11 +23,12 @@ class LocalReportSyncConflict(ValueError):
     """Local and remote report histories cannot safely be advanced automatically."""
 
 
-def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False) -> dict:
+def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False, requires_edit: bool = False) -> dict:
     from .public_research.object_uploads import projection_hash
     value = session.get('/api/research/local-report-publication', query={
         'research_id': research_id, 'report_id': report_id, 'branch_ref': 'main',
-        **({'metadata_only': '1'} if metadata_only else {})})
+        **({'metadata_only': '1'} if metadata_only else {}),
+        **({'requires_edit': '1'} if requires_edit else {})})
     record, bundle, projection = value.get('publication'), value.get('authoring'), value.get('projection')
     if (value.get('success') is not True or not isinstance(record, dict) or not isinstance(bundle, dict) or (not metadata_only and not isinstance(projection, dict))
             or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
@@ -71,6 +72,37 @@ def _copy_files(source: Path, destination: Path, created: list[Path]) -> None:
             atomic_write(target, data)
 
 
+def _recover_pull(store, root: Path, paths: dict, manager_hash: str, report_id: str,
+                  remote: dict, base, local: dict) -> bool:
+    """Finish a verified pull whose Git commit preceded its SQLite receipt."""
+    with store._connect() as db:
+        pending = db.execute('SELECT * FROM report_pull_recovery WHERE report_id=? AND manager_hash=?',
+                             (report_id, manager_hash)).fetchone()
+    if not pending:
+        return False
+    record, bundle = remote['publication'], remote['authoring']
+    if (not base or (base['publication_id'], base['revision'], base['generation'], base['local_root_ref']) !=
+            (pending['publication_id'], pending['base_revision'], pending['base_generation'], pending['base_root_ref'])
+            or (record['publication_id'], record['revision'], record['generation'], record['projection_hash'], bundle['sha256']) !=
+            (pending['publication_id'], pending['revision'], pending['generation'], pending['projection_hash'], pending['bundle_sha256'])
+            or (local['generation'], local['root_ref']) != (pending['generation'], pending['local_root_ref'])):
+        return False
+    status = subprocess.run(['git', '-C', str(root), 'status', '--porcelain'], capture_output=True, text=True, check=True)
+    parent = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD^'], capture_output=True, text=True)
+    message = subprocess.run(['git', '-C', str(root), 'log', '-1', '--format=%s'], capture_output=True, text=True, check=True)
+    if status.stdout.strip() or parent.returncode or parent.stdout.strip() != pending['prior_commit'] or message.stdout.strip() != 'Sync report from Manager':
+        return False
+    with store._connect() as db:
+        changed = db.execute('''UPDATE report_publications SET revision=?, generation=?, projection_hash=?, local_root_ref=?
+            WHERE report_id=? AND manager_hash=? AND publication_id=? AND revision=? AND generation=? AND local_root_ref=?''',
+            (pending['revision'], pending['generation'], pending['projection_hash'], pending['local_root_ref'], report_id,
+             manager_hash, pending['publication_id'], pending['base_revision'], pending['base_generation'], pending['base_root_ref']))
+        if changed.rowcount != 1:
+            raise LocalReportSyncConflict('report synchronization receipt changed during recovery')
+        db.execute('DELETE FROM report_pull_recovery WHERE report_id=? AND manager_hash=?', (report_id, manager_hash))
+    return True
+
+
 def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                       research_id: str, report_id: str) -> dict:
     endpoint, session = manager_session(binding, manager)
@@ -91,6 +123,17 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             local = load_head(paths)
             if local['report_id'] != report_id:
                 raise ValueError('local report identity is invalid')
+            # Recovery updates a local editable snapshot, so recheck write access
+            # just as the authoring attachment endpoint does.
+            with store._connect() as db:
+                has_recovery = db.execute('SELECT 1 FROM report_pull_recovery WHERE report_id=? AND manager_hash=?',
+                                          (report_id, manager_hash)).fetchone() is not None
+            if has_recovery:
+                edit_check = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True)
+                if edit_check != {'publication': remote['publication'], 'authoring': remote['authoring']}:
+                    raise LocalReportSyncConflict('remote report changed during recovery')
+            if has_recovery and _recover_pull(store, root, paths, manager_hash, report_id, remote, base, local):
+                return {'status': 'updated', 'local_modified': False}
             if base and base['revision'] == record['revision']:
                 return {'status': 'up_to_date', 'local_modified': (local['generation'] != base['generation'] or local['root_ref'] != base['local_root_ref'])}
             baseline_ok = bool(base and base['local_root_ref'] and local['generation'] == base['generation'] and local['root_ref'] == base['local_root_ref'])
@@ -128,6 +171,12 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                 created: list[Path] = []
                 head_started = False
                 try:
+                    if base:
+                        with store._connect() as db:
+                            db.execute('''INSERT OR REPLACE INTO report_pull_recovery VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                (report_id, manager_hash, record['publication_id'], record['revision'], staged_head['generation'],
+                                 record['projection_hash'], digest, staged_head['root_ref'], base['revision'], base['generation'],
+                                 base['local_root_ref'], prior_commit))
                     for name in ('resources', 'assets'):
                         _copy_files(staged_branch / name, target_branch / name, created)
                     _copy_files(staged_branch / 'authoring' / 'nodes', target_branch / 'authoring' / 'nodes', created)
@@ -162,13 +211,21 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                             publish_sqlite_index(paths, load_node(paths, current['root_ref']), current['generation'])
                         for path in reversed(created):
                             path.unlink(missing_ok=True)
+                        with store._connect() as db:
+                            db.execute('DELETE FROM report_pull_recovery WHERE report_id=? AND manager_hash=?', (report_id, manager_hash))
                     raise
         with store._connect() as db:
-            db.execute('''INSERT INTO report_publications
+            if base:
+                changed = db.execute('''UPDATE report_publications SET revision=?, generation=?, projection_hash=?, local_root_ref=?
+                    WHERE report_id=? AND manager_hash=? AND publication_id=? AND revision=? AND generation=? AND local_root_ref=?''',
+                    (record['revision'], staged_head['generation'], record['projection_hash'], staged_head['root_ref'],
+                     report_id, manager_hash, base['publication_id'], base['revision'], base['generation'], base['local_root_ref']))
+                if changed.rowcount != 1:
+                    raise LocalReportSyncConflict('report synchronization receipt changed during pull')
+            else:
+                db.execute('''INSERT INTO report_publications
                 (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(report_id, manager_hash) DO UPDATE SET publication_id=excluded.publication_id,
-                revision=excluded.revision, generation=excluded.generation, projection_hash=excluded.projection_hash,
-                local_root_ref=excluded.local_root_ref''', (report_id, manager_hash, record['publication_id'],
+                VALUES (?, ?, ?, ?, ?, ?, ?)''', (report_id, manager_hash, record['publication_id'],
                     record['revision'], staged_head['generation'], record['projection_hash'], staged_head['root_ref']))
+            db.execute('DELETE FROM report_pull_recovery WHERE report_id=? AND manager_hash=?', (report_id, manager_hash))
         return {'status': 'updated', 'local_modified': False}

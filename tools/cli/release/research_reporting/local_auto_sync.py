@@ -10,7 +10,9 @@ from .local_publication import ensure_publication_table, manager_session, publis
 from .local_pull import LocalReportSyncConflict, _remote, pull_local_report
 
 _PUBLICATION_PAGE = '''SELECT report.report_id, report.research_id, publication.publication_id, publication.revision,
-                   publication.generation, publication.local_root_ref
+                   publication.generation, publication.local_root_ref,
+                   EXISTS(SELECT 1 FROM report_pull_recovery AS recovery
+                          WHERE recovery.report_id=publication.report_id AND recovery.manager_hash=publication.manager_hash) AS pending_pull
             FROM report_publications AS publication JOIN reports AS report ON report.report_id=publication.report_id
             WHERE publication.manager_hash=? AND report.profile_id=? AND report.ready=1 AND publication.report_id>?
             ORDER BY publication.report_id LIMIT ?'''
@@ -40,7 +42,13 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                 raise LocalReportSyncConflict('remote publication identity changed')
             local_changed = not row['local_root_ref'] or (head['generation'], head['root_ref']) != (row['generation'], row['local_root_ref'])
             remote_changed = remote['revision'] != row['revision']
-            if local_changed and remote_changed:
+            if local_changed and remote_changed and row['pending_pull']:
+                # Let the pull verify the recorded source, base receipt and Git
+                # commit before treating an interrupted pull as a conflict.
+                pulled = pull_local_report(store, binding=binding, manager=manager, profile_id=profile,
+                                           research_id=research_id, report_id=report_id)
+                status = 'updated' if pulled['status'] == 'updated' else 'unchanged'
+            elif local_changed and remote_changed:
                 same_root = (head['generation'], head['root_ref']) == (authoring['generation'], authoring['root_ref'])
                 same_projection = False
                 local_projection = None

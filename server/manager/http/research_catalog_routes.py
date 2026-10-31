@@ -115,10 +115,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 if query.get('requires_publish', ['0']) not in (['0'], ['1']):
                     raise ValueError('invalid report authorization option')
                 requires_publish = query.get('requires_publish') == ['1']
+                if query.get('requires_edit', ['0']) not in (['0'], ['1']):
+                    raise ValueError('invalid report authorization option')
+                requires_edit = query.get('requires_edit') == ['1']
                 if metadata_only and attachment:
                     raise ValueError('metadata is not an attachment')
-                if requires_publish and not metadata_only:
-                    raise ValueError('publish preflight requires metadata')
+                if (requires_publish or requires_edit) and not metadata_only:
+                    raise ValueError('authorization preflight requires metadata')
                 if len(query.get('server_id', [])) > 1:
                     raise ValueError('only one report server may be selected')
                 server_id = str(query.get('server_id', [''])[0] or '').strip()
@@ -131,7 +134,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         principal=viewer, delegated_user_token=self._bearer_token(), payload={
                             'research_id': research_id, 'report_id': report_id,
                             'publication_ref': publication_ref or '', 'branch_ref': branch_ref, 'attachment': attachment,
-                            'metadata_only': metadata_only, 'requires_publish': requires_publish})
+                            'metadata_only': metadata_only, 'requires_publish': requires_publish, 'requires_edit': requires_edit})
                     if not server_admission(session, state=self.state, use_cache=False)[0]:
                         raise PermissionError('current Manager access is not authorized')
                     if attachment:
@@ -159,7 +162,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         research_id=research_id, report_id=report_id,
                         publication_ref=publication_ref or '', branch_ref=branch_ref, attachment=attachment,
                         **({'metadata_only': True} if metadata_only else {}),
-                        **({'requires_publish': True} if requires_publish else {}))
+                        **({'requires_publish': True} if requires_publish else {}),
+                        **({'requires_edit': True} if requires_edit else {}))
                 if attachment:
                     raw, content_type = value['content'], value['content_type']
                     self.send_response(200)

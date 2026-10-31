@@ -54,6 +54,16 @@ def ensure_publication_table(store):
         # Manager before finding the next eligible page.
         db.execute('''CREATE INDEX IF NOT EXISTS report_publications_manager_report
             ON report_publications(manager_hash, report_id)''')
+        # A bounded per-publication recovery record bridges the Git commit and
+        # SQLite receipt, which cannot participate in one atomic transaction.
+        db.execute('''CREATE TABLE IF NOT EXISTS report_pull_recovery (
+            report_id TEXT NOT NULL, manager_hash TEXT NOT NULL,
+            publication_id TEXT NOT NULL, revision TEXT NOT NULL,
+            generation INTEGER NOT NULL, projection_hash TEXT NOT NULL,
+            bundle_sha256 TEXT NOT NULL, local_root_ref TEXT NOT NULL,
+            base_revision TEXT NOT NULL, base_generation INTEGER NOT NULL,
+            base_root_ref TEXT NOT NULL, prior_commit TEXT NOT NULL,
+            PRIMARY KEY(report_id, manager_hash))''')
 
 
 def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str,

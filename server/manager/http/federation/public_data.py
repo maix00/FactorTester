@@ -104,14 +104,16 @@ class FederationPublicDataRoutesMixin:
                     or context[1].get('username') != principal
                     or type(payload.get('metadata_only', False)) is not bool
                     or type(payload.get('requires_publish', False)) is not bool
-                    or set(payload) - {'research_id', 'report_id', 'publication_ref', 'branch_ref', 'attachment', 'metadata_only', 'requires_publish'}):
+                    or type(payload.get('requires_edit', False)) is not bool
+                    or set(payload) - {'research_id', 'report_id', 'publication_ref', 'branch_ref', 'attachment', 'metadata_only', 'requires_publish', 'requires_edit'}):
                 raise PermissionError('verified report reader is required')
             service = LocalReportPublicationService(state=self.state, store=report_store_from_environment())
             result = service.read(session=context[1], research_id=payload.get('research_id'),
                 report_id=payload.get('report_id'), publication_ref=str(payload.get('publication_ref') or ''),
                 branch_ref=str(payload.get('branch_ref') or ''), attachment=str(payload.get('attachment') or ''),
                 **({'metadata_only': True} if payload.get('metadata_only') else {}),
-                **({'requires_publish': True} if payload.get('requires_publish') else {}))
+                **({'requires_publish': True} if payload.get('requires_publish') else {}),
+                **({'requires_edit': True} if payload.get('requires_edit') else {}))
             if payload.get('attachment'):
                 return {'content_base64': base64.b64encode(result['content']).decode('ascii'),
                         'content_type': result['content_type']}
