@@ -87,7 +87,8 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
             preflight = session.get('/api/research/local-report-publication', query={'research_id': research_id,
                 'report_id': report_id, 'branch_ref': 'main', 'metadata_only': '1', 'requires_publish': '1'})
             record = preflight.get('publication') if preflight.get('success') is True else None
-            if (not isinstance(record, dict) or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
+            if (preflight.get('publish_authorized') is not True or not isinstance(record, dict)
+                    or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
                     or record.get('publication_id') != row['publication_id']):
                 raise PermissionError('report publication identity changed')
         paths = report_tree_paths(root, 'main')

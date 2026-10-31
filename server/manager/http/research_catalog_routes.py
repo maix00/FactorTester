@@ -151,6 +151,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         record, projected = value.get('publication'), value.get('projection')
                         if (not isinstance(record, dict) or (not metadata_only and not isinstance(projected, dict))
                                 or (requires_edit and value.get('edit_authorized') is not True)
+                                or (requires_publish and value.get('publish_authorized') is not True)
                                 or record.get('report_id') != report_id or (not metadata_only and projected.get('report_id') != report_id)
                                 or record.get('storage_server_id') != server_id
                                 or (publication_ref and record.get('publication_id') != publication_ref)
@@ -158,7 +159,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                             raise PermissionError('peer report identity does not match')
                         value = {'publication': record, **({'projection': projected} if not metadata_only else {}),
                                  **({'authoring': value['authoring']} if 'authoring' in value else {}),
-                                 **({'edit_authorized': True} if requires_edit else {})}
+                                 **({'edit_authorized': True} if requires_edit else {}),
+                                 **({'publish_authorized': True} if requires_publish else {})}
                 else:
                     value = self._research_couch_service(local=bool(local_publication)).read(session=session,
                         research_id=research_id, report_id=report_id,

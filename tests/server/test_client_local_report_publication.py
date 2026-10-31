@@ -20,7 +20,7 @@ from tools.cli.release.research_reporting.public_research.projection import buil
 
 def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_access(tmp_path, monkeypatch):
     service, _manager, store, auth = harness(tmp_path / 'manager')
-    transport = {'tamper': False, 'omit_edit': False, 'metadata': 0, 'downloads': 0, 'posts': 0}
+    transport = {'tamper': False, 'omit_edit': False, 'omit_publish': False, 'metadata': 0, 'downloads': 0, 'posts': 0}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args): pass
@@ -44,6 +44,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                                          requires_publish=query.get('requires_publish') == ['1'],
                                          requires_edit=query.get('requires_edit') == ['1'])
                     if transport['omit_edit']: value.pop('edit_authorized', None)
+                    if transport['omit_publish']: value.pop('publish_authorized', None)
                     return self.reply(200, {'success': True, **value})
                 if len(parts) == 7 and parts[4] == 'attachments':
                     transport['downloads'] += 1
@@ -101,6 +102,12 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert not store.docs
         manager['subject'] = SESSION['keycloak_subject']
         published = rpc.request(request)['publication']
+        posts_before = transport['posts']
+        transport['omit_publish'] = True
+        with pytest.raises(PermissionError):
+            rpc.request(request)
+        assert transport['posts'] == posts_before
+        transport['omit_publish'] = False
         assert rpc.request(request)['publication'] == published
         auto = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
         metadata_before = transport['metadata']

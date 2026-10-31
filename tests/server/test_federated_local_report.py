@@ -115,6 +115,15 @@ def test_browser_remote_report_does_not_fall_back_to_local_or_stale(tmp_path, mo
     edit_query = query + '&metadata_only=1&requires_edit=1'
     assert Handler()._get_research_catalog_routes(SimpleNamespace(path=parsed.path, query=edit_query))
     assert responses[-1][0] == 200 and calls[-1][1]['payload']['requires_edit'] is True
+    publish_query = query + '&metadata_only=1&requires_publish=1'
+    assert Handler()._get_research_catalog_routes(SimpleNamespace(path=parsed.path, query=publish_query))
+    assert responses[-1][0] == 403  # An older peer did not verify publish permission.
+    state.federation_gateway = SimpleNamespace(public_data=lambda *_a, **_kw: {
+        'publication': {'publication_id': PUBLICATION, 'report_id': REPORT,
+                        'storage_server_id': 'target', 'branch_ref': 'main'},
+        'publish_authorized': True})
+    assert Handler()._get_research_catalog_routes(SimpleNamespace(path=parsed.path, query=publish_query))
+    assert responses[-1][0] == 200 and responses[-1][1]['publish_authorized'] is True
     state.federation_gateway = SimpleNamespace(public_data=lambda *_a, **_kw: {
         'publication': {'publication_id': PUBLICATION, 'report_id': REPORT,
                         'storage_server_id': 'target', 'branch_ref': 'main'}})
