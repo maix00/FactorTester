@@ -20,14 +20,25 @@ import WebKit
 
 @MainActor
 final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
+    typealias Runner = ([String: Any]) async throws -> [String: Any]
     private weak var session: SessionStore?
     private let endpoint: URL
+    private let runner: Runner
     private var boundIdentity: LocalResearchIdentity?
     private var handshakeGeneration: UInt64 = 0
 
-    init(session: SessionStore, endpoint: URL) {
+    init(session: SessionStore, endpoint: URL, runner: @escaping Runner = LocalResearchBridge.runRequest) {
         self.session = session
         self.endpoint = endpoint
+        self.runner = runner
+    }
+
+    private static func runRequest(_ envelope: [String: Any]) async throws -> [String: Any] {
+        try await BundledRuntimeActivator.waitUntilReady()
+        return try await ReleaseCommand.runObject(
+            ["client", "local-research-request"],
+            executable: ClientCLIResolution.executable(), stdinJSON: envelope
+        )
     }
 
     func userContentController(
@@ -88,16 +99,12 @@ final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
                 "request": request,
             ]
             do {
-                try await BundledRuntimeActivator.waitUntilReady()
                 guard self.isCurrent(identity), self.boundIdentity == identity,
                       handshake == self.handshakeGeneration else {
                     replyHandler(["success": false, "code": "local_research_session_changed"], nil)
                     return
                 }
-                let result = try await ReleaseCommand.runObject(
-                    ["client", "local-research-request"],
-                    executable: ClientCLIResolution.executable(), stdinJSON: envelope
-                )
+                let result = try await self.runner(envelope)
                 guard self.isCurrent(identity), self.boundIdentity == identity,
                       handshake == self.handshakeGeneration else {
                     replyHandler(["success": false, "code": "local_research_session_changed"], nil)
