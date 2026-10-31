@@ -7,6 +7,7 @@ interface so a fake adapter can drive permission tests without Keycloak.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import urllib.error
 from typing import Any, Protocol
 
 
