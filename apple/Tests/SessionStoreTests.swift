@@ -442,10 +442,10 @@ private final class DelayedSessionAPI: SessionAPI {
         }
     }
     func login(username: String, password: String) async throws -> AuthResponse {
-        throw APIError.unauthorized
+        throw APIError.unauthorized("unauthorized")
     }
     func register(username: String, password: String, organizationId: String) async throws -> AuthResponse {
-        throw APIError.unauthorized
+        throw APIError.unauthorized("unauthorized")
     }
     func logout() async throws {}
     func setKeepLogin(_ keep: Bool) async throws {}
