@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Combine
 import Foundation
@@ -66,3 +67,5 @@ enum PersonalWorkspaceAuthorizationPanel {
         return true
     }
 }
+
+#endif

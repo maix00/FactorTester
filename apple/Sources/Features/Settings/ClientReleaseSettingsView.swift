@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct ClientReleaseSettingsView: View {
@@ -204,3 +205,5 @@ struct ClientReleaseSettingsView: View {
         }
     }
 }
+
+#endif

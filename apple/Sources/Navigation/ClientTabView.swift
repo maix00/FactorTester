@@ -113,7 +113,11 @@ struct ClientTabView: View {
                 }
             }
         case .accountSettings:
+            #if os(macOS)
             ClientSettingsHub(open: open)
+            #else
+            WebPageView(path: "/app", presentation: .standalone)
+            #endif
         case .manager:
             if session.role == "super_admin" && session.isManagerLoggedIn {
                 ManagerView()

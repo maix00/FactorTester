@@ -17,7 +17,7 @@ enum LocalDocumentsRoot {
         }.standardizedFileURL
     }
 
-    static func resolve(home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> URL {
+    static func resolve(home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)) throws -> URL {
         let documents = home.appendingPathComponent("Documents", isDirectory: true)
         let current = documents.appendingPathComponent("TradeResearch", isDirectory: true)
         let legacy = documents.appendingPathComponent("FactorTester", isDirectory: true)

@@ -69,7 +69,8 @@ struct TestJobArtifactGrid: View {
                             }
                         }.font(.caption)
                         Button(artifact.fileName) { onOpen(artifact) }
-                            .buttonStyle(.link)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
                             .font(.caption)
                             .lineLimit(1)
                         Text(ByteCountFormatter.string(fromByteCount: Int64(artifact.sizeBytes), countStyle: .file))

@@ -119,9 +119,11 @@ enum PersonalWorkspaceAccessStore {
         for root: URL,
         securityScoped: Bool
     ) throws {
-        let options: URL.BookmarkCreationOptions = securityScoped
-            ? .withSecurityScope
-            : []
+        #if os(macOS)
+        let options: URL.BookmarkCreationOptions = securityScoped ? .withSecurityScope : []
+        #else
+        let options: URL.BookmarkCreationOptions = []
+        #endif
         let bookmark = try root.bookmarkData(
             options: options,
             includingResourceValuesForKeys: nil,
@@ -133,10 +135,11 @@ enum PersonalWorkspaceAccessStore {
     private static func resolve(
         _ bookmark: Data
     ) -> (root: URL, stale: Bool)? {
-        let optionSets: [URL.BookmarkResolutionOptions] = [
-            [.withSecurityScope, .withoutUI],
-            [.withoutUI],
-        ]
+        #if os(macOS)
+        let optionSets: [URL.BookmarkResolutionOptions] = [[.withSecurityScope, .withoutUI], [.withoutUI]]
+        #else
+        let optionSets: [URL.BookmarkResolutionOptions] = [[]]
+        #endif
         for options in optionSets {
             var stale = false
             if let root = try? URL(
@@ -152,7 +155,7 @@ enum PersonalWorkspaceAccessStore {
     }
 
     private static func requiresExplicitAccess(_ target: URL) -> Bool {
-        let documents = FileManager.default.homeDirectoryForCurrentUser
+        let documents = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent("Documents", isDirectory: true)
         return ["TradeResearch", "FactorTester"].contains {
             let root = documents.appendingPathComponent($0, isDirectory: true)
@@ -165,7 +168,7 @@ enum PersonalWorkspaceAccessStore {
     static func storedAuthorizedRoot(
         path: String?,
         for target: URL,
-        home: URL = FileManager.default.homeDirectoryForCurrentUser
+        home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     ) -> URL? {
         guard let path, !path.isEmpty else { return nil }
         let root = URL(fileURLWithPath: path, isDirectory: true)
@@ -181,7 +184,7 @@ enum PersonalWorkspaceAccessStore {
     }
 
     private static func isCanonicalUserRoot(
-        _ root: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser
+        _ root: URL, home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     ) -> Bool {
         let usersRoot = home.appendingPathComponent("Documents/TradeResearch/users", isDirectory: true)
         let rootPath = logicalPath(root, home: home)
@@ -196,7 +199,7 @@ enum PersonalWorkspaceAccessStore {
     }
 
     private static func sameLogicalLocation(_ lhs: URL, _ rhs: URL) -> Bool {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         return logicalPath(lhs, home: home) == logicalPath(rhs, home: home)
     }
 

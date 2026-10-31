@@ -99,9 +99,11 @@ final class SessionStore: ObservableObject {
                 }
             }
             user = confirmed
+            #if os(macOS)
             try? CanonicalFactorLibraryAccessStore.ensureDefault(
                 for: confirmed.username ?? ""
             )
+            #endif
             _ = await bridgeClientSession(
                 principalRef: confirmed.username ?? "",
                 reportError: false
@@ -322,9 +324,11 @@ final class SessionStore: ObservableObject {
             let confirmed = try await confirmPersistentSession()
             guard generation == authenticationGeneration else { return false }
             user = confirmed
+            #if os(macOS)
             try? CanonicalFactorLibraryAccessStore.ensureDefault(
                 for: confirmed.username ?? principalRef
             )
+            #endif
         } catch {
             guard generation == authenticationGeneration else { return false }
             clearAuthentication()
@@ -439,9 +443,11 @@ final class SessionStore: ObservableObject {
             let confirmed = try await confirmPersistentSession()
             guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             user = confirmed
+            #if os(macOS)
             try? CanonicalFactorLibraryAccessStore.ensureDefault(
                 for: confirmed.username ?? credentials.username
             )
+            #endif
             await refreshManagerSession(credentials: credentials)
             guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             let bridged = await bridgeClientSession(

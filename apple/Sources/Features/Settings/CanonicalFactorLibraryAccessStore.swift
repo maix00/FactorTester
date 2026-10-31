@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 enum CanonicalFactorLibraryAccessStore {
@@ -93,3 +94,5 @@ enum CanonicalFactorLibraryAccessStore {
         return try await operation()
     }
 }
+
+#endif

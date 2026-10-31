@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct LocalProfilesView: View {
@@ -140,3 +141,5 @@ struct LocalProfilesView: View {
         }
     }
 }
+
+#endif

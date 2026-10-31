@@ -10,34 +10,15 @@ struct ClientWebShellView: View {
     @Environment(\.openURL) private var openURL
 
     @State private var webSession = WebPageSession()
-    @State private var showingServerSettings = false
 
     var body: some View {
         WebPageView(
-            path: "/",
+            path: "/app",
             presentation: .standalone,
             webSession: webSession,
             onExternalURL: openExternalURL
         )
         .id(managerConfig.baseURL?.absoluteString ?? "manager-unconfigured")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showingServerSettings = true
-                } label: {
-                    Label(
-                        L10n.text("服务器设置"),
-                        systemImage: "server.rack"
-                    )
-                }
-                .help(L10n.text("服务器设置"))
-            }
-        }
-        .sheet(isPresented: $showingServerSettings) {
-            ServerSettingsView {
-                showingServerSettings = false
-            }
-        }
         .task(id: "\(session.isLoggedIn)|\(session.user?.organizationId ?? "")") {
             let previousEndpoint = managerConfig.baseURL
             let previousIdentity = session.user?.stableIdentityID

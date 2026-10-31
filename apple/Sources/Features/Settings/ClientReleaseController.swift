@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Combine
 import Foundation
@@ -241,3 +242,15 @@ private enum Keys {
     static let automatic = "client.update.automaticDownloads"
     static let lastChecked = "client.update.lastChecked"
 }
+
+#else
+import Combine
+import Foundation
+
+/// iOS distribution is managed by the OS, not the desktop updater.
+@MainActor
+final class ClientReleaseController: ObservableObject {
+    func refresh(force: Bool = true) async {}
+    func handleUpdateCommand(_ url: URL) {}
+}
+#endif

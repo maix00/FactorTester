@@ -81,7 +81,8 @@ struct ResearchDocumentEvidenceFragmentList: View {
                     let serverID = identity["server_id"]?.scalarText ?? ""
                     openJob(jobID, port, serverID)
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
             }
         case "file":
             if canDownload,
@@ -90,7 +91,8 @@ struct ResearchDocumentEvidenceFragmentList: View {
                 Button(L10n.text("下载文件")) {
                     Task { await downloadFile(fragment) }
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
             } else if let relative = identity["relative_path"]?.scalarText,
                let url = localFileURL(relative) {
                 Button(L10n.text("打开文件")) {
@@ -100,7 +102,8 @@ struct ResearchDocumentEvidenceFragmentList: View {
                     }
                     #endif
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
             }
         case "web":
             if let raw = identity["url"]?.scalarText,
@@ -111,7 +114,8 @@ struct ResearchDocumentEvidenceFragmentList: View {
                     ResearchDocumentExternalURLLauncher.open(url)
                     #endif
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
             }
         default:
             EmptyView()

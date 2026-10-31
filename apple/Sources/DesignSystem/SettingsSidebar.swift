@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct SettingsSidebarItem: Identifiable, Hashable {
@@ -25,3 +26,5 @@ struct SettingsSidebar: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 }
+
+#endif

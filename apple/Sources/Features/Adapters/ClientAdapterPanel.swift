@@ -91,7 +91,7 @@ struct ClientAdapterPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner))
         .overlay {
             RoundedRectangle(cornerRadius: Theme.cardCorner)
-                .strokeBorder(.separator, lineWidth: 0.5)
+                .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 0.5)
         }
     }
 

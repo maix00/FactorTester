@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct ClientSettingsHub: View {
@@ -155,3 +156,5 @@ private struct SettingsLanguageView: View {
         }
     }
 }
+
+#endif
