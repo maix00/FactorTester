@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import shutil
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
@@ -126,9 +127,14 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         transport['tamper'] = False
         from tools.cli.release.research_reporting import local_pull
         original_commit = local_pull.commit_report_workspace
-        monkeypatch.setattr(local_pull, 'commit_report_workspace', lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('commit failed')))
+        def fail_after_staging(workspace, **_kwargs):
+            subprocess.run(['git', '-C', str(workspace), 'add', '--all'], check=True)
+            raise OSError('commit failed')
+        monkeypatch.setattr(local_pull, 'commit_report_workspace', fail_after_staging)
         with pytest.raises(OSError, match='commit failed'): rpc.request(pull)
         assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
+        _local_report, local_root = rpc.store._report_root('self', research['research_id'], selected['report_id'])
+        assert subprocess.check_output(['git', '-C', str(local_root), 'status', '--porcelain'], text=True).strip() == ''
         monkeypatch.setattr(local_pull, 'commit_report_workspace', original_commit)
         assert rpc.request(pull)['status'] == 'updated'
         assert rpc.request(pull)['status'] == 'up_to_date'

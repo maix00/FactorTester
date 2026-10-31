@@ -120,6 +120,7 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                 if status.stdout.strip():
                     raise LocalReportSyncConflict('local report workspace has uncommitted files')
                 prior_commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+                registry_before = paths['binding_registry'].read_bytes() if paths['binding_registry'].exists() else None
                 staged_branch = staged_root / 'branches' / 'main'
                 target_branch = root / 'branches' / 'main'
                 created: list[Path] = []
@@ -141,8 +142,21 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                 except Exception:
                     after = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
                     if after == prior_commit:
+                        staged = subprocess.check_output(['git', '-C', str(root), 'diff', '--cached', '--name-only', '-z']).decode().split('\x00')
+                        allowed = {str(path.relative_to(root)) for path in created}
+                        allowed.update(str(path.relative_to(root)) for path in (paths['head'], paths['binding_registry']))
+                        allowed.add('.gitignore')
+                        changed = [path for path in staged if path]
+                        if not set(changed).issubset(allowed):
+                            raise LocalReportSyncConflict('unrelated staged files appeared during report recovery')
+                        if changed:
+                            subprocess.run(['git', '-C', str(root), 'restore', '--staged', '--', *changed], check=True, capture_output=True)
                         if head_started:
                             write_head(paths, current)
+                            if registry_before is None:
+                                paths['binding_registry'].unlink(missing_ok=True)
+                            else:
+                                atomic_write(paths['binding_registry'], registry_before)
                             publish_sqlite_index(paths, load_node(paths, current['root_ref']), current['generation'])
                         for path in reversed(created):
                             path.unlink(missing_ok=True)
