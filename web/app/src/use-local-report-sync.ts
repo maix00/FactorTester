@@ -6,13 +6,14 @@ import type { LocalResearchCapabilities, LocalResearchClient } from "./local-res
 /** Synchronize only reports with an explicit publication receipt, in bounded pages. */
 export function useLocalReportSync(client:LocalResearchClient|null,capabilities:LocalResearchCapabilities|null,active:boolean,onChanged:()=>void):()=>void {
   const {t}=useTranslation();
-  const wake=useRef<(()=>void)|null>(null),noticed=useRef(new Map<string,string>()),callback=useRef(onChanged);
+  const wake=useRef<(()=>void)|null>(null),callback=useRef(onChanged);
   callback.current=onChanged;
   useEffect(()=>{
     if(!active||!client||!capabilities?.actions.includes("sync_reports")||!capabilities.profiles.length)return;
-    noticed.current.clear();
     const snapshot=client.snapshot(),profiles=capabilities.profiles;
     let alive=true,running=false,requested=false,timer:number|undefined,profileIndex=0,cursor="";
+    const warned=new Set<string>(),seen=new Set<string>();
+    let transportWarning=false,remoteUpdated=false;
     const schedule=(delay:number)=>{if(timer!==undefined)window.clearTimeout(timer);if(alive)timer=window.setTimeout(()=>void tick(),delay);};
     const tick=async()=>{
       if(!alive||running)return;
@@ -20,29 +21,35 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
       try{
         const page=await client.syncReports(profiles[profileIndex].profile_id,cursor,4);
         if(!alive||!client.isCurrent(snapshot))return;
-        noticed.current.delete("transport");
-        let changed=false, remoteUpdated=false;
+        transportWarning=false;
+        let changed=false;
         for(const item of page.reports){
           if(item.status==="updated"||item.status==="published")changed=true;
           if(item.status==="updated")remoteUpdated=true;
           if(["conflict","denied","unavailable"].includes(item.status)){
-            if(noticed.current.get(item.report_id)!==item.status){
-              noticed.current.set(item.report_id,item.status);
-              notify({code:`research.report.sync.${item.report_id}`,type:"warning",message:item.status==="conflict"?t("localResearch.syncConflict"):item.status==="denied"?t("localResearch.publicationDenied"):t("localResearch.syncUnavailable")});
+            seen.add(item.status);
+            if(!warned.has(item.status)){
+              warned.add(item.status);
+              notify({code:`research.report.sync.${item.status}`,type:"warning",message:item.status==="conflict"?t("localResearch.syncConflict"):item.status==="denied"?t("localResearch.publicationDenied"):t("localResearch.syncUnavailable")});
             }
-          } else noticed.current.delete(item.report_id);
+          }
         }
         if(changed)callback.current();
-        if(remoteUpdated)notify({code:"research.report.sync.changed",type:"info",message:t("localResearch.syncUpdated")});
         if(page.next_report_id)cursor=page.next_report_id;
         else {cursor="";profileIndex=(profileIndex+1)%profiles.length;}
         const more=!!page.next_report_id||profileIndex!==0;
+        if(!more){
+          if(remoteUpdated)notify({code:"research.report.sync.changed",type:"info",message:t("localResearch.syncUpdated")});
+          remoteUpdated=false;
+          for(const status of warned)if(!seen.has(status))warned.delete(status);
+          seen.clear();
+        }
         schedule(more?250:60000);
       }catch{
-        if(alive&&client.isCurrent(snapshot)&&noticed.current.get("transport")!=="unavailable"){
-          noticed.current.set("transport","unavailable");notify({code:"research.report.sync.unavailable",type:"warning",message:t("localResearch.syncUnavailable")});
+        if(alive&&client.isCurrent(snapshot)&&!transportWarning){
+          transportWarning=true;notify({code:"research.report.sync.unavailable",type:"warning",message:t("localResearch.syncUnavailable")});
         }
-        cursor="";profileIndex=0;schedule(60000);
+        cursor="";profileIndex=0;seen.clear();remoteUpdated=false;schedule(60000);
       }finally{
         running=false;
         if(alive&&requested){requested=false;cursor="";profileIndex=0;schedule(250);}
