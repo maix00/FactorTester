@@ -41,7 +41,19 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
             local_changed = not row['local_root_ref'] or (head['generation'], head['root_ref']) != (row['generation'], row['local_root_ref'])
             remote_changed = remote['revision'] != row['revision']
             if local_changed and remote_changed:
-                if (head['generation'], head['root_ref']) != (authoring['generation'], authoring['root_ref']):
+                same_root = (head['generation'], head['root_ref']) == (authoring['generation'], authoring['root_ref'])
+                same_projection = False
+                if same_root:
+                    # The server validates each projection and authoring tree
+                    # separately. Their root alone does not prove that both
+                    # representations describe the same report.
+                    from .authoring.tree_projection import project_snapshot
+                    from .public_research.projection import build_upload_projection
+                    with tree_lock(paths):
+                        current = load_head(paths)
+                        if (current['generation'], current['root_ref']) == (head['generation'], head['root_ref']):
+                            same_projection = build_upload_projection(project_snapshot(paths, current))['projection_hash'] == remote['projection_hash']
+                if not same_root or not same_projection:
                     status = 'conflict'
                 else:
                     # A publish/pull may commit its report before the local receipt
