@@ -10,10 +10,12 @@ from urllib.parse import quote, urlsplit
 from .local_publication import manager_session
 
 
-def import_server_research(store, *, binding: dict, manager: dict, profile_id: str, research_id: str) -> dict:
+def queue_server_researches(store, *, manager: dict, profile_id: str, research_ids: list[str]) -> int:
     profile = store._profile(profile_id)
-    if not isinstance(research_id, str) or not re.fullmatch(r'research:v1:[A-Za-z0-9_-]{24,128}', research_id):
-        raise ValueError('invalid Research identity')
+    if (not isinstance(research_ids, list) or not 1 <= len(research_ids) <= 100
+            or any(not isinstance(ref, str) or not re.fullmatch(r'research:v1:[A-Za-z0-9_-]{24,128}', ref) for ref in research_ids)
+            or len(set(research_ids)) != len(research_ids)):
+        raise ValueError('invalid Research identities')
     if not isinstance(manager, dict) or not isinstance(manager.get('endpoint'), str):
         raise ValueError('native Manager endpoint is invalid')
     endpoint = manager['endpoint'].rstrip('/')
@@ -26,13 +28,26 @@ def import_server_research(store, *, binding: dict, manager: dict, profile_id: s
     # leaves it available for the bounded background synchronizer to retry.
     with store._connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        if db.execute('SELECT count(*) FROM server_research_pending').fetchone()[0] >= 1000 and not db.execute(
-                'SELECT 1 FROM server_research_pending WHERE research_id=? AND manager_hash=? AND profile_id=?',
-                (research_id, manager_hash, profile)).fetchone():
-            raise ValueError('too many pending Research imports')
-        db.execute('INSERT OR IGNORE INTO server_research_pending (research_id,manager_hash,profile_id) VALUES (?,?,?)',
-                   (research_id, manager_hash, profile))
+        count = db.execute('SELECT count(*) FROM server_research_pending').fetchone()[0]
+        added = 0
+        for research_id in research_ids:
+            present = db.execute('SELECT 1 FROM server_research_pending WHERE research_id=? AND manager_hash=? AND profile_id=?',
+                                 (research_id, manager_hash, profile)).fetchone()
+            if present:
+                continue
+            if count + added >= 1000:
+                raise ValueError('too many pending Research imports')
+            db.execute('INSERT INTO server_research_pending (research_id,manager_hash,profile_id) VALUES (?,?,?)',
+                       (research_id, manager_hash, profile))
+            added += 1
+        return added
+
+
+def import_server_research(store, *, binding: dict, manager: dict, profile_id: str, research_id: str) -> dict:
+    profile = store._profile(profile_id)
+    queue_server_researches(store, manager=manager, profile_id=profile, research_ids=[research_id])
     endpoint, session = manager_session(binding, manager)
+    manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
     identity = session.get('/api/session')
     if (str(identity.get('keycloak_issuer') or '').rstrip('/') != binding['issuer']
             or identity.get('tr_identity_id') != binding['identity_id']

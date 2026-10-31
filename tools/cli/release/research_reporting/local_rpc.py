@@ -40,6 +40,7 @@ class LocalResearchRPC:
             'get': {'action', 'profile_id', 'research_id'},
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
             'import_research': {'action', 'profile_id', 'research_id'},
+            'queue_researches': {'action', 'profile_id', 'research_ids'},
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
             'list_profile_reports': {'action', 'profile_id', 'limit', 'offset', 'expected_revision'},
             'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
@@ -53,12 +54,13 @@ class LocalResearchRPC:
         }
         if self.manager is None:
             keys.pop('import_research')
+            keys.pop('queue_researches')
             keys.pop('publish_report')
             keys.pop('pull_report')
             keys.pop('sync_reports')
         if not isinstance(action, str) or action not in keys or set(message) != keys[action]:
             raise ValueError('invalid local Research message')
-        for key in keys[action] - {'action', 'limit', 'offset', 'generation', 'expected_revision'}:
+        for key in keys[action] - {'action', 'limit', 'offset', 'generation', 'expected_revision', 'research_ids'}:
             value = message[key]
             if (not isinstance(value, str) or len(value) > (10000 if key in {'description', 'body'} else 512)
                     or any((ord(char) < 32 and not (key in {'description', 'body'} and char in '\n\r\t'))
@@ -104,6 +106,10 @@ class LocalResearchRPC:
                 if exc.status in {401, 403}:
                     return {'success': False, 'code': 'local_report_publication_denied'}
                 raise
+        elif action == 'queue_researches':
+            from .local_server_research import queue_server_researches
+            value = {'queued': queue_server_researches(self.store, manager=self.manager,
+                     profile_id=message['profile_id'], research_ids=message['research_ids'])}
         elif action == 'create_report':
             value = {'report': self.store.create_report(profile_id=message['profile_id'], research_id=message['research_id'],
                      title=message['title'], operation_id=message['operation_id'])}

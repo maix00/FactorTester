@@ -42,6 +42,19 @@ test("server research import validates the returned owner scope and identity", a
   await assert.rejects(client.importResearch("self",record.research_id),code("local_research_invalid_response"));
 });
 
+test("server discovery queues only bounded unique opaque references", async () => {
+  const ref="research:v1:"+"R".repeat(24);
+  let response=ok({queued:1});
+  const client=localResearchBridge(host(message=>message.action==="capabilities" ?
+    ok({actions:["queue_researches"],profiles:[{profile_id:"self",display_name:"Self"}]}) : response))!;
+  await client.capabilities(currentBinding);
+  assert.equal(await client.queueResearches("self",[ref]),1);
+  await assert.rejects(client.queueResearches("self",[ref,ref]),code("local_research_invalid_input"));
+  await assert.rejects(client.queueResearches("self",["bad"]),code("local_research_invalid_input"));
+  response=ok({queued:2});
+  await assert.rejects(client.queueResearches("self",[ref]),code("local_research_invalid_response"));
+});
+
 test("profile report directory validates its profile and linked research", async () => {
   const {description:_description,...summary}=record;
   const row={report_id:"report:one",research_id:record.research_id,profile_id:"self",title:"Report",created_at:100,research:summary};

@@ -48,6 +48,11 @@ def test_owned_research_import_retries_and_never_overwrites_local_changes(tmp_pa
     request = {'action': 'import_research', 'profile_id': 'self', 'research_id': research_id}
     sync = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
     try:
+        queue = {'action': 'queue_researches', 'profile_id': 'self', 'research_ids': [research_id]}
+        assert rpc.request(queue)['queued'] == 1
+        assert rpc.request(queue)['queued'] == 0
+        with pytest.raises(ValueError): rpc.request({**queue, 'research_ids': [research_id, research_id]})
+        with pytest.raises(PermissionError): rpc.request({**queue, 'profile_id': 'other'})
         with pytest.raises(RuntimeError): rpc.request(request)
         assert rpc.store.get(profile_id='self', research_id=research_id) is None
         with rpc.store._connect() as db: assert db.execute('SELECT count(*) FROM server_research_pending').fetchone()[0] == 1

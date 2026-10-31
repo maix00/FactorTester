@@ -46,9 +46,10 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                       const row=(id,title,profile='p1')=>({research_id:id,profile_id:profile,title,description:'fixture',created_at:1720000000,updated_at:1720000000});
                       const ok=x=>({success:true,schema:'tr-local-research-bridge:v1',...x});
                       const bridge={postMessage(m){f.nativeCalls.push(m);
-                        if(m.action==='capabilities')return Promise.resolve(ok({binding:{issuer:'https://identity.test/realm',identity_id:'identity-1'},actions:['list','get','create','import_research'],profiles:[{profile_id:'p1',display_name:'自有身份'},{profile_id:'p2',display_name:'第二身份'},{profile_id:'self',display_name:'本人'}]}));
+                        if(m.action==='capabilities')return Promise.resolve(ok({binding:{issuer:'https://identity.test/realm',identity_id:'identity-1'},actions:['list','get','create','import_research','queue_researches'],profiles:[{profile_id:'p1',display_name:'自有身份'},{profile_id:'p2',display_name:'第二身份'},{profile_id:'self',display_name:'本人'}]}));
                         if(m.action==='list'){const rows=m.profile_id==='p1'?[row('r1','本机样本'),row('synced','同步样本'),...(f.created?[f.created]:[])]:m.profile_id==='self'&&f.serverNew?[row(f.serverNew.research_id,f.serverNew.title,'self')]:[...(f.created?[f.created]:[])].filter(x=>x.profile_id===m.profile_id);return Promise.resolve(ok({researches:rows.slice(m.offset,m.offset+m.limit),next_offset:null}));}
                         if(m.action==='import_research')return Promise.resolve(ok({research:row(m.research_id,f.serverNew.title,'self'),status:'imported'}));
+                        if(m.action==='queue_researches')return Promise.resolve(ok({queued:m.research_ids.length}));
                         if(m.action==='get')return Promise.resolve(ok({research:row(m.research_id,'本机样本',m.profile_id)}));
                         if(m.action==='create'){if(!f.created)f.created={...row('new-local',m.title,m.profile_id),description:m.description}; if(f.first){f.first=false;return Promise.reject(Error('fixture lost acknowledgement'));} return Promise.resolve(ok({research:f.created}));}
                         throw Error('unexpected native action');}};
@@ -61,7 +62,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                         if(u.pathname==='/api/public/entry')return res({});
                         if(u.pathname==='/api/client/profiles')return res({profiles:[]});
                         if(u.pathname==='/api/research/capabilities/keycloak-sharing')return res({capabilities:{schema:'tr-research-keycloak-sharing-v1',authority:'keycloak',create_research:true}});
-                        if(u.pathname==='/api/research')return res({researches:[{research_id:'server-r',title:'服务器样本',owner_ref:'alice'},{research_id:'synced',title:'同步样本',owner_ref:'alice'},...(f.serverNew?[f.serverNew]:[])]});
+                        if(u.pathname==='/api/research')return res({researches:[{research_id:'server-r',title:'服务器样本',owner_ref:'alice'},{research_id:'synced',title:'同步样本',owner_ref:'alice'},{research_id:'research:v1:SSSSSSSSSSSSSSSSSSSSSSSS',title:'已有服务器研究',owner_ref:'alice',is_owned:true,access:{can_view:true}},...(f.serverNew?[f.serverNew]:[])]});
                         if(u.pathname==='/api/research/keycloak-create'){f.serverNew={research_id:'research:v1:RRRRRRRRRRRRRRRRRRRRRRRR',title:'新服务器研究',owner_ref:'alice',access:{can_view:true}};return res({research:f.serverNew});}
                         if(u.pathname.startsWith('/api/research/research%3Av1%3A'))return res({research:f.serverNew});
                         throw Error('unexpected request '+u.pathname);};
@@ -70,6 +71,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     page.get_by_text("本机样本",exact=True).wait_for()
                     assert page.evaluate("window.fixture.nativeAuth.some(x=>x.action==='session-updated')")
                     page.get_by_text("服务器样本",exact=True).wait_for()
+                    page.wait_for_function("window.fixture.nativeCalls.some(x=>x.action==='queue_researches' && x.research_ids.includes('research:v1:SSSSSSSSSSSSSSSSSSSSSSSS'))")
                     assert page.get_by_role("button",name="同步样本",exact=True).count()==1
                     assert page.get_by_text("本机 / 服务器",exact=True).is_visible()
                     assert page.get_by_role("radiogroup",name="位置").count()==0

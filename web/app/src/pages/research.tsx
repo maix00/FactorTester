@@ -40,6 +40,8 @@ function ResearchPageForSession(): React.ReactElement {
   const instance = usePageInstance();
   const local = useLocalResearchContext();
   const [localRows,setLocalRows]=useState<Row[]>([]);
+  const [localDirectoryReady,setLocalDirectoryReady]=useState(false);
+  const queuedServerResearch=useRef(new Set<string>());
   const [localRevision,setLocalRevision]=useState(0);
   const [creatingLocal,setCreatingLocal]=useState(false);
   const [localProfile,setLocalProfile]=useState<string | null>(null);
@@ -91,6 +93,7 @@ function ResearchPageForSession(): React.ReactElement {
   }, [selected, tab, principal]);
   useEffect(() => {
     let active=true;
+    setLocalDirectoryReady(false);
     if(local.phase!=="ready" || !local.client || !local.capabilities || (tab==="reports" && !local.capabilities.actions.includes("list_profile_reports"))){setLocalRows([]);return()=>{active=false;};}
     const client=local.client, snapshot=client.snapshot(), profiles=local.capabilities.profiles;
     let nextProfile=0,total=0;
@@ -112,9 +115,27 @@ function ResearchPageForSession(): React.ReactElement {
     };
     void Promise.all(Array.from({length:Math.min(4,profiles.length)},async()=>{
       while(active){const index=nextProfile++;if(index>=profiles.length)return;groups[index]=await loadProfile(profiles[index]);}
-    })).then(()=>{if(active && client.isCurrent(snapshot))setLocalRows(groups.flat());}).catch(reason=>{if(active && client.isCurrent(snapshot)){setLocalRows([]);const code=reason instanceof Error?reason.message:"";notify({code:"research.local.load",type:"error",message:["local_research_too_many","local_research_listing_changed"].includes(code) ? t(`localResearch.errors.${code}`) : t("localResearch.errors.default")});}});
+    })).then(()=>{if(active && client.isCurrent(snapshot)){setLocalRows(groups.flat());setLocalDirectoryReady(true);}}).catch(reason=>{if(active && client.isCurrent(snapshot)){setLocalRows([]);const code=reason instanceof Error?reason.message:"";notify({code:"research.local.load",type:"error",message:["local_research_too_many","local_research_listing_changed"].includes(code) ? t(`localResearch.errors.${code}`) : t("localResearch.errors.default")});}});
     return()=>{active=false;};
   },[tab,local.phase,local.client,local.capabilities,principal,revision,localRevision,t]);
+  useEffect(()=>{
+    const client=local.client,profile=local.capabilities?.profiles.find(item=>item.profile_id==="self");
+    if(tab!=="researches"||!localDirectoryReady||local.phase!=="ready"||!client||!profile||
+       !local.capabilities?.actions.includes("queue_researches"))return;
+    const known=new Set(localRows.map(row=>String(row.research_id||"")));
+    const candidates=[...new Set(rows.filter(row=>row.owner_ref===principal&&row.is_owned===true&&row.access?.can_view===true)
+      .map(row=>String(row.research_id||"")))].filter(id=>/^research:v1:[A-Za-z0-9_-]{24,128}$/.test(id)&&!known.has(id)&&!queuedServerResearch.current.has(id));
+    if(!candidates.length)return;
+    let active=true;const snapshot=client.snapshot();
+    void (async()=>{
+      for(let offset=0;offset<candidates.length&&active;offset+=100){
+        const batch=candidates.slice(offset,offset+100);
+        try{await client.queueResearches(profile.profile_id,batch);if(!active||!client.isCurrent(snapshot))return;batch.forEach(id=>queuedServerResearch.current.add(id));syncLocalReports();}
+        catch{if(active&&client.isCurrent(snapshot))notify({code:"research.import.pending",type:"warning",message:t("research.importPending")});return;}
+      }
+    })();
+    return()=>{active=false;};
+  },[tab,localDirectoryReady,local.phase,local.client,local.capabilities,localRows,rows,principal,syncLocalReports,t]);
   useEffect(()=>{
     if(local.phase!=="unavailable"){lastLocalError.current="";return;}
     const key=`${local.key}:${local.code}`;
