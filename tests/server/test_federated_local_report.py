@@ -30,7 +30,7 @@ def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tm
     state.node_identities.enroll(key.public_record())
     identity = {'username': 'target-name', 'tr_identity_id': 'stable-person',
                 'keycloak_issuer': 'https://target/realms/t', 'keycloak_subject': 'target-subject'}
-    live, calls = {'peer': True, 'report': True}, []
+    live, calls = {'peer': True, 'report': True, 'edit': True}, []
     def accept(_state, binding, *, assertion, stable_id, target_scope):
         assert binding == 'source' and assertion == 'source-assertion'
         assert stable_id == 'stable-person' and target_scope == 'read'
@@ -41,10 +41,11 @@ def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tm
     monkeypatch.setattr(research_couchdb_publication, 'report_store_from_environment', lambda: 'target-couch')
     class ReportService:
         def __init__(self, *, state, store): assert store == 'target-couch'
-        def read(self, *, session, research_id, report_id, publication_ref, branch_ref, attachment):
+        def read(self, *, session, research_id, report_id, publication_ref, branch_ref, attachment,
+                 metadata_only=False, requires_edit=False):
             assert current_verified_identity() == ('target-token', identity)
             assert session == identity and research_id == RESEARCH and report_id == REPORT
-            if not live['report']: raise PermissionError('report access revoked')
+            if not live['report'] or (requires_edit and not live['edit']): raise PermissionError('report access revoked')
             calls.append((publication_ref, branch_ref, attachment))
             if attachment: return {'content': b'exact-report-object', 'content_type': 'image/png'}
             return {'publication': {'publication_id': PUBLICATION, 'report_id': REPORT,
@@ -62,6 +63,13 @@ def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tm
     try:
         result = client.signed_json('/api/federation/public-data', request)
         assert result['publication']['report_id'] == REPORT and calls[-1][0] == PUBLICATION
+        request['payload'].update(metadata_only=True, requires_edit=True)
+        live['edit'] = False
+        with pytest.raises(HTTPError) as denied: client.signed_json('/api/federation/public-data', request)
+        assert denied.value.code == 403
+        live['edit'] = True
+        client.signed_json('/api/federation/public-data', request)
+        request['payload'].pop('metadata_only'); request['payload'].pop('requires_edit')
         request['payload']['attachment'] = 'research_asset/one'
         result = client.signed_json('/api/federation/public-data', request)
         assert base64.b64decode(result['content_base64']) == b'exact-report-object'
@@ -73,7 +81,7 @@ def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tm
         assert denied.value.code == 403
         request['requester_server_id'] = 'forged'
         with pytest.raises(HTTPError) as denied: client.signed_json('/api/federation/public-data', request)
-        assert denied.value.code == 403 and len(calls) == 2
+        assert denied.value.code == 403 and len(calls) == 3
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=2)
 
@@ -104,6 +112,9 @@ def test_browser_remote_report_does_not_fall_back_to_local_or_stale(tmp_path, mo
     assert responses[-1][0] == 200 and responses[-1][1]['projection']['report_id'] == REPORT
     assert calls[0][1]['delegated_user_token'] == 'source-session-token'
     assert calls[0][1]['kind'] == 'shared-report'
+    edit_query = query + '&metadata_only=1&requires_edit=1'
+    assert Handler()._get_research_catalog_routes(SimpleNamespace(path=parsed.path, query=edit_query))
+    assert responses[-1][0] == 200 and calls[-1][1]['payload']['requires_edit'] is True
     monkeypatch.setattr(server_admission, 'server_admission', lambda *_args, **_kw: (False, 'revoked'))
     assert Handler()._get_research_catalog_routes(parsed)
     assert responses[-1][0] == 403
