@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
+from urllib.parse import urlencode
 
 import pytest
 
@@ -20,14 +21,19 @@ SESSION = {'username': 'alice', 'keycloak_subject': 'subject-alice', 'keycloak_i
 
 class Manager:
     def __init__(self):
-        self.resource, self.ensure_calls, self.failure = None, 0, ''
+        self.resource, self.ensure_calls, self.failure, self.grants = None, 0, '', {}
         self.owner = {'id': 'subject-alice', 'username': 'alice', 'enabled': True,
                       'attributes': {'tr_identity_id': ['stable-alice']}}
     def identity_provider(self, actor):
         return ResearchRequestIdentity('token', 'https://issuer', 'subject-alice', actor, 'stable-alice')
     def settings_provider(self): return {'issuer': 'https://issuer'}
     def token_provider(self, _settings): return 'protection-token'
-    def user_by_identity(self, _stable): return self.owner
+    def user_by_identity(self, stable):
+        if stable == 'stable-alice': return self.owner
+        if stable == 'stable-bob':
+            return {'id': 'subject-bob', 'username': 'same-name-on-another-server', 'enabled': True,
+                    'attributes': {'tr_identity_id': ['stable-bob']}}
+        raise LookupError('unavailable')
     def user_provider(self, _subject): return self.owner
     def request(self, _settings, _token, method, path):
         assert method == 'GET' and path.startswith('resource_set?')
@@ -45,6 +51,16 @@ class Manager:
     def _resource(self, *_args):
         if self.resource is None: raise AuthorizationUnavailable('missing')
         return self.resource
+    def list_user_grants(self, *, actor, resource_type, resource_ref):
+        assert actor == 'alice' and resource_type == 'research_report' and resource_ref == REPORT
+        return list(self.grants.values())
+    def set_user_grant(self, *, actor, resource_type, resource_ref, source, identity_id, subject, scopes):
+        assert actor == 'alice' and resource_type == 'research_report' and resource_ref == REPORT and source == 'explicit'
+        if scopes:
+            self.grants[identity_id] = {'identity_id': identity_id, 'subject': subject, 'scopes': sorted(scopes)}
+        else:
+            self.grants.pop(identity_id, None)
+        return True
 
 
 def harness(tmp_path):
@@ -139,3 +155,58 @@ def test_invalid_input_and_unverified_identity_do_not_create_records(tmp_path):
         service.publish_local(session=SESSION, research_id=RESEARCH, report_id=REPORT,
             branch_ref='main', projection=payload(), expected_revision=1)
     assert manager.ensure_calls == 0 and not store.docs
+
+
+def test_report_grants_are_exact_stable_identity_and_live_revoke(tmp_path):
+    service, manager, _store, auth = harness(tmp_path)
+    publish(service)
+    args = {'session': SESSION, 'research_id': RESEARCH, 'report_id': REPORT}
+    assert service.set_grant(**args, identity_id='stable-bob', scopes=['read']) is True
+    assert service.list_grants(**args) == [{'identity_id': 'stable-bob', 'subject': 'subject-bob', 'scopes': ['read']}]
+    auth['share'] = False
+    with pytest.raises(PermissionError): service.list_grants(**args)
+    with pytest.raises(PermissionError): service.set_grant(**args, identity_id='stable-bob', scopes=[])
+    assert 'stable-bob' in manager.grants
+    auth['share'] = True
+    with pytest.raises(LookupError): service.set_grant(**args, identity_id='same-name-on-another-server', scopes=['read'])
+    with pytest.raises(ValueError): service.set_grant(**args, identity_id='stable-bob', scopes=['share'])
+    assert service.set_grant(**args, identity_id='stable-bob', scopes=[]) is True
+    assert service.list_grants(**args) == []
+
+
+def test_report_grants_never_cross_report_or_research_registration(tmp_path):
+    service, manager, _store, _auth = harness(tmp_path)
+    publish(service)
+    args = {'session': SESSION, 'research_id': 'research:v1:' + 'Q' * 24, 'report_id': REPORT}
+    with pytest.raises(AuthorizationUnavailable, match='requires repair'):
+        service.set_grant(**args, identity_id='stable-bob', scopes=['read'])
+    assert manager.grants == {}
+
+
+def test_local_grant_routes_do_not_open_legacy_catalog(tmp_path, monkeypatch):
+    from server.manager.http import research_catalog_routes as routes
+
+    service, manager, _store, auth = harness(tmp_path)
+    publish(service)
+    replies = []
+    monkeypatch.setattr(routes, 'json_response', lambda _handler, payload, status=200: replies.append((status, payload)))
+    class Handler(routes.ResearchCatalogRoutesMixin):
+        state = service.state
+        def _session(self): return SESSION
+        def _research_catalog_service(self): raise AssertionError('legacy catalog must not be opened')
+        def _refresh_research_catalog(self, _principal): raise AssertionError('legacy sync must not run')
+        def _research_couch_service(self, *, local=False):
+            assert local is True
+            return service
+        def _json_body(self, _maximum):
+            return {'research_id': RESEARCH, 'report_id': REPORT, 'identity_id': 'stable-bob', 'scopes': ['read']}
+    path = '/api/research/local-report-publication/grants'
+    handler = Handler()
+    assert handler._post_research_catalog_routes(SimpleNamespace(path=path, query=''))
+    assert replies[-1][0] == 200 and replies[-1][1]['changed'] is True
+    query = urlencode({'research_id': RESEARCH, 'report_id': REPORT})
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query=query))
+    assert replies[-1][1]['grants'][0]['identity_id'] == 'stable-bob'
+    auth['share'] = False
+    assert handler._post_research_catalog_routes(SimpleNamespace(path=path, query=''))
+    assert replies[-1][0] == 403 and 'stable-bob' in manager.grants

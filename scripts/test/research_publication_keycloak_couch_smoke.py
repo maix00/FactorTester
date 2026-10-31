@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sqlite3
 import sys
 import tempfile
@@ -71,16 +72,16 @@ def exercise(*, couch, **case):
         thread.start()
         target = ('http://127.0.0.1:' + str(http.server_address[1]) + '/api/research/'
                   + quote(ref, safe='') + '/reports/report-1/couchdb-publication')
-        def publish(payload, path=target):
+        def publish(payload, path=target, bearer=token):
             request = urllib.request.Request(path, data=json.dumps(payload).encode(), method='POST',
-                headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+                headers={'Authorization': 'Bearer ' + bearer, 'Content-Type': 'application/json'})
             try:
                 with urllib.request.urlopen(request, timeout=20) as response:
                     return response.status, json.load(response)
             except urllib.error.HTTPError as exc:
                 return exc.code, json.load(exc)
-        def read(path):
-            request = urllib.request.Request(path, headers={'Authorization': 'Bearer ' + token})
+        def read(path, bearer=token):
+            request = urllib.request.Request(path, headers={'Authorization': 'Bearer ' + bearer})
             try:
                 with urllib.request.urlopen(request, timeout=20) as response:
                     return response.status, response.read()
@@ -163,6 +164,27 @@ def exercise(*, couch, **case):
                 assert conn.execute('SELECT count(*) FROM research_catalog_reports WHERE report_id=?',
                                     (report_id,)).fetchone()[0] == 0
             assert projection(store, get_research_report(store, local_receipt['publication_id']))['title'] == 'local-selected'
+
+            # Grant to the exact stable ID in this realm, then demonstrate
+            # same-token access and revocation through the actual HTTP route.
+            member_password = secrets.token_urlsafe(24)
+            sandbox.api('PUT', realm, 'users/' + users['member']['id'] + '/reset-password',
+                        {'type': 'password', 'value': member_password, 'temporary': False})
+            sandbox.api('POST', realm, 'users/' + users['member']['id'] + '/role-mappings/clients/' + cid,
+                        [case['public_role']])
+            member_token = case['client']._token({'grant_type': 'password', 'client_id': case['client_id'],
+                'username': 'member', 'password': member_password})['access_token']
+            grant_target = local_target + '/grants'
+            grant_payload = {'research_id': research_id, 'report_id': report_id,
+                             'identity_id': 'stable-member', 'scopes': ['read']}
+            assert read(local_target + '?' + local_query, member_token)[0] == 403
+            assert publish(grant_payload, grant_target)[0] == 200
+            grant_status, grant_body = read(grant_target + '?' + local_query)
+            assert grant_status == 200 and json.loads(grant_body)['grants'][0]['identity_id'] == 'stable-member'
+            assert read(local_target + '?' + local_query, member_token)[0] == 200
+            assert publish({**grant_payload, 'scopes': []}, grant_target)[0] == 200
+            assert read(local_target + '?' + local_query, member_token)[0] == 403
+            assert read(local_target + '?' + local_query)[0] == 200
             sandbox.api('DELETE', realm, role_path, [case['public_role']])
             assert publish(local_payload, local_target)[0] in {401, 403}
             sandbox.api('POST', realm, role_path, [case['public_role']])
@@ -191,7 +213,8 @@ def main():
     print(json.dumps({'real_manager_http': True, 'real_keycloak': True, 'real_couchdb': True,
         'single_report_and_attachment': True, 'same_token_role_revocation': True,
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
-        'local_retry_does_not_restore_revoked_share': True, 'cross_manager_tested': False}, sort_keys=True))
+        'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
+        'cross_manager_tested': False}, sort_keys=True))
 
 
 if __name__ == '__main__':

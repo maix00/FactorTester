@@ -95,11 +95,19 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource)/([^/]+))?)?",
             parsed.path,
         )
-        if publication is None and local_publication is None:
+        local_grants = parsed.path == '/api/research/local-report-publication/grants'
+        if publication is None and local_publication is None and not local_grants:
             self._refresh_research_catalog(viewer)
-        service = None if local_publication else self._research_catalog_service()
+        service = None if local_publication or local_grants else self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
+            if local_grants:
+                if len(query.get('research_id', [])) != 1 or len(query.get('report_id', [])) != 1:
+                    raise ValueError('Research and Report references are required')
+                value = self._research_couch_service(local=True).list_grants(session=session,
+                    research_id=query['research_id'][0], report_id=query['report_id'][0])
+                json_response(self, {'success': True, 'grants': value})
+                return True
             if publication or local_publication:
                 if publication:
                     research_id, report_id, publication_ref = unquote(publication.group(1)), unquote(publication.group(2)), publication.group(3)
@@ -277,7 +285,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 else:
                     raise KeyError("research route not found")
         except (LookupError, PermissionError, TypeError, ValueError, RuntimeError, OSError) as exc:
-            if (publication or local_publication) and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
+            if (publication or local_publication or local_grants) and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
                 from urllib.error import HTTPError
                 missing = isinstance(exc, FileNotFoundError) or isinstance(exc, HTTPError) and exc.code == 404
                 json_response(self, {"success": False,
@@ -366,9 +374,18 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         actor = str(session["username"])
         publication = re.fullmatch(r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication", parsed.path)
         local_publication = parsed.path == '/api/research/local-report-publication'
-        service = None if local_publication else self._research_catalog_service()
+        local_grants = parsed.path == '/api/research/local-report-publication/grants'
+        service = None if local_publication or local_grants else self._research_catalog_service()
         try:
             data = self._research_catalog_body(32 * 1024 * 1024 if publication or local_publication else 2 * 1024 * 1024)
+            if local_grants:
+                if set(data) != {'research_id', 'report_id', 'identity_id', 'scopes'}:
+                    raise ValueError('report grant fields are invalid')
+                changed = self._research_couch_service(local=True).set_grant(session=session,
+                    research_id=data['research_id'], report_id=data['report_id'],
+                    identity_id=data['identity_id'], scopes=data['scopes'])
+                json_response(self, {'success': True, 'changed': changed})
+                return True
             if local_publication:
                 if set(data) - {'research_id', 'report_id', 'branch_ref', 'projection', 'expected_revision'}:
                     raise ValueError('unsupported report publication fields')
@@ -518,7 +535,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {"success": False, "code": "research_publication_conflict",
                                      "error": "Research publication revision changed"}, 409)
                 return True
-            if (publication or local_publication) and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
+            if (publication or local_publication or local_grants) and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
                 json_response(self, {"success": False, "code": "research_store_unavailable",
                                      "error": "Research report store is unavailable"}, 503)
                 return True

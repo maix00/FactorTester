@@ -163,3 +163,36 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
         return super().publish(session=session, research_id=research_id, report_id=report_id,
                                branch_ref=branch_ref, projection=projection,
                                expected_revision=expected_revision, _prepared=prepared)
+
+    def list_grants(self, *, session: dict, research_id: str, report_id: str) -> list[dict]:
+        manager = self._manager()
+        actor, _identity = self._verified_identity(session, manager)
+        _resource, _owner, _ref, authorize_now = self._context(
+            session=session, research_id=research_id, report_id=report_id, scopes=('share',))
+        authorize_now()
+        grants = manager.list_user_grants(actor=actor, resource_type='research_report', resource_ref=report_id)
+        authorize_now()
+        return grants
+
+    def set_grant(self, *, session: dict, research_id: str, report_id: str,
+                  identity_id: str, scopes: list[str]) -> bool:
+        if (not isinstance(identity_id, str) or not identity_id.strip() or len(identity_id) > 512
+                or '\x00' in identity_id or not isinstance(scopes, list)
+                or any(not isinstance(scope, str) or scope not in {'read', 'use', 'write'} for scope in scopes)):
+            raise ValueError('invalid report grant')
+        manager = self._manager()
+        actor, _identity = self._verified_identity(session, manager)
+        _resource, _owner, _ref, authorize_now = self._context(
+            session=session, research_id=research_id, report_id=report_id, scopes=('share',))
+        authorize_now()
+        user = manager.user_by_identity(identity_id)
+        if (not isinstance(user, dict) or not isinstance(user.get('id'), str) or not user['id']
+                or type(user.get('enabled')) is not bool
+                or (scopes and user['enabled'] is not True)
+                or (user.get('attributes') or {}).get('tr_identity_id') != [identity_id]):
+            raise LookupError('Keycloak recipient identity is unavailable or ambiguous')
+        # Recheck admission and the same report immediately before the grant.
+        # A username is never used as a cross-realm identity.
+        authorize_now()
+        return manager.set_user_grant(actor=actor, resource_type='research_report', resource_ref=report_id,
+            source='explicit', identity_id=identity_id, subject=user['id'], scopes=scopes)
