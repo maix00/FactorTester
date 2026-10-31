@@ -54,7 +54,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     return {'success': True, 'schema': 'tr-local-research-bridge:v1', 'status': 'up_to_date', 'local_modified': False}
                 envelope = {"binding": {"issuer": "https://identity.test/realm", "identity_id": "stable-1"},
                             "profile": {"profile_id": "self", "display_name": "Alice"}, "request": request,
-                            "manager": {"endpoint":"http://127.0.0.1:7998", "token":"", "certificate_pem":"", "cookies":[]}}
+                            "manager": {"endpoint":"http://127.0.0.1:7998", "subject":"subject", "token":"", "certificate_pem":"", "cookies":[]}}
                 process = subprocess.run([sys.executable, "-m", "tools.cli.app", "client", "local-research-request"],
                                          input=json.dumps(envelope), cwd=ROOT, text=True, capture_output=True,
                                          env={**os.environ, "TRADERESEARCH_CLIENT_ROOT": str(tmp_path / "client")}, timeout=15)

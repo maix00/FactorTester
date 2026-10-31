@@ -18,10 +18,10 @@ from .report_workspace_identity import report_workspace_id_for
 
 
 def manager_session(binding: dict, manager: dict):
-    if not isinstance(manager, dict) or set(manager) != {'endpoint', 'token', 'certificate_pem', 'cookies'}:
+    if not isinstance(manager, dict) or set(manager) != {'endpoint', 'subject', 'token', 'certificate_pem', 'cookies'}:
         raise ValueError('native Manager transport is invalid')
-    endpoint, token, certificate, cookies = (manager[key] for key in ('endpoint', 'token', 'certificate_pem', 'cookies'))
-    if not all(isinstance(value, str) for value in (endpoint, token, certificate)) or not isinstance(cookies, list):
+    endpoint, subject, token, certificate, cookies = (manager[key] for key in ('endpoint', 'subject', 'token', 'certificate_pem', 'cookies'))
+    if not all(isinstance(value, str) for value in (endpoint, subject, token, certificate)) or not subject or not isinstance(cookies, list):
         raise ValueError('native Manager transport is invalid')
     parsed = urlsplit(endpoint)
     if (parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password
@@ -34,7 +34,7 @@ def manager_session(binding: dict, manager: dict):
     session.import_cookies(cookies)
     current = session.get('/api/session')
     if (str(current.get('keycloak_issuer') or '').rstrip('/') != binding['issuer']
-            or current.get('tr_identity_id') != binding['identity_id'] or not current.get('keycloak_subject')):
+            or current.get('tr_identity_id') != binding['identity_id'] or current.get('keycloak_subject') != subject):
         raise PermissionError('native Manager identity changed')
     return endpoint, session
 

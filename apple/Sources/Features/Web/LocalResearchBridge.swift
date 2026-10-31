@@ -94,6 +94,7 @@ final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
             // `self` is an in-memory owner scope, not a new research Profile.
             // Existing username-bound Profiles are not automatically adopted.
             var manager: [String: Any] = ["endpoint": self.endpoint.absoluteString,
+                                           "subject": identity.subject,
                                            "token": "", "certificate_pem": "", "cookies": []]
             if ["publish_report", "pull_report"].contains(request["action"] as? String ?? "") {
                 let cookies = (HTTPCookieStorage.shared.cookies(for: self.endpoint) ?? [])

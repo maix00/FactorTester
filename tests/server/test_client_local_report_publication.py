@@ -61,7 +61,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
-    manager = {'endpoint': f'http://127.0.0.1:{server.server_port}', 'token': 'test-token', 'certificate_pem': '', 'cookies': []}
+    manager = {'endpoint': f'http://127.0.0.1:{server.server_port}', 'subject': SESSION['keycloak_subject'], 'token': 'test-token', 'certificate_pem': '', 'cookies': []}
     rpc = LocalResearchRPC(tmp_path / 'client', issuer=SESSION['keycloak_issuer'], identity_id=SESSION['tr_identity_id'],
                            profiles=[{'profile_id': 'self', 'display_name': 'Alice'}], manager=manager)
     try:
@@ -75,6 +75,10 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         with pytest.raises(PermissionError): rpc.request(request)
         assert not store.docs
         rpc.binding['identity_id'] = SESSION['tr_identity_id']
+        manager['subject'] = 'different-subject'
+        with pytest.raises(PermissionError): rpc.request(request)
+        assert not store.docs
+        manager['subject'] = SESSION['keycloak_subject']
         published = rpc.request(request)['publication']
         assert rpc.request(request)['publication'] == published
         published_view = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')
