@@ -36,6 +36,7 @@ class LocalResearchRPC:
         action = message.get('action')
         keys = {
             'capabilities': {'action'}, 'list': {'action', 'profile_id', 'limit', 'offset'},
+            'list_researches': {'action', 'profile_id', 'limit', 'offset', 'expected_revision'},
             'get': {'action', 'profile_id', 'research_id'},
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
@@ -63,7 +64,7 @@ class LocalResearchRPC:
                 raise ValueError('invalid local Research message')
         if action == 'capabilities':
             value = {'binding': self.binding, 'profiles': self.profiles, 'actions': list(keys)}
-        elif action in {'list', 'list_reports', 'list_profile_reports'}:
+        elif action in {'list', 'list_researches', 'list_reports', 'list_profile_reports'}:
             if type(message['limit']) is not int or type(message['offset']) is not int:
                 raise ValueError('invalid local Research page')
             if action == 'list':
@@ -78,8 +79,9 @@ class LocalResearchRPC:
                 if (message['offset'] == 0) != (revision is None):
                     raise ValueError('local directory continuation requires a revision')
                 try:
-                    value = self.store.list_profile_reports(profile_id=message['profile_id'],
-                        limit=message['limit'], offset=message['offset'], expected_revision=revision)
+                    method = self.store.consistent_page if action == 'list_researches' else self.store.list_profile_reports
+                    value = method(profile_id=message['profile_id'], limit=message['limit'],
+                                   offset=message['offset'], expected_revision=revision)
                 except LocalResearchListingChanged:
                     return {'success': False, 'code': 'local_research_listing_changed'}
         elif action == 'get':

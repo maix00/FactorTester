@@ -166,6 +166,22 @@ export class LocalResearchClient {
     return {researches:rows,next_offset:next as number|null};
   }
 
+  async listResearches(profileId:string,options:{offset?:number;limit?:number;expectedRevision?:number|null}={}):Promise<LocalResearchPage & {revision:number}> {
+    this.requireAction("list_researches");
+    const profile_id=inputText(profileId,512),offset=options.offset??0,limit=options.limit??100,expected_revision=options.expectedRevision??null;
+    this.requireProfile(profile_id);
+    if(!Number.isSafeInteger(offset)||offset<0||offset>1_000_000||!Number.isSafeInteger(limit)||limit<1||limit>200||
+      (expected_revision!==null&&(!Number.isSafeInteger(expected_revision)||expected_revision<0))||((offset===0)!==(expected_revision===null)))throw new LocalResearchBridgeError("local_research_invalid_input");
+    const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"list_researches",profile_id,offset,limit,expected_revision});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    if(!Array.isArray(reply.researches))throw new LocalResearchBridgeError("local_research_invalid_response");
+    const rows=reply.researches.map(research),next=reply.next_offset;
+    if(!Number.isSafeInteger(reply.revision)||(reply.revision as number)<0||(expected_revision!==null&&reply.revision!==expected_revision)||rows.length>limit||rows.some(value=>value.profile_id!==profile_id)||new Set(rows.map(value=>value.research_id)).size!==rows.length||
+      (next!==null&&(!Number.isSafeInteger(next)||next!==offset+rows.length||rows.length===0||(next as number)>1_000_000)))throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {researches:rows,next_offset:next as number|null,revision:reply.revision as number};
+  }
+
   async get(profileId: string, researchId: string): Promise<LocalResearch> {
     this.requireAction("get");
     const profile_id=inputText(profileId,512), research_id=inputText(researchId,512);

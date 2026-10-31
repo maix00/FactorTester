@@ -44,6 +44,29 @@ def test_rpc_rejects_ambiguous_native_profiles(tmp_path):
                                    {'profile_id': 'self', 'display_name': 'B'}])
 
 
+def test_research_directory_pages_detect_concurrent_changes(tmp_path):
+    rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'}])
+    for number in range(2):
+        rpc.request({'action': 'create', 'profile_id': 'self', 'title': str(number),
+                     'description': '', 'operation_id': f'op-{number}'})
+    request = {'action': 'list_researches', 'profile_id': 'self', 'limit': 1, 'offset': 0, 'expected_revision': None}
+    first = rpc.request(request)
+    second = rpc.request({**request, 'offset': first['next_offset'], 'expected_revision': first['revision']})
+    assert len(first['researches'] + second['researches']) == 2
+    assert second['next_offset'] is None
+    rpc.request({'action': 'create', 'profile_id': 'self', 'title': 'new', 'description': '', 'operation_id': 'op-new'})
+    assert rpc.request({**request, 'offset': first['next_offset'], 'expected_revision': first['revision']}) == {
+        'success': False, 'code': 'local_research_listing_changed'}
+    assert rpc.request(request)['revision'] > first['revision']
+    with pytest.raises(ValueError):
+        rpc.request({**request, 'offset': 1})
+    with pytest.raises(PermissionError):
+        rpc.request({**request, 'profile_id': 'other'})
+    with rpc.store._connect() as db:
+        assert 'researches_profile_page' in [row['name'] for row in db.execute('PRAGMA index_list(researches)')]
+
+
 def test_profile_report_directory_is_bounded_and_profile_scoped(tmp_path):
     rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
                            profiles=[{'profile_id': 'self', 'display_name': 'Self'},

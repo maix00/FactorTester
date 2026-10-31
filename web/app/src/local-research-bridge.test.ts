@@ -12,6 +12,20 @@ const ready = async (postMessage:(value:Record<string,unknown>)=>unknown) => {
   await client.capabilities(currentBinding);return client;
 };
 
+test("research directory validates revision and profile across pages", async () => {
+  let response=ok({researches:[record],revision:2,next_offset:1});
+  const client=localResearchBridge(host(message=>message.action==="capabilities" ?
+    ok({actions:["list_researches"],profiles:[{profile_id:"self",display_name:"Self"}]}) : response))!;
+  await client.capabilities(currentBinding);
+  const first=await client.listResearches("self",{limit:1});
+  assert.equal(first.revision,2);
+  response=ok({researches:[record],revision:3});
+  await assert.rejects(client.listResearches("self",{offset:1,expectedRevision:2}),code("local_research_invalid_response"));
+  response=ok({researches:[{...record,profile_id:"other"}],revision:2});
+  await assert.rejects(client.listResearches("self"),code("local_research_invalid_response"));
+  await assert.rejects(client.listResearches("self",{offset:1}),code("local_research_invalid_input"));
+});
+
 test("profile report directory validates its profile and linked research", async () => {
   const {description:_description,...summary}=record;
   const row={report_id:"report:one",research_id:record.research_id,profile_id:"self",title:"Report",created_at:100,research:summary};

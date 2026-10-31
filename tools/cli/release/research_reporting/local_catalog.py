@@ -53,6 +53,8 @@ class LocalResearchCatalog:
                 title TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
                 created_at REAL NOT NULL, ready INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(research_id) REFERENCES researches(research_id))''')
+            db.execute('''CREATE INDEX IF NOT EXISTS researches_profile_page
+                ON researches(profile_id, created_at DESC, research_id DESC)''')
             db.execute('''CREATE INDEX IF NOT EXISTS reports_profile_page
                 ON reports(profile_id, ready, created_at DESC, report_id DESC)''')
             db.execute('''CREATE TABLE IF NOT EXISTS local_directory_revision (
@@ -104,15 +106,29 @@ class LocalResearchCatalog:
     def list(self, *, profile_id: str, limit: int = 200, offset: int = 0) -> list[dict]:
         return self.page(profile_id=profile_id, limit=limit, offset=offset)['researches']
 
-    def page(self, *, profile_id: str, limit: int = 100, offset: int = 0) -> dict:
+    def page(self, *, profile_id: str, limit: int = 100, offset: int = 0,
+             expected_revision: int | None = None, consistent: bool = False) -> dict:
         profile = self._profile(profile_id)
         if not 1 <= limit <= 200 or not 0 <= offset <= 1_000_000:
             raise ValueError('invalid local Research page')
         with self._connect() as db:
+            if consistent:
+                db.execute('BEGIN')
+                revision = db.execute('SELECT revision FROM local_directory_revision WHERE id=1').fetchone()['revision']
+                if expected_revision is not None and expected_revision != revision:
+                    raise LocalResearchListingChanged('local research directory changed during pagination')
             rows = db.execute('SELECT * FROM researches WHERE profile_id=? ORDER BY created_at DESC, research_id DESC LIMIT ? OFFSET ?',
                               (profile, limit + 1, offset)).fetchall()
             items = [self._public(row) for row in rows[:limit]]
-            return {'researches': items, 'next_offset': offset + len(items) if len(rows) > limit else None}
+            result = {'researches': items, 'next_offset': offset + len(items) if len(rows) > limit else None}
+            if consistent:
+                result['revision'] = revision
+            return result
+
+    def consistent_page(self, *, profile_id: str, limit: int, offset: int, expected_revision: int | None) -> dict:
+        """Read a directory page and its revision from the same SQLite snapshot."""
+        return self.page(profile_id=profile_id, limit=limit, offset=offset,
+                         expected_revision=expected_revision, consistent=True)
 
     def get(self, *, profile_id: str, research_id: str) -> dict | None:
         profile = self._profile(profile_id)

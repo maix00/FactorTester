@@ -98,7 +98,7 @@ function ResearchPageForSession(): React.ReactElement {
     const loadProfile=async(item:typeof profiles[number])=>{
       const collected:Row[]=[]; let offset=0,expectedRevision:number|null=null;
       for(let page=0;page<50;page++){
-        const result:LocalResearchPage|{reports:LocalReportWithResearch[];next_offset:number|null;revision:number}=tab==="researches" ? await client.list(item.profile_id,{offset,limit:200}) : await client.listProfileReports(item.profile_id,{offset,limit:200,expectedRevision});
+        const result:LocalResearchPage|{reports:LocalReportWithResearch[];next_offset:number|null;revision:number}=tab==="researches" ? (local.capabilities!.actions.includes("list_researches") ? await client.listResearches(item.profile_id,{offset,limit:200,expectedRevision}) : await client.list(item.profile_id,{offset,limit:200})) : await client.listProfileReports(item.profile_id,{offset,limit:200,expectedRevision});
         if(!active || !client.isCurrent(snapshot))return [];
         const values="researches" in result ? result.researches : result.reports;
         total+=values.length;
