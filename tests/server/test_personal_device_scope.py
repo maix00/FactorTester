@@ -69,6 +69,7 @@ def test_enrollment_disables_record_if_keycloak_grant_fails(monkeypatch):
     route = device_routes.DeviceNetworkRoutesMixin()
     route.state = SimpleNamespace(server_id='public', public_server=False, device_registry=SimpleNamespace(
         enroll=lambda **_kw: {'device_id': 'mine'}, revoke=lambda key: revoked.append(key),
+        key_binding=lambda **_kw: None,
     ))
     route._session = lambda: {'username': 'alice'}
     route._has_secure_ui_transport = lambda: True
@@ -77,3 +78,22 @@ def test_enrollment_disables_record_if_keycloak_grant_fails(monkeypatch):
     route._device_enroll()
     assert responses[-1] == 503
     assert revoked == ['mine']
+
+
+def test_failed_enrollment_can_be_retried_explicitly(monkeypatch):
+    responses, calls = [], []
+    monkeypatch.setattr(device_routes, 'json_response', lambda _h, payload, status=200, **_kw: responses.append(status))
+    monkeypatch.setattr('server.identity.keycloak_device.register_device', lambda **kw: calls.append(kw))
+    route = device_routes.DeviceNetworkRoutesMixin()
+    route.state = SimpleNamespace(server_id='public', public_server=False, device_registry=SimpleNamespace(
+        key_binding=lambda **kw: {'enabled': False},
+        retry_enrollment=lambda **kw: {'device_id': kw['device_id']},
+        backend_status=lambda: {},
+    ))
+    route._session = lambda: {'username': 'alice'}
+    route._has_secure_ui_transport = lambda: True
+    route._device_request_metadata = lambda: {}
+    route._json_body = lambda _limit: {'device_id': 'mine', 'public_key': 'key'}
+    route._device_enroll()
+    assert responses[-1] == 201
+    assert calls[0]['device_id'] == 'mine'

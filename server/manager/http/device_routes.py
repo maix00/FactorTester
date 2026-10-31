@@ -152,13 +152,18 @@ class DeviceNetworkRoutesMixin:
             return
         try:
             payload = self._json_body(64 * 1024)
-            device = self.state.device_registry.enroll(
-                username=str(session["username"]),
-                device_id=str(payload.get("device_id") or ""),
-                public_key=payload.get("public_key"),
-                device_name=str(payload.get("device_name") or ""),
-                **self._device_request_metadata(),
-            )
+            username = str(session["username"])
+            device_id = str(payload.get("device_id") or "")
+            public_key = payload.get("public_key")
+            binding = self.state.device_registry.key_binding(username=username, device_id=device_id)
+            if binding is not None and not binding.get("enabled"):
+                device = self.state.device_registry.retry_enrollment(username=username, device_id=device_id, public_key=public_key)
+            else:
+                device = self.state.device_registry.enroll(
+                    username=username, device_id=device_id, public_key=public_key,
+                    device_name=str(payload.get("device_name") or ""),
+                    **self._device_request_metadata(),
+                )
             # Registration is explicit: a verified signature alone must never
             # create an authorization grant. A failed grant leaves the local
             # record disabled until the user deliberately registers again.

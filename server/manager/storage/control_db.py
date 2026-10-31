@@ -667,6 +667,21 @@ class PostgresControlStore(AccountDomainControlMixin):
             ).fetchall()
         return [self._device_value(row) for row in rows]
 
+    def reenable_device(self, *, device_id: str, username: str, public_key: Mapping[str, Any], source_server_id: str) -> dict[str, Any] | None:
+        """Retry an explicit enrollment only for the exact original binding."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                """UPDATE control_devices SET enabled=TRUE, updated_at=CURRENT_TIMESTAMP
+                   WHERE device_id=%s AND username=%s AND public_key=%s::jsonb
+                     AND source_server_id=%s AND enabled=FALSE
+                   RETURNING device_id, public_key, username, device_name, client_type,
+                             client_name, enrollment_ip, last_seen_ip, enabled,
+                             source_server_id, created_at, updated_at, last_seen_at""",
+                (str(device_id), str(username), json.dumps(dict(public_key), ensure_ascii=False), str(source_server_id)),
+            ).fetchone()
+        return None if row is None else self._device_value(row)
+
     def revoke_device(self, device_id: str) -> dict[str, Any] | None:
         self.ensure_schema()
         with self._connection() as connection:

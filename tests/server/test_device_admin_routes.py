@@ -36,12 +36,13 @@ class _Route(device_admin_routes.DeviceAdministrationRoutesMixin):
         self.path = "/api/admin/devices?username=alice"
         rows = [{"device_id": "device-1234567890", "username": "alice", "enabled": True}]
         self.revoked = []
-        self.state = SimpleNamespace(device_registry=SimpleNamespace(
+        self.state = SimpleNamespace(server_id='manager', device_registry=SimpleNamespace(
             list=lambda *, username, include_disabled: (
                 rows if username == "alice" and include_disabled else []
             ),
             public_device_total_count=lambda *, username: 1 if username == "alice" else 0,
             revoke=lambda device_id: self.revoked.append(device_id) or rows[0],
+            key_binding=lambda **kw: {'public_key': 'key'},
             backend_status=lambda: {"backend": "control-db"},
         ))
         self.adapter = _AdminAdapter(group_paths)
@@ -63,7 +64,22 @@ def responses(monkeypatch):
         device_admin_routes, "json_response",
         lambda _handler, payload, status=200, **kwargs: values.append((status, payload, kwargs)),
     )
+    monkeypatch.setattr('server.identity.keycloak_research.resolve_keycloak_research_member',
+                        lambda username: {'subject': username, 'identity_id': 'stable-' + username})
+    monkeypatch.setattr('server.identity.keycloak_device.revoke_device_for_owner', lambda **kw: True)
     return values
+
+
+def test_admin_revoke_keeps_record_if_keycloak_unavailable(monkeypatch, responses):
+    admin = _Route({'username': 'root'}, {'alice': []})
+    monkeypatch.setattr(device_admin_routes, 'current_manager_role', lambda *_: True)
+    monkeypatch.setattr(device_admin_routes, 'current_administrative_groups', lambda *_: ())
+    def fail(**_kw):
+        raise RuntimeError('unavailable')
+    monkeypatch.setattr('server.identity.keycloak_device.revoke_device_for_owner', fail)
+    admin._admin_device_revoke()
+    assert responses[-1][0] == 503
+    assert admin.revoked == []
 
 
 def test_organization_admin_can_read_and_revoke_only_in_scope_user_devices(

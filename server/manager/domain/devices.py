@@ -352,6 +352,28 @@ class DeviceRegistry:
             self._save()
             return _public_record(candidate)
 
+    def retry_enrollment(self, *, username: str, device_id: str, public_key: object) -> dict[str, object]:
+        """Explicitly re-enable a disabled device only with its original key."""
+        identifier = normalise_device_id(device_id)
+        owner = str(username or "").strip()
+        key = normalise_public_key(public_key)
+        if self.control_store is not None:
+            record = self.control_store.reenable_device(device_id=identifier, username=owner,
+                                                        public_key=key, source_server_id=self.server_id)
+            if record is None:
+                raise DeviceRegistryError("device cannot be re-enrolled with this identity or key")
+            return _public_record(record)
+        with self._lock:
+            record = self._local.get(identifier)
+            if (record is None or record.get("enabled") or record.get("username") != owner
+                    or record.get("public_key") != key):
+                raise DeviceRegistryError("device cannot be re-enrolled with this identity or key")
+            record = {**record, "enabled": True, "updated_at": time.time()}
+            self._local[identifier] = record
+            self._generation += 1
+            self._save()
+            return _public_record(record)
+
     def public_device_count(self, *, username: str = "") -> int:
         owner = str(username or "").strip()
         if self.control_store is not None:

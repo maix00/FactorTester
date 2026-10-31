@@ -35,6 +35,21 @@ def _signature(private_key: ec.EllipticCurvePrivateKey, message: bytes) -> str:
     return _b64url(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
 
 
+def test_retry_requires_same_owner_and_key(tmp_path):
+    key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    other_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='local')
+    registry.enroll(username='alice', device_id='device-opaque-123456', public_key=key)
+    registry.revoke('device-opaque-123456')
+    with pytest.raises(ValueError):
+        registry.retry_enrollment(username='alice', device_id='device-opaque-123456', public_key=other_key)
+    with pytest.raises(ValueError):
+        registry.retry_enrollment(username='bob', device_id='device-opaque-123456', public_key=key)
+    assert registry.retry_enrollment(username='alice', device_id='device-opaque-123456', public_key=key)['enabled']
+    with pytest.raises(ValueError):
+        registry.retry_enrollment(username='alice', device_id='device-opaque-123456', public_key=key)
+
+
 def test_device_registry_keeps_only_minimal_client_and_ip_audit_metadata(tmp_path) -> None:
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_key = _jwk(private_key.public_key())

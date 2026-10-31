@@ -65,7 +65,8 @@ class DeviceAdministrationRoutesMixin:
         )
 
         adapter = manager_keycloak_admin_adapter()
-        user_id = adapter.user_id(username)
+        from server.identity.keycloak_research import resolve_keycloak_research_member
+        user_id = resolve_keycloak_research_member(username)["subject"]
         paths = adapter.user_group_paths(
             user_id, page_size=100, max_groups=2000,
         )
@@ -163,6 +164,15 @@ class DeviceAdministrationRoutesMixin:
             )
             if record is None:
                 raise PermissionError("device was not found for this user")
+            binding = self.state.device_registry.key_binding(username=username, device_id=device_id)
+            if binding is None:
+                raise PermissionError("device key was not found for this user")
+            from server.identity.keycloak_research import resolve_keycloak_research_member
+            from server.identity.keycloak_device import revoke_device_for_owner
+            owner = resolve_keycloak_research_member(username)
+            revoke_device_for_owner(owner_subject=owner["subject"], identity_id=owner["identity_id"],
+                                    server_id=self.state.server_id, device_id=device_id,
+                                    public_key=binding.get("public_key"))
             device = self.state.device_registry.revoke(device_id)
         except LookupError:
             json_response(self, {
