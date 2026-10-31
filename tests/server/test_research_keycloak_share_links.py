@@ -29,6 +29,7 @@ class GrantManager:
         self.fail_grant = False
         self.fail_after_grant = False
         self.grants = {}
+        self.denied = set()
         self.lock = threading.Lock()
 
     def identity_provider(self, actor):
@@ -41,7 +42,7 @@ class GrantManager:
                      if user["attributes"].get("tr_identity_id") == [identity]), None)
 
     def require_resource_share(self, *, actor, resource_type, resource_ref):
-        if actor != "alice" or not self.issuer_authorized:
+        if actor != "alice" or not self.issuer_authorized or (resource_type, resource_ref) in self.denied:
             raise PermissionError("share denied")
 
     def require_link_issuer_share(self, *, identity_id, subject, research_id, resource_type, resource_ref):
@@ -194,6 +195,92 @@ def test_share_routes_return_authorization_errors_and_do_not_use_legacy_acl(tmp_
     assert responses[-1][1] == 200
     with sqlite3.connect(catalog.db_path) as db:
         assert db.execute("SELECT authorized_users_json FROM research_catalog_researches").fetchone()[0] == "[]"
+
+
+def test_keycloak_only_routes_fail_closed_even_after_capability_check(tmp_path, monkeypatch):
+    from server.manager.http import research_catalog_routes as routes
+    catalog, manager, research = fixture(tmp_path)
+    catalog._profile_identity_resolver = lambda name: {"identity_id": "stable-" + name, "subject": "sub-" + name}
+    responses = []
+    class Handler(routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=catalog)
+        actor, body = "alice", {"target_kind": "research"}
+        def _session(self): return {"username": self.actor}
+        def _json_body(self, _maximum): return self.body
+    monkeypatch.setattr(routes, "json_response", lambda _self, data, status=200: responses.append((data, status)))
+    handler = Handler()
+    handler._get_research_catalog_routes(SimpleNamespace(path="/api/research/capabilities/keycloak-sharing", query=""))
+    assert responses[-1][0]["capabilities"] == {"schema": "tr-research-keycloak-sharing-v1",
+        "authority": "keycloak", "share_links": True, "explicit_grants": True}
+    handler._get_research_catalog_routes(SimpleNamespace(
+        path=f"/api/research/{research}/keycloak-sharing-capabilities", query=""))
+    assert responses[-1][0]["capabilities"]["can_manage_links"] is True
+    assert responses[-1][0]["capabilities"]["can_manage_grants"] is True
+    manager.issuer_authorized = False
+    handler._get_research_catalog_routes(SimpleNamespace(
+        path=f"/api/research/{research}/keycloak-sharing-capabilities", query=""))
+    assert responses[-1][0]["capabilities"]["can_manage_links"] is False
+    assert responses[-1][0]["capabilities"]["can_manage_grants"] is False
+    manager.issuer_authorized = True
+    prior_check = manager.require_resource_share
+    manager.require_resource_share = lambda **_kwargs: (_ for _ in ()).throw(AuthorizationUnavailable("offline"))
+    handler._get_research_catalog_routes(SimpleNamespace(
+        path=f"/api/research/{research}/keycloak-sharing-capabilities", query=""))
+    assert responses[-1][1] == 503
+    manager.require_resource_share = prior_check
+
+    handler._post_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links"))
+    assert responses[-1][1] == 201
+    created = responses[-1][0]["share_link"]
+    handler.actor, handler.body = "bob", {"token": created["token"]}
+    handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/keycloak-share-links/redeem"))
+    assert responses[-1][1] == 200 and responses[-1][0]["grant"]["research_id"] == research
+    handler.actor, handler.body = "alice", {"revoked": True}
+    handler._patch_research_catalog_routes(SimpleNamespace(
+        path=f"/api/research/{research}/keycloak-share-links/{created['link_id']}"))
+    assert responses[-1][1] == 200 and responses[-1][0]["share_link"]["revoked_at"] > 0
+
+    # A prior capability response cannot make a later request fall back to
+    # old ACL writes after a server restart, routing change, or downgrade.
+    legacy = ResearchCatalog(catalog.db_path)
+    handler.state.research_catalog = legacy
+    with sqlite3.connect(catalog.db_path) as db:
+        before = db.execute("SELECT count(*) FROM research_catalog_share_links").fetchone()[0]
+    handler.body = {"target_kind": "research"}
+    handler._post_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links"))
+    assert responses[-1][1] == 409 and responses[-1][0]["code"] == "keycloak_sharing_unavailable"
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT count(*) FROM research_catalog_share_links").fetchone()[0] == before
+    handler.body = {"token": "untrusted"}
+    handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/keycloak-share-links/redeem"))
+    assert responses[-1][1] == 409 and responses[-1][0]["code"] == "keycloak_sharing_unavailable"
+    handler.body = {"revoked": True}
+    handler._patch_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links/old"))
+    assert responses[-1][1] == 409 and responses[-1][0]["code"] == "keycloak_sharing_unavailable"
+
+
+def test_keycloak_link_listing_checks_exact_target_and_denies_unscoped_legacy_route(tmp_path, monkeypatch):
+    from server.manager.http import research_catalog_routes as routes
+    from urllib.parse import urlencode
+    catalog, manager, research = fixture(tmp_path)
+    responses = []
+    class Handler(routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=catalog)
+        def _session(self): return {"username": "alice"}
+    monkeypatch.setattr(routes, "json_response", lambda _self, data, status=200: responses.append((data, status)))
+    handler = Handler()
+    research_link = catalog.create_share_link(target_kind="research", research_id=research, actor="alice")
+    report_link = catalog.create_share_link(target_kind="report", research_id=research, report_id="report", actor="alice")
+    handler._get_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links", query=""))
+    assert [row["link_id"] for row in responses[-1][0]["share_links"]] == [research_link["link_id"]]
+    query = urlencode({"target_kind": "report", "report_id": "report"})
+    handler._get_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links", query=query))
+    assert [row["link_id"] for row in responses[-1][0]["share_links"]] == [report_link["link_id"]]
+    manager.denied.add(("research_report", "report"))
+    handler._get_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links", query=query))
+    assert responses[-1][1] == 403
+    handler._get_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/share-links", query=""))
+    assert responses[-1][1] == 409 and responses[-1][0]["code"] == "keycloak_sharing_unavailable"
 
 
 def test_link_issuer_requires_exact_enabled_subject_and_live_scope():

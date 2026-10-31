@@ -39,7 +39,11 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
 
     def _research_catalog_error(self, exc: Exception) -> None:
         from server.identity.keycloak_authorization import AuthorizationUnavailable
-        if isinstance(exc, AuthorizationUnavailable):
+        from server.manager.services.research_catalog import KeycloakResearchSharingUnavailable
+        code = None
+        if isinstance(exc, KeycloakResearchSharingUnavailable):
+            status, code = 409, "keycloak_sharing_unavailable"
+        elif isinstance(exc, AuthorizationUnavailable):
             status = 503
         elif isinstance(exc, PermissionError):
             status = 403
@@ -49,7 +53,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             status = 400
         else:
             status = 500
-        json_response(self, {"success": False, "error": str(exc)}, status)
+        json_response(self, {"success": False, "error": str(exc), **({"code": code} if code else {})}, status)
 
     def _get_research_catalog_routes(self, parsed) -> bool:
         if not self._is_research_catalog_path(parsed.path):
@@ -64,7 +68,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         try:
             if self._get_report_branch_route(parsed, viewer):
                 return True
-            if parsed.path == "/api/research":
+            if parsed.path == "/api/research/capabilities/keycloak-sharing":
+                payload = {"capabilities": service.keycloak_sharing_capabilities()}
+            elif parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
                 subordinate_refs = (
                     self._research_catalog_subordinate_refs(viewer)
@@ -189,7 +195,21 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                             research_id, actor=viewer,
                         ),
                     }
+                elif child == "keycloak-share-links":
+                    service.require_keycloak_sharing()
+                    payload = {"share_links": service.list_keycloak_share_links(
+                        research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
+                        report_id=str(query.get("report_id", [""])[0]))}
+                elif child == "keycloak-sharing-capabilities":
+                    payload = {"capabilities": service.keycloak_target_sharing_capabilities(
+                        research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
+                        report_id=str(query.get("report_id", [""])[0]))}
                 elif child == "grants":
+                    payload = {"grants": service.list_explicit_grants(
+                        research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
+                        report_id=str(query.get("report_id", [""])[0]))}
+                elif child == "keycloak-grants":
+                    service.require_keycloak_sharing()
                     payload = {"grants": service.list_explicit_grants(
                         research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
                         report_id=str(query.get("report_id", [""])[0]))}
@@ -297,7 +317,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 )
                 json_response(self, {"success": True, **value}, 200)
                 return True
-            if parsed.path == "/api/research/share-links/redeem":
+            if parsed.path in {"/api/research/share-links/redeem", "/api/research/keycloak-share-links/redeem"}:
+                if parsed.path == "/api/research/keycloak-share-links/redeem":
+                    service.require_keycloak_sharing()
                 value = service.redeem_share_link(
                     str(data.get("token") or ""), actor=actor,
                 )
@@ -362,7 +384,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     )
                 json_response(self, {"success": True, "report": value}, 201)
                 return True
-            if child == "share-links":
+            if child in {"share-links", "keycloak-share-links"}:
+                if child == "keycloak-share-links":
+                    service.require_keycloak_sharing()
                 value = service.create_share_link(
                     target_kind=str(data.get("target_kind") or "research"),
                     research_id=research_id,
@@ -373,7 +397,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 )
                 json_response(self, {"success": True, "share_link": value}, 201)
                 return True
-            if child == "grants":
+            if child in {"grants", "keycloak-grants"}:
+                if child == "keycloak-grants":
+                    service.require_keycloak_sharing()
                 value = service.set_explicit_grant(research_id, actor=actor,
                     principal_ref=data.get("principal_ref"), scopes=data.get("scopes"),
                     target_kind=str(data.get("target_kind") or "research"),
@@ -401,7 +427,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
 
     def _patch_research_catalog_routes(self, parsed) -> bool:
         share_match = re.fullmatch(
-            r"/api/research/([^/]+)/share-links/([^/]+)", parsed.path,
+            r"/api/research/([^/]+)/(share-links|keycloak-share-links)/([^/]+)", parsed.path,
         )
         if share_match:
             session = self._research_catalog_session()
@@ -411,9 +437,11 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 data = self._research_catalog_body()
                 if data.get("revoked") is not True:
                     raise ValueError("share link patch requires revoked=true")
+                if share_match.group(2) == "keycloak-share-links":
+                    self._research_catalog_service().require_keycloak_sharing()
                 value = self._research_catalog_service().revoke_share_link(
                     unquote(share_match.group(1)),
-                    unquote(share_match.group(2)),
+                    unquote(share_match.group(3)),
                     actor=str(session["username"]),
                 )
             except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
@@ -605,7 +633,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:
         match = re.fullmatch(
-            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links|grants|collaboration-branches))?",
+            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links|grants|collaboration-branches|keycloak-share-links|keycloak-grants|keycloak-sharing-capabilities))?",
             path,
         )
         if not match:

@@ -28,6 +28,10 @@ MEMBER_STATUSES = frozenset({"active", "invited", "revoked"})
 RESEARCH_SCOPES = frozenset({"all", "mine", "subordinates", "shared"})
 
 
+class KeycloakResearchSharingUnavailable(RuntimeError):
+    """A Keycloak-only sharing API was called before the guarded cutover."""
+
+
 class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
     """Persist Research relationships in the Manager-owned SQLite database."""
 
@@ -1593,6 +1597,39 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
             raise ValueError("active report does not belong to this Research")
         return "research_report", str(report["report_id"])
 
+    def keycloak_sharing_capabilities(self) -> dict[str, Any]:
+        """Describe the live authority; this is not an authorization grant."""
+        manager = self._profile_grant_manager
+        available = self._research_authorizer is not None and all(callable(getattr(manager, name, None))
+            for name in ("require_resource_share", "identity_provider", "user_by_identity",
+                         "require_link_issuer_share", "_reconcile_user_grant"))
+        return {"schema": "tr-research-keycloak-sharing-v1",
+                "authority": "keycloak" if self._research_authorizer is not None else "legacy",
+                "share_links": available,
+                "explicit_grants": available and callable(self._profile_identity_resolver)}
+
+    def require_keycloak_sharing(self) -> None:
+        if not self.keycloak_sharing_capabilities()["share_links"]:
+            raise KeycloakResearchSharingUnavailable("Keycloak Research sharing is not enabled")
+
+    def keycloak_target_sharing_capabilities(self, research_id: str, *, actor: str,
+                                            target_kind: str = "research", report_id: str = "") -> dict[str, Any]:
+        self.require_keycloak_sharing()
+        research = self._research_row(research_id)
+        access = self._research_access(research, actor)
+        if not access.get("can_view"):
+            raise PermissionError("research is not visible to current account")
+        kind, target = self._keycloak_share_target(research_id, target_kind, report_id)
+        try:
+            self._profile_grant_manager.require_resource_share(actor=actor, resource_type=kind, resource_ref=target)
+            can_share = True
+        except PermissionError:
+            can_share = False
+        return {"schema": "tr-research-keycloak-target-sharing-v1", "authority": "keycloak",
+                "target_kind": target_kind, "research_id": research_id, "report_id": report_id,
+                "can_manage_grants": can_share and callable(self._profile_identity_resolver),
+                "can_manage_links": can_share and bool(access.get("can_manage"))}
+
     def list_explicit_grants(self, research_id: str, *, actor: str,
                              target_kind: str = "research", report_id: str = "") -> list[dict[str, Any]]:
         kind, target = self._keycloak_share_target(research_id, target_kind, report_id)
@@ -1680,6 +1717,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         }
 
     def list_share_links(self, research_id: str, *, actor: str) -> list[dict[str, Any]]:
+        if self._research_authorizer is not None:
+            raise KeycloakResearchSharingUnavailable("Target-scoped Keycloak sharing API is required")
         research = self._research_row(research_id)
         if not self._research_access(research, actor)["can_manage"]:
             raise PermissionError("research sharing is not authorized")
@@ -1689,6 +1728,21 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
                    WHERE research_id=? ORDER BY created_at DESC""",
                 (research_id,),
             ).fetchall()
+        return [self._share_link_value(row) for row in rows]
+
+    def list_keycloak_share_links(self, research_id: str, *, actor: str,
+                                  target_kind: str = "research", report_id: str = "") -> list[dict[str, Any]]:
+        """List only the exact resource for which the caller has share scope."""
+        self.require_keycloak_sharing()
+        kind, target = self._keycloak_share_target(research_id, target_kind, report_id)
+        research = self._research_row(research_id)
+        if not self._research_access(research, actor)["can_manage"]:
+            raise PermissionError("research sharing is not authorized")
+        self._profile_grant_manager.require_resource_share(actor=actor, resource_type=kind, resource_ref=target)
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            rows = conn.execute("""SELECT * FROM research_catalog_share_links
+                WHERE research_id=? AND target_kind=? AND report_id=? ORDER BY created_at DESC""",
+                (research_id, target_kind, report_id)).fetchall()
         return [self._share_link_value(row) for row in rows]
 
     def revoke_share_link(
