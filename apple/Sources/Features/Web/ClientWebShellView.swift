@@ -39,17 +39,18 @@ struct ClientWebShellView: View {
             }
         }
         .task(id: "\(session.isLoggedIn)|\(session.user?.organizationId ?? "")") {
+            let previousEndpoint = managerConfig.baseURL
+            let previousIdentity = session.user?.stableIdentityID
             let wasLoggedIn = session.isLoggedIn
             let selected = await ManagerEndpointDiscoveryService.shared
                 .selectBestManager(
                     organizationID: session.user?.organizationId
                 )
-            // Manager cookies/tokens are origin-scoped. When an authenticated
-            // user moves from the public Manager to an organization-owned
-            // internal Manager, refresh the same credentials on that new
-            // endpoint before the Web shell is reloaded.
-            if wasLoggedIn, selected != nil {
-                _ = await session.refresh()
+            // Do not send stored credentials to a newly discovered Manager.
+            // Only a target session for the same stable identity is accepted.
+            if wasLoggedIn, session.isLoggedIn, session.user?.stableIdentityID == previousIdentity,
+               selected != nil, previousEndpoint != managerConfig.baseURL {
+                _ = await session.validateManagerChange(expectedIdentityID: previousIdentity)
             }
             await releaseController.refresh(force: false)
         }

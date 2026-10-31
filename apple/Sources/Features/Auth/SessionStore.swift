@@ -130,6 +130,33 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// Validate an already-selected Manager without replaying saved passwords.
+    /// A denied, unavailable, or different account never retains the old UI identity.
+    @discardableResult
+    func validateManagerChange(expectedIdentityID: String?) async -> Bool {
+        authenticationGeneration &+= 1
+        let generation = authenticationGeneration
+        let target = ManagerConfig.shared.baseURL
+        restoreTask?.cancel()
+        restoreTask = nil
+        isWorking = false
+        clearAuthentication()
+        guard let expected = expectedIdentityID, !expected.isEmpty else { return false }
+        do {
+            let candidate = try await api.me()
+            guard generation == authenticationGeneration, target == ManagerConfig.shared.baseURL else { return false }
+            guard candidate.isLoggedIn, !candidate.visitorLogin,
+                  candidate.authentication != "agent",
+                  candidate.stableIdentityID == expected,
+                  candidate.localResearchIdentity != nil else { return false }
+            user = candidate
+            return true
+        } catch {
+            guard generation == authenticationGeneration else { return false }
+            return false
+        }
+    }
+
     private func clearAuthentication() {
         user = nil
         isManagerLoggedIn = false
