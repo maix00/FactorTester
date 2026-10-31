@@ -86,6 +86,30 @@ def test_normal_user_principal_picker_does_not_gain_admin_directory(monkeypatch)
     assert responses[-1][0]["principals"] == []
 
 
+def test_owned_sync_cursor_is_opaque_and_bound_to_verified_identity(monkeypatch):
+    from urllib.parse import urlencode
+    responses, calls = [], []
+    session = {'username': 'alice', 'tr_identity_id': 'alice-stable'}
+    class Service:
+        def owned_sync_page(self, **kwargs):
+            calls.append(kwargs)
+            return {'researches': [], 'next_cursor': {'updated_at': 3, 'research_id': 'denied-secret'}}
+    class Handler(research_catalog_routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=Service())
+        def _session(self): return session
+    monkeypatch.setattr(research_catalog_routes, 'json_response',
+                        lambda _handler, body, status=200: responses.append((body, status)))
+    handler = Handler()
+    assert handler._get_research_catalog_routes(SimpleNamespace(path='/api/research/owned-sync', query='limit=2'))
+    token = responses[-1][0]['next_cursor']
+    assert responses[-1][1] == 200 and 'denied-secret' not in token
+    assert handler._get_research_catalog_routes(SimpleNamespace(path='/api/research/owned-sync', query=urlencode({'cursor':token})))
+    assert calls[-1]['after_ref'] == 'denied-secret'
+    session['tr_identity_id'] = 'another-user'
+    assert handler._get_research_catalog_routes(SimpleNamespace(path='/api/research/owned-sync', query=urlencode({'cursor':token})))
+    assert responses[-1][1] == 400 and len(calls) == 2
+
+
 @pytest.mark.parametrize("path", ["/api/research", "/api/research/reports"])
 @pytest.mark.parametrize("scope", ["mine", "all", "subordinates"])
 def test_research_lists_use_verified_session_for_directory(monkeypatch, path, scope):

@@ -613,6 +613,11 @@ EXACT_PATH_TESTS["server/manager/services/research_catalog.py"] = (
     "tests/server/test_server_research_collaboration.py",
     "tests/release/test_report_collaboration_workflow.py",
 )
+EXACT_PATH_TESTS["tools/cli/commands/research_report_scope_identity.py"] = (
+    "tests/release/test_report_collaboration_workflow.py",
+    "tests/release/test_local_research_rpc.py",
+    "tests/server/test_client_local_report_publication.py",
+)
 for _path in (
     "tools/cli/release/research_reporting/local_rpc.py",
     "tools/cli/release/research_reporting/local_server_research.py",

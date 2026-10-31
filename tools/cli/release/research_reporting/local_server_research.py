@@ -10,6 +10,45 @@ from urllib.parse import quote, urlsplit
 from .local_publication import manager_session
 
 
+def discover_server_researches(store, *, binding: dict, manager: dict, profile_id: str,
+                               cursor: str, limit: int) -> dict:
+    """Discover and queue one authorized page; a repeated page is idempotent."""
+    profile = store._profile(profile_id)
+    if not isinstance(cursor, str) or len(cursor) > 2048 or type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError('invalid Research discovery page')
+    endpoint, session = manager_session(binding, manager)
+    response = session.get('/api/research/owned-sync', query={'cursor': cursor, 'limit': limit})
+    items, next_cursor = response.get('researches'), response.get('next_cursor')
+    if (response.get('success') is not True or not isinstance(items, list) or len(items) > limit
+            or (next_cursor is not None and (not isinstance(next_cursor, str) or not next_cursor
+                                             or len(next_cursor) > 2048 or next_cursor == cursor))):
+        raise ValueError('Manager Research discovery response is invalid')
+    versions = {}
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {'research_id', 'updated_at', 'title', 'description'}:
+            raise ValueError('Manager Research discovery response is invalid')
+        ref, version = item['research_id'], item['updated_at']
+        if (not isinstance(ref, str) or not re.fullmatch(r'research:v1:[A-Za-z0-9_-]{24,128}', ref)
+                or ref in versions or type(version) not in (int, float) or not math.isfinite(version) or version < 0
+                or not isinstance(item['title'], str) or not item['title'].strip() or len(item['title']) > 256
+                or not isinstance(item['description'], str) or len(item['description']) > 10000):
+            raise ValueError('Manager Research discovery response is invalid')
+        versions[ref] = (version, item['title'], item['description'])
+    manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
+    if versions:
+        with store._connect() as db:
+            rows = db.execute('SELECT research_id,manager_hash,profile_id,updated_at,title,description FROM server_research_origins '
+                              f"WHERE research_id IN ({','.join('?' for _ in versions)})", tuple(versions)).fetchall()
+        origins = {row['research_id']: row for row in rows}
+        candidates = [ref for ref, version in versions.items() if ref not in origins
+                      or origins[ref]['manager_hash'] != manager_hash or origins[ref]['profile_id'] != profile
+                      or (origins[ref]['updated_at'], origins[ref]['title'], origins[ref]['description']) != version]
+        queued = queue_server_researches(store, manager=manager, profile_id=profile, research_ids=candidates) if candidates else 0
+    else:
+        queued = 0
+    return {'queued': queued, 'next_cursor': next_cursor}
+
+
 def queue_server_researches(store, *, manager: dict, profile_id: str, research_ids: list[str]) -> int:
     profile = store._profile(profile_id)
     if (not isinstance(research_ids, list) or not 1 <= len(research_ids) <= 100

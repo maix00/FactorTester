@@ -56,12 +56,56 @@ createRoot(document.getElementById('root')!).render(<App/>);
                 page.wait_for_function('window.fixture?.timers.length > 0')
                 for _ in range(4): page.evaluate('window.step()')
                 assert page.evaluate('window.fixture.calls') == ['', 'report-1', '', 'report-1']
-                assert page.evaluate('window.fixture.notices') == ['research.report.sync.unavailable']
+                assert page.evaluate('window.fixture.notices') == ['research.discovery.unavailable', 'research.report.sync.unavailable']
                 page.evaluate('window.fixture.fail=false')
                 for _ in range(2): page.evaluate('window.step()')
                 page.evaluate('window.fixture.fail=true')
                 for _ in range(2): page.evaluate('window.step()')
-                assert page.evaluate('window.fixture.notices') == ['research.report.sync.unavailable'] * 2
+                assert page.evaluate('window.fixture.notices') == ['research.discovery.unavailable', 'research.report.sync.unavailable', 'research.report.sync.unavailable']
+            finally:
+                browser.close()
+    finally:
+        server.shutdown(); server.server_close(); worker.join(timeout=3)
+
+
+def test_background_research_discovery_paginates_without_reopening_a_page(tmp_path):
+    harness, bundle = tmp_path / 'discovery.tsx', tmp_path / 'discovery.js'
+    harness.write_text(f'''
+import React from {json.dumps(str(APP / 'node_modules/react/index.js'))};
+import {{createRoot}} from {json.dumps(str(APP / 'node_modules/react-dom/client.js'))};
+import {{useLocalReportSync}} from {json.dumps(str(APP / 'src/use-local-report-sync.ts'))};
+import {json.dumps(str(APP / 'src/i18n.ts'))};
+const state=(window as any).fixture={{timers:[],discover:[],sync:0,changed:0}};
+window.setTimeout=((fn:any,delay?:number)=>{{state.timers.push({{fn,delay}});return 1;}}) as typeof setTimeout;
+window.clearTimeout=(()=>{{}}) as typeof clearTimeout;
+const client={{snapshot:()=>1,isCurrent:()=>true,
+  discoverResearches:async (_profile:string,cursor:string)=>{{state.discover.push(cursor);return {{queued:cursor?1:0,next_cursor:cursor?null:'next'}};}},
+  syncReports:async()=>{{state.sync++;return {{reports:[],researches:state.sync===2?[{{research_id:'r',status:'imported'}}]:[],researches_pending_more:false,next_report_id:null}};}}
+}};
+const caps={{actions:['sync_reports','discover_researches'],profiles:[{{profile_id:'self',display_name:'Self'}}]}};
+function App(){{useLocalReportSync(client as any,caps as any,true,()=>{{state.changed++;}});return <div>sync</div>;}}
+createRoot(document.getElementById('root')!).render(<App/>);
+(window as any).step=async()=>{{const item=state.timers.shift();if(!item)throw Error('missing timer');item.fn();for(let i=0;i<16;i++)await Promise.resolve();}};
+''', encoding='utf-8')
+    subprocess.run([str(APP / 'node_modules/.bin/esbuild'), str(harness), '--bundle', '--format=iife',
+                    '--target=es2020', f'--outfile={bundle}'], cwd=APP, check=True, capture_output=True)
+    (tmp_path / 'index.html').write_text('<div id="root"></div><script src="/discovery.js"></script>', encoding='utf-8')
+    server = ThreadingHTTPServer(('127.0.0.1', 0), partial(SimpleHTTPRequestHandler, directory=str(tmp_path)))
+    worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel='chrome', headless=True)
+            try:
+                page = browser.new_page()
+                page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
+                page.wait_for_function('window.fixture?.timers.length > 0')
+                page.evaluate('window.step()')
+                assert page.evaluate('window.fixture.discover') == ['']
+                assert page.evaluate('window.fixture.timers[0].delay') == 250
+                page.evaluate('window.step()')
+                assert page.evaluate('window.fixture.discover') == ['', 'next']
+                assert page.evaluate('window.fixture.changed') == 1
+                assert page.evaluate('window.fixture.timers[0].delay') == 60000
             finally:
                 browser.close()
     finally:

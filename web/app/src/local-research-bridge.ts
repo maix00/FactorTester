@@ -317,6 +317,20 @@ export class LocalResearchClient {
     return reply.queued as number;
   }
 
+  async discoverResearches(profileId:string,cursor="",limit=16):Promise<{queued:number;next_cursor:string|null}> {
+    this.requireAction("discover_researches");
+    const profile_id=inputText(profileId,512);this.requireProfile(profile_id);
+    cursor=inputText(cursor,2048,true);
+    if(!Number.isSafeInteger(limit)||limit<1||limit>100)throw new LocalResearchBridgeError("local_research_invalid_input");
+    const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"discover_researches",profile_id,cursor,limit});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    if(!Number.isSafeInteger(reply.queued)||(reply.queued as number)<0||(reply.queued as number)>limit ||
+       (reply.next_cursor!==null&&(typeof reply.next_cursor!=="string"||!reply.next_cursor||reply.next_cursor.length>2048||reply.next_cursor===cursor)))
+      throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {queued:reply.queued as number,next_cursor:reply.next_cursor as string|null};
+  }
+
   async syncReports(profileId:string,afterReportId="",limit=4):Promise<{reports:{report_id:string;research_id:string;status:string}[];researches:{research_id:string;status:string}[];researches_pending_more:boolean;next_report_id:string|null}> {
     this.requireAction("sync_reports");const profile_id=inputText(profileId,512),after_report_id=inputText(afterReportId,160,true);
     this.requireProfile(profile_id);

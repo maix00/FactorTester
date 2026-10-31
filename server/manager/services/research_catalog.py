@@ -610,6 +610,56 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
             result.append(self._research_value(row, viewer=viewer, access=access))
         return result
 
+    def owned_sync_page(self, *, viewer: str, after_time: float, after_ref: str, limit: int) -> dict[str, Any]:
+        """Return a bounded page of currently authorized owned Research refs.
+
+        The cursor describes scanned rows, including denied rows, so a denied
+        entry cannot stall the scan. Every new scan reevaluates authorization.
+        """
+        import math
+        viewer_ref = str(viewer or '').strip()
+        if (not viewer_ref or self._research_authorizer is None or type(limit) is not int
+                or not 1 <= limit <= 100 or type(after_time) not in (int, float)
+                or not math.isfinite(after_time) or after_time < 0
+                or not isinstance(after_ref, str) or len(after_ref) > 256):
+            raise ValueError('invalid owned Research synchronization page')
+        self.ensure_schema()
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            rows = conn.execute('''SELECT research.*,
+                (SELECT membership.role FROM research_catalog_memberships AS membership
+                 WHERE membership.research_id=research.research_id AND membership.principal_ref=?
+                   AND membership.status='active' ORDER BY CASE membership.role
+                   WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 WHEN 'contributor' THEN 2 ELSE 3 END LIMIT 1) AS viewer_member_role,
+                (SELECT membership.status FROM research_catalog_memberships AS membership
+                 WHERE membership.research_id=research.research_id AND membership.principal_ref=?
+                   AND membership.status='active' LIMIT 1) AS viewer_member_status
+                FROM research_catalog_researches AS research
+                WHERE research.owner_ref=? AND research.status='active'
+                  AND (research.updated_at>? OR (research.updated_at=? AND research.research_id>?))
+                ORDER BY research.updated_at, research.research_id LIMIT ?''',
+                (viewer_ref, viewer_ref, viewer_ref, after_time, after_time, after_ref, limit + 1)).fetchall()
+            scanned = rows[:limit]
+            ids = {str(row['research_id']) for row in scanned}
+            pairs = self._profile_pairs(conn, viewer_ref, research_ids=ids)
+        profile_access = self._profile_membership_access(viewer_ref, pairs, bounded=True)
+        decisions = self._research_authorizer.research_access_many(viewer=viewer_ref,
+            researches=[(str(row['research_id']), str(row['status'])) for row in scanned]) if scanned else {}
+        items = []
+        for row in scanned:
+            ref = str(row['research_id'])
+            membership = ({'role': row['viewer_member_role'], 'status': row['viewer_member_status']}
+                          if row['viewer_member_status'] else None)
+            access = self._research_access_values(research_id=ref, owner=str(row['owner_ref']),
+                status=str(row['status']), visibility=str(row['visibility']),
+                authorized_users_json=row['authorized_users_json'], viewer=viewer_ref, membership=membership,
+                profile_access=profile_access.get(ref, {}), keycloak_access=decisions.get(ref))
+            if access['can_view']:
+                items.append({'research_id': ref, 'updated_at': float(row['updated_at']),
+                              'title': str(row['title']), 'description': str(row['description'])})
+        cursor = ({'updated_at': float(scanned[-1]['updated_at']), 'research_id': str(scanned[-1]['research_id'])}
+                  if len(rows) > limit else None)
+        return {'researches': items, 'next_cursor': cursor}
+
     def get_research(
         self, research_id: str, *, viewer: str | None,
     ) -> dict[str, Any]:
@@ -2296,9 +2346,13 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
             raise KeyError("report not found")
         return row
 
-    def _profile_pairs(self, conn, viewer: str, *, research_id: str = "") -> dict[tuple[str, str], int]:
+    def _profile_pairs(self, conn, viewer: str, *, research_id: str = "", research_ids: set[str] | None = None) -> dict[tuple[str, str], int]:
         if self._profile_authorizer is None or not viewer:
             return {}
+        if research_ids is not None and (not research_ids or len(research_ids) > 100 or research_id):
+            if not research_ids:
+                return {}
+            raise ValueError('invalid bounded Research membership scope')
         sql = """SELECT m.research_id, m.profile_ref, COALESCE(v.revision, 0) AS policy_version
                  FROM research_catalog_memberships m
                  LEFT JOIN research_profile_policy_versions v
@@ -2311,17 +2365,20 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         if research_id:
             sql += " AND m.research_id=?"
             params.append(research_id)
+        if research_ids is not None:
+            sql += f" AND m.research_id IN ({','.join('?' for _ in research_ids)})"
+            params.extend(sorted(research_ids))
         # These are association candidates, not permission decisions. Keycloak
         # may allow or deny independently of their old role/status columns.
         return {(str(item["research_id"]), str(item["profile_ref"])): int(item["policy_version"])
                 for item in conn.execute(sql, params)}
 
-    def _profile_membership_access(self, viewer: str, pairs: dict[tuple[str, str], int]) -> dict[str, dict[str, bool]]:
+    def _profile_membership_access(self, viewer: str, pairs: dict[tuple[str, str], int], *, bounded: bool = False) -> dict[str, dict[str, bool]]:
         if self._profile_authorizer is None or not viewer or not pairs:
             return {}
         values = self._profile_authorizer.profile_membership_access_many(viewer=viewer, profiles=pairs)
         with connect_sqlite(self.db_path, readonly=True) as conn:
-            current_pairs = self._profile_pairs(conn, viewer)
+            current_pairs = self._profile_pairs(conn, viewer, research_ids={pair[0] for pair in pairs} if bounded else None)
         result: dict[str, dict[str, bool]] = {}
         for (research_id, profile_ref), access in values.items():
             pair = (research_id, profile_ref)

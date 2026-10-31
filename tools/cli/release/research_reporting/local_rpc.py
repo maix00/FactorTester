@@ -41,6 +41,7 @@ class LocalResearchRPC:
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
             'import_research': {'action', 'profile_id', 'research_id'},
             'queue_researches': {'action', 'profile_id', 'research_ids'},
+            'discover_researches': {'action', 'profile_id', 'cursor', 'limit'},
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
             'list_profile_reports': {'action', 'profile_id', 'limit', 'offset', 'expected_revision'},
             'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
@@ -55,6 +56,7 @@ class LocalResearchRPC:
         if self.manager is None:
             keys.pop('import_research')
             keys.pop('queue_researches')
+            keys.pop('discover_researches')
             keys.pop('publish_report')
             keys.pop('pull_report')
             keys.pop('sync_reports')
@@ -62,7 +64,7 @@ class LocalResearchRPC:
             raise ValueError('invalid local Research message')
         for key in keys[action] - {'action', 'limit', 'offset', 'generation', 'expected_revision', 'research_ids'}:
             value = message[key]
-            if (not isinstance(value, str) or len(value) > (10000 if key in {'description', 'body'} else 512)
+            if (not isinstance(value, str) or len(value) > (10000 if key in {'description', 'body'} else 2048 if key == 'cursor' else 512)
                     or any((ord(char) < 32 and not (key in {'description', 'body'} and char in '\n\r\t'))
                            or ord(char) == 127 for char in value)):
                 raise ValueError('invalid local Research message')
@@ -110,6 +112,20 @@ class LocalResearchRPC:
             from .local_server_research import queue_server_researches
             value = {'queued': queue_server_researches(self.store, manager=self.manager,
                      profile_id=message['profile_id'], research_ids=message['research_ids'])}
+        elif action == 'discover_researches':
+            from tools.cli.http import HttpClientError
+            from .local_server_research import discover_server_researches
+            try:
+                value = discover_server_researches(self.store, binding=self.binding, manager=self.manager,
+                    profile_id=message['profile_id'], cursor=message['cursor'], limit=message['limit'])
+            except HttpClientError as exc:
+                if exc.status == 400 and message['cursor']:
+                    return {'success': False, 'code': 'local_research_cursor_expired'}
+                if exc.status == 404:
+                    return {'success': False, 'code': 'local_research_discovery_unsupported'}
+                if exc.status in {401, 403}:
+                    return {'success': False, 'code': 'local_report_publication_denied'}
+                raise
         elif action == 'create_report':
             value = {'report': self.store.create_report(profile_id=message['profile_id'], research_id=message['research_id'],
                      title=message['title'], operation_id=message['operation_id'])}

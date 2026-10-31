@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { notify } from "./notifications/core.ts";
-import type { LocalResearchCapabilities, LocalResearchClient } from "./local-research-bridge.ts";
+import { LocalResearchBridgeError, type LocalResearchCapabilities, type LocalResearchClient } from "./local-research-bridge.ts";
 
 /** Synchronize only reports with an explicit publication receipt, in bounded pages. */
 export function useLocalReportSync(client:LocalResearchClient|null,capabilities:LocalResearchCapabilities|null,active:boolean,onChanged:()=>void):()=>void {
@@ -13,13 +13,36 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
     const snapshot=client.snapshot(),profiles=capabilities.profiles;
     let alive=true,running=false,requested=false,timer:number|undefined,profileIndex=0,cursor="";
     const warned=new Set<string>(),seen=new Set<string>();
+    const discoveryCursors=new Map<string,string>(),discoveryDone=new Set<string>();
     let transportWarning=false,remoteUpdated=false;
     const schedule=(delay:number)=>{if(timer!==undefined)window.clearTimeout(timer);if(alive)timer=window.setTimeout(()=>void tick(),delay);};
     const tick=async()=>{
       if(!alive||running)return;
       running=true;
       try{
-        const page=await client.syncReports(profiles[profileIndex].profile_id,cursor,4);
+        const profile=profiles[profileIndex].profile_id;
+        if(capabilities.actions.includes("discover_researches")&&!discoveryDone.has(profile)){
+          const discoveryCursor=discoveryCursors.get(profile)||"";
+          try{
+            const discovery=await client.discoverResearches(profile,discoveryCursor,16);
+            if(!alive||!client.isCurrent(snapshot))return;
+            if(discovery.next_cursor)discoveryCursors.set(profile,discovery.next_cursor);
+            else {discoveryCursors.delete(profile);discoveryDone.add(profile);}
+          }catch(reason){
+            if(!alive||!client.isCurrent(snapshot))return;
+            discoveryCursors.delete(profile);
+            // A restarted Manager invalidates its opaque cursor; restart on
+            // the next tick. Other failures wait for the normal retry cycle.
+            if(!(reason instanceof LocalResearchBridgeError&&reason.code==="local_research_cursor_expired")){
+              discoveryDone.add(profile);seen.add("discovery");
+              if(!warned.has("discovery")){warned.add("discovery");notify({code:"research.discovery.unavailable",type:"warning",message:t("research.importPending")});}
+            }
+          }
+        } else if(!capabilities.actions.includes("discover_researches")) {
+          discoveryDone.add(profile);seen.add("discovery");
+          if(!warned.has("discovery")){warned.add("discovery");notify({code:"research.discovery.unavailable",type:"warning",message:t("research.importPending")});}
+        }
+        const page=await client.syncReports(profile,cursor,4);
         if(!alive||!client.isCurrent(snapshot))return;
         let changed=false;
         for(const item of page.reports){
@@ -41,15 +64,17 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
           }
         }
         if(changed)callback.current();
+        const discoveryMore=!discoveryDone.has(profile);
         if(page.next_report_id)cursor=page.next_report_id;
-        else {cursor="";profileIndex=(profileIndex+1)%profiles.length;}
-        const more=!!page.next_report_id||profileIndex!==0||page.researches_pending_more===true;
+        else {cursor="";if(!discoveryMore&&!page.researches_pending_more)profileIndex=(profileIndex+1)%profiles.length;}
+        const more=!!page.next_report_id||profileIndex!==0||page.researches_pending_more===true||discoveryMore;
         if(!more){
           // A successful first page does not mean the whole scan recovered.
           // Clear the warning only after every page and Profile has succeeded.
           transportWarning=false;
           if(remoteUpdated)notify({code:"research.report.sync.changed",type:"info",message:t("localResearch.syncUpdated")});
           remoteUpdated=false;
+          discoveryDone.clear();discoveryCursors.clear();
           for(const status of warned)if(!seen.has(status))warned.delete(status);
           seen.clear();
         }
@@ -58,7 +83,7 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
         if(alive&&client.isCurrent(snapshot)&&!transportWarning){
           transportWarning=true;notify({code:"research.report.sync.unavailable",type:"warning",message:t("localResearch.syncUnavailable")});
         }
-        cursor="";profileIndex=0;seen.clear();remoteUpdated=false;schedule(60000);
+        cursor="";profileIndex=0;discoveryDone.clear();discoveryCursors.clear();seen.clear();remoteUpdated=false;schedule(60000);
       }finally{
         running=false;
         if(alive&&requested){requested=false;cursor="";profileIndex=0;schedule(250);}

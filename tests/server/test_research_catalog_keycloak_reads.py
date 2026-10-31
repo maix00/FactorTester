@@ -55,6 +55,26 @@ def test_strict_catalog_never_uses_legacy_public_or_same_name_owner(tmp_path):
     assert catalog.list_researches(viewer="bob") == []
 
 
+def test_owned_sync_scans_denied_rows_without_losing_the_next_authorized_row(tmp_path):
+    catalog, first, second, permissions, calls = _fixture(tmp_path)
+    # Make timestamp ties exercise the reference tie-breaker independently of
+    # creation timing and SQLite iteration order.
+    from tools.data.sqlite.db import connect_sqlite
+    with connect_sqlite(catalog.db_path) as db:
+        db.execute('UPDATE research_catalog_researches SET updated_at=10')
+    ordered = sorted([first, second])
+    _grant(permissions, 'research', ordered[1], 'read')
+    page = catalog.owned_sync_page(viewer='alice', after_time=0, after_ref='', limit=1)
+    assert page['researches'] == []
+    assert page['next_cursor'] == {'updated_at': 10.0, 'research_id': ordered[0]}
+    page = catalog.owned_sync_page(viewer='alice', after_time=10, after_ref=ordered[0], limit=1)
+    assert len(page['researches']) == 1 and page['researches'][0]['research_id'] == ordered[1]
+    assert page['researches'][0]['updated_at'] == 10.0
+    assert page['next_cursor'] is None
+    assert all(size <= 3 for _token, size in calls)
+    assert catalog.owned_sync_page(viewer='bob', after_time=0, after_ref='', limit=1)['researches'] == []
+
+
 def test_strict_catalog_batches_research_and_report_scopes_and_propagates_outage(tmp_path):
     catalog, public, _private, permissions, calls = _fixture(tmp_path)
     _grant(permissions, "research", public, "read", "use")

@@ -55,6 +55,18 @@ test("server discovery queues only bounded unique opaque references", async () =
   await assert.rejects(client.queueResearches("self",[ref]),code("local_research_invalid_response"));
 });
 
+test("background discovery validates cursor and bounded queue count", async () => {
+  let response=ok({queued:1,next_cursor:"opaque-token"});
+  const client=localResearchBridge(host(message=>message.action==="capabilities" ?
+    ok({actions:["discover_researches"],profiles:[{profile_id:"self",display_name:"Self"}]}) : response))!;
+  await client.capabilities(currentBinding);
+  assert.deepEqual(await client.discoverResearches("self","",2),{queued:1,next_cursor:"opaque-token"});
+  response=ok({queued:1,next_cursor:"opaque-token"});
+  await assert.rejects(client.discoverResearches("self","opaque-token",2),code("local_research_invalid_response"));
+  response=ok({queued:3,next_cursor:null});
+  await assert.rejects(client.discoverResearches("self","",2),code("local_research_invalid_response"));
+});
+
 test("profile report directory validates its profile and linked research", async () => {
   const {description:_description,...summary}=record;
   const row={report_id:"report:one",research_id:record.research_id,profile_id:"self",title:"Report",created_at:100,research:summary};

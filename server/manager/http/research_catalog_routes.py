@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import re
 from typing import Any
 from urllib.parse import parse_qs, unquote
 
 from server.manager.http.responses import json_response
 from .research_branch_routes import ResearchBranchRoutesMixin
+from cryptography.fernet import Fernet, InvalidToken
+
+# Opaque, process-local cursors cannot reveal IDs of denied rows. A Manager
+# restart invalidates them; clients restart their scan without deleting data.
+_OWNED_SYNC_CURSOR = Fernet(Fernet.generate_key())
 
 
 class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
@@ -87,7 +93,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             parsed.path,
         )
         local_grants = parsed.path == '/api/research/local-report-publication/grants'
-        if publication is None and local_publication is None and not local_grants:
+        if publication is None and local_publication is None and not local_grants and parsed.path != '/api/research/owned-sync':
             self._refresh_research_catalog(viewer)
         service = None if local_publication or local_grants else self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
@@ -184,6 +190,30 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 return True
             elif parsed.path == "/api/research/capabilities/keycloak-sharing":
                 payload = {"capabilities": service.keycloak_sharing_capabilities()}
+            elif parsed.path == "/api/research/owned-sync":
+                if any(len(query.get(key, [])) > 1 for key in ('cursor', 'limit')) or set(query) - {'cursor', 'limit'}:
+                    raise ValueError('invalid owned Research synchronization query')
+                stable_id = str(session.get('tr_identity_id') or '')
+                if not stable_id:
+                    raise PermissionError('verified stable identity is required')
+                token = query.get('cursor', [''])[0]
+                if len(token) > 2048:
+                    raise ValueError('invalid owned Research synchronization cursor')
+                if token:
+                    try:
+                        cursor = json.loads(_OWNED_SYNC_CURSOR.decrypt(token.encode('ascii'), ttl=3600))
+                        if not isinstance(cursor, dict) or set(cursor) != {'identity_id', 'updated_at', 'research_id'} or cursor['identity_id'] != stable_id:
+                            raise ValueError('invalid cursor identity')
+                        after_time, after_ref = cursor['updated_at'], cursor['research_id']
+                    except (InvalidToken, UnicodeError, ValueError, KeyError, TypeError):
+                        raise ValueError('invalid owned Research synchronization cursor') from None
+                else:
+                    after_time, after_ref = 0, ''
+                payload = service.owned_sync_page(viewer=viewer, after_time=after_time,
+                    after_ref=after_ref, limit=int(query.get('limit', ['50'])[0]))
+                cursor = payload.pop('next_cursor')
+                payload['next_cursor'] = (_OWNED_SYNC_CURSOR.encrypt(json.dumps({
+                    'identity_id': stable_id, **cursor}, separators=(',', ':')).encode()).decode('ascii') if cursor else None)
             elif parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
                 subordinate_refs = (
