@@ -537,7 +537,7 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-settings-content h2 { font-size:22px; }
 .tr-settings-content .tr-settings-row b { font-size:14px; font-weight:500; }
 .tr-settings-content .tr-settings-row:last-child { border-bottom:0; }
-.tr-device-settings { display:grid; gap:16px; min-width:0; }
+.tr-device-settings { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; min-width:0; }
 .tr-device-controls { display:flex; align-items:center; gap:12px; }
 .tr-device-controls .ant-input-search { flex:1; min-width:0; }
 .tr-device-controls > .ant-select { flex:0 0 min(260px, 42%); min-width:180px; }
@@ -548,11 +548,14 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-device-client .ant-tag { flex:none; margin-inline-end:0; }
 .tr-device-client > span { min-width:0; overflow-wrap:anywhere; }
 @media(max-width:767px) {
-  .tr-device-controls { align-items:stretch; flex-wrap:wrap; }
-  .tr-device-controls .ant-input-search,.tr-device-controls > .ant-select { flex:1 1 100%; width:100%; min-width:0; }
+  .tr-device-controls { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+  .tr-device-controls .ant-input-search { grid-column:1; grid-row:1; width:100%; min-width:0; }
+  .tr-device-controls > .ant-btn { grid-column:2; grid-row:1; }
+  .tr-device-controls > .ant-select { grid-column:1 / -1; grid-row:2; width:100%; min-width:0; }
   .tr-device-filter-row { align-items:flex-start; flex-direction:column; }
   .tr-device-filter-row .ant-segmented { width:100%; }
   .tr-device-filter-row .ant-segmented-group { min-width:max-content; }
+  .tr-device-client > span { display:none; }
 }
 .tr-admin-tab { display:grid; gap:18px; min-width:0; }
 .tr-admin-identity { display:grid; gap:16px; }
