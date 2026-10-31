@@ -72,9 +72,17 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             assert not page.locator(".ant-modal:visible").get_by_role("combobox", name="研究身份").is_visible()
             page.get_by_label("名称", exact=True).fill("本机真实存储验收")
             page.locator(".ant-modal").get_by_role("button", name="新建研究").click()
-            page.get_by_role("button", name="本机真实存储验收").wait_for()
+            page.get_by_role("button", name="本机真实存储验收").click()
+            dialog = page.get_by_role("dialog")
+            dialog.get_by_role("button", name="新建研究报告").click()
+            dialog.get_by_label("名称", exact=True).fill("本机报告验收")
+            dialog.get_by_role("button", name="新建研究报告", exact=True).last.click()
+            dialog.get_by_text("本机报告验收").wait_for()
             open_page()
-            page.get_by_role("button", name="本机真实存储验收").wait_for()
+            page.get_by_role("button", name="本机真实存储验收").click()
+            page.get_by_role("dialog").get_by_text("本机报告验收").wait_for()
+            if os.environ.get("TR_UI_SCREENSHOT"):
+                page.screenshot(path=os.environ["TR_UI_SCREENSHOT"])
             assert not errors
             browser.close()
     finally:
