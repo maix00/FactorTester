@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import hashlib
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -180,55 +181,68 @@ class AccountDomainSyncService:
         return count
 
     def flush(self, *, principal: str = "", limit: int = 100) -> dict[str, Any]:
-        pending = self.local.pending(principal=principal, limit=limit)
+        target = max(1, min(int(limit), 1000))
+        pending = self.local.pending(principal=principal, limit=target)
         if not pending:
             return {"sent": 0, "conflicts": 0, **self.local.sync_state(principal=principal)}
         if self.control_store is None:
             return {"sent": 0, "pending": len(pending), "conflicts": 0, "offline": True}
+        from .research_sync import research_outbox_status, research_sync_lock
         sent = conflicts = 0
-        for item in pending:
-            try:
-                outbound = item
-                if item["entity_type"] == "factor_param_config":
-                    from .factor_sync import compact_factor_config_payload
-                    outbound = {
-                        **item,
-                        "payload": compact_factor_config_payload(item["payload"]),
-                    }
-                receipt = self.control_store.push_account_domain_entity(
-                    principal=outbound["principal"],
-                    entity_type=outbound["entity_type"],
-                    entity_id=outbound["entity_id"],
-                    payload=outbound["payload"],
-                    deleted=outbound["deleted"],
-                    base_revision=outbound["base_revision"],
-                    origin_manager_id=self.manager_id,
-                    operation_id=outbound["operation_id"],
-                )
-                if str(receipt.get("status") or "") == "conflict":
-                    if self.local.record_push_conflict(item, receipt):
-                        continue
-                    conflicts += 1
-                    self.local.mark_attempt(item["operation_id"], "remote revision conflict")
+        seen: set[str] = set()
+        scan_budget = min(5000, max(1000, target * 10))
+        while pending and len(seen) < scan_budget and sent + conflicts < target:
+            for item in pending:
+                operation = item["operation_id"]
+                if operation in seen:
                     continue
-                self.local.acknowledge(
-                    item["operation_id"], revision=int(receipt.get("revision") or 0), sent_item=outbound,
-                )
-                sent += 1
-            except (TypeError, ValueError) as exc:
-                # A malformed entity must not starve unrelated valid writes.
-                # Preserve the rejected operation for repair and keep sending
-                # the remainder of this bounded batch.
-                self.local.mark_attempt(item["operation_id"], str(exc))
-                continue
-            except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError) as exc:
-                self.local.mark_attempt(item["operation_id"], str(exc))
-                return {
-                    "sent": sent,
-                    "pending": len(pending) - sent,
-                    "conflicts": conflicts,
-                    "offline": True,
-                }
+                seen.add(operation)
+                try:
+                    lock = (research_sync_lock(self.local.path, item["entity_id"])
+                            if item["entity_type"] == "research_catalog" else nullcontext())
+                    with lock:
+                        if item["entity_type"] == "research_catalog":
+                            decision = research_outbox_status(self, item)
+                            if decision == 'review':
+                                # Mark while holding the same lock as an explicit
+                                # share. Otherwise a concurrent share can requeue
+                                # this exact operation just before we block it.
+                                self.local.mark_research_sync_review([operation])
+                                continue
+                            if decision == 'superseded':
+                                continue
+                        outbound = item
+                        if item["entity_type"] == "factor_param_config":
+                            from .factor_sync import compact_factor_config_payload
+                            outbound = {**item, "payload": compact_factor_config_payload(item["payload"])}
+                        receipt = self.control_store.push_account_domain_entity(
+                            principal=outbound["principal"], entity_type=outbound["entity_type"],
+                            entity_id=outbound["entity_id"], payload=outbound["payload"],
+                            deleted=outbound["deleted"], base_revision=outbound["base_revision"],
+                            origin_manager_id=self.manager_id, operation_id=outbound["operation_id"],
+                        )
+                        if str(receipt.get("status") or "") == "conflict":
+                            if self.local.record_push_conflict(item, receipt):
+                                continue
+                            conflicts += 1
+                            self.local.mark_attempt(operation, "remote revision conflict")
+                            continue
+                        self.local.acknowledge(operation, revision=int(receipt.get("revision") or 0), sent_item=outbound)
+                        sent += 1
+                except (TypeError, ValueError) as exc:
+                    # Preserve malformed rows without starving unrelated writes.
+                    self.local.mark_attempt(operation, str(exc))
+                except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError) as exc:
+                    self.local.mark_attempt(operation, str(exc))
+                    return {"sent": sent, "conflicts": conflicts, "offline": True,
+                            **self.local.sync_state(principal=principal)}
+                if sent + conflicts >= target or len(seen) >= scan_budget:
+                    break
+            if sent + conflicts >= target or len(seen) >= scan_budget:
+                break
+            batch_size = min(1000, target - sent - conflicts + len(seen))
+            pending = [item for item in self.local.pending(principal=principal, limit=batch_size)
+                       if item['operation_id'] not in seen]
         return {"sent": sent, "conflicts": conflicts, **self.local.sync_state(principal=principal)}
 
     def pull(self, *, principal: str, limit: int = 100) -> dict[str, Any]:

@@ -20,6 +20,202 @@ def replicas(tmp_path):
     return values, control
 
 
+def test_private_research_and_owner_only_workspaces_never_enter_automatic_outbox(tmp_path):
+    ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='local', profile_ref='work')['research_id']
+    author.register_report(rid, actor='alice', report_id='private-report', profile_ref='self')
+    author.update_research(rid, actor='alice', title='local edit')
+    assert outgoing.local.pending(principal='alice') == []
+    assert backfill_researches(outgoing, 'alice') == 0
+    assert outgoing.flush(principal='alice')['sent'] == 0
+    assert incoming.pull(principal='alice')['applied'] == 0
+    assert mirror.list_researches(viewer='alice') == [] and control.rows == {}
+    assert author.get_research_summary(rid, viewer='alice')['title'] == 'local edit'
+
+
+def test_large_private_research_does_not_hit_shared_envelope_limit(tmp_path):
+    from tools.data.sqlite.db import connect_sqlite
+    ((author, outgoing), (_mirror, _incoming)), _control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='private')['research_id']
+    with connect_sqlite(outgoing.local.path) as db:
+        db.executemany('INSERT INTO research_catalog_reports VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+            (f'report-{i}', rid, 'alice', 'title', 'self', '', 'client', '', 'private', '[]', 'active', '', 0, 0)
+            for i in range(2000)
+        ])
+    assert author.update_research(rid, actor='alice', title='private edit')['title'] == 'private edit'
+    assert outgoing.local.pending(principal='alice') == []
+
+
+def test_old_accidentally_replicated_private_projection_is_preserved_without_further_sync(tmp_path):
+    from server.manager.storage.account_domain.research_sync import snapshot
+    from tools.data.sqlite.db import connect_sqlite
+    ((author, outgoing), (_mirror, _incoming)), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='old private')['research_id']
+    with connect_sqlite(outgoing.local.path, readonly=True) as conn:
+        old = snapshot(conn, rid)
+    outgoing.local.upsert_local(principal='alice', entity_type='research_catalog', entity_id=rid,
+        payload={'schema_version': 2, 'visibility': 'public', 'replication_scope': 'trusted_managers',
+                 'storage_server_id': 'public', **old}, manager_id='public')
+    # Simulate a private projection already pushed by the old implementation.
+    old_item = outgoing.local.pending(principal='alice')[0]
+    receipt = control.push_account_domain_entity(principal=old_item['principal'], entity_type=old_item['entity_type'],
+        entity_id=old_item['entity_id'], payload=old_item['payload'], deleted=False,
+        base_revision=old_item['base_revision'], origin_manager_id=outgoing.manager_id,
+        operation_id=old_item['operation_id'])
+    outgoing.local.acknowledge(old_item['operation_id'], revision=receipt['revision'], sent_item=old_item)
+    author.update_research(rid, actor='alice', title='new private')
+    assert outgoing.local.pending(principal='alice') == []
+    assert control.rows[('alice', 'research_catalog', rid)]['payload']['research']['title'] == 'old private'
+    assert not control.rows[('alice', 'research_catalog', rid)]['deleted']
+    assert author.get_research_summary(rid, viewer='alice')['title'] == 'new private'
+
+
+def _queue_old_private_projection(sync, research_id, *, deleted=False):
+    from server.manager.storage.account_domain.research_sync import snapshot
+    from tools.data.sqlite.db import connect_sqlite
+    with connect_sqlite(sync.local.path, readonly=True) as conn:
+        value = snapshot(conn, research_id)
+    return sync.local.upsert_local(
+        principal='alice', entity_type='research_catalog', entity_id=research_id,
+        payload={'schema_version': 2, 'visibility': 'public', 'replication_scope': 'trusted_managers',
+                 'storage_server_id': sync.manager_id, **value},
+        manager_id=sync.manager_id, deleted=deleted,
+    )
+
+
+@pytest.mark.parametrize('deleted', [False, True])
+def test_old_private_outbox_is_retained_for_review_and_cannot_starve_other_kinds(tmp_path, deleted):
+    ((author, outgoing), _), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='legacy private')['research_id']
+    operation = _queue_old_private_projection(outgoing, rid, deleted=deleted)
+    before = outgoing.local.pending(principal='alice')[0]
+    outgoing.upsert('alice', 'product_group', 'unrelated', {'id': 'unrelated'}, flush=False)
+
+    result = outgoing.flush(principal='alice', limit=1)
+
+    assert result['sent'] == 1 and result['blocked'] == 1
+    assert ('alice', 'product_group', 'unrelated') in control.rows
+    assert ('alice', 'research_catalog', rid) not in control.rows
+    assert outgoing.local.pending(principal='alice') == []
+    retained = outgoing.local.pending(principal='alice', include_blocked=True)
+    assert len(retained) == 1 and retained[0]['operation_id'] == operation
+    assert retained[0]['payload'] == before['payload'] and retained[0]['deleted'] == deleted
+    assert retained[0]['last_error'] == 'research_sync_needs_review'
+
+
+def test_explicit_link_reactivates_the_same_previously_blocked_snapshot(tmp_path):
+    ((author, outgoing), _), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='private')['research_id']
+    operation = _queue_old_private_projection(outgoing, rid)
+    assert outgoing.flush(principal='alice')['blocked'] == 1
+    author.create_share_link(target_kind='research', research_id=rid, actor='alice')
+    pending = outgoing.local.pending(principal='alice')
+    assert len(pending) == 1 and pending[0]['operation_id'] == operation
+    assert outgoing.flush(principal='alice')['sent'] == 1
+    assert ('alice', 'research_catalog', rid) in control.rows
+
+
+def test_keycloak_mode_never_uploads_queued_legacy_shared_snapshot(tmp_path):
+    ((author, outgoing), _), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='legacy share',
+                                 visibility='authorized', authorized_users=['bob'])['research_id']
+    assert outgoing.local.pending(principal='alice')
+    outgoing.research_legacy_sharing = False
+    assert outgoing.flush(principal='alice')['blocked'] == 1
+    assert control.rows == {}
+    assert outgoing.local.pending(principal='alice', include_blocked=True)[0]['entity_id'] == rid
+
+
+def test_expired_link_does_not_release_a_queued_private_snapshot(tmp_path):
+    from tools.data.sqlite.db import connect_sqlite
+    ((author, outgoing), _), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='private')['research_id']
+    author.create_share_link(target_kind='research', research_id=rid, actor='alice')
+    with connect_sqlite(outgoing.local.path) as conn:
+        conn.execute('UPDATE research_catalog_share_links SET expires_at=1 WHERE research_id=?', (rid,))
+    assert outgoing.flush(principal='alice')['blocked'] == 1
+    assert control.rows == {}
+
+
+@pytest.mark.parametrize('change', ['revoked', 'private_edit'])
+def test_stale_previously_shared_queue_entry_does_not_override_current_state(tmp_path, change):
+    from tools.data.sqlite.db import connect_sqlite
+    ((author, outgoing), _), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='shared', visibility='public')['research_id']
+    # Models an old queue entry after external recovery or an interrupted old
+    # writer: it was shared when queued, but no longer matches live data.
+    with connect_sqlite(outgoing.local.path) as conn:
+        if change == 'revoked':
+            conn.execute("UPDATE research_catalog_researches SET visibility='private' WHERE research_id=?", (rid,))
+        else:
+            conn.execute("UPDATE research_catalog_researches SET title='new local edit' WHERE research_id=?", (rid,))
+    assert outgoing.flush(principal='alice')['blocked'] == 1
+    assert control.rows == {}
+
+
+def test_revoke_serializes_with_in_flight_shared_snapshot(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='shared')['research_id']
+    author.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='bob-profile', role='viewer')
+    entered, release = Event(), Event()
+    original_push = control.push_account_domain_entity
+
+    def blocked_push(**item):
+        entered.set()
+        assert release.wait(5)
+        return original_push(**item)
+
+    control.push_account_domain_entity = blocked_push
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        sending = pool.submit(outgoing.flush, principal='alice')
+        try:
+            assert entered.wait(5)
+            removing = pool.submit(author.remove_membership, rid, actor='alice', profile_ref='bob-profile')
+            assert not removing.done()
+        finally:
+            release.set()
+        assert sending.result(timeout=5)['sent'] == 1
+        removing.result(timeout=5)
+
+    control.push_account_domain_entity = original_push
+    assert outgoing.flush(principal='alice')['sent'] == 1
+    incoming.pull(principal='bob')
+    assert mirror.list_researches(viewer='bob') == []
+
+
+def test_explicitly_shared_report_and_link_allow_backfill_but_keycloak_never_guesses_from_old_acl(tmp_path):
+    ((author, outgoing), (_mirror, _incoming)), _control = replicas(tmp_path)
+    report_research = author.create_research(owner_ref='alice', title='report')['research_id']
+    author.register_report(report_research, actor='alice', report_id='shared-report',
+                           visibility='authorized', authorized_users=['bob'])
+    assert len(outgoing.local.pending(principal='alice')) == 1
+    link_research = author.create_research(owner_ref='alice', title='link')['research_id']
+    author.create_share_link(target_kind='research', research_id=link_research, actor='alice')
+    assert {row['entity_id'] for row in outgoing.local.pending(principal='alice')} == {report_research, link_research}
+    assert backfill_researches(outgoing, 'alice') == 0
+    outgoing.research_legacy_sharing = False
+    strict_research = author.create_research(owner_ref='alice', title='stale legacy ACL',
+                                             visibility='authorized', authorized_users=['bob'])['research_id']
+    assert not any(row['entity_id'] == strict_research for row in outgoing.local.pending(principal='alice'))
+    assert backfill_researches(outgoing, 'alice') == 0
+
+
+def test_archive_sends_one_final_shared_snapshot_even_with_a_live_link(tmp_path):
+    ((author, outgoing), (mirror, incoming)), _control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='shared', visibility='public')['research_id']
+    author.create_share_link(target_kind='research', research_id=rid, actor='alice')
+    outgoing.flush(principal='alice'); incoming.pull(principal='alice')
+    author.update_research(rid, actor='alice', status='archived')
+    assert outgoing.flush(principal='alice')['sent'] == 1
+    incoming.pull(principal='alice')
+    assert mirror.get_research_summary(rid, viewer='alice')['status'] == 'archived'
+    author.update_research(rid, actor='alice', title='private archived edit')
+    assert outgoing.local.pending(principal='alice') == []
+
+
 def test_research_relationships_and_revocations_converge_without_granting_public_access(tmp_path):
     ((author, outgoing), (mirror, incoming)), _ = replicas(tmp_path)
     item = author.create_research(owner_ref='alice', title='private research')
@@ -43,7 +239,9 @@ def test_research_relationships_and_revocations_converge_without_granting_public
     author.update_research(rid, actor='alice', title='renamed', status='archived')
     outgoing.flush(principal='alice'); incoming.pull(principal='alice')
     result = mirror.get_research_summary(rid, viewer='alice')
-    assert result['title'] == 'renamed' and result['status'] == 'archived'
+    # After the revocation snapshot, subsequent private edits remain local.
+    assert result['title'] == 'private research' and result['status'] == 'active'
+    assert outgoing.local.pending(principal='alice') == []
 
 
 def test_research_outbox_failure_rolls_back_authored_change(tmp_path, monkeypatch):
@@ -52,7 +250,8 @@ def test_research_outbox_failure_rolls_back_authored_change(tmp_path, monkeypatc
         raise ValueError('too large')
     monkeypatch.setattr(sync.local, 'upsert_local', reject)
     with pytest.raises(ValueError, match='too large'):
-        catalog.create_research(owner_ref='alice', title='not committed')
+        catalog.create_research(owner_ref='alice', title='not committed',
+                                visibility='authorized', authorized_users=['bob'])
     assert catalog.list_researches(viewer='alice') == []
 
 
@@ -74,7 +273,8 @@ def test_redeemed_access_syncs_without_replicating_share_token(tmp_path):
 def test_replication_cannot_reassign_an_existing_research_owner(tmp_path):
     from server.manager.storage.account_domain.research_sync import materialize_research
     ((author, outgoing), (mirror, incoming)), _ = replicas(tmp_path)
-    rid = author.create_research(owner_ref='alice', title='owned')['research_id']
+    rid = author.create_research(owner_ref='alice', title='owned',
+                                 visibility='authorized', authorized_users=['bob'])['research_id']
     outgoing.flush(principal='alice'); incoming.pull(principal='alice')
     envelope = outgoing.local.get_entity('alice', 'research_catalog', rid)
     envelope['principal'] = 'mallory'
@@ -99,7 +299,8 @@ def test_incomplete_snapshot_cannot_remove_memberships(tmp_path):
 
 def test_offline_and_conflicting_research_edits_preserve_local_work(tmp_path):
     ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path)
-    rid = author.create_research(owner_ref='alice', title='initial')['research_id']
+    rid = author.create_research(owner_ref='alice', title='initial',
+                                 visibility='authorized', authorized_users=['bob'])['research_id']
     outgoing.flush(principal='alice'); incoming.pull(principal='alice')
     outgoing.control_store = None
     author.update_research(rid, actor='alice', title='offline edit')
@@ -130,7 +331,8 @@ def test_offline_and_conflicting_research_edits_preserve_local_work(tmp_path):
 def test_selected_remote_snapshot_removes_local_only_grants_and_workspace_collision(tmp_path):
     from server.manager.storage.account_domain.research_sync import materialize_pending_researches
     ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path)
-    rid = author.create_research(owner_ref='alice', title='initial')['research_id']
+    rid = author.create_research(owner_ref='alice', title='initial',
+                                 visibility='authorized', authorized_users=['charlie'])['research_id']
     author.add_membership(rid, actor='alice', principal_ref='alice', profile_ref='analysis')
     outgoing.flush(principal='alice'); incoming.pull(principal='alice')
     author.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='bob')
@@ -150,6 +352,30 @@ def test_selected_remote_snapshot_removes_local_only_grants_and_workspace_collis
     assert materialize_pending_researches(outgoing) == 1
     assert author.list_researches(viewer='bob') == []
     assert author.create_workspace(rid, actor='alice', principal_ref='alice', profile_ref='analysis')['workspace_id'] == remote_workspace['workspace_id']
+
+
+def test_resolved_snapshot_is_not_sent_after_a_newer_local_change(tmp_path):
+    from tools.data.sqlite.db import connect_sqlite
+    ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='initial',
+                                 visibility='authorized', authorized_users=['bob'])['research_id']
+    outgoing.flush(principal='alice'); incoming.pull(principal='alice')
+    author.update_research(rid, actor='alice', title='local edit')
+    mirror.update_research(rid, actor='alice', title='peer edit')
+    incoming.flush(principal='alice')
+    assert outgoing.flush(principal='alice')['conflicts'] == 1
+    remote = control.rows[('alice', 'research_catalog', rid)]
+    local = outgoing.local.get_entity('alice', 'research_catalog', rid)
+    outgoing.local.resolve_conflict(
+        principal='alice', entity_type='research_catalog', entity_id=rid,
+        expected_payload=local['payload'], remote_revision=remote['revision'],
+        payload=remote['payload'], manager_id='public',
+    )
+    with connect_sqlite(outgoing.local.path) as conn:
+        conn.execute("UPDATE research_catalog_researches SET title='newer local edit' WHERE research_id=?", (rid,))
+    assert outgoing.flush(principal='alice')['blocked'] == 1
+    assert control.rows[('alice', 'research_catalog', rid)]['payload']['research']['title'] == 'peer edit'
+    assert author.get_research_summary(rid, viewer='alice')['title'] == 'newer local edit'
 
 
 def test_same_named_profile_members_replicate_and_revoke_independently(tmp_path):

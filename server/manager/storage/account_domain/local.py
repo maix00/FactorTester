@@ -14,6 +14,9 @@ from typing import Any, Iterable
 from tools.data.sqlite.db import connect_sqlite
 
 
+RESEARCH_SYNC_NEEDS_REVIEW = "research_sync_needs_review"
+
+
 ENTITY_TYPES = {
     "user_metadata",
     "organization",
@@ -89,6 +92,15 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS account_domain_outbox_entity
             ON account_domain_outbox(principal, entity_type, entity_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS account_domain_research_sync_intents (
+            operation_id TEXT PRIMARY KEY, principal TEXT NOT NULL, entity_id TEXT NOT NULL,
+            kind TEXT NOT NULL, payload_sha256 TEXT NOT NULL
+        );
+        CREATE TRIGGER IF NOT EXISTS account_domain_research_sync_intent_cleanup
+        AFTER DELETE ON account_domain_outbox BEGIN
+            DELETE FROM account_domain_research_sync_intents WHERE operation_id=OLD.operation_id;
+        END;
 
         CREATE TABLE IF NOT EXISTS account_domain_cursors (
             scope_key TEXT PRIMARY KEY,
@@ -213,7 +225,8 @@ class LocalAccountDomainStore:
         return operation_id
 
     def pending(self, *, principal: str = "", limit: int = 100, include_blocked: bool = False) -> list[dict[str, Any]]:
-        clauses = [] if include_blocked else ["last_error NOT IN ('remote revision conflict', 'factor materialization required')"]
+        clauses = [] if include_blocked else [
+            "last_error NOT IN ('remote revision conflict', 'factor materialization required', 'research_sync_needs_review')"]
         params: list[Any] = []
         if principal:
             clauses.append("principal=?")
@@ -275,6 +288,15 @@ class LocalAccountDomainStore:
                 (str(error or "")[:1000], operation_id),
             )
 
+    def mark_research_sync_review(self, operation_ids: list[str]) -> None:
+        """Keep unverified old outbox rows without retrying them indefinitely."""
+        if not operation_ids:
+            return
+        with connect_sqlite(self.path) as conn:
+            conn.executemany("""UPDATE account_domain_outbox SET attempts=attempts+1,last_error=?
+                WHERE operation_id=? AND entity_type='research_catalog'""",
+                [(RESEARCH_SYNC_NEEDS_REVIEW, operation_id) for operation_id in operation_ids])
+
     def _rebase_research(self, conn, key, remote) -> bool:
         if key[1] != 'research_catalog' or remote.get('deleted'):
             return False
@@ -320,7 +342,8 @@ class LocalAccountDomainStore:
         args = (principal,) if principal else ()
         with connect_sqlite(self.path) as conn:
             row = conn.execute(
-                "SELECT count(*) AS pending, coalesce(sum(last_error='remote revision conflict'),0) AS blocked "
+                "SELECT count(*) AS pending, coalesce(sum(last_error IN "
+                "('remote revision conflict','research_sync_needs_review')),0) AS blocked "
                 "FROM account_domain_outbox" + where, args,
             ).fetchone()
         return {"pending": int(row["pending"]), "blocked": int(row["blocked"])}
@@ -339,7 +362,12 @@ class LocalAccountDomainStore:
         encoded = _encode(payload)
         operation = uuid.uuid4().hex
         now = time.time()
-        with connect_sqlite(self.path) as conn:
+        if entity_type == 'research_catalog':
+            from .research_sync import research_sync_lock
+            lock = research_sync_lock(self.path, entity_id)
+        else:
+            lock = nullcontext()
+        with lock, connect_sqlite(self.path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT payload_json FROM account_domain_entities WHERE principal=? AND entity_type=? AND entity_id=?", key,
@@ -350,6 +378,15 @@ class LocalAccountDomainStore:
             ).fetchone()[0]
             if row is None or row["payload_json"] != _encode(expected_payload) or latest != remote_revision:
                 raise ValueError("conflict resolution precondition changed; inspect again")
+            conflict_id = None
+            if entity_type == 'research_catalog':
+                conflict = conn.execute('''SELECT conflict_id FROM account_domain_conflicts
+                    WHERE principal=? AND entity_type=? AND entity_id=? AND status='open'
+                    AND remote_revision=? AND local_payload_json=? ORDER BY created_at DESC LIMIT 1''',
+                    (*key, remote_revision, _encode(expected_payload))).fetchone()
+                if conflict is None:
+                    raise ValueError("research conflict snapshot changed; inspect again")
+                conflict_id = str(conflict['conflict_id'])
             conn.execute(
                 "UPDATE account_domain_entities SET payload_json=?, deleted=?, remote_revision=?, base_revision=?, "
                 "origin_manager_id=?, updated_at=? WHERE principal=? AND entity_type=? AND entity_id=?",
@@ -362,6 +399,11 @@ class LocalAccountDomainStore:
                 "deleted, base_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (operation, *key, encoded, int(deleted), remote_revision, now),
             )
+            if conflict_id is not None:
+                conn.execute('''INSERT INTO account_domain_research_sync_intents
+                    (operation_id,principal,entity_id,kind,payload_sha256) VALUES (?,?,?,?,?)''',
+                    (operation, principal, entity_id, 'resolution:' + conflict_id,
+                     hashlib.sha256(encoded.encode('utf-8')).hexdigest()))
             conn.execute(
                 "UPDATE account_domain_conflicts SET status='resolved', resolved_at=? "
                 "WHERE principal=? AND entity_type=? AND entity_id=? AND status='open'", (now, *key),

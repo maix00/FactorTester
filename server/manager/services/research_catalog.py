@@ -14,7 +14,7 @@ import secrets
 import time
 from pathlib import Path
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any
 
 from tools.data.sqlite.db import connect_sqlite
@@ -103,19 +103,27 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         if synchronizer.local.path.resolve() != self.db_path:
             raise ValueError("research catalog and outbox must share one database")
         self._synchronizer = synchronizer
+        # In Keycloak mode legacy ACL columns are not the current sharing
+        # authority, so they cannot trigger cross-Manager publication.
+        self._synchronizer.research_legacy_sharing = self._research_authorizer is None
         self._schedule_refresh = schedule_refresh
 
     @contextmanager
     def _write(self, research_id: str, *, after_commit: Callable[[], None] | None = None):
         owner = ""
-        with connect_sqlite(self.db_path) as conn:
+        from server.manager.storage.account_domain.research_sync import research_sync_lock
+        lock = (research_sync_lock(self.db_path, research_id)
+                if self._synchronizer is not None and getattr(self._synchronizer, 'research_legacy_sharing', False)
+                else nullcontext())
+        with lock, connect_sqlite(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
             if self._synchronizer is not None:
                 from server.manager.storage.account_domain.research_sync import publish_research
-                publish_research(self._synchronizer, conn, research_id)
-                row = conn.execute("SELECT owner_ref FROM research_catalog_researches WHERE research_id=?", (research_id,)).fetchone()
-                owner = str(row["owner_ref"]) if row else ""
+                operation = publish_research(self._synchronizer, conn, research_id)
+                if operation:
+                    row = conn.execute("SELECT owner_ref FROM research_catalog_researches WHERE research_id=?", (research_id,)).fetchone()
+                    owner = str(row["owner_ref"]) if row else ""
             if after_commit is not None:
                 # Mark the actual database commit before either connection
                 # cleanup or the post-commit sync scheduler can fail.
@@ -1707,7 +1715,7 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         token = secrets.token_urlsafe(32)
         link_id = "share-" + secrets.token_hex(12)
         now = time.time()
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             conn.execute(
                 """INSERT INTO research_catalog_share_links
                    (link_id, target_kind, research_id, report_id, owner_ref,
@@ -1766,10 +1774,7 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         research = self._research_row(research_id)
         if not self._research_access(research, actor)["can_manage"]:
             raise PermissionError("research sharing is not authorized")
-        with connect_sqlite(self.db_path) as conn:
-            if self._research_authorizer is not None:
-                # Serialize with an in-flight Keycloak grant for this link.
-                conn.execute("BEGIN IMMEDIATE")
+        with self._write(research_id) as conn:
             row = conn.execute(
                 """SELECT * FROM research_catalog_share_links
                    WHERE research_id=? AND link_id=?""",

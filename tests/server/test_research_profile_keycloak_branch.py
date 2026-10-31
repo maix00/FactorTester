@@ -410,7 +410,7 @@ def test_research_creation_keeps_keycloak_resources_after_database_commit(tmp_pa
     catalog = ResearchCatalog(tmp_path / "research.sqlite", profile_authorizer=Authorization(),
                               profile_grant_manager=grants)
     catalog._synchronizer = object()
-    monkeypatch.setattr(research_sync, "publish_research", lambda *_args: None)
+    monkeypatch.setattr(research_sync, "publish_research", lambda *_args: "pending-operation")
     def failed_schedule(_owner):
         raise RuntimeError("sync scheduler failed after commit")
     catalog._schedule_refresh = failed_schedule
