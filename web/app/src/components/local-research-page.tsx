@@ -47,7 +47,7 @@ export function LocalResearchCreate({client,profiles,initialProfile,operation,on
     <Form layout="vertical" initialValues={{profile_id:initialProfile}} disabled={busy} onFinish={save}>
       <Form.Item name="title" label={t("editor.name")} rules={[{required:true,whitespace:true,max:256}]}><Input aria-label={t("editor.name")} autoFocus maxLength={256}/></Form.Item>
       <Form.Item name="description" label={t("library.description")}><Input.TextArea aria-label={t("library.description")} autoSize={{minRows:3,maxRows:8}} maxLength={10000}/></Form.Item>
-      <Form.Item name="profile_id" label={t("research.profile")} rules={[{required:true}]}><Select aria-label={t("research.profile")} options={profiles.map(value=>({value:value.profile_id,label:value.display_name||value.profile_id}))}/></Form.Item>
+      <Form.Item name="profile_id" label={profiles.length>1 ? t("research.profile") : undefined} hidden={profiles.length===1} rules={[{required:true}]}><Select aria-label={t("research.profile")} options={profiles.map(value=>({value:value.profile_id,label:value.display_name||value.profile_id}))}/></Form.Item>
       <div className="tr-inline-actions"><Button type="primary" htmlType="submit" loading={busy}>{t("research.create")}</Button><DetailsCancelButton disabled={busy} closePanel onCancel={onClose}/></div>
     </Form>
   </DetailsPanel>;

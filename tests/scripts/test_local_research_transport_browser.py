@@ -69,6 +69,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             open_page()
             page.get_by_role("button", name="新建研究").click()
             page.locator(".ant-dropdown:visible").get_by_role("menuitem", name="本机", exact=True).click()
+            assert not page.locator(".ant-modal:visible").get_by_role("combobox", name="研究身份").is_visible()
             page.get_by_label("名称", exact=True).fill("本机真实存储验收")
             page.locator(".ant-modal").get_by_role("button", name="新建研究").click()
             page.get_by_role("button", name="本机真实存储验收").wait_for()
