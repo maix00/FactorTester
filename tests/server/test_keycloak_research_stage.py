@@ -238,6 +238,20 @@ def test_link_issuer_without_mapped_share_scope_requires_repair(legacy):
     assert 'share_link_issuer_scope_not_mapped' in group['reasons']
 
 
+@pytest.mark.parametrize('claimant,expected', [
+    ('unknown', 'share_link_identity_or_target_unresolved'),
+    ('bob', 'share_link_claimant_access_not_mapped'),
+])
+def test_redeemed_link_without_verified_claimant_access_requires_repair(legacy, claimant, expected):
+    path, _backup_path, ids = legacy
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE research_catalog_share_links SET redeemed_by=?,redeemed_at=1 WHERE research_id=?", (claimant, ids['live_link']))
+    group = next(item for item in build_plan(path, ACCOUNTS, issuer=ISSUER, now=1)['groups'] if item['research_id'] == ids['live_link'])
+    assert group['state'] == 'needs_repair'
+    assert expected in group['reasons']
+    assert not group['links'] and not group['resources']
+
+
 def test_staging_rejects_backup_source_or_plan_drift_before_keycloak_writes(legacy):
     path, backup, _ids = legacy
     reviewed = build_plan(path, ACCOUNTS, issuer=ISSUER, now=1)
