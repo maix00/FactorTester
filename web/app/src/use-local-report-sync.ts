@@ -20,9 +20,10 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
         const page=await client.syncReports(profiles[profileIndex].profile_id,cursor,4);
         if(!alive||!client.isCurrent(snapshot))return;
         noticed.current.delete("transport");
-        let changed=false;
+        let changed=false, remoteUpdated=false;
         for(const item of page.reports){
           if(item.status==="updated"||item.status==="published")changed=true;
+          if(item.status==="updated")remoteUpdated=true;
           if(["conflict","denied","unavailable"].includes(item.status)){
             if(noticed.current.get(item.report_id)!==item.status){
               noticed.current.set(item.report_id,item.status);
@@ -30,7 +31,8 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
             }
           } else noticed.current.delete(item.report_id);
         }
-        if(changed){callback.current();notify({code:"research.report.sync.changed",type:"info",message:t("localResearch.syncUpdated")});}
+        if(changed)callback.current();
+        if(remoteUpdated)notify({code:"research.report.sync.changed",type:"info",message:t("localResearch.syncUpdated")});
         if(page.next_report_id)cursor=page.next_report_id;
         else {cursor="";profileIndex=(profileIndex+1)%profiles.length;}
         const more=!!page.next_report_id||profileIndex!==0;
