@@ -93,10 +93,24 @@ final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             // `self` is an in-memory owner scope, not a new research Profile.
             // Existing username-bound Profiles are not automatically adopted.
+            var manager: [String: Any] = ["endpoint": self.endpoint.absoluteString,
+                                           "token": "", "certificate_pem": "", "cookies": []]
+            if request["action"] as? String == "publish_report" {
+                let cookies = (HTTPCookieStorage.shared.cookies(for: self.endpoint) ?? [])
+                    .filter { $0.name == "ft-manager-session" }.map { cookie -> [String: Any] in
+                        var value: [String: Any] = ["name": cookie.name, "value": cookie.value,
+                            "domain": cookie.domain, "path": cookie.path, "secure": cookie.isSecure]
+                        if let expires = cookie.expiresDate?.timeIntervalSince1970 { value["expires"] = expires }
+                        return value
+                    }
+                manager["token"] = ManagerSessionTokenStore.read(for: self.endpoint)
+                manager["certificate_pem"] = SelfSignedTrustDelegate.certificatePEM(for: self.endpoint)
+                manager["cookies"] = cookies
+            }
             let envelope: [String: Any] = [
                 "binding": ["issuer": identity.issuer, "identity_id": identity.stableID],
                 "profile": ["profile_id": "self", "display_name": user.alias ?? name],
-                "request": request,
+                "request": request, "manager": manager,
             ]
             do {
                 guard self.isCurrent(identity), self.boundIdentity == identity,

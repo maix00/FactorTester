@@ -23,7 +23,7 @@ def local_research_request() -> None:
         raise click.ClickException("local research request exceeds the size limit")
     try:
         envelope = json.loads(raw)
-        if not isinstance(envelope, dict) or set(envelope) != {"binding", "profile", "request"}:
+        if not isinstance(envelope, dict) or set(envelope) not in ({"binding", "profile", "request"}, {"binding", "profile", "request", "manager"}):
             raise ValueError("invalid host envelope")
         binding, profile = envelope["binding"], envelope["profile"]
         if not isinstance(binding, dict) or set(binding) != {"issuer", "identity_id"}:
@@ -35,7 +35,7 @@ def local_research_request() -> None:
         if profile["profile_id"] != "self":
             raise ValueError("invalid host profile")
         rpc = LocalResearchRPC(default_client_root(), issuer=binding["issuer"],
-                               identity_id=binding["identity_id"], profiles=[profile])
+                               identity_id=binding["identity_id"], profiles=[profile], manager=envelope.get("manager"))
         result = rpc.request(envelope["request"])
     except (ValueError, TypeError, PermissionError, KeyError, json.JSONDecodeError) as exc:
         raise click.ClickException("invalid local research request") from exc

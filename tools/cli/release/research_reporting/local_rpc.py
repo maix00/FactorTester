@@ -13,7 +13,7 @@ SCHEMA = 'tr-local-research-bridge:v1'
 
 
 class LocalResearchRPC:
-    def __init__(self, root: Path, *, issuer: str, identity_id: str, profiles: list[dict]) -> None:
+    def __init__(self, root: Path, *, issuer: str, identity_id: str, profiles: list[dict], manager: dict | None = None) -> None:
         normalized = []
         for item in profiles:
             if not isinstance(item, dict) or set(item) != {'profile_id', 'display_name'}:
@@ -28,6 +28,7 @@ class LocalResearchRPC:
         self.store = LocalResearchCatalog(root, issuer=issuer, identity_id=identity_id, profiles=set(identifiers))
         self.binding = {'issuer': issuer.strip().rstrip('/'), 'identity_id': identity_id.strip()}
         self.profiles = normalized
+        self.manager = manager
 
     def request(self, message: object) -> dict:
         if not isinstance(message, dict):
@@ -43,7 +44,10 @@ class LocalResearchRPC:
             'get_report_chapter': {'action', 'profile_id', 'research_id', 'report_id', 'chapter_id'},
             'add_report_component': {'action', 'profile_id', 'research_id', 'report_id', 'component_id', 'kind',
                                      'parent_id', 'title', 'body', 'generation', 'root_ref'},
+            'publish_report': {'action', 'profile_id', 'research_id', 'report_id'},
         }
+        if self.manager is None:
+            keys.pop('publish_report')
         if not isinstance(action, str) or action not in keys or set(message) != keys[action]:
             raise ValueError('invalid local Research message')
         for key in keys[action] - {'action', 'limit', 'offset', 'generation'}:
@@ -79,10 +83,22 @@ class LocalResearchRPC:
         elif action == 'get_report_chapter':
             value = self.store.get_report_chapter(profile_id=message['profile_id'], research_id=message['research_id'],
                      report_id=message['report_id'], chapter_id=message['chapter_id'])
-        else:
+        elif action == 'add_report_component':
             from .authoring.tree_transactions import ReportVersionConflict
             try:
                 value = self.store.add_report_component(**{key: message[key] for key in keys[action] - {'action'}})
             except ReportVersionConflict:
                 return {'success': False, 'code': 'local_report_version_conflict'}
+        else:
+            from tools.cli.http import HttpClientError
+            from .local_publication import publish_local_report
+            try:
+                value = publish_local_report(self.store, binding=self.binding, manager=self.manager,
+                    profile_id=message['profile_id'], research_id=message['research_id'], report_id=message['report_id'])
+            except HttpClientError as exc:
+                if exc.status == 409:
+                    return {'success': False, 'code': 'local_report_publication_conflict'}
+                if exc.status in {401, 403}:
+                    return {'success': False, 'code': 'local_report_publication_denied'}
+                raise
         return {'success': True, 'schema': SCHEMA, **value}

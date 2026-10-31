@@ -44,6 +44,8 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
         await fulfillment(of: [try XCTUnwrap(loaded)], timeout: 10)
         let capability = try await message(view, ["action": "capabilities"])
         XCTAssertEqual(capability["success"] as? Bool, true)
+        XCTAssertTrue((capability["actions"] as? [String])?.contains("publish_report") == true)
+        XCTAssertNil(capability["manager"])
         let created = try await message(view, ["action": "create", "profile_id": "self", "title": "WK test", "description": "", "operation_id": "test-operation"])
         let row = try XCTUnwrap(created["research"] as? [String: Any])
         XCTAssertEqual(row["title"] as? String, "WK test")
