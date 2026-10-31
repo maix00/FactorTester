@@ -237,6 +237,11 @@ class DeviceRegistry:
         ):
             self._repair_count += 1
             return
+        if payload.get("server_id") != self.server_id:
+            # A moved or unbound snapshot is not evidence that its devices
+            # belong to this Manager. Retain it for an explicit migration.
+            self._repair_count += 1
+            return
         self._legacy_root = {key: value for key, value in payload.items()
                              if key not in {"schema_version", "server_id", "generation", "devices", "sources"}}
         try:

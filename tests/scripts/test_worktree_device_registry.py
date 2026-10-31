@@ -164,6 +164,21 @@ def test_invalid_legacy_record_is_reported_without_overwrite(tmp_path) -> None:
     assert path.read_bytes() == original
 
 
+def test_other_manager_snapshot_is_not_rebound_or_overwritten(tmp_path) -> None:
+    public_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    path = tmp_path / 'devices.json'
+    path.write_text(json.dumps({'schema_version': 3, 'server_id': 'public', 'generation': 0,
+        'devices': {'device-good-123456': {'username': 'alice', 'public_key': public_key, 'enabled': True}},
+        'sources': {}}))
+    original = path.read_bytes()
+    registry = DeviceRegistry(path, server_id='local')
+    assert registry.backend_status()['migration_repair_required'] is True
+    assert registry.list() == []
+    with pytest.raises(ValueError, match='migration repair'):
+        registry.enroll(username='alice', device_id='device-new-1234567', public_key=public_key)
+    assert path.read_bytes() == original
+
+
 def test_mirror_update_cannot_discard_unmigrated_device_fields(tmp_path) -> None:
     public_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
     path = tmp_path / 'devices.json'
