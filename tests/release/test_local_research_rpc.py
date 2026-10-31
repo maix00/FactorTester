@@ -42,3 +42,36 @@ def test_rpc_rejects_ambiguous_native_profiles(tmp_path):
         LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
                          profiles=[{'profile_id': 'self', 'display_name': 'A'},
                                    {'profile_id': 'self', 'display_name': 'B'}])
+
+
+def test_local_report_uses_existing_report_tree_and_retry_recovers(tmp_path, monkeypatch):
+    from tools.cli.release.research_reporting import workspace
+    from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
+    from tools.cli.release.research_reporting.report_workspace_identity import report_workspace_id_for
+
+    rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'}])
+    research = rpc.request({'action': 'create', 'profile_id': 'self', 'title': 'Research',
+                            'description': '', 'operation_id': 'research-op'})['research']
+    request = {'action': 'create_report', 'profile_id': 'self', 'research_id': research['research_id'],
+               'title': 'Report', 'operation_id': 'report-op'}
+    original = workspace.initialize_report_workspace
+    monkeypatch.setattr(workspace, 'initialize_report_workspace', lambda **_: (_ for _ in ()).throw(OSError('interrupted')))
+    with pytest.raises(OSError):
+        rpc.request(request)
+    listing = {'action': 'list_reports', 'profile_id': 'self', 'research_id': research['research_id'], 'limit': 20, 'offset': 0}
+    assert rpc.request(listing)['reports'] == []
+    monkeypatch.setattr(workspace, 'initialize_report_workspace', original)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        values = list(pool.map(lambda _: rpc.request(request)['report'], range(4)))
+    assert all(value == values[0] for value in values)
+    assert rpc.request(listing)['reports'] == [values[0]]
+    root = rpc.store.workspace_root / 'research' / report_workspace_id_for(values[0]['report_id'])
+    assert load_snapshot(package_root=root, branch_id='main')['head']['report_id'] == values[0]['report_id']
+    assert (root / '.git').is_dir()
+    other = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='other',
+                             profiles=[{'profile_id': 'self', 'display_name': 'Other'}])
+    with pytest.raises(ValueError):
+        other.request(listing)
+    with pytest.raises(ValueError):
+        rpc.request({**request, 'title': 'Different'})

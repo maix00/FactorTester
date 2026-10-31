@@ -36,6 +36,7 @@ class LocalResearchCatalog:
         base.mkdir(parents=True, mode=0o700, exist_ok=True)
         base.chmod(0o700)
         self.path = base / (identity_hash + '.sqlite3')
+        self.workspace_root = base / (identity_hash + '.reports')
         if self.path.is_symlink():
             raise ValueError('local research database cannot be a symlink')
         with self._connect() as db:
@@ -43,6 +44,11 @@ class LocalResearchCatalog:
                 research_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, title TEXT NOT NULL,
                 description TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
                 created_at REAL NOT NULL, updated_at REAL NOT NULL)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS reports (
+                report_id TEXT PRIMARY KEY, research_id TEXT NOT NULL, profile_id TEXT NOT NULL,
+                title TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
+                created_at REAL NOT NULL, ready INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(research_id) REFERENCES researches(research_id))''')
 
     @contextmanager
     def _connect(self):
@@ -98,6 +104,67 @@ class LocalResearchCatalog:
         with self._connect() as db:
             row = db.execute('SELECT * FROM researches WHERE profile_id=? AND research_id=?', (profile, str(research_id))).fetchone()
             return self._public(row) if row else None
+
+    def create_report(self, *, profile_id: str, research_id: str, title: str, operation_id: str) -> dict:
+        """Reserve one report identity and initialize the shared report-tree format.
+
+        The reservation survives an interrupted initialization; retrying the
+        same operation completes the same report rather than creating another.
+        """
+        from .generation import report_workspace_lock
+        from .report_workspace_identity import report_workspace_id_for
+        from .workspace import initialize_report_workspace
+
+        profile = self._profile(profile_id)
+        title = str(title or '').strip()
+        if not title or len(title) > 256:
+            raise ValueError('invalid report title')
+        operation = validate_local_identifier(operation_id, 'operation_id')
+        with self._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not db.execute('SELECT 1 FROM researches WHERE profile_id=? AND research_id=?',
+                              (profile, research_id)).fetchone():
+                raise ValueError('research is unavailable')
+            row = db.execute('SELECT * FROM reports WHERE operation_id=?', (operation,)).fetchone()
+            if row:
+                if (row['profile_id'], row['research_id'], row['title']) != (profile, research_id, title):
+                    raise ValueError('operation_id was already used for another report')
+            else:
+                identifier = 'report:v1:' + secrets.token_urlsafe(18)
+                db.execute('INSERT INTO reports (report_id, research_id, profile_id, title, operation_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                           (identifier, research_id, profile, title, operation, time.time()))
+                row = db.execute('SELECT * FROM reports WHERE report_id=?', (identifier,)).fetchone()
+            report = dict(row)
+        if self.workspace_root.is_symlink():
+            raise ValueError('local report directory cannot be a symlink')
+        self.workspace_root.mkdir(mode=0o700, exist_ok=True)
+        self.workspace_root.chmod(0o700)
+        workspace_id = report_workspace_id_for(report['report_id'])
+        with report_workspace_lock(self.workspace_root / '.locks' / workspace_id):
+            initialize_report_workspace(workspace_root=self.workspace_root, report_workspace_id=workspace_id,
+                report_id=report['report_id'], branch_id='main', workspace_id=research_id,
+                title=title, branch_ref='report-branch:main')
+        with self._connect() as db:
+            db.execute('UPDATE reports SET ready=1 WHERE report_id=?', (report['report_id'],))
+        return self._report_public(report)
+
+    def list_reports(self, *, profile_id: str, research_id: str, limit: int, offset: int) -> dict:
+        profile = self._profile(profile_id)
+        if not 1 <= limit <= 200 or not 0 <= offset <= 1_000_000:
+            raise ValueError('invalid local report page')
+        with self._connect() as db:
+            if not db.execute('SELECT 1 FROM researches WHERE profile_id=? AND research_id=?',
+                              (profile, research_id)).fetchone():
+                raise ValueError('research is unavailable')
+            rows = db.execute('''SELECT * FROM reports WHERE profile_id=? AND research_id=? AND ready=1
+                ORDER BY created_at DESC, report_id DESC LIMIT ? OFFSET ?''',
+                (profile, research_id, limit + 1, offset)).fetchall()
+            items = [self._report_public(row) for row in rows[:limit]]
+            return {'reports': items, 'next_offset': offset + len(items) if len(rows) > limit else None}
+
+    @staticmethod
+    def _report_public(row) -> dict:
+        return {key: row[key] for key in ('report_id', 'research_id', 'profile_id', 'title', 'created_at')}
 
     @staticmethod
     def _public(row) -> dict:

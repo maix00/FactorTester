@@ -37,6 +37,8 @@ class LocalResearchRPC:
             'capabilities': {'action'}, 'list': {'action', 'profile_id', 'limit', 'offset'},
             'get': {'action', 'profile_id', 'research_id'},
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
+            'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
+            'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
         }
         if not isinstance(action, str) or action not in keys or set(message) != keys[action]:
             raise ValueError('invalid local Research message')
@@ -48,16 +50,23 @@ class LocalResearchRPC:
                 raise ValueError('invalid local Research message')
         if action == 'capabilities':
             value = {'binding': self.binding, 'profiles': self.profiles, 'actions': list(keys)}
-        elif action == 'list':
+        elif action in {'list', 'list_reports'}:
             if type(message['limit']) is not int or type(message['offset']) is not int:
                 raise ValueError('invalid local Research page')
-            value = self.store.page(profile_id=message['profile_id'], limit=message['limit'], offset=message['offset'])
+            if action == 'list':
+                value = self.store.page(profile_id=message['profile_id'], limit=message['limit'], offset=message['offset'])
+            else:
+                value = self.store.list_reports(profile_id=message['profile_id'], research_id=message['research_id'],
+                    limit=message['limit'], offset=message['offset'])
         elif action == 'get':
             row = self.store.get(profile_id=message['profile_id'], research_id=message['research_id'])
             if row is None:
                 return {'success': False, 'code': 'local_research_not_found'}
             value = {'research': row}
-        else:
+        elif action == 'create':
             value = {'research': self.store.create(profile_id=message['profile_id'], title=message['title'],
                      description=message['description'], operation_id=message['operation_id'])}
+        else:
+            value = {'report': self.store.create_report(profile_id=message['profile_id'], research_id=message['research_id'],
+                     title=message['title'], operation_id=message['operation_id'])}
         return {'success': True, 'schema': SCHEMA, **value}
