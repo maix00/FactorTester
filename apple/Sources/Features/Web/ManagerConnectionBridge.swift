@@ -132,6 +132,11 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
                 return
             }
             self.apply(target)
+            #if os(macOS)
+            if ManagerConfig.shared.baseURL == target {
+                ManagerCLISelectionSynchronizer.shared.schedule(target)
+            }
+            #endif
             replyHandler(self.reply(["url": raw, "auth_state": candidate == nil ? "unauthorized" : "authorized"]), nil)
         }
     }
@@ -157,17 +162,32 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let token = ManagerSessionTokenStore.read(for: target)
+        // Other applications may use the same host. Only the Manager's own
+        // session cookie belongs in this preflight request.
+        let cookies = (HTTPCookieStorage.shared.cookies(for: url) ?? []).filter { $0.name == "ft-manager-session" }
+        var usedCookie = token.isEmpty && !cookies.isEmpty
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        else if let cookies = HTTPCookieStorage.shared.cookies(for: url), !cookies.isEmpty {
+        else if !cookies.isEmpty {
             request.allHTTPHeaderFields = (request.allHTTPHeaderFields ?? [:]).merging(HTTPCookie.requestHeaderFields(with: cookies)) { old, _ in old }
         }
         do {
-            let (data, response) = try await network.data(for: request)
+            var (data, response) = try await network.data(for: request)
+            // A stale endpoint token must not hide a valid Manager cookie.
+            if !token.isEmpty, !cookies.isEmpty,
+               let http = response as? HTTPURLResponse, http.statusCode == 401 || http.statusCode == 403 {
+                request.setValue(nil, forHTTPHeaderField: "Authorization")
+                request.allHTTPHeaderFields = (request.allHTTPHeaderFields ?? [:]).merging(HTTPCookie.requestHeaderFields(with: cookies)) { old, _ in old }
+                (data, response) = try await network.data(for: request)
+                usedCookie = true
+            }
             guard let http = response as? HTTPURLResponse else { return .unavailable }
             if http.statusCode == 401 || http.statusCode == 403 { return .unauthorized }
             guard http.statusCode == 200 else { return .unavailable }
             let user = try JSONDecoder().decode(UserInfo.self, from: data)
             guard let actual = user.localResearchIdentity, actual.stableID == expected.stableID else { return .unauthorized }
+            if usedCookie, let cookie = cookies.first, !cookie.value.isEmpty {
+                ManagerSessionTokenStore.save(cookie.value, for: target)
+            }
             return .authorized(user)
         } catch { return .unavailable }
     }

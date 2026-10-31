@@ -12,7 +12,7 @@ import click
 from tools.cli.client import FactorTesterClient
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
-from tools.cli.http import ClientConfig, HttpSession, save_config, save_native_selection
+from tools.cli.http import ClientConfig, HttpSession, load_config, save_config, save_native_selection
 from tools.cli.release.factor_worktree import (
     CanonicalFactorRepoStore,
     ensure_factor_worktree_binding,
@@ -83,12 +83,47 @@ def import_ui_session(server_url: str, principal_ref: str) -> None:
         clear_session(server_url)
     persisted = HttpSession(server_url)
     persisted.import_cookies(cookies)
-    save_native_selection(ClientConfig(server_url.rstrip("/")))
+    _publish_native_selection(ClientConfig(server_url.rstrip("/")))
     click.echo(_json({
         "schema_version": 1,
         "principal_ref": observed,
         "verified": True,
     }))
+
+
+@client_profile.command("select-manager", hidden=True)
+@click.option("--server-url", required=True)
+@friendly_errors
+def select_manager(server_url: str) -> None:
+    """Publish the desktop Manager choice without overriding explicit CLI settings."""
+    from urllib.parse import urlsplit
+    value = server_url.strip().rstrip("/")
+    parts = urlsplit(value)
+    if (parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password
+            or parts.path or parts.query or parts.fragment or any(ord(ch) < 33 for ch in value)):
+        raise ValueError("invalid Manager address")
+    if parts.port is not None and not 1 <= parts.port <= 65535:
+        raise ValueError("invalid Manager address")
+    effective = _publish_native_selection(ClientConfig(value))
+    click.echo(_json({"success": True, "native_url": value, "effective_url": effective}))
+
+
+def _publish_native_selection(config: ClientConfig) -> str:
+    from tools.cli.state import load_state, save_state
+
+    try:
+        previous = load_config().base_url
+    except FileNotFoundError:
+        previous = ""
+    save_native_selection(config)
+    effective = load_config().base_url
+    if previous and previous != effective:
+        state = load_state()
+        state.reset()
+        state.workspace_id = ""
+        state.configuration_revision = 0
+        save_state(state)
+    return effective
 
 
 @client_profile.command("clear-ui-session")

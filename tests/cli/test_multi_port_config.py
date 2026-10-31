@@ -154,3 +154,24 @@ def test_session_rejects_cross_origin_urls_and_redirects(tmp_path, monkeypatch):
     with pytest.raises(HTTPError, match='cross-origin'):
         _OriginBoundRedirect().redirect_request(Request('https://manager.example:9443/api/me'), None, 302,
             'found', {}, 'https://other.example/api/me')
+
+
+def test_native_manager_selection_resets_only_when_cli_follows_it(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+    from tools.cli.commands.client_profile import client_profile
+    from tools.cli.http import ClientConfig, save_config, load_config
+    from tools.cli.state import CliState, save_state, load_state
+    monkeypatch.setenv('TRADERESEARCH_CONFIG', str(tmp_path / 'config.json'))
+    monkeypatch.setenv('TRADERESEARCH_HOME', str(tmp_path / 'home'))
+    runner = CliRunner()
+    assert runner.invoke(client_profile, ['select-manager', '--server-url', 'https://first.test:7998']).exit_code == 0
+    save_state(CliState(workspace_id='old-workspace', configuration_revision=3))
+    assert runner.invoke(client_profile, ['select-manager', '--server-url', 'https://next.test:7998']).exit_code == 0
+    assert load_config().base_url == 'https://next.test:7998'
+    assert load_state().workspace_id == ''
+    save_config(ClientConfig('https://explicit.test:7998'))
+    save_state(CliState(workspace_id='explicit-workspace', configuration_revision=7))
+    assert runner.invoke(client_profile, ['select-manager', '--server-url', 'https://third.test:7998']).exit_code == 0
+    assert load_config().base_url == 'https://explicit.test:7998'
+    assert load_state().workspace_id == 'explicit-workspace'
+    assert runner.invoke(client_profile, ['select-manager', '--server-url', 'https://user:password@test.invalid']).exit_code != 0
