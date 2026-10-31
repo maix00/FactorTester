@@ -44,6 +44,43 @@ def test_rpc_rejects_ambiguous_native_profiles(tmp_path):
                                    {'profile_id': 'self', 'display_name': 'B'}])
 
 
+def test_profile_report_directory_is_bounded_and_profile_scoped(tmp_path):
+    rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'},
+                                     {'profile_id': 'work', 'display_name': 'Work'}])
+    created = {}
+    for profile in ('self', 'work'):
+        research = rpc.request({'action': 'create', 'profile_id': profile, 'title': 'Research ' + profile,
+                                'description': 'description is loaded only when opened', 'operation_id': 'research-' + profile})['research']
+        for number in range(2):
+            row = rpc.request({'action': 'create_report', 'profile_id': profile, 'research_id': research['research_id'],
+                               'title': f'Report {profile} {number}', 'operation_id': f'{profile}-{number}'})['report']
+            created[row['report_id']] = (profile, research)
+    request = {'action': 'list_profile_reports', 'profile_id': 'self', 'limit': 1, 'offset': 0}
+    first = rpc.request(request)
+    second = rpc.request({**request, 'offset': first['next_offset']})
+    rows = first['reports'] + second['reports']
+    assert len(rows) == 2 and second['next_offset'] is None
+    assert all('description' not in row['research'] for row in rows)
+    assert all(created[row['report_id']][0] == 'self' and
+               {key: value for key, value in created[row['report_id']][1].items() if key != 'description'} == row['research']
+               for row in rows)
+    assert len({row['report_id'] for row in rows}) == 2
+    with pytest.raises(PermissionError):
+        rpc.request({**request, 'profile_id': 'other'})
+    with pytest.raises(ValueError):
+        rpc.request({**request, 'limit': True})
+    with rpc.store._connect() as db:
+        indexes = [row['name'] for row in db.execute('PRAGMA index_list(reports)')]
+    assert 'reports_profile_page' in indexes
+    foreign_research = next(value[1]['research_id'] for value in created.values() if value[0] == 'work')
+    with rpc.store._connect() as db:
+        db.execute('UPDATE reports SET research_id=?,created_at=? WHERE report_id=?',
+                   (foreign_research, 99999999999, rows[0]['report_id']))
+    with pytest.raises(ValueError, match='mismatched Research identity'):
+        rpc.request(request)
+
+
 def test_local_report_uses_existing_report_tree_and_retry_recovers(tmp_path, monkeypatch):
     from tools.cli.release.research_reporting import workspace
     from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot

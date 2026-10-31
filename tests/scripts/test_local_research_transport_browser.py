@@ -26,11 +26,12 @@ import {{createRoot}} from {json.dumps(str(APP / "node_modules/react-dom/client.
 import {{ResearchPage}} from {json.dumps(str(APP / "src/pages/research.tsx"))};
 import {{PageInstanceProvider}} from {json.dumps(str(APP / "src/page-instance.ts"))};
 import {{AuthGate}} from {json.dumps(str(APP / "src/auth.tsx"))};
+import {{ObjectReferenceProvider}} from {json.dumps(str(APP / "src/components/object-reference-provider.tsx"))};
 import {json.dumps(str(APP / "src/i18n.ts"))};
 import {json.dumps(str(APP / "src/shell.css"))};
 createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvider value={{{{
  id:'fixture',pageId:'research',mobile:false,args:{{}},active:true,open:()=>{{}}
-}}}}><ResearchPage /></PageInstanceProvider></AuthGate>);
+}}}}><ObjectReferenceProvider><ResearchPage /></ObjectReferenceProvider></PageInstanceProvider></AuthGate>);
 ''', encoding="utf-8")
     subprocess.run([str(APP / "node_modules/.bin/esbuild"), str(harness), "--bundle", "--format=iife",
                     "--target=es2020", f"--outfile={bundle}"], cwd=APP, check=True, capture_output=True)
@@ -74,6 +75,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     if(path==='/api/session')return reply({username:'alice',keycloak_issuer:'https://identity.test/realm',tr_identity_id:'stable-1',keycloak_subject:'subject'});
                     if(path==='/api/public/entry')return reply({});
                     if(path==='/api/research')return reply({researches:[]});
+                    if(path==='/api/research/reports')return reply({reports:[]});
                     if(path==='/api/research/capabilities/keycloak-sharing')return reply({capabilities:{schema:'tr-research-keycloak-sharing-v1',authority:'keycloak',create_research:true}});
                     throw Error('unexpected request '+path);};
                 }''')
@@ -91,6 +93,27 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             dialog.get_by_label("名称", exact=True).fill("本机报告验收")
             dialog.get_by_role("button", name="新建研究报告", exact=True).last.click()
             dialog.get_by_text("本机报告验收").wait_for()
+            open_page()
+            page.get_by_role("tab", name="研究报告").click()
+            report_row = page.get_by_role("row").filter(has_text="本机报告验收")
+            report_row.get_by_text("本机", exact=True).wait_for()
+            assert report_row.get_by_role("button", name="查看 alice 的信息").is_visible()
+            if os.environ.get("TR_REPORT_LIST_SCREENSHOT"):
+                page.screenshot(path=os.environ["TR_REPORT_LIST_SCREENSHOT"])
+            report_row.get_by_role("button", name="本机报告验收").click()
+            dialog = page.get_by_role("dialog")
+            dialog.get_by_role("button", name="编辑报告内容").wait_for()
+            dialog.get_by_role("button", name="返回", exact=True).click()
+            dialog.get_by_role("button", name="新建研究报告").click()
+            dialog.get_by_label("名称", exact=True).fill("本机第二报告")
+            dialog.get_by_role("button", name="新建研究报告", exact=True).last.click()
+            dialog.get_by_text("本机第二报告").wait_for()
+            dialog.locator(".ant-modal-close").click()
+            page.get_by_role("row").filter(has_text="本机第二报告").wait_for()
+            open_page()
+            page.get_by_role("tab", name="研究报告").click()
+            page.get_by_role("row").filter(has_text="本机报告验收").get_by_role("button", name="本机真实存储验收").click()
+            page.get_by_role("dialog").get_by_role("button", name="新建研究报告").wait_for()
             open_page()
             page.get_by_role("button", name="本机真实存储验收").click()
             dialog = page.get_by_role("dialog")

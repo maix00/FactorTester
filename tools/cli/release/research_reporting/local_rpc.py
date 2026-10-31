@@ -39,6 +39,7 @@ class LocalResearchRPC:
             'get': {'action', 'profile_id', 'research_id'},
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
+            'list_profile_reports': {'action', 'profile_id', 'limit', 'offset'},
             'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
             'get_report': {'action', 'profile_id', 'research_id', 'report_id'},
             'get_report_chapter': {'action', 'profile_id', 'research_id', 'report_id', 'chapter_id'},
@@ -62,13 +63,16 @@ class LocalResearchRPC:
                 raise ValueError('invalid local Research message')
         if action == 'capabilities':
             value = {'binding': self.binding, 'profiles': self.profiles, 'actions': list(keys)}
-        elif action in {'list', 'list_reports'}:
+        elif action in {'list', 'list_reports', 'list_profile_reports'}:
             if type(message['limit']) is not int or type(message['offset']) is not int:
                 raise ValueError('invalid local Research page')
             if action == 'list':
                 value = self.store.page(profile_id=message['profile_id'], limit=message['limit'], offset=message['offset'])
-            else:
+            elif action == 'list_reports':
                 value = self.store.list_reports(profile_id=message['profile_id'], research_id=message['research_id'],
+                    limit=message['limit'], offset=message['offset'])
+            else:
+                value = self.store.list_profile_reports(profile_id=message['profile_id'],
                     limit=message['limit'], offset=message['offset'])
         elif action == 'get':
             row = self.store.get(profile_id=message['profile_id'], research_id=message['research_id'])

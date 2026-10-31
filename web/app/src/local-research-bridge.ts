@@ -18,6 +18,8 @@ export type LocalResearchCapabilities = { binding: LocalResearchBinding; actions
 export type LocalResearchCreate = { profile_id: string; title: string; description: string; operation_id: string };
 export type LocalResearchPage = { researches: LocalResearch[]; next_offset: number | null };
 export type LocalReport = { report_id: string; research_id: string; profile_id: string; title: string; created_at: number };
+export type LocalResearchSummary = Omit<LocalResearch, "description">;
+export type LocalReportWithResearch = LocalReport & { research: LocalResearchSummary };
 export type LocalReportVersion = {generation:number;root_ref:string};
 export type LocalReportIndex = { report:LocalReport; chapters:{component_id:string;title:string;preview:string}[]; version:LocalReportVersion };
 
@@ -80,6 +82,12 @@ function research(value: unknown): LocalResearch {
     title:text(value.title,256),description:text(value.description,10000,true,true),
     created_at:timestamp(value.created_at),updated_at:timestamp(value.updated_at),
   };
+}
+
+function researchSummary(value:unknown):LocalResearchSummary {
+  if(!isRecord(value))throw new LocalResearchBridgeError("local_research_invalid_response");
+  return {research_id:identifier(value.research_id),profile_id:identifier(value.profile_id),
+    title:text(value.title,256),created_at:timestamp(value.created_at),updated_at:timestamp(value.updated_at)};
 }
 
 function report(value: unknown): LocalReport {
@@ -182,6 +190,24 @@ export class LocalResearchClient {
     const rows=reply.reports.map(report),next=reply.next_offset;
     if (rows.length>limit||rows.some(value=>value.profile_id!==profile_id||value.research_id!==research_id)||new Set(rows.map(value=>value.report_id)).size!==rows.length||
         (next!==null&&(!Number.isSafeInteger(next)||next!==offset+rows.length||rows.length===0||(next as number)>1_000_000))) throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {reports:rows,next_offset:next as number|null};
+  }
+
+  async listProfileReports(profileId:string,options:{offset?:number;limit?:number}={}):Promise<{reports:LocalReportWithResearch[];next_offset:number|null}> {
+    this.requireAction("list_profile_reports");
+    const profile_id=inputText(profileId,512),offset=options.offset??0,limit=options.limit??100;
+    this.requireProfile(profile_id);
+    if(!Number.isSafeInteger(offset)||offset<0||offset>1_000_000||!Number.isSafeInteger(limit)||limit<1||limit>200)throw new LocalResearchBridgeError("local_research_invalid_input");
+    const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"list_profile_reports",profile_id,offset,limit});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    if(!Array.isArray(reply.reports))throw new LocalResearchBridgeError("local_research_invalid_response");
+    const rows=reply.reports.map(value=>{
+      if(!isRecord(value))throw new LocalResearchBridgeError("local_research_invalid_response");
+      return {...report(value),research:researchSummary(value.research)};
+    }),next=reply.next_offset;
+    if(rows.length>limit||rows.some(value=>value.profile_id!==profile_id||value.research.profile_id!==profile_id||value.research_id!==value.research.research_id)||new Set(rows.map(value=>value.report_id)).size!==rows.length||
+      (next!==null&&(!Number.isSafeInteger(next)||next!==offset+rows.length||rows.length===0||(next as number)>1_000_000)))throw new LocalResearchBridgeError("local_research_invalid_response");
     return {reports:rows,next_offset:next as number|null};
   }
 

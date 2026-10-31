@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty, Form, Input, Popconfirm, Select, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { formatDate } from "../format.ts";
-import { LocalResearchBridgeError, type LocalResearch, type LocalReport, type LocalReportIndex, type LocalResearchCapabilities, type LocalResearchClient } from "../local-research-bridge.ts";
+import { LocalResearchBridgeError, type LocalResearch, type LocalResearchSummary, type LocalReport, type LocalReportIndex, type LocalResearchCapabilities, type LocalResearchClient } from "../local-research-bridge.ts";
 import { notify } from "../notifications/core.ts";
 import { DetailsCancelButton, DetailsPanel } from "./details-panel.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
@@ -14,24 +14,24 @@ function errorMessage(error:unknown,t:(key:string,options?:any)=>string):string 
   return t(`localResearch.errors.${code}`,{defaultValue:t("localResearch.errors.default")});
 }
 
-export function LocalResearchDetail({client,capabilities,item,onClose,onSaved}:{client:LocalResearchClient;capabilities:LocalResearchCapabilities;item:LocalResearch;onClose:()=>void;onSaved?:()=>void}):React.ReactElement {
-  const {t}=useTranslation();const [value,setValue]=useState<LocalResearch|null>(capabilities.actions.includes("get")?null:item),[error,setError]=useState("");
+export function LocalResearchDetail({client,capabilities,item,initialReport,onClose,onSaved}:{client:LocalResearchClient;capabilities:LocalResearchCapabilities;item:LocalResearch|LocalResearchSummary;initialReport?:LocalReport;onClose:()=>void;onSaved?:()=>void}):React.ReactElement {
+  const {t}=useTranslation();const [value,setValue]=useState<LocalResearch|null>(capabilities.actions.includes("get")?null:{...item,description:"description" in item?item.description:""}),[error,setError]=useState("");
   useEffect(()=>{
     if(!capabilities.actions.includes("get"))return;
     let active=true;const snapshot=client.snapshot();
     void client.get(item.profile_id,item.research_id).then(row=>{if(active&&client.isCurrent(snapshot))setValue(row);}).catch(reason=>{if(active&&client.isCurrent(snapshot))setError(errorMessage(reason,t));});
     return()=>{active=false;};
   },[client,item.profile_id,item.research_id,t]);
-  return <DetailsPanel title={item.title} onClose={onClose} width={680}>{error?<Alert type="error" showIcon message={error}/>:value?<><p className="tr-research-origin">{t("localResearch.privateNote")}</p><PropertyGroups groups={[{key:"research",title:t("details"),items:[
+  return <DetailsPanel title={initialReport?.title || item.title} onClose={onClose} width={680}>{error?<Alert type="error" showIcon message={error}/>:value?<><PropertyGroups groups={[{key:"research",title:t("details"),items:[
     {key:"title",label:t("editor.name"),value:value.title},...(value.description ? [{key:"description",label:t("library.description"),value:value.description,wide:true}] : []),
     {key:"id",label:t("objectReference.reference"),value:value.research_id,wide:true},{key:"updated",label:t("jobs.updated"),value:value.updated_at,render:amount=>formatDate(amount as number,{dateStyle:"medium",timeStyle:"short"})},
-  ]}]} />{capabilities.actions.includes("list_reports")&&capabilities.actions.includes("create_report")?<LocalReports client={client} item={value} canOpen={capabilities.actions.includes("get_report")} canEdit={capabilities.actions.includes("get_report_chapter")&&capabilities.actions.includes("add_report_component")} canPublish={capabilities.actions.includes("publish_report")} canPull={capabilities.actions.includes("pull_report")} onSaved={onSaved}/>:null}</>:<Spin tip={t("loading")} />}</DetailsPanel>;
+  ]}]} />{capabilities.actions.includes("list_reports")?<LocalReports client={client} item={value} initialReport={initialReport} canCreate={capabilities.actions.includes("create_report")} canOpen={capabilities.actions.includes("get_report")} canEdit={capabilities.actions.includes("get_report_chapter")&&capabilities.actions.includes("add_report_component")} canPublish={capabilities.actions.includes("publish_report")} canPull={capabilities.actions.includes("pull_report")} onSaved={onSaved}/>:null}</>:<Spin tip={t("loading")} />}</DetailsPanel>;
 }
 
-function LocalReports({client,item,canOpen,canEdit,canPublish,canPull,onSaved}:{client:LocalResearchClient;item:LocalResearch;canOpen:boolean;canEdit:boolean;canPublish:boolean;canPull:boolean;onSaved?:()=>void}):React.ReactElement {
+function LocalReports({client,item,initialReport,canCreate,canOpen,canEdit,canPublish,canPull,onSaved}:{client:LocalResearchClient;item:LocalResearch;initialReport?:LocalReport;canCreate:boolean;canOpen:boolean;canEdit:boolean;canPublish:boolean;canPull:boolean;onSaved?:()=>void}):React.ReactElement {
   const {t}=useTranslation();
   const [rows,setRows]=useState<LocalReport[]>([]),[page,setPage]=useState(1),[pageSize,setPageSize]=useState(20),[hasMore,setHasMore]=useState(false),[loading,setLoading]=useState(true),[revision,setRevision]=useState(0),[creating,setCreating]=useState(false),[busy,setBusy]=useState(false);
-  const [selected,setSelected]=useState<LocalReport|null>(null),[index,setIndex]=useState<LocalReportIndex|null>(null);
+  const [selected,setSelected]=useState<LocalReport|null>(initialReport||null),[index,setIndex]=useState<LocalReportIndex|null>(null);
   const [publishing,setPublishing]=useState(false);
   const [pullRevision,setPullRevision]=useState(0);
   const publicationPending=useRef(false);
@@ -85,7 +85,7 @@ function LocalReports({client,item,canOpen,canEdit,canPublish,canPull,onSaved}:{
     const snapshot=client.snapshot();pending.current=true;setBusy(true);
     try{
       await client.createReport(item.profile_id,item.research_id,title,operation.current.id);
-      if(mounted.current&&client.isCurrent(snapshot)){operation.current=null;setCreating(false);setPage(1);setRevision(value=>value+1);notify({code:"research.local.report.created",type:"success",message:t("researchDetail.notices.report")});}
+      if(mounted.current&&client.isCurrent(snapshot)){operation.current=null;setCreating(false);setPage(1);setRevision(value=>value+1);onSaved?.();notify({code:"research.local.report.created",type:"success",message:t("researchDetail.notices.report")});}
     }catch(reason){if(mounted.current&&client.isCurrent(snapshot))notify({code:"research.local.report.create",type:"error",message:`${t("localResearch.writeUnconfirmed")} ${errorMessage(reason,t)}`});}
     finally{pending.current=false;if(mounted.current&&client.isCurrent(snapshot))setBusy(false);}
   };
@@ -104,7 +104,7 @@ function LocalReports({client,item,canOpen,canEdit,canPublish,canPull,onSaved}:{
     finally{publicationPending.current=false;if(mounted.current&&client.isCurrent(snapshot))setPublishing(false);}
   };
   if(selected)return <section><div className="tr-inline-actions"><Button aria-label={t("back")} disabled={publishing} onClick={()=>setSelected(null)}>{t("back")}</Button><h3>{selected.title}</h3>{canPublish?<Popconfirm title={t("localResearch.publishConfirm")} okText={t("localResearch.publish")} cancelText={t("cancel")} onConfirm={()=>void publish()}><Button loading={publishing}>{t("localResearch.publish")}</Button></Popconfirm>:null}{canPull?<Popconfirm title={t("localResearch.pullConfirm")} okText={t("localResearch.pull")} cancelText={t("cancel")} onConfirm={()=>void pull()}><Button disabled={publishing}>{t("localResearch.pull")}</Button></Popconfirm>:null}</div>{index ? index.chapters.length ? <ul>{index.chapters.map(chapter=><li key={chapter.component_id}>{chapter.title}</li>)}</ul> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("empty")} /> : <Spin tip={t("loading")} />}{canEdit&&requester?<ReportEditor key={`${selected.report_id}:${pullRevision}`} publicationID={selected.report_id} requester={requester} appendOnly onUpdated={()=>{setRevision(value=>value+1);onSaved?.();}} />:null}</section>;
-  return <section><div className="tr-inline-actions"><h3>{t("researchDetail.reports")}</h3><Button onClick={()=>setCreating(true)} disabled={creating}>{t("researchDetail.create.reports")}</Button></div>
+  return <section><div className="tr-inline-actions"><h3>{t("researchDetail.reports")}</h3>{canCreate?<Button onClick={()=>setCreating(true)} disabled={creating}>{t("researchDetail.create.reports")}</Button>:null}</div>
     {creating?<Form layout="inline" onFinish={create}><Form.Item name="title" rules={[{required:true,whitespace:true,max:256}]}><Input aria-label={t("editor.name")} placeholder={t("editor.name")} maxLength={256}/></Form.Item><Button type="primary" htmlType="submit" loading={busy}>{t("researchDetail.create.reports")}</Button><Button disabled={busy} onClick={()=>setCreating(false)}>{t("cancel")}</Button></Form>:null}
     <TRDataTable<LocalReport> rowKey="report_id" rows={rows} loading={loading} columns={[{title:t("editor.name"),dataIndex:"title",key:"title",render:(title:string,row:LocalReport)=>canOpen?<button type="button" className="tr-table-link" onClick={()=>setSelected(row)}>{title}</button>:title},{title:t("localResearch.reportCreatedAt"),dataIndex:"created_at",key:"created_at",render:(value:number)=>formatDate(value,{dateStyle:"medium",timeStyle:"short"})}]} pagination={{page,pageSize,total:0,mode:"cursor",hasMore,onChange:(next,size)=>{setPage(next);setPageSize(size);}}}/>
   </section>;

@@ -39,9 +39,11 @@ function ResearchPageForSession(): React.ReactElement {
   const instance = usePageInstance();
   const local = useLocalResearchContext();
   const [localRows,setLocalRows]=useState<Row[]>([]);
+  const [localRevision,setLocalRevision]=useState(0);
   const [creatingLocal,setCreatingLocal]=useState(false);
   const [localProfile,setLocalProfile]=useState<string | null>(null);
   const lastLocalError=useRef("");
+  const missingReportDirectory=useRef(false);
   const localAttempt=useRef<{signature:string;id:string}|null>(null);
   const [creating, setCreating] = useState(false);
   const [authority, setAuthority] = useState<"legacy"|"keycloak"|null>(null);
@@ -88,18 +90,19 @@ function ResearchPageForSession(): React.ReactElement {
   }, [selected, tab, principal]);
   useEffect(() => {
     let active=true;
-    if(tab!=="researches" || local.phase!=="ready" || !local.client || !local.capabilities){setLocalRows([]);return()=>{active=false;};}
+    if(local.phase!=="ready" || !local.client || !local.capabilities || (tab==="reports" && !local.capabilities.actions.includes("list_profile_reports"))){setLocalRows([]);return()=>{active=false;};}
     const client=local.client, snapshot=client.snapshot(), profiles=local.capabilities.profiles;
     let nextProfile=0,total=0;
     const groups:Row[][]=Array.from({length:profiles.length},()=>[]);
     const loadProfile=async(item:typeof profiles[number])=>{
       const collected:Row[]=[]; let offset=0;
       for(let page=0;page<50;page++){
-        const result=await client.list(item.profile_id,{offset,limit:200});
+        const result=tab==="researches" ? await client.list(item.profile_id,{offset,limit:200}) : await client.listProfileReports(item.profile_id,{offset,limit:200});
         if(!active || !client.isCurrent(snapshot))return [];
-        total+=result.researches.length;
+        const values="researches" in result ? result.researches : result.reports;
+        total+=values.length;
         if(total>10000)throw new Error("local_research_too_many");
-        collected.push(...result.researches.map(value=>({...value,__local:true,owner_ref:principal,profile_id:item.profile_id})));
+        collected.push(...values.map(value=>({...value,__local:true,owner_ref:principal,profile_id:item.profile_id})));
         if(result.next_offset===null)return collected;
         offset=result.next_offset;
       }
@@ -109,15 +112,22 @@ function ResearchPageForSession(): React.ReactElement {
       while(active){const index=nextProfile++;if(index>=profiles.length)return;groups[index]=await loadProfile(profiles[index]);}
     })).then(()=>{if(active && client.isCurrent(snapshot))setLocalRows(groups.flat());}).catch(reason=>{if(active && client.isCurrent(snapshot)){setLocalRows([]);notify({code:"research.local.load",type:"error",message:reason instanceof Error && reason.message==="local_research_too_many" ? t("localResearch.errors.local_research_too_many") : t("localResearch.errors.default")});}});
     return()=>{active=false;};
-  },[tab,local.phase,local.client,local.capabilities,principal,revision,t]);
+  },[tab,local.phase,local.client,local.capabilities,principal,revision,localRevision,t]);
   useEffect(()=>{
     if(local.phase!=="unavailable"){lastLocalError.current="";return;}
     const key=`${local.key}:${local.code}`;
     if(lastLocalError.current!==key){lastLocalError.current=key;notify({code:"research.local.unavailable",type:"warning",message:t(`localResearch.errors.${local.code}`,{defaultValue:t("localResearch.errors.default")})});}
   },[local.phase,local.key,local.code,t]);
+  useEffect(()=>{
+    if(local.phase!=="ready" || local.capabilities?.actions.includes("list_profile_reports")){missingReportDirectory.current=false;return;}
+    if(tab==="reports" && !missingReportDirectory.current){
+      missingReportDirectory.current=true;
+      notify({code:"research.local.reportDirectory.unsupported",type:"warning",message:t("localResearch.reportDirectoryUnavailable")});
+    }
+  },[tab,local.phase,local.capabilities,t]);
   useEffect(()=>{if(error)notify({code:"research.server.load",type:"error",message:error});},[error]);
   const filtered = useMemo(() => {
-    if(tab!=="researches")return rows;
+    if(tab!=="researches")return [...localRows,...rows];
     const remaining=new Map(localRows.map(row=>[row.research_id,row]));
     const server=rows.map(row=>{
       const id=researchRowID(row),localRow=remaining.get(id);
@@ -140,17 +150,20 @@ function ResearchPageForSession(): React.ReactElement {
   };
   const researchLink = (row:Row): React.ReactNode => {
     const id = linkedResearchID(row), title = String(row.research?.title || row.research_title || id);
-    return id ? <button type="button" className="tr-table-link" onClick={() => openResearch(id,title)}>{title}</button> : "—";
+    return id ? <button type="button" className="tr-table-link" onClick={() => {
+      if(row.__local && row.research){setTab("researches");setRows([]);setPage(1);setSelected({...row.research,__local:true,owner_ref:principal});setEditor(false);}
+      else openResearch(id,title);
+    }}>{title}</button> : "—";
   };
   const activateServer=():void=>{assistantResearchContexts.activate(instance.id);};
   const canCreateLocal=local.phase==="ready" && local.capabilities?.actions.includes("create");
   return <div className="tr-research-page" onPointerDownCapture={activateServer} onFocusCapture={activateServer}><FunctionPage title={t("nav.research")} actions={<>{tab === "researches" ? canCreateLocal && session ? <Dropdown trigger={["click"]} menu={{items:[{key:"local",label:t("localResearch.local")},{key:"server",label:t("localResearch.server")}],onClick:({key})=>key==="local" ? setCreatingLocal(true) : setCreating(true)}}><Button type="primary">{t("research.create")} <DownOutlined /></Button></Dropdown> : <Button type="primary" onClick={() => session ? setCreating(true) : openAuth("login")}>{t("research.create")}</Button> : null}<Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} /></>}>
     <Tabs activeKey={tab} onChange={(value) => { setTab(value); setRows([]); setPage(1); setSelected(null); setSelectedPublicationID(""); setEditor(false); }} items={[{ key: "researches", label: t("research.tabResearches") }, { key: "reports", label: t("research.tabReports") }]} />
     <div className="tr-research-table"><TRDataTable clientFiltering rows={filtered} rowKey={(row) => `${row.__local ? "local" : "server"}:${rowID(row)}`} loading={loading} pagination={{ page, pageSize: size, total: filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
-      { title: t("editor.name"), key: "title", render: (_, row) => <button className="tr-table-link" onClick={() => { setSelected(row); setSelectedPublicationID(tab === "reports" ? selectReportBranch(row)?.publication_id || "" : ""); setEditor(false); }}>{row.title || rowID(row)}</button> },
+      { title: t("editor.name"), key: "title", render: (_, row) => row.__local && tab === "reports" && !local.capabilities?.actions.includes("get_report") ? row.title : <button className="tr-table-link" onClick={() => { setSelected(row); setSelectedPublicationID(tab === "reports" ? selectReportBranch(row)?.publication_id || "" : ""); setEditor(false); }}>{row.title || rowID(row)}</button> },
       ...(tab === "reports" ? [{title:t("research.linkedResearch"),key:"research",render:(_:unknown,row:Row) => researchLink(row)}] : []),
       {title:t("research.profile"),key:"profile",className:"tr-research-profile-column",filters:Array.from(new Set(filtered.map(row=>String(row.profile_ref || row.profile_id || row.selected_branch?.profile_ref || "")).filter(Boolean))).map(value=>({text:value,value})),onFilter:(value:React.Key | boolean,row:Row)=>String(row.profile_ref || row.profile_id || row.selected_branch?.profile_ref || "")===String(value),render:(_:unknown,row:Row) => profile(row)},
-      ...(tab === "researches" ? [{title:t("localResearch.location"),key:"location",filters:[{text:t("localResearch.local"),value:"local"},{text:t("localResearch.server"),value:"server"}],onFilter:(value:React.Key | boolean,row:Row)=>value==="local" ? !!(row.__local || row.__hasLocal) : !row.__local,render:(_:unknown,row:Row)=>row.__hasLocal ? `${t("localResearch.local")} / ${t("localResearch.server")}` : t(row.__local ? "localResearch.local" : "localResearch.server")}] : []),
+      {title:t("localResearch.location"),key:"location",filters:[{text:t("localResearch.local"),value:"local"},{text:t("localResearch.server"),value:"server"}],onFilter:(value:React.Key | boolean,row:Row)=>value==="local" ? !!(row.__local || row.__hasLocal) : !row.__local,render:(_:unknown,row:Row)=>row.__hasLocal ? `${t("localResearch.local")} / ${t("localResearch.server")}` : t(row.__local ? "localResearch.local" : "localResearch.server")},
       ...([
         { title: t("library.owner"), key: "owner", filters:Array.from(new Set(filtered.map(row=>String(row.owner_ref || row.owner || "")).filter(Boolean))).map(value=>({text:value,value})), onFilter:(value:React.Key | boolean,row:Row)=>String(row.owner_ref || row.owner || "")===String(value), render: (_:unknown, row:Row) => owner(row) },
         ...(authority === "legacy" ? [{ title: t("library.visibility"), dataIndex: "visibility", render: (value:string) => value ? <Tag>{t(`research.visibility.${value}`, { defaultValue: value })}</Tag> : "—" }] : []),
@@ -160,7 +173,7 @@ function ResearchPageForSession(): React.ReactElement {
     {creatingLocal && local.client && local.capabilities?.profiles.length ? <LocalResearchCreate client={local.client} profiles={local.capabilities.profiles} initialProfile={local.capabilities.profiles[0].profile_id} operation={localAttempt} onClose={()=>setCreatingLocal(false)} onCreated={()=>{localAttempt.current=null;setCreatingLocal(false);setRevision(value=>value+1);}} />:null}
     {localProfile ? <DetailsPanel title={t("research.profile")} onClose={()=>setLocalProfile(null)} width={520}><PropertyGroups groups={[{key:"profile",title:t("research.profile"),items:[{key:"name",label:t("editor.name"),value:local.capabilities?.profiles.find(value=>value.profile_id===localProfile)?.display_name || localProfile},{key:"id",label:t("objectReference.reference"),value:localProfile}]}]} /></DetailsPanel>:null}
     {creating ? <ResearchCreate onClose={() => setCreating(false)} onCreated={(value) => { setCreating(false); setSelected(value); setEditor(false); setRevision(revision => revision + 1); }} /> : null}
-    {selected?.__local && local.client && local.capabilities ? <LocalResearchDetail client={local.client} capabilities={local.capabilities} item={selected as any} onSaved={syncLocalReports} onClose={()=>setSelected(null)} /> : null}
+    {selected?.__local && local.client && local.capabilities ? <LocalResearchDetail key={`${selected.profile_id}:${rowID(selected)}`} client={local.client} capabilities={local.capabilities} item={(tab === "reports" ? selected.research : selected) as any} initialReport={tab === "reports" ? selected as any : undefined} onSaved={()=>{setLocalRevision(value=>value+1);syncLocalReports();}} onClose={()=>setSelected(null)} /> : null}
     {selected && !selected.__local ? <DetailsPanel title={selected.title || rowID(selected)} onClose={() => { setSelected(null); setSelectedPublicationID(""); setEditor(false); }}>
       {tab === "reports" ? <>
         {linkedResearch ? <Button type="link" onClick={() => openResearch(linkedResearch,selected.research?.title || selected.research_title || linkedResearch)}>{t("research.openLinkedResearch")}</Button> : null}

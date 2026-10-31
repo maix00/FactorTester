@@ -49,6 +49,8 @@ class LocalResearchCatalog:
                 title TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
                 created_at REAL NOT NULL, ready INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(research_id) REFERENCES researches(research_id))''')
+            db.execute('''CREATE INDEX IF NOT EXISTS reports_profile_page
+                ON reports(profile_id, ready, created_at DESC, report_id DESC)''')
 
     @contextmanager
     def _connect(self):
@@ -165,6 +167,31 @@ class LocalResearchCatalog:
                 ORDER BY created_at DESC, report_id DESC LIMIT ? OFFSET ?''',
                 (profile, research_id, limit + 1, offset)).fetchall()
             items = [self._report_public(row) for row in rows[:limit]]
+            return {'reports': items, 'next_offset': offset + len(items) if len(rows) > limit else None}
+
+    def list_profile_reports(self, *, profile_id: str, limit: int, offset: int) -> dict:
+        """List one verified Profile's report metadata without opening report trees."""
+        profile = self._profile(profile_id)
+        if not 1 <= limit <= 200 or not 0 <= offset <= 1_000_000:
+            raise ValueError('invalid local report page')
+        with self._connect() as db:
+            rows = db.execute('''SELECT report.report_id, report.research_id, report.profile_id,
+                    report.title, report.created_at, research.title AS research_title,
+                    research.profile_id AS research_profile_id,
+                    research.created_at AS research_created_at,
+                    research.updated_at AS research_updated_at
+                FROM reports AS report LEFT JOIN researches AS research
+                  ON research.research_id=report.research_id
+                WHERE report.profile_id=? AND report.ready=1
+                ORDER BY report.created_at DESC, report.report_id DESC LIMIT ? OFFSET ?''',
+                (profile, limit + 1, offset)).fetchall()
+            if any(row['research_profile_id'] != profile for row in rows):
+                raise ValueError('local report has a missing or mismatched Research identity')
+            items = [{**self._report_public(row), 'research': {
+                'research_id': row['research_id'], 'profile_id': row['profile_id'],
+                'title': row['research_title'],
+                'created_at': row['research_created_at'], 'updated_at': row['research_updated_at'],
+            }} for row in rows[:limit]]
             return {'reports': items, 'next_offset': offset + len(items) if len(rows) > limit else None}
 
     def get_report_index(self, *, profile_id: str, research_id: str, report_id: str) -> dict:
