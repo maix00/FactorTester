@@ -143,7 +143,9 @@ def exercise(*, couch, **case):
                 bind_verified_identity(owner_token, owner_session)
                 service.set_grant(session=owner_session, research_id=research_id, report_id=report_id,
                                   identity_id='stable-alice', scopes=['read', 'write'])
-            assert read()['publication']['publication_id'] == published['publication_id']
+            edit_check = read()
+            assert edit_check['publication']['publication_id'] == published['publication_id']
+            assert edit_check['edit_authorized'] is True
             with identity_request():
                 bind_verified_identity(owner_token, owner_session)
                 service.set_grant(session=owner_session, research_id=research_id, report_id=report_id,
