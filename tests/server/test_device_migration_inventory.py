@@ -6,9 +6,9 @@ IDENTITY = {"tr_identity_id": "stable", "keycloak_subject": "subject", "active":
 
 def test_inventory_preserves_denials_and_never_exposes_public_keys():
     records = [
-        {"device_id": "device-1234567890123456", "username": "alice", "public_key": KEY, "enabled": True},
-        {"device_id": "device-1234567890123457", "username": "alice", "public_key": KEY, "enabled": False},
-        {"device_id": "device-1234567890123458", "username": "missing", "public_key": KEY, "enabled": True},
+        {"device_id": "device-1234567890123456", "username": "alice", "source_server_id": "manager", "public_key": KEY, "enabled": True},
+        {"device_id": "device-1234567890123457", "username": "alice", "source_server_id": "manager", "public_key": KEY, "enabled": False},
+        {"device_id": "device-1234567890123458", "username": "missing", "source_server_id": "manager", "public_key": KEY, "enabled": True},
     ]
     rows = classify_devices(manager_id="manager", records=records, identities={"alice": [IDENTITY]})
     assert [row["status"] for row in rows] == ["grant", "denied", "invalid_identity"]
@@ -16,8 +16,23 @@ def test_inventory_preserves_denials_and_never_exposes_public_keys():
 
 
 def test_inventory_refuses_duplicate_devices_and_ambiguous_users():
-    record = {"device_id": "device-1234567890123456", "username": "alice", "public_key": KEY, "enabled": True}
+    record = {"device_id": "device-1234567890123456", "username": "alice", "source_server_id": "manager", "public_key": KEY, "enabled": True}
     rows = classify_devices(manager_id="manager", records=[record, record], identities={"alice": [IDENTITY]})
     assert [row["status"] for row in rows] == ["conflict", "conflict"]
     rows = classify_devices(manager_id="manager", records=[record], identities={"alice": [IDENTITY, IDENTITY]})
     assert rows[0]["status"] == "invalid_identity"
+
+
+def test_inventory_refuses_missing_or_different_server_and_invalid_enabled():
+    base = {"device_id": "device-1234567890123456", "username": "alice", "public_key": KEY, "enabled": True}
+    for change, expected in [({}, "needs_repair"), ({"source_server_id": "elsewhere"}, "outside_manager"),
+                             ({"source_server_id": "manager", "enabled": "false"}, "needs_repair")]:
+        row = classify_devices(manager_id="manager", records=[base | change], identities={"alice": [IDENTITY]})[0]
+        assert row["status"] == expected
+        assert "resource_ref" not in row
+
+
+def test_inventory_requires_manager_identity():
+    import pytest
+    with pytest.raises(ValueError):
+        classify_devices(manager_id="", records=[], identities={})

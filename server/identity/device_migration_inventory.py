@@ -12,14 +12,23 @@ def classify_devices(*, manager_id: str, records: list[dict], identities: dict[s
     The caller supplies a scoped, freshly verified Keycloak directory. Ambiguous
     identities and duplicate device IDs require repair rather than a grant.
     """
+    target = str(manager_id or "").strip()
+    if not target or len(target) > 256:
+        raise ValueError("Manager identity is required")
     counts = Counter(str(row.get("device_id") or "") for row in records)
     result = []
     for row in records:
         device_id = str(row.get("device_id") or "")
         owner = str(row.get("username") or "")
         item = {"device_id": device_id, "username": owner}
+        source = str(row.get("source_server_id") or "").strip()
         matches = identities.get(owner, [])
-        if counts[device_id] != 1:
+        if not source or type(row.get("enabled")) is not bool:
+            item["status"] = "needs_repair"
+        elif source != target:
+            # Mirror records cannot be re-granted under this Manager's identity.
+            item["status"] = "outside_manager"
+        elif counts[device_id] != 1:
             item["status"] = "conflict"
         elif len(matches) != 1:
             item["status"] = "invalid_identity"
@@ -31,7 +40,7 @@ def classify_devices(*, manager_id: str, records: list[dict], identities: dict[s
                 item["status"] = "invalid_identity"
             else:
                 try:
-                    item["resource_ref"] = device_resource_ref(server_id=manager_id, identity_id=stable,
+                    item["resource_ref"] = device_resource_ref(server_id=target, identity_id=stable,
                                                                device_id=device_id, public_key=row.get("public_key"))
                     item["status"] = "grant" if row.get("enabled") is True else "denied"
                 except (TypeError, ValueError):
