@@ -579,11 +579,21 @@ for _path in (
     EXACT_PATH_TESTS[_path] = CLI_NAMING_TESTS
 EXACT_PATH_TESTS["vendor/py-alpha-lib"] = ALPHA_RUNTIME_TESTS
 EXACT_PATH_TESTS["tools/cli/release/research_reporting/local_publication.py"] = (
+    "tests/server/test_catalog_report_client_sync.py",
     "tests/release/test_local_research_rpc.py",
     "tests/server/test_client_local_report_publication.py",
     "tests/server/test_client_server_research_import.py",
     "tests/server/test_local_report_publication.py",
 )
+for _path in (
+    "tools/cli/release/research_reporting/local_auto_sync.py",
+    "tools/cli/release/research_reporting/local_pull.py",
+):
+    EXACT_PATH_TESTS[_path] = (
+        "tests/release/test_local_research_rpc.py",
+        "tests/server/test_catalog_report_client_sync.py",
+        "tests/server/test_client_local_report_publication.py",
+    )
 EXACT_PATH_TESTS["server/manager/services/research_couchdb_publication.py"] = (
     "tests/server/test_research_couchdb_publication.py",
     "tests/server/test_local_report_publication.py",

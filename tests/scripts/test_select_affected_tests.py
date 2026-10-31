@@ -41,6 +41,7 @@ def test_local_research_publication_selects_focused_client_and_server_contracts(
     mode, targets = selector.select({"tools/cli/release/research_reporting/local_publication.py"})
     assert mode == "SCOPED"
     assert set(targets) == {
+        "tests/server/test_catalog_report_client_sync.py",
         "tests/release/test_local_research_rpc.py",
         "tests/server/test_client_local_report_publication.py",
         "tests/server/test_client_server_research_import.py",
@@ -467,3 +468,13 @@ def test_shared_factor_benchmarks_and_planning_remain_scoped():
         assert mode == "SCOPED"
         assert targets and all((selector.ROOT / target).is_file() for target in targets)
         assert "tests/server" not in targets and "tests/factors" not in targets
+
+
+def test_report_sync_helpers_select_only_relevant_contracts():
+    for path in ("tools/cli/release/research_reporting/local_auto_sync.py",
+                 "tools/cli/release/research_reporting/local_pull.py"):
+        mode, targets = selector.select({path})
+        assert mode == "SCOPED"
+        assert set(targets) == {"tests/release/test_local_research_rpc.py",
+                                "tests/server/test_catalog_report_client_sync.py",
+                                "tests/server/test_client_local_report_publication.py"}
