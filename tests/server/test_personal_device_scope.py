@@ -4,6 +4,40 @@ import pytest
 from server.manager.http import device_routes
 
 
+@pytest.mark.parametrize('session,allowed,expected_owner,expected_scope', [
+    (None, False, '', 'server'),
+    ({'username': 'alice', 'role': 'super_admin'}, False, 'alice', 'account'),
+    ({'username': 'alice', 'role': 'user'}, True, '', 'server'),
+    ({'username': 'alice', 'role': 'user'}, False, 'alice', 'account'),
+])
+def test_device_summary_uses_current_keycloak_administration(session, allowed, expected_owner, expected_scope, monkeypatch):
+    responses, owners = [], []
+    monkeypatch.setattr(device_routes, 'json_response',
+                        lambda _handler, payload, status=200, **_kw: responses.append((status, payload)))
+    monkeypatch.setattr('server.identity.server_admission.current_manager_role', lambda *_args: allowed)
+    route = device_routes.DeviceNetworkRoutesMixin()
+    route._session = lambda: session
+    route.state = SimpleNamespace(device_registry=SimpleNamespace(
+        public_device_total_count=lambda *, username: owners.append(username) or 2,
+        public_user_count=lambda: 2,
+        backend_status=lambda: {},
+    ))
+    route._device_summary()
+    assert responses[-1][0] == 200
+    assert responses[-1][1]['scope'] == expected_scope
+    assert owners == [expected_owner]
+
+
+def test_device_summary_rejects_session_without_user(monkeypatch):
+    responses = []
+    monkeypatch.setattr(device_routes, 'json_response', lambda _handler, payload, status=200, **_kw: responses.append(status))
+    monkeypatch.setattr('server.identity.server_admission.current_manager_role', lambda *_args: False)
+    route = device_routes.DeviceNetworkRoutesMixin()
+    route._session = lambda: {'role': 'super_admin'}
+    route._device_summary()
+    assert responses == [403]
+
+
 @pytest.mark.parametrize('role', ['user', 'super_admin'])
 def test_personal_devices_and_revoke_always_use_current_owner(role, monkeypatch):
     responses = []

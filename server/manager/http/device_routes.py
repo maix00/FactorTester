@@ -104,9 +104,16 @@ class DeviceNetworkRoutesMixin:
         session = self._session()
         owner = ""
         scope = "server"
-        if session is not None and str(session.get("role") or "") != "super_admin":
-            owner = str(session.get("username") or "")
-            scope = "account"
+        if session is not None:
+            from server.identity.server_admission import current_manager_role
+            # A stale legacy role label must not retain administrator scope.
+            # The unauthenticated aggregate remains available for compliance.
+            if not current_manager_role(session, "admin_console:manage"):
+                owner = str(session.get("username") or "").strip()
+                if not owner:
+                    json_response(self, {"success": False, "error": "verified user identity required"}, 403)
+                    return
+                scope = "account"
         try:
             total_count = self.state.device_registry.public_device_total_count(
                 username=owner,
