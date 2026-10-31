@@ -20,17 +20,35 @@ class ResearchCouchPublicationService:
         self.state, self.catalog, self.store = state, catalog, store
         self.admission, self.authorize_many = admission, authorize_many
 
-    def _context(self, *, session: dict, research_id: str, report_id: str, scopes: tuple[str, ...]):
-        actor = str(session.get('username') or '').strip() if isinstance(session, dict) else ''
+    def _manager(self):
+        return self.catalog._profile_grant_manager
+
+    def _validate_target(self, research_id: str, report_id: str):
         self.catalog.require_keycloak_sharing()
         self.catalog._keycloak_share_target(research_id, 'report', report_id)
-        manager = self.catalog._profile_grant_manager
+
+    def _validate_owner(self, research_id, report_id, resource, owner_id, owner_ref):
+        report = self.catalog._report_row(report_id)
+        if not owner_ref or owner_ref != str(report['owner_ref']):
+            raise AuthorizationUnavailable('report owner requires identity repair')
+
+    @staticmethod
+    def _verified_identity(session, manager):
+        if not isinstance(session, dict):
+            raise PermissionError('verified Keycloak report publisher is required')
+        actor = str(session.get('username') or '').strip()
         identity = manager.identity_provider(actor)
         if (identity is None or identity.username != actor
                 or identity.subject != session.get('keycloak_subject')
                 or identity.issuer.rstrip('/') != str(session.get('keycloak_issuer') or '').rstrip('/')
                 or identity.identity_id != session.get('tr_identity_id')):
             raise PermissionError('verified Keycloak report publisher is required')
+        return actor, identity
+
+    def _context(self, *, session: dict, research_id: str, report_id: str, scopes: tuple[str, ...]):
+        self._validate_target(research_id, report_id)
+        manager = self._manager()
+        actor, identity = self._verified_identity(session, manager)
 
         def resource_and_owner():
             settings = manager.settings_provider()
@@ -53,9 +71,7 @@ class ResearchCouchPublicationService:
             if not isinstance(verified, dict) or verified.get('id') != owners[0]:
                 raise AuthorizationUnavailable('report owner stable identity is ambiguous')
             owner_ref = str(legacy[0] if legacy is not None else owner.get('username') or '').strip()
-            report = self.catalog._report_row(report_id)
-            if not owner_ref or owner_ref != str(report['owner_ref']):
-                raise AuthorizationUnavailable('report owner requires identity repair')
+            self._validate_owner(research_id, report_id, resource, stable[0], owner_ref)
             return resource_id, stable[0], owner_ref
 
         resource_id, owner_id, owner_ref = resource_and_owner()
@@ -68,7 +84,7 @@ class ResearchCouchPublicationService:
             if (current != identity or current.token != identity.token
                     or resource_and_owner() != (resource_id, owner_id, owner_ref)):
                 raise PermissionError('report publisher or owner identity changed')
-            self.catalog._keycloak_share_target(research_id, 'report', report_id)
+            self._validate_target(research_id, report_id)
             decisions = self.authorize_many(identity.token,
                 permissions=[(uri, name, scope) for scope in scopes], use_cache=False)
             if any(decisions.get((uri, scope)) is not True for scope in scopes):
@@ -77,7 +93,7 @@ class ResearchCouchPublicationService:
         return resource_id, owner_id, owner_ref, authorize_now
 
     def publish(self, *, session: dict, research_id: str, report_id: str, branch_ref: str,
-                projection: dict, expected_revision: str | None) -> dict:
+                projection: dict, expected_revision: str | None, _prepared=None) -> dict:
         resource_id, owner_id, owner_ref, authorize_now = self._context(
             session=session, research_id=research_id, report_id=report_id, scopes=('write', 'share'))
 
@@ -87,7 +103,7 @@ class ResearchCouchPublicationService:
         return commit_shared_report(self.store, manager_id=self.state.server_id, owner_id=owner_id,
             owner_ref=owner_ref, research_id=research_id, report_id=report_id, branch_ref=branch_ref,
             keycloak_resource_id=resource_id, projection=projection, expected_revision=expected_revision,
-            authorize_now=authorize_now)
+            authorize_now=authorize_now, prepared=_prepared)
 
     def read(self, *, session: dict, research_id: str, report_id: str, publication_ref: str = '',
              branch_ref: str = '', attachment: str = '') -> dict:

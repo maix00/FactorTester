@@ -366,6 +366,7 @@ def ensure_keycloak_resource(
     *, resource_type: str, resource_ref: str, owner_subject: str,
     owner_scopes: tuple[str, ...] | None = None,
     creation_intent: str | None = None,
+    create_only: bool = False,
 ) -> str:
     """Idempotently register a user-authorized object in Keycloak.
 
@@ -410,6 +411,10 @@ def ensure_keycloak_resource(
         for row in rows:
             if not isinstance(row, dict) or str(row.get("name") or "") != resource_name:
                 continue
+            if create_only:
+                # A retry must evaluate the existing policy, not recreate an
+                # owner policy an administrator may since have revoked.
+                raise AuthorizationUnavailable("Keycloak resource already exists; evaluate its current grants")
             resource_id = str(row.get("_id") or row.get("id") or "").strip()
             if not resource_id:
                 if creation_intent is not None:

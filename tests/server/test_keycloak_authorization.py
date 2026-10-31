@@ -237,6 +237,9 @@ def test_creation_intent_recovers_lost_response_but_rejects_foreign_resource(mon
         authz.ensure_keycloak_resource(**args, creation_intent=intent)
     assert authz.ensure_keycloak_resource(**args, creation_intent=intent) == "kc-report"
     assert state["posts"] == 1
+    monkeypatch.setattr(authz, "_ensure_owner_policy", lambda *_args: pytest.fail("must not restore an existing policy"))
+    with pytest.raises(authz.AuthorizationUnavailable, match="already exists"):
+        authz.ensure_keycloak_resource(**args, creation_intent=intent, create_only=True)
     with pytest.raises(authz.AuthorizationUnavailable, match="another creation intent"):
         authz.ensure_keycloak_resource(**args, creation_intent="b" * 64)
     assert state["posts"] == 1

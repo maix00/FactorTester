@@ -101,10 +101,11 @@ def prepare_projection(raw: object, *, report_id: str) -> tuple[dict, dict, dict
 def commit_shared_report(store, *, manager_id: str, owner_id: str, owner_ref: str,
                          research_id: str, report_id: str, branch_ref: str,
                          keycloak_resource_id: str, projection: dict, expected_revision: str | None,
-                         authorize_now) -> dict:
+                         authorize_now, prepared=None) -> dict:
     """Compare-and-set one document and its content-addressed attachments."""
     identifier = publication_id(manager_id, owner_id, report_id, branch_ref)
-    clean, attachments, inline = prepare_projection(projection, report_id=report_id)
+    clean, attachments, inline = (prepared if prepared is not None
+                                  else prepare_projection(projection, report_id=report_id))
     if not isinstance(keycloak_resource_id, str) or not keycloak_resource_id.strip():
         raise ValueError("report Keycloak resource is missing")
     if expected_revision is not None and (not isinstance(expected_revision, str) or len(expected_revision) > 256):

@@ -19,7 +19,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             raise RuntimeError("Research catalog is unavailable")
         return service
 
-    def _research_couch_service(self):
+    def _research_couch_service(self, *, local=False):
         import os
         from server.jobs.storage.couchdb_reports import CouchDBObjectStore
         from server.manager.services.research_couchdb_publication import ResearchCouchPublicationService
@@ -33,6 +33,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         store = CouchDBObjectStore(couch, database,
             username=os.environ.get("TRADERESEARCH_COUCHDB_USER") or os.environ.get("FACTORTESTER_COUCHDB_USER", ""),
             password=os.environ.get("TRADERESEARCH_COUCHDB_PASSWORD") or os.environ.get("FACTORTESTER_COUCHDB_PASSWORD", ""))
+        if local:
+            from server.manager.services.local_report_publication import LocalReportPublicationService
+            return LocalReportPublicationService(state=self.state, store=store)
         return ResearchCouchPublicationService(state=self.state, catalog=self._research_catalog_service(), store=store)
 
     def _refresh_research_catalog(self, principal: str) -> None:
@@ -87,18 +90,30 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource)/([^/]+))?)?",
             parsed.path,
         )
-        if publication is None:
+        local_publication = re.fullmatch(
+            r"/api/research/local-report-publication"
+            r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource)/([^/]+))?)?",
+            parsed.path,
+        )
+        if publication is None and local_publication is None:
             self._refresh_research_catalog(viewer)
-        service = self._research_catalog_service()
+        service = None if local_publication else self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
-            if publication:
-                attachment = ((publication.group(4) + '/' + unquote(publication.group(5)))
-                              if publication.group(4) else '')
-                value = self._research_couch_service().read(session=session,
-                    research_id=unquote(publication.group(1)), report_id=unquote(publication.group(2)),
-                    publication_ref=publication.group(3) or '',
-                    branch_ref='' if publication.group(3) else str(query.get('branch_ref', [''])[0]),
+            if publication or local_publication:
+                if publication:
+                    research_id, report_id, publication_ref = unquote(publication.group(1)), unquote(publication.group(2)), publication.group(3)
+                    kind, object_id = publication.group(4), publication.group(5)
+                else:
+                    if len(query.get('research_id', [])) != 1 or len(query.get('report_id', [])) != 1:
+                        raise ValueError('Research and Report references are required')
+                    research_id, report_id = query['research_id'][0], query['report_id'][0]
+                    publication_ref, kind, object_id = local_publication.group(1), local_publication.group(2), local_publication.group(3)
+                attachment = (kind + '/' + unquote(object_id)) if kind else ''
+                value = self._research_couch_service(local=bool(local_publication)).read(session=session,
+                    research_id=research_id, report_id=report_id,
+                    publication_ref=publication_ref or '',
+                    branch_ref='' if publication_ref else str(query.get('branch_ref', [''])[0]),
                     attachment=attachment)
                 if attachment:
                     raw, content_type = value['content'], value['content_type']
@@ -262,7 +277,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 else:
                     raise KeyError("research route not found")
         except (LookupError, PermissionError, TypeError, ValueError, RuntimeError, OSError) as exc:
-            if publication and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
+            if (publication or local_publication) and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
                 from urllib.error import HTTPError
                 missing = isinstance(exc, FileNotFoundError) or isinstance(exc, HTTPError) and exc.code == 404
                 json_response(self, {"success": False,
@@ -349,10 +364,20 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         if session is None:
             return True
         actor = str(session["username"])
-        service = self._research_catalog_service()
         publication = re.fullmatch(r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication", parsed.path)
+        local_publication = parsed.path == '/api/research/local-report-publication'
+        service = None if local_publication else self._research_catalog_service()
         try:
-            data = self._research_catalog_body(32 * 1024 * 1024 if publication else 2 * 1024 * 1024)
+            data = self._research_catalog_body(32 * 1024 * 1024 if publication or local_publication else 2 * 1024 * 1024)
+            if local_publication:
+                if set(data) - {'research_id', 'report_id', 'branch_ref', 'projection', 'expected_revision'}:
+                    raise ValueError('unsupported report publication fields')
+                value = self._research_couch_service(local=True).publish_local(session=session,
+                    research_id=data.get('research_id'), report_id=data.get('report_id'),
+                    branch_ref=str(data.get('branch_ref') or ''), projection=data.get('projection'),
+                    expected_revision=data.get('expected_revision'))
+                json_response(self, {'success': True, 'publication': value}, 201)
+                return True
             if publication:
                 if set(data) - {"branch_ref", "projection", "expected_revision"}:
                     raise ValueError("unsupported report publication fields")
@@ -493,7 +518,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {"success": False, "code": "research_publication_conflict",
                                      "error": "Research publication revision changed"}, 409)
                 return True
-            if publication and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
+            if (publication or local_publication) and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
                 json_response(self, {"success": False, "code": "research_store_unavailable",
                                      "error": "Research report store is unavailable"}, 503)
                 return True

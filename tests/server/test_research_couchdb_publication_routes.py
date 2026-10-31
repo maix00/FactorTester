@@ -73,7 +73,7 @@ def test_http_route_reads_exact_publication_and_attachment_without_legacy_refres
         def __init__(self): self.wfile, self.status, self.headers = BytesIO(), None, {}
         def _session(self): return SESSION
         def _research_catalog_service(self): return catalog
-        def _research_couch_service(self): return service
+        def _research_couch_service(self, *, local=False): return service
         def _refresh_research_catalog(self, _principal): raise AssertionError('legacy refresh must not run')
         def send_response(self, status): self.status = status
         def send_header(self, name, value): self.headers[name] = value

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -15,7 +16,7 @@ import urllib.request
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from scripts.test.couchdb_sandbox import couchdb_sandbox
 from scripts.test.keycloak_cross_realm_smoke import Sandbox
@@ -25,6 +26,7 @@ from server.identity.request_context import bind_verified_identity, identity_req
 from server.identity.user_session import UserSessionVerifier
 from server.jobs.storage.couchdb_reports import CouchDBObjectStore
 from server.jobs.storage.couchdb_research_reports import get_research_report, projection
+from tools.cli.release.research_reporting.public_research.object_uploads import projection_hash
 
 
 def exercise(*, couch, **case):
@@ -69,8 +71,8 @@ def exercise(*, couch, **case):
         thread.start()
         target = ('http://127.0.0.1:' + str(http.server_address[1]) + '/api/research/'
                   + quote(ref, safe='') + '/reports/report-1/couchdb-publication')
-        def publish(payload):
-            request = urllib.request.Request(target, data=json.dumps(payload).encode(), method='POST',
+        def publish(payload, path=target):
+            request = urllib.request.Request(path, data=json.dumps(payload).encode(), method='POST',
                 headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
             try:
                 with urllib.request.urlopen(request, timeout=20) as response:
@@ -134,6 +136,50 @@ def exercise(*, couch, **case):
             manager.request(settings, pat, 'PUT', 'uma-policy/' + policy['id'], without_read)
             assert read(read_target)[0] in {401, 403}
             manager.request(settings, pat, 'PUT', 'uma-policy/' + policy['id'], original)
+
+            # A client-local report has no server-side Research or Profile.
+            # Its first explicit publication registers exactly one report
+            # resource and atomically writes its selected CouchDB projection.
+            research_id, report_id = 'research:v1:' + 'R' * 24, 'report:v1:' + 'P' * 24
+            local_target = ('http://127.0.0.1:' + str(http.server_address[1])
+                            + '/api/research/local-report-publication')
+            local_value = value(1, 'local-selected')
+            local_value['report_id'] = report_id
+            local_value['projection_hash'] = projection_hash(local_value)
+            local_payload = {'research_id': research_id, 'report_id': report_id,
+                             'branch_ref': 'main', 'projection': local_value, 'expected_revision': None}
+            status, result = publish(local_payload, local_target)
+            if status != 201:
+                raise AssertionError('real local report first publication failed: ' + str(status) + ' ' + str(result))
+            local_receipt = result['publication']
+            retry_status, retry = publish(local_payload, local_target)
+            assert retry_status == 201 and retry['publication']['idempotent'] is True
+            local_query = urlencode({'research_id': research_id, 'report_id': report_id, 'branch_ref': 'main'})
+            local_read_status, local_read_body = read(local_target + '?' + local_query)
+            assert local_read_status == 200 and json.loads(local_read_body)['projection']['report_id'] == report_id
+            with sqlite3.connect('file:' + str(catalog.db_path) + '?mode=ro', uri=True) as conn:
+                assert conn.execute('SELECT count(*) FROM research_catalog_researches WHERE research_id=?',
+                                    (research_id,)).fetchone()[0] == 0
+                assert conn.execute('SELECT count(*) FROM research_catalog_reports WHERE report_id=?',
+                                    (report_id,)).fetchone()[0] == 0
+            assert projection(store, get_research_report(store, local_receipt['publication_id']))['title'] == 'local-selected'
+            sandbox.api('DELETE', realm, role_path, [case['public_role']])
+            assert publish(local_payload, local_target)[0] in {401, 403}
+            sandbox.api('POST', realm, role_path, [case['public_role']])
+            local_resource = manager._resource(settings, pat, 'research_report', report_id)
+            local_resource_id = str(local_resource.get('_id') or local_resource.get('id'))
+            local_policies = [row for row in manager._resource_policies(settings, pat, local_resource_id)
+                              if str(row.get('name') or '').endswith(':owner')]
+            assert len(local_policies) == 1 and 'share' in local_policies[0]['scopes']
+            local_policy = local_policies[0]
+            local_original = {'name': local_policy['name'], 'description': local_policy['description'],
+                              'users': [users['owner']['id']], 'scopes': local_policy['scopes'], 'logic': 'POSITIVE'}
+            manager.request(settings, pat, 'PUT', 'uma-policy/' + local_policy['id'],
+                            {**local_original, 'scopes': [scope for scope in local_original['scopes'] if scope != 'share']})
+            assert publish(local_payload, local_target)[0] in {401, 403}
+            live_policy = next(row for row in manager._resource_policies(settings, pat, local_resource_id)
+                               if row['id'] == local_policy['id'])
+            assert 'share' not in live_policy['scopes']
         finally:
             http.shutdown(); http.server_close(); thread.join(timeout=5)
             server_admission.clear_server_admission_cache()
@@ -144,7 +190,8 @@ def main():
         run(sandbox, on_ready=lambda **case: exercise(couch=couch, **case))
     print(json.dumps({'real_manager_http': True, 'real_keycloak': True, 'real_couchdb': True,
         'single_report_and_attachment': True, 'same_token_role_revocation': True,
-        'same_token_share_and_read_revocation': True, 'cross_manager_tested': False}, sort_keys=True))
+        'same_token_share_and_read_revocation': True, 'local_first_publication': True,
+        'local_retry_does_not_restore_revoked_share': True, 'cross_manager_tested': False}, sort_keys=True))
 
 
 if __name__ == '__main__':
