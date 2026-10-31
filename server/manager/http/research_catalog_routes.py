@@ -39,9 +39,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
 
     def _research_catalog_error(self, exc: Exception) -> None:
         from server.identity.keycloak_authorization import AuthorizationUnavailable
-        from server.manager.services.research_catalog import KeycloakResearchSharingUnavailable
+        from server.manager.services.research_catalog import (
+            KeycloakResearchCreationUnavailable, KeycloakResearchSharingUnavailable,
+        )
         code = None
-        if isinstance(exc, KeycloakResearchSharingUnavailable):
+        if isinstance(exc, KeycloakResearchCreationUnavailable):
+            status, code = 409, "keycloak_research_creation_unavailable"
+        elif isinstance(exc, KeycloakResearchSharingUnavailable):
             status, code = 409, "keycloak_sharing_unavailable"
         elif isinstance(exc, AuthorizationUnavailable):
             status = 503
@@ -300,7 +304,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             data = self._research_catalog_body()
             if self._post_report_branch_route(parsed, actor, data):
                 return True
-            if parsed.path == "/api/research":
+            if parsed.path in {"/api/research", "/api/research/keycloak-create"}:
+                if parsed.path == "/api/research/keycloak-create":
+                    service.require_keycloak_research_creation()
                 value = service.create_research(
                     owner_ref=actor,
                     title=data.get("title"),

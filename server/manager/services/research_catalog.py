@@ -32,6 +32,10 @@ class KeycloakResearchSharingUnavailable(RuntimeError):
     """A Keycloak-only sharing API was called before the guarded cutover."""
 
 
+class KeycloakResearchCreationUnavailable(RuntimeError):
+    """The current Manager cannot create a Keycloak-owned Research."""
+
+
 class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
     """Persist Research relationships in the Manager-owned SQLite database."""
 
@@ -467,6 +471,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         )
         clean_visibility = _visibility(visibility)
         users = _authorized_users(authorized_users, owner)
+        if self._research_authorizer is not None and (clean_visibility != "private" or authorized_users):
+            raise ValueError("Research authorization must be configured in Keycloak after creation")
         research_id = "research:v1:" + secrets.token_urlsafe(18)
         now = time.time()
         initial_workspace = None
@@ -991,6 +997,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         access = self._research_access(row, actor)
         if not access["can_manage"]:
             raise PermissionError("research management is not authorized")
+        if self._research_authorizer is not None and (visibility is not None or authorized_users is not None):
+            raise ValueError("Research authorization must be managed in Keycloak")
         values: dict[str, Any] = {}
         if title is not None:
             values["title"] = _text(title, "title", maximum=256)
@@ -1606,7 +1614,14 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         return {"schema": "tr-research-keycloak-sharing-v1",
                 "authority": "keycloak" if self._research_authorizer is not None else "legacy",
                 "share_links": available,
-                "explicit_grants": available and callable(self._profile_identity_resolver)}
+                "explicit_grants": available and callable(self._profile_identity_resolver),
+                "create_research": self._research_authorizer is not None and all(
+                    callable(getattr(manager, name, None)) for name in
+                    ("create_research_resource", "set_profile_membership", "delete_resource"))}
+
+    def require_keycloak_research_creation(self) -> None:
+        if not self.keycloak_sharing_capabilities()["create_research"]:
+            raise KeycloakResearchCreationUnavailable("Keycloak Research creation is not enabled")
 
     def require_keycloak_sharing(self) -> None:
         if not self.keycloak_sharing_capabilities()["share_links"]:
@@ -2011,6 +2026,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         explicit and makes it possible to run once against each source without
         making request-time reads mutate the catalog.
         """
+        if self._research_authorizer is not None:
+            raise KeycloakResearchCreationUnavailable("Legacy report import requires a Keycloak migration")
         principal = _principal(actor)
         canonical_report_ids, legacy_report_ids = _canonical_migration_report_ids(
             records, principal,

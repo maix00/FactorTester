@@ -30,6 +30,7 @@ class GrantManager:
         self.fail_after_grant = False
         self.grants = {}
         self.denied = set()
+        self.creations = []
         self.lock = threading.Lock()
 
     def identity_provider(self, actor):
@@ -44,6 +45,16 @@ class GrantManager:
     def require_resource_share(self, *, actor, resource_type, resource_ref):
         if actor != "alice" or not self.issuer_authorized or (resource_type, resource_ref) in self.denied:
             raise PermissionError("share denied")
+
+    def create_research_resource(self, *, actor, research_id):
+        self.creations.append(research_id)
+        return self.identity_provider(actor)
+
+    def set_profile_membership(self, **_kwargs):
+        pass
+
+    def delete_resource(self, **_kwargs):
+        pass
 
     def require_link_issuer_share(self, *, identity_id, subject, research_id, resource_type, resource_ref):
         if not self.issuer_authorized:
@@ -211,7 +222,7 @@ def test_keycloak_only_routes_fail_closed_even_after_capability_check(tmp_path, 
     handler = Handler()
     handler._get_research_catalog_routes(SimpleNamespace(path="/api/research/capabilities/keycloak-sharing", query=""))
     assert responses[-1][0]["capabilities"] == {"schema": "tr-research-keycloak-sharing-v1",
-        "authority": "keycloak", "share_links": True, "explicit_grants": True}
+        "authority": "keycloak", "share_links": True, "explicit_grants": True, "create_research": True}
     handler._get_research_catalog_routes(SimpleNamespace(
         path=f"/api/research/{research}/keycloak-sharing-capabilities", query=""))
     assert responses[-1][0]["capabilities"]["can_manage_links"] is True
@@ -257,6 +268,53 @@ def test_keycloak_only_routes_fail_closed_even_after_capability_check(tmp_path, 
     handler.body = {"revoked": True}
     handler._patch_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links/old"))
     assert responses[-1][1] == 409 and responses[-1][0]["code"] == "keycloak_sharing_unavailable"
+
+
+def test_strict_research_creation_and_update_cannot_silently_write_legacy_acl(tmp_path):
+    catalog, manager, research = fixture(tmp_path)
+    with sqlite3.connect(catalog.db_path) as db:
+        previous_migrations = db.execute("SELECT count(*) FROM research_catalog_migrations").fetchone()[0]
+    for kwargs in ({"visibility": "public"}, {"visibility": "superiors"},
+                   {"visibility": "authorized"}, {"authorized_users": ["bob"]},
+                   {"authorized_users": ["alice"]}):
+        with pytest.raises(ValueError, match="Keycloak after creation"):
+            catalog.create_research(owner_ref="alice", title="Forbidden", **kwargs)
+    assert manager.creations == []
+    with pytest.raises(ValueError, match="managed in Keycloak"):
+        catalog.update_research(research, actor="alice", title="Must not change",
+                                visibility="public", authorized_users=["bob"])
+    with pytest.raises(ValueError, match="managed in Keycloak"):
+        catalog.update_research(research, actor="alice", authorized_users=[])
+    with pytest.raises(RuntimeError, match="Legacy report import requires"):
+        catalog.migrate_reports([{"report_id": "old"}], actor="alice")
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT count(*) FROM research_catalog_researches").fetchone()[0] == 1
+        assert db.execute("SELECT title,visibility,authorized_users_json FROM research_catalog_researches").fetchone() == (
+            "Research", "private", "[]")
+        assert db.execute("SELECT count(*) FROM research_catalog_migrations").fetchone()[0] == previous_migrations
+    created = catalog.create_research(owner_ref="alice", title="Private")
+    assert created["research_id"] in manager.creations
+
+
+def test_keycloak_create_route_never_falls_back_to_legacy_creation(tmp_path, monkeypatch):
+    from server.manager.http import research_catalog_routes as routes
+    catalog, manager, _research = fixture(tmp_path)
+    responses = []
+    class Handler(routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=catalog)
+        def _session(self): return {"username": "alice"}
+        def _json_body(self, _maximum): return {"title": "New", "visibility": "private"}
+    monkeypatch.setattr(routes, "json_response", lambda _self, data, status=200: responses.append((data, status)))
+    handler = Handler()
+    handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/keycloak-create"))
+    assert responses[-1][1] == 201 and responses[-1][0]["research"]["research_id"] in manager.creations
+    handler.state.research_catalog = ResearchCatalog(catalog.db_path)
+    with sqlite3.connect(catalog.db_path) as db:
+        before = db.execute("SELECT count(*) FROM research_catalog_researches").fetchone()[0]
+    handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/keycloak-create"))
+    assert responses[-1][1] == 409 and responses[-1][0]["code"] == "keycloak_research_creation_unavailable"
+    with sqlite3.connect(catalog.db_path) as db:
+        assert db.execute("SELECT count(*) FROM research_catalog_researches").fetchone()[0] == before
 
 
 def test_keycloak_link_listing_checks_exact_target_and_denies_unscoped_legacy_route(tmp_path, monkeypatch):
