@@ -12,7 +12,7 @@ type DocumentValue = { _rev?: string; projection_hash?: string };
 type Attachment = { path?: string; name?: string };
 
 /** Edit only the current chapter, using its real parent and sibling identities. */
-export function ReportEditor({ publicationID, onUpdated }: { publicationID: string; onUpdated?: () => void }): React.ReactElement {
+export function ReportEditor({ publicationID, onUpdated, requester = request, appendOnly = false }: { publicationID: string; onUpdated?: () => void; requester?:typeof request; appendOnly?:boolean }): React.ReactElement {
   const { t } = useTranslation();
   const [document,setDocument] = useState<DocumentValue | null>(null), [canWrite,setCanWrite] = useState<boolean | null>(null);
   const [chapters,setChapters] = useState<ChapterSummary[]>([]), [chapterID,setChapterID] = useState(""), [chapter,setChapter] = useState<ReportChapter | null>(null);
@@ -27,7 +27,7 @@ export function ReportEditor({ publicationID, onUpdated }: { publicationID: stri
   const load = async (signal?:AbortSignal): Promise<boolean> => {
     const revision = ++loadRevision.current;
     try {
-      const [doc,agent,files] = await Promise.all([request(base,{signal}),request(`${base}/agent`,{signal}),request(`${base}/attachments`,{signal})]);
+      const [doc,agent,files] = await Promise.all([requester(base,{signal}),requester(`${base}/agent`,{signal}),requester(`${base}/attachments`,{signal})]);
       if (signal?.aborted || revision !== loadRevision.current || activePublication.current !== publicationID) return false;
       if (!doc.document?._rev || !Array.isArray(agent.manifest?.chapters) || !Array.isArray(files.attachments)) throw new Error(t("researchDetail.invalidResponse"));
       const next = agent.manifest.chapters as ChapterSummary[];
@@ -48,7 +48,7 @@ export function ReportEditor({ publicationID, onUpdated }: { publicationID: stri
     const controller = new AbortController(); setChapter(null); setChapterError("");
     if (!chapterID || !editing) { setChapterLoading(false); return () => controller.abort(); }
     setChapterLoading(true);
-    void request(`${base}/chapters/${encodeURIComponent(chapterID)}`,{signal:controller.signal}).then(value => {
+    void requester(`${base}/chapters/${encodeURIComponent(chapterID)}`,{signal:controller.signal}).then(value => {
       if (controller.signal.aborted) return;
       if (!Array.isArray(value.chapter?.components)) throw new Error(t("researchDetail.invalidResponse"));
       setChapter({...value.chapter,chapter_id:chapterID});
@@ -63,7 +63,7 @@ export function ReportEditor({ publicationID, onUpdated }: { publicationID: stri
     operationPending.current = true; setBusy(true);
     const controller = new AbortController(); operationRequest.current = controller;
     try {
-      await request(`${base}/operations`,{method:"POST",signal:controller.signal,body:JSON.stringify({base_rev:document._rev,operation})});
+      await requester(`${base}/operations`,{method:"POST",signal:controller.signal,body:JSON.stringify({base_rev:document._rev,operation})});
       if (activePublication.current !== publicationID) return false;
       const refreshed = await load(controller.signal);
       if (!refreshed && !controller.signal.aborted) setNeedsReview(true);
@@ -140,21 +140,21 @@ export function ReportEditor({ publicationID, onUpdated }: { publicationID: stri
       {selected.length ? <Popconfirm title={t("report.removeComponentsConfirm")} onConfirm={removeSelected}><Button danger disabled={locked}>{t("report.removeSelected",{count:selected.length})}</Button></Popconfirm> : null}
       <div className="tr-report-chapter">
         {chapters.map((item,index) => <div className="tr-report-component" key={item.chapter_id}><span>{item.title || item.chapter_id}</span><span className="tr-report-chapter-actions">
-          {index > 0 ? <Button size="small" disabled={locked} onClick={() => void apply({op:"move_chapter",chapter_id:item.chapter_id,after_chapter_id:index > 1 ? chapters[index-2]?.chapter_id : null})} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} /> : null}
-          {index < chapters.length - 1 ? <Button size="small" disabled={locked} onClick={() => void apply({op:"move_chapter",chapter_id:item.chapter_id,after_chapter_id:chapters[index+1]?.chapter_id})} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} /> : null}
-          {document?.projection_hash ? <Popconfirm title={t("report.removeChapterConfirm")} onConfirm={() => void apply({op:"remove_chapter",chapter_id:item.chapter_id})}><Button size="small" danger disabled={locked}>{t("report.remove")}</Button></Popconfirm> : null}
+          {!appendOnly && index > 0 ? <Button size="small" disabled={locked} onClick={() => void apply({op:"move_chapter",chapter_id:item.chapter_id,after_chapter_id:index > 1 ? chapters[index-2]?.chapter_id : null})} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} /> : null}
+          {!appendOnly && index < chapters.length - 1 ? <Button size="small" disabled={locked} onClick={() => void apply({op:"move_chapter",chapter_id:item.chapter_id,after_chapter_id:chapters[index+1]?.chapter_id})} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} /> : null}
+          {!appendOnly && document?.projection_hash ? <Popconfirm title={t("report.removeChapterConfirm")} onConfirm={() => void apply({op:"remove_chapter",chapter_id:item.chapter_id})}><Button size="small" danger disabled={locked}>{t("report.remove")}</Button></Popconfirm> : null}
         </span></div>)}
       </div>
       {components.length ? <section className="tr-report-chapter"><h3>{t("report.components")}</h3>{components.map(item => {
         const id = String(item.component_id), label = item.title || item.kind || id;
         const up = chapter && moveReportComponent(chapter,id,"up"), down = chapter && moveReportComponent(chapter,id,"down");
-        return <div className="tr-report-component" key={id} style={{marginInlineStart:componentDepth(item)*12}}><div><Checkbox checked={selected.includes(id)} aria-label={t("report.selectComponent",{name:label})} onChange={event => {
+        return <div className="tr-report-component" key={id} style={{marginInlineStart:componentDepth(item)*12}}><div>{!appendOnly ? <Checkbox checked={selected.includes(id)} aria-label={t("report.selectComponent",{name:label})} onChange={event => {
           if (event.target.checked && selected.length >= 100) {notify({code:"report.selection-limit",type:"warning",message:t("report.selectionLimit")});return;}
           setSelected(current => event.target.checked ? [...current,id] : current.filter(value => value !== id));
-        }} /><b>{label}</b>{item.body ? <p>{item.body}</p> : null}</div><div className="tr-report-component-actions">
-          {up ? <Button size="small" disabled={locked} onClick={() => void apply(up)} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} /> : null}
-          {down ? <Button size="small" disabled={locked} onClick={() => void apply(down)} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} /> : null}
-          <Popconfirm title={t("report.removeComponentConfirm")} onConfirm={() => void apply({op:"remove_component",chapter_id:chapterID,component_id:id,include_children:true})}><Button size="small" danger disabled={locked}>{t("report.remove")}</Button></Popconfirm>
+        }} />:null}<b>{label}</b>{item.body ? <p>{item.body}</p> : null}</div><div className="tr-report-component-actions">
+          {!appendOnly && up ? <Button size="small" disabled={locked} onClick={() => void apply(up)} aria-label={t("report.moveUp")} icon={<ArrowUpOutlined />} /> : null}
+          {!appendOnly && down ? <Button size="small" disabled={locked} onClick={() => void apply(down)} aria-label={t("report.moveDown")} icon={<ArrowDownOutlined />} /> : null}
+          {!appendOnly ? <Popconfirm title={t("report.removeComponentConfirm")} onConfirm={() => void apply({op:"remove_component",chapter_id:chapterID,component_id:id,include_children:true})}><Button size="small" danger disabled={locked}>{t("report.remove")}</Button></Popconfirm> : null}
         </div></div>;
       })}</section> : null}
     </> : null}

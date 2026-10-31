@@ -18,7 +18,8 @@ export type LocalResearchCapabilities = { binding: LocalResearchBinding; actions
 export type LocalResearchCreate = { profile_id: string; title: string; description: string; operation_id: string };
 export type LocalResearchPage = { researches: LocalResearch[]; next_offset: number | null };
 export type LocalReport = { report_id: string; research_id: string; profile_id: string; title: string; created_at: number };
-export type LocalReportIndex = { report:LocalReport; chapters:{component_id:string;title:string;preview:string}[] };
+export type LocalReportVersion = {generation:number;root_ref:string};
+export type LocalReportIndex = { report:LocalReport; chapters:{component_id:string;title:string;preview:string}[]; version:LocalReportVersion };
 
 type NativeHandler = { postMessage: (message: Record<string, unknown>) => unknown };
 type NativeHost = { webkit?: { messageHandlers?: { tradeResearchLocalResearch?: unknown } } };
@@ -41,6 +42,10 @@ function text(value: unknown, maximum: number, allowEmpty = false, multiline = f
 }
 
 function identifier(value: unknown): string { return text(value, 512); }
+function reportVersion(value:unknown):LocalReportVersion {
+  if(!isRecord(value)||!Number.isSafeInteger(value.generation)||(value.generation as number)<0||typeof value.root_ref!=="string"||!/^nodes\/[0-9a-f]{2}\/[0-9a-f]{64}\.json$/.test(value.root_ref)) throw new LocalResearchBridgeError("local_research_invalid_response");
+  return {generation:value.generation as number,root_ref:value.root_ref};
+}
 function binding(value:unknown):LocalResearchBinding {
   if (!isRecord(value)) throw new LocalResearchBridgeError("local_research_invalid_response");
   const issuer=text(value.issuer,2048), identity_id=identifier(value.identity_id);
@@ -206,7 +211,24 @@ export class LocalResearchClient {
       return {component_id:identifier(chapter.component_id),title:text(chapter.title,512,true),preview:text(chapter.preview,512,true)};
     });
     if(new Set(chapters.map(chapter=>chapter.component_id)).size!==chapters.length) throw new LocalResearchBridgeError("local_research_invalid_response");
-    return {report:value,chapters};
+    return {report:value,chapters,version:reportVersion(reply.version)};
+  }
+
+  async getReportChapter(profileId:string,researchId:string,reportId:string,chapterId:string):Promise<{chapter_id:string;components:Record<string,unknown>[],version:LocalReportVersion}> {
+    this.requireAction("get_report_chapter");
+    const profile_id=inputText(profileId,512),research_id=inputText(researchId,512),report_id=inputText(reportId,512),chapter_id=inputText(chapterId,512);
+    this.requireProfile(profile_id);const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"get_report_chapter",profile_id,research_id,report_id,chapter_id});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    if(!isRecord(reply.chapter)||reply.chapter.chapter_id!==chapter_id||!Array.isArray(reply.chapter.components)||reply.chapter.components.some(item=>!isRecord(item))) throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {chapter_id,components:reply.chapter.components as Record<string,unknown>[],version:reportVersion(reply.version)};
+  }
+
+  async addReportComponent(input:{profileId:string;researchId:string;reportId:string;componentId:string;kind:"chapter"|"entry";parentId:string;title:string;body:string;version:LocalReportVersion}):Promise<LocalReportVersion> {
+    this.requireAction("add_report_component");const profile_id=inputText(input.profileId,512),research_id=inputText(input.researchId,512),report_id=inputText(input.reportId,512);
+    this.requireProfile(profile_id);const version=reportVersion(input.version),generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"add_report_component",profile_id,research_id,report_id,component_id:inputText(input.componentId,512),kind:input.kind,parent_id:inputText(input.parentId,512,true),title:inputText(input.title,512,true),body:inputText(input.body,10000,true,true),...version});
+    this.requireAuthorizedSnapshot(generation,sequence);return reportVersion(reply.version);
   }
 
   /** The caller retains operation_id for retries; this client never retries writes. */

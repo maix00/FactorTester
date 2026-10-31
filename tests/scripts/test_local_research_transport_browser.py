@@ -85,6 +85,18 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             dialog.get_by_role("button", name="返回").wait_for()
             assert dialog.get_by_text("本机报告验收").is_visible()
             dialog.get_by_text("暂无数据").wait_for()
+            dialog.get_by_role("button", name="编辑报告内容").click()
+            dialog.get_by_label("新章节标题").fill("研究方法")
+            dialog.get_by_role("button", name="新增章节").click()
+            dialog.get_by_label("段落正文").fill("真实存储的段落内容")
+            dialog.get_by_role("button", name="添加段落").click()
+            dialog.get_by_text("真实存储的段落内容").wait_for()
+            open_page()
+            page.get_by_role("button", name="本机真实存储验收").click()
+            dialog = page.get_by_role("dialog")
+            dialog.get_by_role("button", name="本机报告验收").click()
+            dialog.get_by_role("button", name="编辑报告内容").click()
+            dialog.get_by_text("真实存储的段落内容").wait_for()
             if os.environ.get("TR_UI_SCREENSHOT"):
                 page.screenshot(path=os.environ["TR_UI_SCREENSHOT"])
             assert not errors
