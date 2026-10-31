@@ -1,4 +1,6 @@
 """Real client HTTP transport to the single-report Keycloak/Couch service seam."""
+import base64
+import hashlib
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -7,7 +9,9 @@ import pytest
 from tests.server.test_local_report_publication import SESSION, harness
 from server.jobs.storage.couchdb_research_publication import ResearchPublicationConflict
 from tools.cli.release.research_reporting.local_rpc import LocalResearchRPC
-from tools.cli.release.research_reporting.public_research.object_uploads import projection_hash
+from tools.cli.release.research_reporting.authoring.tree_bundle import export_report_bundle
+from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
+from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
 
 
 def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_access(tmp_path):
@@ -52,6 +56,14 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         rpc.binding['identity_id'] = SESSION['tr_identity_id']
         published = rpc.request(request)['publication']
         assert rpc.request(request)['publication'] == published
+        published_view = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')
+        authoring_path = 'report_authoring/' + published_view['authoring']['sha256']
+        assert service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main', attachment=authoring_path)['content']
+        auth['write'] = False
+        assert service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')['projection']['report_id'] == selected['report_id']
+        with pytest.raises(PermissionError):
+            service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main', attachment=authoring_path)
+        auth['write'] = True
         documents = [doc for doc in store.docs.values() if doc['kind'] == 'research_report']
         assert len(documents) == 1 and documents[0]['report_id'] == selected['report_id']
         assert private['report_id'] not in json.dumps(store.docs)
@@ -63,10 +75,24 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         second = rpc.request(request)['publication']
         assert second['generation'] == 1 and second['revision'] != published['revision']
         remote = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')['projection']
-        remote['generation'] = 2; remote['title'] = 'Other client'; remote['projection_hash'] = projection_hash(remote)
+        with pytest.raises(ResearchPublicationConflict):
+            service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
+                branch_ref='main', projection=remote, expected_revision=second['revision'])
+        latest = rpc.request({**edit, **next_head, 'component_id': 'chapter-2', 'title': 'Second'})['version']
+        _report, root = rpc.store._report_root('self', research['research_id'], selected['report_id'])
+        snapshot = load_snapshot(package_root=root, branch_id='main')
+        bundle = export_report_bundle(package_root=root, branch_id='main', expected_generation=latest['generation'], expected_root_ref=latest['root_ref'])
+        remote = build_upload_projection(snapshot)
+        authoring = {'sha256': hashlib.sha256(bundle).hexdigest(), 'root_ref': latest['root_ref'], 'content_base64': base64.b64encode(bundle).decode()}
+        with pytest.raises(ValueError):
+            service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
+                branch_ref='main', projection=remote, expected_revision=second['revision'], authoring={**authoring, 'sha256': '0' * 64})
+        with pytest.raises(ValueError):
+            service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
+                branch_ref='another', projection=remote, expected_revision=None, authoring=authoring)
         service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
-            branch_ref='main', projection=remote, expected_revision=second['revision'])
-        rpc.request({**edit, **next_head, 'component_id': 'chapter-2', 'title': 'Second'})
+            branch_ref='main', projection=remote, expected_revision=second['revision'], authoring=authoring)
+        rpc.request({**edit, **latest, 'component_id': 'chapter-3', 'title': 'Third'})
         assert rpc.request(request) == {'success': False, 'code': 'local_report_publication_conflict'}
         auth['admit'] = False
         assert rpc.request(request) == {'success': False, 'code': 'local_report_publication_denied'}

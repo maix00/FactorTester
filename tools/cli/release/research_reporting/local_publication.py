@@ -1,6 +1,7 @@
 """Explicit, session-bound publication of one local report to a Manager."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -8,6 +9,7 @@ from urllib.parse import urlsplit
 
 from tools.cli.http import HttpSession
 from .authoring.tree_paths import report_tree_paths
+from .authoring.tree_bundle import bundle_from_snapshot
 from .authoring.tree_projection import project_snapshot
 from .authoring.tree_store import load_head, tree_lock
 from .generation import report_workspace_lock
@@ -45,9 +47,15 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
             head = load_head(paths)
             if head['report_id'] != report_id:
                 raise ValueError('local report identity is invalid')
-            projection = build_upload_projection(project_snapshot(paths, head))
+            snapshot = project_snapshot(paths, head)
+            projection = build_upload_projection(snapshot)
+            bundle = bundle_from_snapshot(snapshot, package_root=root, branch_id='main')
+        if not bundle or len(bundle) > 8 * 1024 * 1024:
+            raise ValueError('report authoring bundle exceeds Manager limit')
+        authoring = {'sha256': hashlib.sha256(bundle).hexdigest(), 'root_ref': head['root_ref'],
+                     'content_base64': base64.b64encode(bundle).decode('ascii')}
         # Match the existing Manager request budget, before making a network call.
-        encoded_size = len(json.dumps(projection, ensure_ascii=False).encode('utf-8'))
+        encoded_size = len(json.dumps({'projection': projection, 'authoring': authoring}, ensure_ascii=False).encode('utf-8'))
         if encoded_size > 30 * 1024 * 1024:
             raise ValueError('report publication exceeds Manager request limit')
         with store._connect() as db:
@@ -59,7 +67,7 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
                              (report_id, manager_hash)).fetchone()
             expected_revision = row['revision'] if row else None
         response = session.post('/api/research/local-report-publication', {'research_id': research_id,
-            'report_id': report_id, 'branch_ref': 'main', 'projection': projection,
+            'report_id': report_id, 'branch_ref': 'main', 'projection': projection, 'authoring': authoring,
             'expected_revision': expected_revision})
         value = response.get('publication') if response.get('success') is True else None
         if (not isinstance(value, dict) or value.get('report_id') != report_id

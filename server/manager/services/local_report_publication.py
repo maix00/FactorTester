@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 
 from server.identity.keycloak_authorization import AuthorizationUnavailable, keycloak_resource_name
 from server.identity.keycloak_research import KeycloakResearchGrantManager
-from server.jobs.storage.couchdb_research_publication import prepare_projection, publication_id
+from server.jobs.storage.couchdb_research_publication import prepare_authoring, prepare_projection, publication_id
 from server.manager.services.research_couchdb_publication import ResearchCouchPublicationService
 from tools.cli.release.research_reporting.generation import report_workspace_lock
 
@@ -102,7 +102,7 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
             raise AuthorizationUnavailable('report registration requires repair')
 
     def publish_local(self, *, session: dict, research_id: str, report_id: str, branch_ref: str,
-                      projection: dict, expected_revision: str | None) -> dict:
+                      projection: dict, expected_revision: str | None, authoring: dict | None = None) -> dict:
         self._validate_target(research_id, report_id)
         manager = self._manager()
         actor, identity = self._verified_identity(session, manager)
@@ -116,6 +116,8 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
         if expected_revision is not None and (not isinstance(expected_revision, str) or len(expected_revision) > 256):
             raise ValueError('expected CouchDB revision is invalid')
         prepared = prepare_projection(projection, report_id=report_id)
+        prepared_authoring = prepare_authoring(authoring, report_id=report_id,
+            generation=prepared[0]['generation'], branch_ref=branch_ref)
         marker_id = _receipt_id(str(self.state.server_id), identity.identity_id, report_id)
         lock_root = Path(self.state.state_root) / '.local-report-registration' / hashlib.sha256(report_id.encode()).hexdigest()[:2]
         with report_workspace_lock(lock_root):
@@ -162,7 +164,7 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
         # Keycloak owner policy cannot be recreated by a publication retry.
         return super().publish(session=session, research_id=research_id, report_id=report_id,
                                branch_ref=branch_ref, projection=projection,
-                               expected_revision=expected_revision, _prepared=prepared)
+                               expected_revision=expected_revision, _prepared=prepared, _authoring=prepared_authoring)
 
     def list_grants(self, *, session: dict, research_id: str, report_id: str) -> list[dict]:
         manager = self._manager()

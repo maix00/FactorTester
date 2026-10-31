@@ -98,14 +98,49 @@ def prepare_projection(raw: object, *, report_id: str) -> tuple[dict, dict, dict
     return clean, attachments, inline
 
 
+def prepare_authoring(raw: object, *, report_id: str, generation: int, branch_ref: str):
+    """Validate a bounded editable branch separately from the read projection."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != {'content_base64', 'sha256', 'root_ref'}:
+        raise ValueError('report authoring bundle is invalid')
+    digest, root_ref, encoded = raw['sha256'], raw['root_ref'], raw['content_base64']
+    if (not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)
+            or not isinstance(encoded, str) or len(encoded) > ((_MAX_OBJECT + 2) // 3) * 4):
+        raise ValueError('report authoring bundle exceeds its limit')
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError):
+        raise ValueError('report authoring bundle encoding is invalid') from None
+    if not payload or len(payload) > _MAX_OBJECT or hashlib.sha256(payload).hexdigest() != digest:
+        raise ValueError('report authoring bundle checksum or size mismatch')
+    from tools.cli.release.research_reporting.authoring.tree_bundle import validate_report_bundle
+    manifest, _files = validate_report_bundle(payload=payload, expected_sha256=digest, report_id=report_id,
+        source_generation=generation, source_root_ref=root_ref)
+    if manifest.get('source_branch_id') != branch_ref:
+        raise ValueError('report authoring bundle branch does not match')
+    return {'sha256': digest, 'root_ref': root_ref, 'generation': generation, 'size_bytes': len(payload)}, payload
+
+
 def commit_shared_report(store, *, manager_id: str, owner_id: str, owner_ref: str,
                          research_id: str, report_id: str, branch_ref: str,
                          keycloak_resource_id: str, projection: dict, expected_revision: str | None,
-                         authorize_now, prepared=None) -> dict:
+                         authorize_now, prepared=None, authoring=None) -> dict:
     """Compare-and-set one document and its content-addressed attachments."""
     identifier = publication_id(manager_id, owner_id, report_id, branch_ref)
     clean, attachments, inline = (prepared if prepared is not None
                                   else prepare_projection(projection, report_id=report_id))
+    descriptor = None
+    if authoring is not None:
+        descriptor, payload = authoring
+        name = descriptor['sha256'] + '.bin'
+        attachments['report_authoring/' + descriptor['sha256']] = {
+            'name': name, 'content_type': 'application/octet-stream',
+            'sha256': descriptor['sha256'], 'size_bytes': len(payload)}
+        encoded = base64.b64encode(payload).decode('ascii')
+        if name in inline and inline[name]['data'] != encoded:
+            raise ValueError('report object digest collision')
+        inline[name] = {'content_type': 'application/octet-stream', 'data': encoded}
     if not isinstance(keycloak_resource_id, str) or not keycloak_resource_id.strip():
         raise ValueError("report Keycloak resource is missing")
     if expected_revision is not None and (not isinstance(expected_revision, str) or len(expected_revision) > 256):
@@ -129,6 +164,7 @@ def commit_shared_report(store, *, manager_id: str, owner_id: str, owner_ref: st
         prior_record = current.get("publication")
         same_content = (current.get("generation") == clean["generation"]
                         and current.get("projection_hash") == clean["projection_hash"]
+                        and current.get('authoring') == descriptor
                         and current.get("attachments") == attachments
                         and isinstance(current.get("_attachments"), dict)
                         and set(current["_attachments"]) == set(inline)
@@ -141,6 +177,8 @@ def commit_shared_report(store, *, manager_id: str, owner_id: str, owner_ref: st
             return {"publication_id": identifier, "revision": current["_rev"],
                     "generation": clean["generation"], "projection_hash": clean["projection_hash"],
                     "report_id": report_id, "idempotent": True}
+        if current.get('authoring') is not None and descriptor is None:
+            raise ResearchPublicationConflict('editable report cannot be replaced without its authoring bundle')
         if expected_revision != current.get("_rev"):
             raise ResearchPublicationConflict("report publication revision changed")
         old_generation = current.get("generation")
@@ -148,6 +186,9 @@ def commit_shared_report(store, *, manager_id: str, owner_id: str, owner_ref: st
             raise ResearchPublicationConflict("report generation cannot move backwards")
         if clean["generation"] == old_generation and clean["projection_hash"] != current.get("projection_hash"):
             raise ResearchPublicationConflict("one report generation cannot have different content")
+        if (clean['generation'] == old_generation and current.get('authoring') is not None
+                and current['authoring'] != descriptor):
+            raise ResearchPublicationConflict('one report generation cannot have different authoring content')
     elif expected_revision is not None:
         raise ResearchPublicationConflict("report publication no longer exists")
     record = {"publication_id": identifier, "report_id": report_id, "owner_ref": owner_ref,
@@ -159,6 +200,8 @@ def commit_shared_report(store, *, manager_id: str, owner_id: str, owner_ref: st
            "keycloak_resource_id": keycloak_resource_id, "generation": clean["generation"],
            "projection_hash": clean["projection_hash"], "publication": record,
            "attachments": attachments, "_attachments": inline}
+    if descriptor is not None:
+        doc['authoring'] = descriptor
     if current is not None:
         doc["_rev"] = current["_rev"]
     # Authorization may change while a large projection is prepared or read.

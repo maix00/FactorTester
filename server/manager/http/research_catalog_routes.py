@@ -83,7 +83,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         )
         local_publication = re.fullmatch(
             r"/api/research/local-report-publication"
-            r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource)/([^/]+))?)?",
+            r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource|report_authoring)/([^/]+))?)?",
             parsed.path,
         )
         local_grants = parsed.path == '/api/research/local-report-publication/grants'
@@ -141,7 +141,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                                 or (publication_ref and record.get('publication_id') != publication_ref)
                                 or (branch_ref and record.get('branch_ref') != branch_ref)):
                             raise PermissionError('peer report identity does not match')
-                        value = {'publication': record, 'projection': projected}
+                        value = {'publication': record, 'projection': projected,
+                                 **({'authoring': value['authoring']} if 'authoring' in value else {})}
                 else:
                     value = self._research_couch_service(local=bool(local_publication)).read(session=session,
                         research_id=research_id, report_id=report_id,
@@ -410,12 +411,12 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {'success': True, 'changed': changed})
                 return True
             if local_publication:
-                if set(data) - {'research_id', 'report_id', 'branch_ref', 'projection', 'expected_revision'}:
+                if set(data) - {'research_id', 'report_id', 'branch_ref', 'projection', 'expected_revision', 'authoring'}:
                     raise ValueError('unsupported report publication fields')
                 value = self._research_couch_service(local=True).publish_local(session=session,
                     research_id=data.get('research_id'), report_id=data.get('report_id'),
                     branch_ref=str(data.get('branch_ref') or ''), projection=data.get('projection'),
-                    expected_revision=data.get('expected_revision'))
+                    expected_revision=data.get('expected_revision'), authoring=data.get('authoring'))
                 json_response(self, {'success': True, 'publication': value}, 201)
                 return True
             if publication:
