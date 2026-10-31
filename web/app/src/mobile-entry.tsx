@@ -5,6 +5,8 @@ import { setupIonicReact } from "@ionic/react";
 import { createRoot } from "react-dom/client";
 import { MobileShell } from "./mobile-shell.tsx";
 import { AuthGate } from "./auth.tsx";
+import { captureResearchShare } from "./research-share-intent.ts";
+import { ResearchShareRedeemer } from "./components/research-share-redeemer.tsx";
 import "@ionic/react/css/core.css";
 import "@ionic/react/css/normalize.css";
 import "@ionic/react/css/structure.css";
@@ -14,4 +16,4 @@ import "./shell.css";
 setupIonicReact({ mode: "md" });
 
 const mount = document.querySelector<HTMLElement>("[data-tr-web-app]");
-if (mount) createRoot(mount).render(<AuthGate><MobileShell /></AuthGate>);
+if (mount) { captureResearchShare(); createRoot(mount).render(<AuthGate><MobileShell /><ResearchShareRedeemer /></AuthGate>); }

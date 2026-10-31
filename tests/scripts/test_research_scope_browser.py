@@ -50,7 +50,7 @@ createRoot(document.getElementById('root')!).render(
                     page.set_default_timeout(5000)
                     page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
                     page.evaluate("""() => {
-                      const fixture = window.fixture = {requests:[],opened:[],releaseMine:null,allowResearch:true};
+                      const fixture = window.fixture = {requests:[],opened:[],releaseMine:null,allowResearch:true,authority:'legacy'};
                       window.fetch = (input, options = {}) => {
                         const url = new URL(String(input), location.origin);
                         fixture.requests.push(url.pathname + url.search);
@@ -58,6 +58,7 @@ createRoot(document.getElementById('root')!).render(
                           {status:200,headers:{'Content-Type':'application/json'}});
                         if (url.pathname === '/api/session') return Promise.resolve(response({session:{username:'alice'}}));
                         if (url.pathname === '/api/public/entry') return Promise.resolve(response({}));
+                        if (url.pathname === '/api/research/capabilities/keycloak-sharing') return Promise.resolve(response({capabilities:{schema:'tr-research-keycloak-sharing-v1',authority:fixture.authority}}));
                         if (url.pathname === '/api/research/r1') return Promise.resolve(response({research:{
                           research_id:'r1',title:'研究甲',owner_ref:'alice',access:{can_view:fixture.allowResearch,can_manage:false}
                         }}));
@@ -98,10 +99,12 @@ createRoot(document.getElementById('root')!).render(
                     assert opened[0]["kind"] == "profile" and opened[0]["ref"] == "self"
                     assert opened[0]["profileKey"] == "local::alice::self" and opened[0]["owner"] == "alice"
                     assert opened[1]["kind"] == "user" and opened[1]["ref"] == "alice"
-                    page.evaluate("window.fixture.setLanguage('en')")
+                    page.evaluate("window.fixture.authority='keycloak'; window.fixture.setLanguage('en')")
                     page.get_by_role("combobox", name="Research scope").wait_for()
                     assert page.get_by_role("tab", name="Reports").is_visible()
-                    page.evaluate("window.fixture.setLanguage('zh')")
+                    page.wait_for_function("window.fixture.requests.filter(r => r==='/api/research/capabilities/keycloak-sharing').length>=2")
+                    page.wait_for_function("!document.body.innerText.includes('Only me')")
+                    page.evaluate("window.fixture.authority='legacy'; window.fixture.setLanguage('zh')")
                     page.get_by_role("button", name="研究甲", exact=True).click()
                     page.get_by_role("dialog").wait_for()
                     assert "/api/research/r1" in page.evaluate("window.fixture.requests")

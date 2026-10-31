@@ -10,6 +10,7 @@ import { reportRowID, researchRelationCandidates } from "../research-model.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { ObjectReference } from "./object-reference.tsx";
 import { ResearchEvidenceEditor } from "./research-evidence-editor.tsx";
+import { ResearchSharing } from "./research-sharing.tsx";
 import { ResultView } from "./result-view.tsx";
 import { TRDataTable } from "./data-table.tsx";
 
@@ -17,7 +18,7 @@ type Row = Record<string, any>;
 type CreateKind = "profile" | "workspace" | "report";
 
 /** Research relations use the same authorized catalog endpoints as the legacy view. */
-export function ResearchRelations({ research, overview, onReport, onResearch, onSectionChange }: { research: Row; overview: React.ReactNode; onReport: (value: Row) => void; onResearch: (value: Row) => void; onSectionChange?: (section:string) => void }): React.ReactElement {
+export function ResearchRelations({ research, overview, onReport, onResearch, onSectionChange, showLegacyVisibility = false }: { research: Row; overview: React.ReactNode; onReport: (value: Row) => void; onResearch: (value: Row) => void; onSectionChange?: (section:string) => void; showLegacyVisibility?:boolean }): React.ReactElement {
   const { t } = useTranslation();
   const id = String(research.research_id || "");
   const base = `/api/research/${encodeURIComponent(id)}`;
@@ -29,7 +30,7 @@ export function ResearchRelations({ research, overview, onReport, onResearch, on
   const mutation = useRef(false);
   const canManage = research.access?.can_manage === true;
   useEffect(() => {
-    if (tab === "details") return;
+    if (tab === "details" || tab === "sharing") return;
     const controller = new AbortController(); setLoading(true); setError(""); setRows([]);
     const endpoint = tab === "evidence" ? `/api/research-evidence/catalog/research/${encodeURIComponent(id)}?page=${page}&page_size=${size}` : `${base}/${tab}`;
     void request(endpoint, { signal: controller.signal }).then(value => {
@@ -90,14 +91,15 @@ export function ResearchRelations({ research, overview, onReport, onResearch, on
   return <section className="tr-research-relations">
     <Tabs activeKey={tab} onChange={selectTab} items={[
       { key: "details", label: t("details") }, { key: "reports", label: t("researchDetail.reports") },
-      { key: "evidence", label: t("researchDetail.evidence") }, { key: "members", label: t("research.profile") }, { key: "workspaces", label: t("researchDetail.workspaces") },
+      { key: "evidence", label: t("researchDetail.evidence") }, { key: "members", label: t("research.profile") }, { key: "workspaces", label: t("researchDetail.workspaces") }, {key:"sharing",label:t("researchSharing.title")},
     ]} />
     {tab === "details" ? overview : <>
+      {tab === "sharing" ? <ResearchSharing target={{researchId:id}} /> : null}
       {canManage && ["reports", "members", "workspaces"].includes(tab) ? <div className="tr-research-relations-actions"><Button type="primary" onClick={() => setCreate(tab === "members" ? "profile" : tab === "reports" ? "report" : "workspace")}>{t(`researchDetail.create.${tab}`)}</Button></div> : null}
       {tab === "reports" ? table([
         { title: t("editor.name"), key: "title", render: (_: unknown, row: Row) => <button type="button" className="tr-table-link" onClick={() => onReport({ ...row, research_id: row.research_id || id })}>{row.title || reportRowID(row)}</button> },
         { title: t("research.profile"), key: "profile", render: (_: unknown, row: Row) => row.profile_ref ? <ObjectReference value={{kind:"profile",ref:String(row.profile_ref),profileKey:row.profile_key,owner:row.owner_ref}} /> : "—" },
-        { title: t("library.visibility"), key: "visibility", render: (_: unknown, row: Row) => row.visibility ? t(`research.visibility.${row.visibility}`, {defaultValue:row.visibility}) : "—" },
+        ...(showLegacyVisibility ? [{ title: t("library.visibility"), key: "visibility", render: (_: unknown, row: Row) => row.visibility ? t(`research.visibility.${row.visibility}`, {defaultValue:row.visibility}) : "—" }] : []),
         { title: t("jobs.updated"), key: "updated", render: (_: unknown, row: Row) => row.updated_at ? formatDate(row.updated_at, {dateStyle:"medium",timeStyle:"short"}) : "—" },
         { title: t("jobs.action"), key: "action", render: (_: unknown, row: Row) => row.report_id && row.access?.can_manage === true && row.can_delete === true ? <Popconfirm title={t("researchDetail.deleteReportConfirm")} onConfirm={() => void perform("deleteReport", async () => { await request(`${base}/reports/${encodeURIComponent(String(row.report_id))}`, {method:"DELETE"}); })}><Button danger disabled={busy}>{t("configuration.remove")}</Button></Popconfirm> : "—" },
       ], row => reportRowID(row)) : null}
