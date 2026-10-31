@@ -55,6 +55,14 @@ class LocalResearchCatalog:
                 FOREIGN KEY(research_id) REFERENCES researches(research_id))''')
             db.execute('''CREATE INDEX IF NOT EXISTS researches_profile_page
                 ON researches(profile_id, created_at DESC, research_id DESC)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS server_research_origins (
+                research_id TEXT PRIMARY KEY, manager_hash TEXT NOT NULL, profile_id TEXT NOT NULL,
+                title TEXT NOT NULL, description TEXT NOT NULL, updated_at REAL NOT NULL)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS server_research_pending (
+                research_id TEXT NOT NULL, manager_hash TEXT NOT NULL, profile_id TEXT NOT NULL,
+                last_attempt REAL NOT NULL DEFAULT 0, PRIMARY KEY(research_id, manager_hash, profile_id))''')
+            db.execute('''CREATE INDEX IF NOT EXISTS server_research_pending_page
+                ON server_research_pending(manager_hash, profile_id, last_attempt, research_id)''')
             db.execute('''CREATE INDEX IF NOT EXISTS reports_profile_page
                 ON reports(profile_id, ready, created_at DESC, report_id DESC)''')
             db.execute('''CREATE TABLE IF NOT EXISTS local_directory_revision (

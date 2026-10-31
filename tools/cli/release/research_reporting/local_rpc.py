@@ -39,6 +39,7 @@ class LocalResearchRPC:
             'list_researches': {'action', 'profile_id', 'limit', 'offset', 'expected_revision'},
             'get': {'action', 'profile_id', 'research_id'},
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
+            'import_research': {'action', 'profile_id', 'research_id'},
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
             'list_profile_reports': {'action', 'profile_id', 'limit', 'offset', 'expected_revision'},
             'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
@@ -51,6 +52,7 @@ class LocalResearchRPC:
             'sync_reports': {'action', 'profile_id', 'after_report_id', 'limit'},
         }
         if self.manager is None:
+            keys.pop('import_research')
             keys.pop('publish_report')
             keys.pop('pull_report')
             keys.pop('sync_reports')
@@ -92,6 +94,16 @@ class LocalResearchRPC:
         elif action == 'create':
             value = {'research': self.store.create(profile_id=message['profile_id'], title=message['title'],
                      description=message['description'], operation_id=message['operation_id'])}
+        elif action == 'import_research':
+            from tools.cli.http import HttpClientError
+            from .local_server_research import import_server_research
+            try:
+                value = import_server_research(self.store, binding=self.binding, manager=self.manager,
+                    profile_id=message['profile_id'], research_id=message['research_id'])
+            except HttpClientError as exc:
+                if exc.status in {401, 403}:
+                    return {'success': False, 'code': 'local_report_publication_denied'}
+                raise
         elif action == 'create_report':
             value = {'report': self.store.create_report(profile_id=message['profile_id'], research_id=message['research_id'],
                      title=message['title'], operation_id=message['operation_id'])}

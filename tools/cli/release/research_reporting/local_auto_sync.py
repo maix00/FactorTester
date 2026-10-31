@@ -101,4 +101,8 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
         except (OSError, RuntimeError, ValueError):
             status = 'unavailable'
         results.append({'research_id': research_id, 'report_id': report_id, 'status': status})
-    return {'reports': results, 'next_report_id': rows[limit - 1]['report_id'] if len(rows) > limit else None}
+    from .local_server_research import retry_pending_server_research
+    researches = retry_pending_server_research(store, binding=binding, manager=manager,
+                                               profile_id=profile, limit=limit)
+    return {'reports': results, 'researches': researches,
+            'next_report_id': rows[limit - 1]['report_id'] if len(rows) > limit else None}
