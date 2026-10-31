@@ -43,16 +43,29 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
             if local_changed and remote_changed:
                 same_root = (head['generation'], head['root_ref']) == (authoring['generation'], authoring['root_ref'])
                 same_projection = False
+                local_projection = None
                 if same_root:
                     # The server validates each projection and authoring tree
                     # separately. Their root alone does not prove that both
                     # representations describe the same report.
                     from .authoring.tree_projection import project_snapshot
+                    from .public_research.object_uploads import detach_object_bytes, projection_hash
                     from .public_research.projection import build_upload_projection
                     with tree_lock(paths):
                         current = load_head(paths)
                         if (current['generation'], current['root_ref']) == (head['generation'], head['root_ref']):
-                            same_projection = build_upload_projection(project_snapshot(paths, current))['projection_hash'] == remote['projection_hash']
+                            local_projection, _uploads = detach_object_bytes(build_upload_projection(project_snapshot(paths, current)))
+                            same_projection = local_projection['projection_hash'] == remote['projection_hash']
+                    if not same_projection and local_projection is not None:
+                        # HEAD mtime is not part of the immutable report tree;
+                        # it can change after copying or a recovered pull. Check
+                        # the source-free projection with that one field aligned.
+                        complete = _remote(session, research_id, report_id)
+                        projected = complete.get('projection')
+                        if (complete.get('publication') == remote and complete.get('authoring') == authoring
+                                and isinstance(projected, dict) and 'updated_at' in projected):
+                            local_projection['updated_at'] = projected['updated_at']
+                            same_projection = projection_hash(local_projection) == remote['projection_hash']
                 if not same_root or not same_projection:
                     status = 'conflict'
                 else:

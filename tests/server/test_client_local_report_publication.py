@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -74,6 +75,19 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         create = {'action': 'create_report', 'profile_id': 'self', 'research_id': research['research_id']}
         selected = rpc.request({**create, 'title': 'Selected', 'operation_id': 'one'})['report']
         private = rpc.request({**create, 'title': 'Private', 'operation_id': 'two'})['report']
+        # A real asset exercises the difference between the editable projection
+        # and the source-free projection stored by the Manager.
+        from tools.cli.release.research_reporting.authoring.tree_model import add_asset
+        from tools.cli.release.research_reporting.git import commit_report_workspace
+        _selected, selected_root = rpc.store._report_root('self', research['research_id'], selected['report_id'])
+        raw_asset = b'research-figure-fixture'
+        asset_hash = hashlib.sha256(raw_asset).hexdigest()
+        (selected_root / 'branches' / 'main' / 'assets').mkdir(exist_ok=True)
+        (selected_root / 'branches' / 'main' / 'assets' / 'figure.png').write_bytes(raw_asset)
+        add_asset(package_root=selected_root, branch_id='main', asset={
+            'asset_ref': 'report-asset:sha256:' + asset_hash, 'media_type': 'image/png', 'filename': 'figure.png',
+            'caption': 'Figure', 'alt_text': '', 'content_hash': asset_hash, 'local_ref': 'branches/main/assets/figure.png'})
+        commit_report_workspace(selected_root, message='Add report figure')
         request = {'action': 'publish_report', 'profile_id': 'self', 'research_id': research['research_id'], 'report_id': selected['report_id']}
         assert not store.docs
         rpc.binding['identity_id'] = 'different-identity'
@@ -116,7 +130,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         auth['share'] = True
         assert rpc.request(auto)['reports'][0]['status'] == 'published'
         second = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main', metadata_only=True)['publication']
-        assert second['generation'] == 1 and second['revision'] != published['revision']
+        assert second['generation'] == head['generation'] + 1 and second['revision'] != published['revision']
         # Simulate a process exit after the server accepted the new report but
         # before the local publication receipt was persisted.
         with rpc.store._connect() as db:
@@ -124,6 +138,10 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                           WHERE report_id=? AND manager_hash=?''',
                        (previous_receipt['revision'], previous_receipt['generation'], previous_receipt['projection_hash'],
                         previous_receipt['local_root_ref'], selected['report_id'], previous_receipt['manager_hash']))
+        from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
+        _item, local_root = rpc.store._report_root('self', research['research_id'], selected['report_id'])
+        head_file = report_tree_paths(local_root, 'main')['head']
+        os.utime(head_file, (head_file.stat().st_atime, head_file.stat().st_mtime + 100))
         posts_before, downloads_before = transport['posts'], transport['downloads']
         assert rpc.request(auto)['reports'][0]['status'] == 'unchanged'
         assert transport['posts'] == posts_before and transport['downloads'] == downloads_before
@@ -135,7 +153,8 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         shutil.copytree(tmp_path / 'client', tmp_path / 'client-2')
         other = LocalResearchRPC(tmp_path / 'client-2', issuer=SESSION['keycloak_issuer'], identity_id=SESSION['tr_identity_id'],
                                  profiles=[{'profile_id': 'self', 'display_name': 'Alice'}], manager=manager)
-        remote = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')['projection']
+        _report, root = other.store._report_root('self', research['research_id'], selected['report_id'])
+        remote = build_upload_projection(load_snapshot(package_root=root, branch_id='main'))
         with pytest.raises(ResearchPublicationConflict):
             service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
                 branch_ref='main', projection=remote, expected_revision=second['revision'])

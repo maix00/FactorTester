@@ -44,7 +44,8 @@ def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = 
         raise ValueError('remote report snapshot is invalid or not editable')
     from .authoring.tree_schema import node_reference
     node_reference(bundle['root_ref'])
-    return {'publication': record, 'authoring': bundle}
+    return {'publication': record, 'authoring': bundle,
+            **({'projection': projection} if not metadata_only else {})}
 
 
 def _copy_files(source: Path, destination: Path, created: list[Path]) -> None:
