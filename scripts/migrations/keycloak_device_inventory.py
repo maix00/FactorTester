@@ -42,6 +42,27 @@ def read_postgres_snapshot(connection, *, manager_id: str, principal: str) -> di
             'legacy_columns_present': optional}
 
 
+def read_keycloak_directory(principal: str) -> dict:
+    """Resolve one legacy principal through the Manager's Keycloak admin adapter."""
+    if not isinstance(principal, str) or not principal.strip() or len(principal) > 256:
+        raise ValueError('a scoped principal is required')
+    from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+    from server.identity.keycloak_research import resolve_keycloak_research_member
+    try:
+        identity = resolve_keycloak_research_member(principal)
+    except LookupError:
+        # Missing or ambiguous identities are never turned into new grants.
+        return {'accounts': []}
+    user = manager_keycloak_admin_adapter().user_by_identity_id(identity['identity_id'])
+    attributes = user.get('attributes') if isinstance(user, dict) else None
+    if (not isinstance(user, dict) or user.get('id') != identity['subject']
+            or type(user.get('enabled')) is not bool or not isinstance(attributes, dict)
+            or attributes.get('tr_identity_id') != [identity['identity_id']]):
+        raise ValueError('Keycloak device owner changed during inventory')
+    return {'accounts': [{'username': principal, 'tr_identity_id': identity['identity_id'],
+                          'keycloak_subject': identity['subject'], 'active': user['enabled']}]}
+
+
 def plan(snapshot: dict, directory: dict, *, manager_id: str) -> dict:
     if not isinstance(snapshot, dict) or not isinstance(directory, dict):
         raise ValueError('device snapshot and Keycloak directory must be objects')
@@ -121,10 +142,15 @@ def main() -> None:
     source.add_argument('--snapshot')
     source.add_argument('--postgres', action='store_true', help='read the configured control database without initializing it')
     parser.add_argument('--principal', help='required single principal when reading PostgreSQL')
-    parser.add_argument('--reviewed-directory', required=True)
+    directory = parser.add_mutually_exclusive_group(required=True)
+    directory.add_argument('--reviewed-directory')
+    directory.add_argument('--keycloak-live', action='store_true',
+                           help='resolve the scoped owner using the configured Keycloak admin adapter')
     parser.add_argument('--manager-id', required=True)
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
+    if args.keycloak_live and not args.postgres:
+        parser.error('--keycloak-live requires a scoped --postgres inventory')
     if args.postgres:
         if not args.principal:
             parser.error('--postgres requires --principal')
@@ -139,7 +165,9 @@ def main() -> None:
             connection.close()
     else:
         snapshot = json.loads(Path(args.snapshot).read_text())
-    result = plan(snapshot, json.loads(Path(args.reviewed_directory).read_text()), manager_id=args.manager_id)
+    accounts = (read_keycloak_directory(args.principal) if args.keycloak_live else
+                json.loads(Path(args.reviewed_directory).read_text()))
+    result = plan(snapshot, accounts, manager_id=args.manager_id)
     fd = os.open(Path(args.output).expanduser(), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as output:
         json.dump(result, output, ensure_ascii=False, sort_keys=True)

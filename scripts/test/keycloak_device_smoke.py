@@ -9,6 +9,8 @@ from urllib.parse import urlencode
 
 from scripts.test.keycloak_cross_realm_smoke import Sandbox
 from server.identity import keycloak_authorization, keycloak_device
+from server.identity.keycloak import KeycloakAdminAdapter
+from scripts.migrations.keycloak_device_inventory import read_keycloak_directory
 
 
 def run(sandbox: Sandbox) -> dict[str, str]:
@@ -18,6 +20,11 @@ def run(sandbox: Sandbox) -> dict[str, str]:
     sandbox.request("POST", "/admin/realms", token=sandbox.admin, body={
         "realm": realm, "enabled": True, "sslRequired": "none", "registrationAllowed": False,
     })
+    profile = sandbox.api("GET", realm, "users/profile")
+    profile["attributes"].append({"name": "tr_identity_id", "displayName": "Stable identity",
+                                  "permissions": {"view": ["admin"], "edit": ["admin"]}})
+    profile["unmanagedAttributePolicy"] = "ADMIN_EDIT"
+    sandbox.api("PUT", realm, "users/profile", profile)
     sandbox.api("POST", realm, "clients", {
         "clientId": "tr-resource-server", "enabled": True, "protocol": "openid-connect",
         "publicClient": False, "secret": secret, "serviceAccountsEnabled": True,
@@ -28,6 +35,7 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         sandbox.api("POST", realm, "users", {
             "username": username, "enabled": True, "emailVerified": True,
             "firstName": "Temporary", "lastName": "User", "email": username + "@example.invalid",
+            "attributes": {"tr_identity_id": ["stable-" + username]},
             "credentials": [{"type": "password", "value": password, "temporary": False}],
         })
         users[username] = sandbox.find(realm, "users?" + urlencode({"username": username, "exact": "true"}),
@@ -40,9 +48,8 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         })
         return result["access_token"]
 
-    class Admin:
-        def _get(self, path):
-            return sandbox.api("GET", realm, path)
+    admin = KeycloakAdminAdapter(sandbox.base, realm)
+    admin._token = lambda: sandbox.admin  # ephemeral realm test credential
 
     settings = {"issuer": issuer, "base_url": sandbox.base, "backchannel_base_url": sandbox.base,
                 "realm": realm, "authz_client_id": "tr-resource-server", "authz_client_secret": secret}
@@ -57,7 +64,11 @@ def run(sandbox: Sandbox) -> dict[str, str]:
     args = {"server_id": "manager-1", "device_id": device_id, "public_key": key}
     with patch.object(keycloak_device, "oidc_settings", return_value=settings), \
          patch.object(keycloak_authorization, "oidc_settings", return_value=settings), \
-         patch("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", return_value=Admin()):
+         patch("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", return_value=admin):
+        directory = read_keycloak_directory('owner')
+        assert directory['accounts'] == [{'username': 'owner', 'tr_identity_id': 'stable-owner',
+                                           'keycloak_subject': users['owner']['id'], 'active': True}]
+        assert read_keycloak_directory('missing') == {'accounts': []}
         keycloak_device.register_device(session=owner, **args)
         assert keycloak_device.may_use_device(token=owner_token, session=owner, **args)
         assert not keycloak_device.may_use_device(token=other_token, session=other, **args)
@@ -65,7 +76,7 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         assert keycloak_device.revoke_device(session=owner, **args)
         assert not keycloak_device.may_use_device(token=owner_token, session=owner, **args)
         assert not keycloak_device.revoke_device(session=owner, **args)
-    return {"owner": "allowed", "other_user": "denied", "other_key": "denied",
+    return {"owner": "allowed", "other_user": "denied", "other_key": "denied", "live_inventory": "verified",
             "same_token_after_revoke": "denied"}
 
 

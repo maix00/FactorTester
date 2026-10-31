@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from scripts.migrations.keycloak_device_inventory import plan, read_postgres_snapshot
+from scripts.migrations.keycloak_device_inventory import plan, read_keycloak_directory, read_postgres_snapshot
 
 KEY = {'kty': 'EC', 'crv': 'P-256', 'x': 'A' * 43, 'y': 'A' * 43}
 ACCOUNT = {'username': 'alice', 'tr_identity_id': 'stable', 'keycloak_subject': 'subject', 'active': True}
@@ -77,3 +77,25 @@ def test_postgres_inventory_is_read_only_scoped_and_pages_without_loss():
     assert len({row['device_id'] for row in snapshot['devices']}) == 1002
     assert connection.calls[0][0] == 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY'
     assert len([call for call in connection.calls if 'FROM control_devices' in call[0]]) == 3
+
+
+def test_live_keycloak_directory_rechecks_exact_subject_and_disabled_state(monkeypatch):
+    from server.identity import federation_identity_sync, keycloak_research
+    class Adapter:
+        def user_by_identity_id(self, stable):
+            assert stable == 'stable'
+            return {'id': 'subject', 'enabled': False, 'attributes': {'tr_identity_id': ['stable']}}
+    monkeypatch.setattr(keycloak_research, 'resolve_keycloak_research_member',
+                        lambda name: {'identity_id': 'stable', 'subject': 'subject'})
+    monkeypatch.setattr(federation_identity_sync, 'manager_keycloak_admin_adapter', lambda: Adapter())
+    assert read_keycloak_directory('alice') == {'accounts': [{**ACCOUNT, 'active': False}]}
+    monkeypatch.setattr(keycloak_research, 'resolve_keycloak_research_member',
+                        lambda name: (_ for _ in ()).throw(LookupError('ambiguous')))
+    assert read_keycloak_directory('alice') == {'accounts': []}
+
+
+def test_live_keycloak_directory_does_not_treat_outage_as_missing(monkeypatch):
+    from server.identity import keycloak_research
+    monkeypatch.setattr(keycloak_research, 'resolve_keycloak_research_member',
+                        lambda name: (_ for _ in ()).throw(ConnectionError('offline')))
+    with pytest.raises(ConnectionError): read_keycloak_directory('alice')
