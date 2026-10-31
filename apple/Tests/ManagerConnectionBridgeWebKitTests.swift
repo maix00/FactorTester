@@ -106,6 +106,40 @@ server.serve_forever()
         content.removeScriptMessageHandler(forName: ManagerConnectionBridgeContract.messageName)
     }
 
+    func testSwitchIsCancelledIfSessionIsReverifiedDuringProbe() async throws {
+        let value: [String: Any] = ["username": "alice", "keycloak_issuer": "https://identity.test/realm",
+                                    "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
+        let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
+        let api = ManagerBridgeTestAPI(user: user)
+        let session = SessionStore(api: api, managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
+        let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
+        var applied: URL?
+        var resumeProbe: CheckedContinuation<ManagerConnectionBridge.ProbeResult, Never>?
+        let probing = expectation(description: "target probe is pending")
+        let content = WKUserContentController()
+        content.addScriptMessageHandler(ManagerConnectionBridge(session: session, endpoint: endpoint, probe: { _, _, _ in
+            await withCheckedContinuation { continuation in
+                resumeProbe = continuation
+                probing.fulfill()
+            }
+        }, apply: { applied = $0 }), contentWorld: .page, name: ManagerConnectionBridgeContract.messageName)
+        let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent(); config.userContentController = content
+        let view = WKWebView(frame: .zero, configuration: config); view.navigationDelegate = self
+        loaded = expectation(description: "Manager test page")
+        view.loadHTMLString("<html><body>Manager</body></html>", baseURL: endpoint)
+        await fulfillment(of: [try XCTUnwrap(loaded)], timeout: 10)
+        _ = try await message(view, ["action": "capabilities"])
+        let pending = Task { try await self.message(view, ["action": "switch", "url": "https://test-manager.invalid:54321"]) }
+        await fulfillment(of: [probing], timeout: 10)
+        api.user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: ["username": "visitor", "visitor_login": true]))
+        _ = try await message(view, ["action": "capabilities"])
+        try XCTUnwrap(resumeProbe).resume(returning: .authorized(user))
+        let result = try await pending.value
+        XCTAssertEqual(result["code"] as? String, "manager_session_changed")
+        XCTAssertNil(applied)
+        content.removeScriptMessageHandler(forName: ManagerConnectionBridgeContract.messageName)
+    }
+
     private func message(_ view: WKWebView, _ input: [String: Any]) async throws -> [String: Any] {
         let result = try await view.callAsyncJavaScript("return await window.webkit.messageHandlers.tradeResearchManager.postMessage(input)",
                                                        arguments: ["input": input], in: nil, contentWorld: .page)

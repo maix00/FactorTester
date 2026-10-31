@@ -108,6 +108,7 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         switching = true
         let expected = verifiedIdentity
+        let generation = verificationGeneration
         let username = session.user?.username
         let webView = message.webView
         Task { @MainActor [weak self] in
@@ -122,7 +123,8 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
                 result = await self.targetSession(target, expected: expected, username: username)
             }
             guard ManagerConfig.shared.baseURL == self.endpoint,
-                  session.user?.localResearchIdentity == expected else {
+                  session.user?.localResearchIdentity == expected,
+                  self.verifiedIdentity == expected, self.verificationGeneration == generation else {
                 replyHandler(["success": false, "code": "manager_session_changed"], nil)
                 return
             }
@@ -139,6 +141,7 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             case .unavailable: return
             }
             guard ManagerConfig.shared.baseURL == self.endpoint,
+                  self.verifiedIdentity == expected, self.verificationGeneration == generation,
                   session.adoptManagerSession(expected: expected, candidate: candidate) else {
                 replyHandler(["success": false, "code": "manager_session_changed"], nil)
                 return
