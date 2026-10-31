@@ -12,7 +12,7 @@ type Target = { researchId: string; reportId?: string };
 type Capabilities = { can_manage_grants: boolean; can_manage_links: boolean };
 type Grant = { identity_id: string; username: string; enabled: boolean; scopes: string[] };
 type ShareLink = { link_id: string; target_kind: string; report_id?: string; mode: string; expires_at?: number; revoked_at?: number; redeemed_by?: string; created_at?: number };
-type Status = { loading: boolean; error: string; unavailable: boolean; capabilities: Capabilities | null };
+type Status = { loading: boolean; error: string; unavailable: "" | "missing" | "migration"; capabilities: Capabilities | null };
 
 function targetParams(target: Target): URLSearchParams {
   return new URLSearchParams({target_kind:target.reportId ? "report" : "research", report_id:target.reportId || ""});
@@ -21,13 +21,13 @@ function targetParams(target: Target): URLSearchParams {
 /** All mutations use explicitly Keycloak-only endpoints; the capability response is only a UI hint. */
 export function ResearchSharing({ target }: { target: Target }): React.ReactElement {
   const { t } = useTranslation();
-  const [status, setStatus] = useState<Status>({loading:true,error:"",unavailable:false,capabilities:null});
+  const [status, setStatus] = useState<Status>({loading:true,error:"",unavailable:"",capabilities:null});
   const [retry, setRetry] = useState(0), [tab, setTab] = useState("grants");
   const base = `/api/research/${encodeURIComponent(target.researchId)}`;
   const params = targetParams(target).toString();
   useEffect(() => {
     const controller = new AbortController();
-    setStatus({loading:true,error:"",unavailable:false,capabilities:null});
+    setStatus({loading:true,error:"",unavailable:"",capabilities:null});
     void request(`${base}/keycloak-sharing-capabilities?${params}`, {signal:controller.signal,cache:"no-store"}).then(value => {
       if (controller.signal.aborted) return;
       const c = value.capabilities;
@@ -35,16 +35,16 @@ export function ResearchSharing({ target }: { target: Target }): React.ReactElem
           c.research_id !== target.researchId || c.report_id !== (target.reportId || "") ||
           c.target_kind !== (target.reportId ? "report" : "research") ||
           typeof c.can_manage_grants !== "boolean" || typeof c.can_manage_links !== "boolean") throw new Error(t("researchDetail.invalidResponse"));
-      setStatus({loading:false,error:"",unavailable:false,capabilities:c});
+      setStatus({loading:false,error:"",unavailable:"",capabilities:c});
       setTab(c.can_manage_grants ? "grants" : "links");
     }).catch(reason => {
-      if (!controller.signal.aborted) setStatus({loading:false,error:String(reason.message || reason),unavailable:reason.status === 404 || reason.code === "keycloak_sharing_unavailable",capabilities:null});
+      if (!controller.signal.aborted) setStatus({loading:false,error:String(reason.message || reason),unavailable:reason.status === 404 ? "missing" : reason.code === "keycloak_sharing_unavailable" ? "migration" : "",capabilities:null});
     });
     return () => controller.abort();
   }, [base, params, retry, t]);
   if (status.loading) return <Spin tip={t("loading")} />;
   if (status.error) return <Alert type={status.unavailable ? "info" : "error"} showIcon
-    message={t(status.unavailable ? "researchSharing.unavailable" : "researchSharing.capabilityError")}
+    message={t(status.unavailable === "missing" ? "researchSharing.targetUnavailable" : status.unavailable === "migration" ? "researchSharing.unavailable" : "researchSharing.capabilityError")}
     description={status.unavailable ? undefined : status.error} action={<Button onClick={() => setRetry(value => value + 1)}>{t("retry")}</Button>} />;
   const capabilities = status.capabilities;
   if (!capabilities?.can_manage_grants && !capabilities?.can_manage_links) return <Alert type="info" showIcon message={t("researchSharing.noAccess")} />;

@@ -12,6 +12,8 @@ export function ResearchShareRedeemer(): React.ReactElement | null {
   const [token,setToken]=useState(pendingResearchShare), [busy,setBusy]=useState(false);
   const mutation=useRef(false);
   if(!token || !session)return null;
+  const account = session.alias && session.username && session.alias !== session.username
+    ? `${session.alias} (${session.username})` : session.username || session.alias || "";
   const dismiss=():void=>{if(!mutation.current){clearResearchShare();setToken("");}};
   const redeem=async():Promise<void>=>{
     if(mutation.current)return;mutation.current=true;setBusy(true);
@@ -29,5 +31,5 @@ export function ResearchShareRedeemer(): React.ReactElement | null {
     <><Button disabled={busy} onClick={dismiss}>{t("configuration.cancel")}</Button>{session.visitor_login
       ? <Button type="primary" onClick={()=>openAuth("login")}>{t("researchSharing.signInToClaim")}</Button>
       : <Button type="primary" loading={busy} onClick={()=>void redeem()}>{t("researchSharing.claim")}</Button>}</>
-  }><p>{t("researchSharing.claimAs",{name:session.alias||session.username||""})}</p><Alert type="info" showIcon message={t("researchSharing.claimHint")} /></Modal>;
+  }><p>{t("researchSharing.claimAs",{name:account})}</p><Alert type="info" showIcon message={t("researchSharing.claimHint")} /></Modal>;
 }

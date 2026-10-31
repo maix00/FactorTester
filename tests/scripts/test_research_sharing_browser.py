@@ -91,6 +91,7 @@ createRoot(document.getElementById('root')!).render(<App />);
                         if (url.pathname === '/api/research/principals') return result({principals:[{principal_ref:'bob',label:'bob'}]});
                         if (url.pathname === '/api/research/r1/keycloak-sharing-capabilities') {
                           if (f.mode === 'legacy') return result({success:false,error:'migration required',code:'keycloak_sharing_unavailable'},409);
+                          if (f.mode === 'missing') return result({success:false,error:'not found'},404);
                           if (f.mode === 'denied') return result({success:true,capabilities:{schema:'tr-research-keycloak-target-sharing-v1',authority:'keycloak',research_id:'r1',target_kind:url.searchParams.get('target_kind'),report_id:url.searchParams.get('report_id'),can_manage_grants:false,can_manage_links:false}});
                           return result({success:true,capabilities:{schema:'tr-research-keycloak-target-sharing-v1',authority:'keycloak',research_id:'r1',target_kind:url.searchParams.get('target_kind'),report_id:url.searchParams.get('report_id'),can_manage_grants:true,can_manage_links:true}});
                         }
@@ -181,6 +182,9 @@ createRoot(document.getElementById('root')!).render(<App />);
                     assert not page.evaluate(
                         "window.fixture.requests.some(r => /\\/share-links(?:\\/|$)/.test(r.path) && !r.path.includes('keycloak-share-links'))"
                     )
+                    page.evaluate("window.fixture.mode='missing'")
+                    page.get_by_role("button", name="Report fixture").click()
+                    page.get_by_text("研究或报告不可用，或服务器尚不支持 Keycloak 权限设置。").wait_for()
                     # A claim token lives in a fragment, is removed from the address,
                     # survives a reload in this tab, and is not redeemed implicitly.
                     page.evaluate("window.fixture.mode='ok'")
@@ -192,7 +196,7 @@ createRoot(document.getElementById('root')!).render(<App />);
                       window.fetch=(input,options={})=>{const url=new URL(String(input),location.origin);const method=options.method||'GET';
                         const body=options.body?JSON.parse(options.body):null;f.requests.push({path:url.pathname,method,body});
                         const result=(data,status=200)=>Promise.resolve(new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}}));
-                        if(url.pathname==='/api/session')return result({session:{username:'alice'}});
+                        if(url.pathname==='/api/session')return result({session:{username:'alice',alias:'Alice Display'}});
                         if(url.pathname==='/api/public/entry')return result({});
                         if(url.pathname.endsWith('/keycloak-sharing-capabilities'))return result({success:false,code:'keycloak_sharing_unavailable'},409);
                         if(url.pathname==='/api/research/keycloak-share-links/redeem')return result({success:true,grant:{research_id:'r1',target_kind:'research'}});
@@ -201,6 +205,7 @@ createRoot(document.getElementById('root')!).render(<App />);
                     page.evaluate(claim_fixture)
                     page.add_script_tag(path=str(bundle))
                     page.get_by_role("dialog", name="领取研究分享").wait_for()
+                    assert page.get_by_text("当前账号：Alice Display (alice)").is_visible()
                     assert "research_share" not in page.url
                     assert not page.evaluate(
                         "window.fixture.requests.some(r => r.path.endsWith('/redeem'))"
