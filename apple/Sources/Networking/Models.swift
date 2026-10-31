@@ -1,5 +1,12 @@
 import Foundation
 
+/// Identity obtained from a verified Manager session, never from a web message.
+struct LocalResearchIdentity: Equatable {
+    let issuer: String
+    let subject: String
+    let stableID: String
+}
+
 /// 与 Manager `/api/session`、`/auth/login`、`/auth/register` 的 JSON 契约对应。
 struct UserInfo: Codable, Equatable {
     var username: String?
@@ -10,6 +17,11 @@ struct UserInfo: Codable, Equatable {
     var isAdmin: Bool
     var isDeveloper: Bool
     var keepLogin: Bool
+    var keycloakIssuer: String?
+    var keycloakSubject: String?
+    var stableIdentityID: String?
+    var visitorLogin: Bool
+    var authentication: String?
 
     init(
         username: String?, alias: String? = nil, role: String? = nil,
@@ -24,6 +36,11 @@ struct UserInfo: Codable, Equatable {
         self.isAdmin = isAdmin
         self.isDeveloper = isDeveloper
         self.keepLogin = keepLogin
+        self.keycloakIssuer = nil
+        self.keycloakSubject = nil
+        self.stableIdentityID = nil
+        self.visitorLogin = false
+        self.authentication = nil
     }
 
     enum CodingKeys: String, CodingKey {
@@ -33,6 +50,11 @@ struct UserInfo: Codable, Equatable {
         case isAdmin = "is_admin"
         case isDeveloper = "is_developer"
         case keepLogin = "keep_login"
+        case keycloakIssuer = "keycloak_issuer"
+        case keycloakSubject = "keycloak_subject"
+        case stableIdentityID = "tr_identity_id"
+        case visitorLogin = "visitor_login"
+        case authentication
     }
 
     init(from decoder: Decoder) throws {
@@ -45,9 +67,29 @@ struct UserInfo: Codable, Equatable {
         isAdmin = (try? c.decodeIfPresent(Bool.self, forKey: .isAdmin)) ?? false
         isDeveloper = (try? c.decodeIfPresent(Bool.self, forKey: .isDeveloper)) ?? false
         keepLogin = (try? c.decodeIfPresent(Bool.self, forKey: .keepLogin)) ?? false
+        keycloakIssuer = try c.decodeIfPresent(String.self, forKey: .keycloakIssuer)
+        keycloakSubject = try c.decodeIfPresent(String.self, forKey: .keycloakSubject)
+        stableIdentityID = try c.decodeIfPresent(String.self, forKey: .stableIdentityID)
+        visitorLogin = (try? c.decodeIfPresent(Bool.self, forKey: .visitorLogin)) ?? false
+        authentication = try c.decodeIfPresent(String.self, forKey: .authentication)
     }
 
     var isLoggedIn: Bool { (username?.isEmpty == false) }
+
+    /// Missing or capability-only sessions never gain access to local research.
+    var localResearchIdentity: LocalResearchIdentity? {
+        guard isLoggedIn, !visitorLogin, role != "visitor", authentication != "agent",
+              let issuer = keycloakIssuer?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let subject = keycloakSubject?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let stableID = stableIdentityID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let url = URLComponents(string: issuer),
+              ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              url.host != nil, url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil,
+              !subject.isEmpty, !stableID.isEmpty,
+              subject.utf8.count <= 255, stableID.utf8.count <= 128 else { return nil }
+        return LocalResearchIdentity(issuer: issuer, subject: subject, stableID: stableID)
+    }
 
     /// 是否可进入「用户与机构管理」（与前端 renderUserArea 的角色判断一致）。
     var canManageUsers: Bool {

@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class SessionStoreTests: XCTestCase {
+    func testLocalResearchIdentityRequiresVerifiedNonVisitorClaims() throws {
+        func decode(_ value: [String: Any]) throws -> UserInfo {
+            try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        let base: [String: Any] = ["username": "alice", "keycloak_issuer": "https://id.example/realms/one",
+                                   "keycloak_subject": "subject", "tr_identity_id": "stable"]
+        XCTAssertEqual(try decode(base).localResearchIdentity?.stableID, "stable")
+        for overrides: [String: Any] in [
+            ["visitor_login": true], ["role": "visitor"], ["authentication": "agent"],
+            ["tr_identity_id": ""], ["keycloak_subject": ""],
+            ["keycloak_issuer": "https://user:password@id.example/realm"],
+            ["keycloak_issuer": "file:///tmp/identity"],
+        ] {
+            XCTAssertNil(try decode(base.merging(overrides) { _, new in new }).localResearchIdentity)
+        }
+        XCTAssertNil(try decode(["username": "alice"]).localResearchIdentity)
+    }
+
     func testNilUsernameIsNotAnAuthenticatedIdentity() async throws {
         let api = FakeSessionAPI(user: try user(username: nil))
         let store = SessionStore(
