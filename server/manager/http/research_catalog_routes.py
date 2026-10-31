@@ -84,7 +84,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         viewer = str(session["username"])
         publication = re.fullmatch(
             r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication"
-            r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource)/([^/]+))?)?",
+            r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource|report_authoring)/([^/]+))?)?",
             parsed.path,
         )
         local_publication = re.fullmatch(

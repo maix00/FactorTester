@@ -1,6 +1,8 @@
 from io import BytesIO
 from types import SimpleNamespace
 
+import pytest
+
 from server.manager.http import research_catalog_routes as routes
 from server.manager.services import research_couchdb_publication as service_module
 from server.jobs.storage import couchdb_reports
@@ -64,6 +66,25 @@ def test_catalog_report_publication_keeps_verified_editable_source(tmp_path, mon
                           publication_ref=response['publication']['publication_id'], metadata_only=True,
                           requires_edit=True)
     assert result['authoring']['sha256'] == authoring['sha256'] and result['edit_authorized'] is True
+    class Handler(routes.ResearchCatalogRoutesMixin):
+        state = service.state
+        def __init__(self): self.wfile, self.status = BytesIO(), None
+        def _session(self): return SESSION
+        def _research_catalog_service(self): return catalog
+        def _research_couch_service(self, *, local=False): return service
+        def send_response(self, status): self.status = status
+        def send_header(self, *_args): pass
+        def end_headers(self): pass
+    path = ('/api/research/research-1/reports/report-1/couchdb-publication/'
+            + response['publication']['publication_id'] + '/attachments/report_authoring/' + authoring['sha256'])
+    handler = Handler()
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query=''))
+    assert handler.status == 200 and handler.wfile.getvalue() == bundle
+    _auth['write'] = False
+    with pytest.raises(PermissionError):
+        service.read(session=SESSION, research_id='research-1', report_id='report-1',
+                     publication_ref=response['publication']['publication_id'],
+                     attachment='report_authoring/' + authoring['sha256'])
     (status, _response), denied_store = _request(monkeypatch, body=body,
         change=lambda _catalog, auth: auth.update(write=False))
     assert status == 403 and denied_store.writes == 0

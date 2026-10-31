@@ -138,6 +138,36 @@ def exercise(*, couch, **case):
             assert read(read_target)[0] in {401, 403}
             manager.request(settings, pat, 'PUT', 'uma-policy/' + policy['id'], original)
 
+            # A catalog-owned report can now publish its actual editable tree,
+            # not just its read-only projection. Verify bytes through the real
+            # HTTP, Keycloak and CouchDB path after the policy is restored.
+            import base64
+            import hashlib
+            from tools.cli.release.research_reporting.workspace import initialize_report_workspace
+            from tools.cli.release.research_reporting.authoring.tree_model import add_component
+            from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
+            from tools.cli.release.research_reporting.authoring.tree_bundle import bundle_from_snapshot
+            from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+            workspace = initialize_report_workspace(workspace_root=root / 'authoring', report_workspace_id='smoke',
+                branch_id='main', report_id='report-1', workspace_id=ref, title='Editable', branch_ref='report-branch:main')
+            package = workspace['package_root']
+            for number in (1, 2):
+                add_component(package_root=package, branch_id='main', component_id=f'chapter-{number}',
+                    kind='chapter', title=f'Chapter {number}', parent_id=None, body='', content=None, display_kind='')
+            snapshot = load_snapshot(package_root=package, branch_id='main')
+            source = bundle_from_snapshot(snapshot, package_root=package, branch_id='main')
+            digest = hashlib.sha256(source).hexdigest()
+            status, editable = publish({'branch_ref': 'main', 'projection': build_upload_projection(snapshot),
+                'expected_revision': receipt['revision'], 'authoring': {'sha256': digest,
+                    'root_ref': snapshot['head']['root_ref'], 'content_base64': base64.b64encode(source).decode('ascii')}})
+            if status != 201:
+                raise AssertionError('real editable publication failed: ' + str(status) + ' ' + str(editable))
+            status, body = read(target + '?branch_ref=main&metadata_only=1&requires_edit=1')
+            metadata = json.loads(body)
+            assert status == 200 and metadata['edit_authorized'] is True and metadata['authoring']['sha256'] == digest
+            status, body = read(read_target + '/attachments/report_authoring/' + digest)
+            assert status == 200 and body == source, f'authoring download status={status}, bytes={len(body)}, expected={len(source)}'
+
             # A client-local report has no server-side Research or Profile.
             # Its first explicit publication registers exactly one report
             # resource and atomically writes its selected CouchDB projection.
@@ -212,6 +242,7 @@ def main():
         run(sandbox, on_ready=lambda **case: exercise(couch=couch, **case))
     print(json.dumps({'real_manager_http': True, 'real_keycloak': True, 'real_couchdb': True,
         'single_report_and_attachment': True, 'same_token_role_revocation': True,
+        'catalog_editable_source_roundtrip': True,
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
         'cross_manager_tested': False}, sort_keys=True))
