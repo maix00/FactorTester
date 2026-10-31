@@ -661,9 +661,12 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            let origin = message.frameInfo.securityOrigin
             if message.name == ClientWebAuthenticationMessage.handlerName,
-               let action = ClientWebAuthenticationMessage.action(
-                   from: message.body
+               let action = ClientWebAuthenticationMessage.authorizedAction(
+                   from: message.body, isMainFrame: message.frameInfo.isMainFrame,
+                   scheme: origin.protocol, host: origin.host, port: origin.port,
+                   endpoint: serverOrigin, currentEndpoint: ManagerConfig.shared.baseURL
                ) {
                 DispatchQueue.main.async { [weak self] in
                     self?.onAuthentication?(action)
