@@ -8,6 +8,8 @@ import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
 import { QuotaSummary } from "./quota-summary.tsx";
 import { ServerSummary } from "./server-summary.tsx";
+import { ManagerConnectionSettings } from "./manager-connection-settings.tsx";
+import "./manager-connection-settings.css";
 import { request } from "../configuration/api.ts";
 import { useAuth } from "../auth.tsx";
 
@@ -53,7 +55,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
       .catch(reason => {if(!controller.signal.aborted)setError(reason.message);});
     return ()=>controller.abort();
   }, [section,reload]);
- if(error)return <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/>;
+ if(error && section!=="server")return <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/>;
  return <>          {section === "language" ? (
             <div className="tr-settings-card">
               <div className="tr-settings-row">
@@ -69,9 +71,9 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
               </div>
             </div>
           ) : section === "server" ? (
-            <div className="tr-settings-card">
-              {serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
-            </div>
+            <><div className="tr-settings-card tr-manager-connection"><ManagerConnectionSettings /></div><div className="tr-settings-card tr-manager-server-summary">
+              {error ? <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/> : serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
+            </div></>
           ) : section === "profiles" ? <ProfileSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
               {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} onRefresh={() => setReload(value => value + 1)} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
