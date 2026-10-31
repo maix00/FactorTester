@@ -26,6 +26,8 @@ python -m scripts.migrations.keycloak_research_stage plan \
 
 计划从同一 SQLite 读事务生成原始授权摘要和对象清单；输出只包含汇总和计划摘要。逐项检查 `needs_repair`、对象数量、所有者、成员、显式授权、报告继承与链接状态。即使数量相同，也必须比对引用集合及每一身份的允许和拒绝结果。
 
+Profile 盘点可显式增加 `--include-postgres --postgres-settings <Manager 的 control-database.json>`；连接地址和密码只在进程内使用，不写入终端输出或回执。工具在独立只读、可重复读事务中按指定 principal 分批读取 `control_profiles` 与 `control_account_domain_entities` 的授权字段，并分别核对后者的 payload 与权限 envelope；不会读取会话正文。SQLite、缓存文件与 PostgreSQL 是不同快照，`postgres_checked=true` 不表示它们同一时点一致，更不是切换许可。客户端数据、稳定身份与动态层级仍需单独核对。
+
 ## 隔离演练与分批准备
 
 在临时 SQLite 副本和隔离 Keycloak realm 先执行，不触碰真实业务对象：

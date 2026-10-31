@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from scripts.migrations.keycloak_profile_inventory import build_inventory, main, read_cache, read_sqlite
+from scripts.migrations.keycloak_profile_inventory import build_inventory, main, read_cache, read_postgres, read_sqlite
 
 
 def _db(path):
@@ -118,3 +118,44 @@ def test_cli_output_is_private_and_prints_aggregate_only(tmp_path, monkeypatch, 
     assert json.loads(output.read_text())["principal_scope"] == ["alice"]
     with pytest.raises(FileExistsError):
         main()
+
+
+def test_postgres_inventory_uses_scoped_readonly_snapshot_and_keeps_envelope_conflicts():
+    from types import SimpleNamespace
+    columns = ["principal", "profile_id", "deleted", "origin_manager_id", "binding_profile_id",
+        "payload_type", "binding_type", "binding_owner", "owner_identity_id", "visibility", "profile_visibility", "authorized_users",
+        "conversation_sharing", "envelope_visibility", "envelope_authorized_users"]
+    record = ("alice", "work", False, "manager-a", "work", "object", "object", "alice", None,
+              "private", None, [], None, "authorized", ["bob"])
+    class Cursor:
+        description = [SimpleNamespace(name=name) for name in columns]
+        def __init__(self, rows): self.rows = list(rows)
+        def __enter__(self): return self
+        def __exit__(self, *_args): pass
+        def execute(self, query, params):
+            assert params == (["alice"], 100001)
+            assert "principal = ANY(%s)" in query and "SELECT *" not in query
+        def fetchmany(self, _limit):
+            rows, self.rows = self.rows, []
+            return rows
+    class Connection:
+        def __init__(self): self.commands = []
+        def transaction(self): return self
+        def __enter__(self): return self
+        def __exit__(self, *_args): pass
+        def execute(self, query):
+            self.commands.append(query)
+            return SimpleNamespace(fetchone=lambda: ("db", "127.0.0.1", 5432, "started", "snapshot"))
+        def cursor(self, *, name):
+            return Cursor([record] if name.endswith("1") else [])
+    connection = Connection()
+    rows, snapshot = read_postgres(connection, principals=["alice"])
+    assert connection.commands[0] == "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+    assert [row["source"] for row in rows] == ["postgres_account_payload", "postgres_account_acl"]
+    assert set(snapshot) == {"database_observation_sha256", "transaction_snapshot_sha256"}
+    inventory = build_inventory(rows, manager_id="manager-a", pending=set(), conflicts=set(),
+        sharing={}, referenced=set(), principals=["alice"], postgres_snapshot=snapshot)
+    assert inventory["postgres_checked"] is True and inventory["cross_source_atomic"] is False
+    assert "projection_authorization_conflict" in inventory["objects"][0]["reasons"]
+    assert "postgres_snapshot_not_verified" not in inventory["objects"][0]["reasons"]
+    assert "client_source_not_verified" in inventory["objects"][0]["reasons"]

@@ -3,7 +3,9 @@
 Output contains only authorization metadata, never conversation text or
 credentials. SQLite is read in one transaction; cache files have independent
 snapshots and are explicitly not asserted to be atomic with it. Client files
-and PostgreSQL are deliberately not claimed as inventoried by this tool.
+are deliberately not claimed as inventoried by this tool. PostgreSQL can be
+read in its own bounded repeatable-read snapshot when explicitly requested;
+that snapshot is never claimed to be atomic with SQLite, files or Keycloak.
 This is an inventory, not authorization or an instruction to delete data.
 """
 from __future__ import annotations
@@ -63,7 +65,8 @@ def _observation(*, source, principal, profile_id, profile, deleted=False,
     bound_owner = _text(binding.get("principal_ref"), optional=True)
     bound_profile = _text(profile.get("profile_id"), optional=True)
     visibility = str(profile.get("visibility") or profile.get("profile_visibility") or "private").strip().lower()
-    if visibility not in {"private", "authorized", "public"}:
+    if visibility not in {"private", "authorized", "public"} and not (
+            source == "postgres_account_acl" and visibility == "superiors"):
         raise ValueError("Profile visibility is invalid")
     sharing = profile.get("conversation_sharing")
     # SQLite json_extract returns booleans as integer 0/1. Anything else is
@@ -192,11 +195,111 @@ def read_sqlite(path: str | Path, *, principals) -> tuple[list[dict], set[tuple[
     return values, pending, conflicts, sharing, referenced
 
 
+def read_postgres(connection, *, principals) -> tuple[list[dict], dict]:
+    """Read scoped Profile authorization columns, never entire JSON payloads.
+
+    The supplied connection must not already have an open transaction. Both
+    PostgreSQL projection tables are read in one repeatable-read, read-only
+    transaction, with server-side cursors and an explicit row budget. The
+    caller must separately account for SQLite/cache/client concurrency.
+    """
+    selected = _principals(principals)
+    values: list[dict] = []
+    queries = (
+        ("postgres_profile", """SELECT principal,left(profile_id,1025) AS profile_id,FALSE AS deleted,'' AS origin_manager_id,
+            jsonb_typeof(payload) AS payload_type,jsonb_typeof(payload->'session_binding') AS binding_type,
+            left(payload->>'profile_id',1025) AS binding_profile_id,
+            left(payload->'session_binding'->>'principal_ref',1025) AS binding_owner,
+            left(payload->'session_binding'->>'principal_identity_id',1025) AS owner_identity_id,
+            left(payload->>'visibility',1025) AS visibility,left(payload->>'profile_visibility',1025) AS profile_visibility,
+            CASE WHEN octet_length(COALESCE((payload->'authorized_users')::text,''))<=1048576
+                 THEN payload->'authorized_users' ELSE '"invalid-oversized-list"'::jsonb END AS authorized_users,
+            CASE WHEN octet_length(COALESCE((payload->'conversation_sharing')::text,''))<=64
+                 THEN payload->'conversation_sharing' ELSE '"invalid-sharing"'::jsonb END AS conversation_sharing,
+            NULL AS envelope_visibility,NULL::jsonb AS envelope_authorized_users
+            FROM control_profiles WHERE principal = ANY(%s) ORDER BY principal,profile_id LIMIT %s"""),
+        ("postgres_account_payload", """SELECT principal,left(entity_id,1025) AS profile_id,deleted,
+            left(origin_manager_id,1025) AS origin_manager_id,
+            jsonb_typeof(payload) AS payload_type,jsonb_typeof(payload->'session_binding') AS binding_type,
+            left(payload->>'profile_id',1025) AS binding_profile_id,
+            left(payload->'session_binding'->>'principal_ref',1025) AS binding_owner,
+            left(payload->'session_binding'->>'principal_identity_id',1025) AS owner_identity_id,
+            left(payload->>'visibility',1025) AS visibility,left(payload->>'profile_visibility',1025) AS profile_visibility,
+            CASE WHEN octet_length(COALESCE((payload->'authorized_users')::text,''))<=1048576
+                 THEN payload->'authorized_users' ELSE '"invalid-oversized-list"'::jsonb END AS authorized_users,
+            CASE WHEN octet_length(COALESCE((payload->'conversation_sharing')::text,''))<=64
+                 THEN payload->'conversation_sharing' ELSE '"invalid-sharing"'::jsonb END AS conversation_sharing,
+            left(visibility,1025) AS envelope_visibility,
+            CASE WHEN octet_length(authorized_users::text)<=1048576 THEN authorized_users
+                 ELSE '"invalid-oversized-list"'::jsonb END AS envelope_authorized_users
+            FROM control_account_domain_entities WHERE entity_type='profile' AND principal = ANY(%s)
+            ORDER BY principal,entity_id LIMIT %s"""),
+    )
+    with connection.transaction():
+        connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        marker = connection.execute("""SELECT current_database(),COALESCE(inet_server_addr()::text,''),
+            COALESCE(inet_server_port(),0),pg_postmaster_start_time()::text,txid_current_snapshot()::text""").fetchone()
+        if not marker or len(marker) != 5:
+            raise RuntimeError("PostgreSQL snapshot identity is unavailable")
+        for index, (source, sql) in enumerate(queries):
+            count = 0
+            with connection.cursor(name=f"tr_profile_inventory_{index}") as cursor:
+                cursor.execute(sql, (selected, _MAX_ROWS + 1))
+                columns = [column.name for column in cursor.description]
+                while batch := cursor.fetchmany(_PAGE):
+                    count += len(batch)
+                    if count > _MAX_ROWS:
+                        raise ValueError("PostgreSQL Profile source exceeds its row budget")
+                    for record in batch:
+                        row = dict(zip(columns, record, strict=True))
+                        owner, ref = _text(row["principal"]), _text(row["profile_id"])
+                        if owner not in selected or type(row["deleted"]) is not bool:
+                            raise ValueError("PostgreSQL Profile scope or tombstone is invalid")
+                        if row["payload_type"] != "object" or row["binding_type"] not in (None, "object", "null"):
+                            raise ValueError("PostgreSQL Profile payload or binding is invalid")
+                        if row["authorized_users"] is not None and not isinstance(row["authorized_users"], list):
+                            raise ValueError("PostgreSQL Profile authorization list is invalid")
+                        if source == "postgres_account_payload" and (
+                                not isinstance(row["envelope_visibility"], str)
+                                or not isinstance(row["envelope_authorized_users"], list)):
+                            raise ValueError("PostgreSQL Profile authorization envelope is invalid")
+                        projected = {"profile_id": row["binding_profile_id"],
+                            "visibility": row["visibility"], "profile_visibility": row["profile_visibility"],
+                            "authorized_users": row["authorized_users"],
+                            "conversation_sharing": row["conversation_sharing"],
+                            "session_binding": {"principal_ref": row["binding_owner"],
+                                                "principal_identity_id": row["owner_identity_id"]}}
+                        values.append(_observation(source=source, principal=owner, profile_id=ref,
+                            profile=projected, deleted=row["deleted"], origin_manager_id=row["origin_manager_id"]))
+                        if source == "postgres_account_payload":
+                            # The account-domain envelope independently affects
+                            # replication visibility. Preserve it separately so
+                            # divergence from the payload cannot be hidden.
+                            envelope = {**projected, "visibility": row["envelope_visibility"],
+                                        "profile_visibility": None,
+                                        "authorized_users": row["envelope_authorized_users"]}
+                            values.append(_observation(source="postgres_account_acl", principal=owner,
+                                profile_id=ref, profile=envelope, deleted=row["deleted"],
+                                origin_manager_id=row["origin_manager_id"]))
+                        if len(values) > _MAX_ROWS:
+                            raise ValueError("PostgreSQL Profile observations exceed their row budget")
+        snapshot = {"database_observation_sha256": hashlib.sha256(json.dumps(
+            list(marker[:4]), ensure_ascii=False, separators=(",", ":")).encode()).hexdigest(),
+            "transaction_snapshot_sha256": hashlib.sha256(str(marker[4]).encode()).hexdigest()}
+    return values, snapshot
+
+
 def build_inventory(observations: list[dict], *, manager_id: str,
                     pending: set[tuple[str, str]], conflicts: set[tuple[str, str]],
                     sharing: dict[tuple[str, str], bool], referenced: set[tuple[str, str]],
-                    principals) -> dict:
+                    principals, postgres_snapshot: dict | None = None) -> dict:
     manager = _text(manager_id)
+    if postgres_snapshot is not None and (not isinstance(postgres_snapshot, dict)
+            or set(postgres_snapshot) != {"database_observation_sha256", "transaction_snapshot_sha256"}
+            or any(not isinstance(value, str) or len(value) != 64
+                   or any(char not in "0123456789abcdef" for char in value)
+                   for value in postgres_snapshot.values())):
+        raise ValueError("PostgreSQL snapshot receipt is invalid")
     selected = _principals(principals)
     if len(observations) > _MAX_ROWS:
         raise ValueError("Profile observation count exceeds its budget")
@@ -233,11 +336,17 @@ def build_inventory(observations: list[dict], *, manager_id: str,
                 reasons.add("source_manager_unverified")
             if row["visibility"] in {"public", "authorized"}:
                 reasons.add("local_remote_conversation_policy_differs")
-        semantics = {(row["visibility"], tuple(row["authorized_users"]), row["owner_identity_id"])
+        semantics = {(row["visibility"], tuple(row["authorized_users"]), row["owner_identity_id"],
+                      row["conversation_sharing"])
                      for row in rows if not row["deleted"]}
         if len(semantics) > 1:
             reasons.add("projection_authorization_conflict")
-        reasons.add("postgres_snapshot_not_verified")
+        if postgres_snapshot is None:
+            reasons.add("postgres_snapshot_not_verified")
+        elif not any(row["source"] in {"postgres_profile", "postgres_account_payload"} for row in rows):
+            reasons.add("postgres_profile_missing")
+        elif any(row["source"] == "postgres_account_acl" and row["visibility"] == "superiors" for row in rows):
+            reasons.add("postgres_superior_policy_not_verified")
         reasons.add("client_source_not_verified")
         # A reviewed account snapshot provides an inventory scope only; it is
         # not proof that current Keycloak subjects still have that identity.
@@ -249,12 +358,14 @@ def build_inventory(observations: list[dict], *, manager_id: str,
                         "reasons": sorted(reasons), "legacy_share_to_parent": sharing.get((owner, profile_id)),
                         "observations": sorted(rows, key=lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True))})
     canonical = {"schema": "tr-profile-authorization-inventory-v1", "manager_id": manager, "principal_scope": selected,
-                 "objects": objects, "postgres_checked": False,
+                 "objects": objects, "postgres_checked": postgres_snapshot is not None,
+                 "postgres_snapshot": postgres_snapshot,
                  "client_checked": False, "cross_source_atomic": False}
     canonical["sha256"] = hashlib.sha256(json.dumps(canonical, ensure_ascii=False, sort_keys=True,
         separators=(",", ":")).encode("utf-8")).hexdigest()
     canonical["summary"] = {"principals": len(selected), "profiles": len(objects), "observations": len(observations),
         "by_source": dict(sorted(Counter(row["source"] for row in observations).items())),
+        "postgres_checked": postgres_snapshot is not None, "cross_source_atomic": False,
         "needs_repair": sum(item["state"] == "needs_repair" for item in objects),
         "reasons": dict(sorted(Counter(reason for item in objects for reason in item["reasons"]).items())),
         "cutover_ready": False}
@@ -272,6 +383,9 @@ def main():
                        help="exact account owner to inventory; repeat for each approved principal")
     scope.add_argument("--reviewed-directory", help="protected reviewed account snapshot used only to select principals")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--include-postgres", action="store_true",
+                        help="read a separate read-only snapshot using the Manager's configured database URL")
+    parser.add_argument("--postgres-settings", help="Manager control-database.json path; no connection string is printed")
     args = parser.parse_args()
     selected = args.principal
     if args.reviewed_directory:
@@ -286,8 +400,25 @@ def main():
     cached, cache_pending = read_cache(args.cache_root, principals=selected)
     rows.extend(cached)
     pending.update(cache_pending)
+    postgres_snapshot = None
+    if args.include_postgres:
+        import psycopg
+        url = (os.environ.get("TRADERESEARCH_CONTROL_DATABASE_URL", "") or
+               os.environ.get("FACTORTESTER_CONTROL_DATABASE_URL", "")).strip()
+        if not url and args.postgres_settings:
+            value = _read_file(Path(args.postgres_settings).expanduser()).get("url")
+            url = value.strip() if isinstance(value, str) else ""
+        if not url:
+            raise RuntimeError("Manager PostgreSQL connection is not configured")
+        try:
+            with psycopg.connect(url, connect_timeout=5) as connection:
+                postgres_rows, postgres_snapshot = read_postgres(connection, principals=selected)
+            rows.extend(postgres_rows)
+        except (psycopg.Error, OSError):
+            raise RuntimeError("PostgreSQL Profile inventory is unavailable") from None
     value = build_inventory(rows, manager_id=args.manager_id, pending=pending, conflicts=conflicts,
-                            sharing=sharing, referenced=referenced, principals=selected)
+                            sharing=sharing, referenced=referenced, principals=selected,
+                            postgres_snapshot=postgres_snapshot)
     value["observed_from_utc"] = started_at
     value["observed_until_utc"] = datetime.now(timezone.utc).isoformat()
     fd = os.open(Path(args.output).expanduser(), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
