@@ -14,6 +14,7 @@ import { ObjectReference } from "../components/object-reference.tsx";
 import { ResearchCreate } from "../components/research-create.tsx";
 import { useAuth } from "../auth.tsx";
 import { usePageInstance } from "../page-instance.ts";
+import { hasDesktopClientBridge } from "../desktop-client.ts";
 import { assistantResearchContexts } from "../assistant-research-context.ts";
 import { researchAuthority } from "../research-authority.ts";
 import { ReportEditor } from "../components/report-editor.tsx";
@@ -29,6 +30,7 @@ export function ResearchPage(): React.ReactElement {
   const { t } = useTranslation();
   const { session, openAuth } = useAuth();
   const instance = usePageInstance();
+  const desktopClient = !instance.mobile && typeof window !== "undefined" && hasDesktopClientBridge(window);
   const compact = useCompactLayout();
   const [creating, setCreating] = useState(false);
   const [authority, setAuthority] = useState<"legacy"|"keycloak"|null>(null);
@@ -90,7 +92,7 @@ export function ResearchPage(): React.ReactElement {
   const mobileMeta = (label:string, value:React.ReactNode):React.ReactElement => <span className="tr-research-mobile-reference"><span>{label}</span><span>{value}</span></span>;
   return <div className="tr-research-page" onPointerDownCapture={() => assistantResearchContexts.activate(instance.id)} onFocusCapture={() => assistantResearchContexts.activate(instance.id)}><FunctionPage title={t("nav.research")} actions={<>{tab === "researches" ? <Button type="primary" onClick={() => session ? setCreating(true) : openAuth("login")}>{t("research.createServer")}</Button> : null}<Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} /></>}>
     <Tabs activeKey={tab} onChange={(value) => { setTab(value); setRows([]); setPage(1); setSelected(null); setSelectedPublicationID(""); setEditor(false); }} items={[{ key: "researches", label: t("research.tabResearches") }, { key: "reports", label: t("research.tabReports") }]} />
-    <p className="tr-research-origin">{t("research.serverListPending")}</p>
+    <p className="tr-research-origin">{t(desktopClient ? "research.serverListPending" : "research.serverList")}</p>
     <div className="tr-library-filters"><Select aria-label={t("research.scope")} value={scope} onChange={value => {setScope(value);setRows([]);setPage(1);}} options={["all","mine","subordinates","shared"].map(value => ({value,label:t(`research.scopes.${value}`)}))} /><Input.Search allowClear aria-label={t("library.search")} placeholder={t("library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} /></div>
     <div className="tr-research-table"><TRDataTable rows={filtered.slice((page - 1) * size, page * size)} rowKey={(row) => rowID(row)} loading={loading} error={error} pagination={{ page, pageSize: size, total: filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
       { title: t("editor.name"), key: "title", render: (_, row) => <div><button className="tr-table-link" onClick={() => { setSelected(row); setSelectedPublicationID(tab === "reports" ? selectReportBranch(row)?.publication_id || "" : ""); setEditor(false); }}>{row.title || rowID(row)}</button>{compact ? <div className="tr-research-mobile-meta">{row.owner_ref || row.owner ? mobileMeta(t("library.owner"),owner(row)) : null}{tab === "reports" && (row.profile_ref || row.profile_id || row.selected_branch?.profile_ref) ? mobileMeta(t("research.profile"),profile(row)) : null}{tab === "reports" && linkedResearchID(row) ? mobileMeta(t("research.linkedResearch"),researchLink(row)) : null}{authority === "legacy" && row.visibility ? mobileMeta(t("library.visibility"),t(`research.visibility.${row.visibility}`, { defaultValue: row.visibility })) : null}{row.updated_at ? mobileMeta(t("jobs.updated"),formatDate(row.updated_at, { dateStyle: "medium", timeStyle: "short" })) : null}</div> : null}</div> },

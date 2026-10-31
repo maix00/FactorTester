@@ -347,7 +347,7 @@ def run(sandbox, bundle, stylesheet):
                     creator = load(owner_ctx, create=True)
                     creator.get_by_text("新研究默认仅自己可见", exact=False).wait_for()
                     assert creator.get_by_text(
-                        "当前入口在服务器创建研究", exact=False
+                        "此入口在服务器创建研究", exact=False
                     ).is_visible()
                     creator.get_by_role("textbox", name="名称").fill(
                         "Temporary private research"

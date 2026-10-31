@@ -3,6 +3,8 @@ import { Alert, Button, Form, Input, Select, Space } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { researchAuthority } from "../research-authority.ts";
+import { usePageInstance } from "../page-instance.ts";
+import { hasDesktopClientBridge } from "../desktop-client.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { ObjectReference } from "./object-reference.tsx";
 import { notify } from "../notifications/core.ts";
@@ -11,6 +13,8 @@ import "./research-sharing.css";
 type Row = Record<string, any>;
 export function ResearchCreate({ onClose, onCreated }: { onClose: () => void; onCreated: (value: Row) => void }): React.ReactElement {
   const { t } = useTranslation();
+  const instance = usePageInstance();
+  const desktopClient = !instance.mobile && typeof window !== "undefined" && hasDesktopClientBridge(window);
   const [form] = Form.useForm();
   const visibility = Form.useWatch("visibility", form) || "private";
   const profileRef = Form.useWatch("profile_ref", form);
@@ -58,7 +62,7 @@ export function ResearchCreate({ onClose, onCreated }: { onClose: () => void; on
     finally { saving.current = false; if (!controller.signal.aborted) setBusy(false); }
   };
   return <DetailsPanel title={t("research.createServer")} onClose={onClose} width={600}>
-    <Alert type="info" showIcon message={t("research.serverCreatePending")} />
+    <Alert type="info" showIcon message={t(desktopClient ? "research.serverCreatePending" : "research.serverCreateHint")} />
     {lookupError ? <Alert type="error" showIcon message={lookupError} action={<Button onClick={() => setRetry(value => value + 1)}>{t("retry")}</Button>} /> : null}
     {principalError && authority === "legacy" && visibility === "authorized" ? <Alert type="error" showIcon message={principalError} action={<Button onClick={() => setRetry(value => value + 1)}>{t("retry")}</Button>} /> : null}
     <Form form={form} layout="vertical" initialValues={{ visibility: "private", authorized_users: [] }} disabled={busy} onFinish={save}>
