@@ -10,7 +10,7 @@ from .local_publication import ensure_publication_table, manager_session, publis
 from .local_pull import LocalReportSyncConflict, _remote, pull_local_report
 
 _PUBLICATION_PAGE = '''SELECT report.report_id, report.research_id, publication.publication_id, publication.revision,
-                   publication.generation, publication.local_root_ref,
+                   publication.generation, publication.local_root_ref, publication.source_kind,
                    EXISTS(SELECT 1 FROM report_pull_recovery AS recovery
                           WHERE recovery.report_id=publication.report_id AND recovery.manager_hash=publication.manager_hash) AS pending_pull
             FROM report_publications AS publication JOIN reports AS report ON report.report_id=publication.report_id
@@ -36,7 +36,7 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
             paths = report_tree_paths(root, 'main')
             with tree_lock(paths):
                 head = load_head(paths)
-            snapshot = _remote(session, research_id, report_id, metadata_only=True)
+            snapshot = _remote(session, research_id, report_id, metadata_only=True, source_kind=row['source_kind'])
             remote, authoring = snapshot['publication'], snapshot['authoring']
             if remote['publication_id'] != row['publication_id']:
                 raise LocalReportSyncConflict('remote publication identity changed')
@@ -68,7 +68,7 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                         # HEAD mtime is not part of the immutable report tree;
                         # it can change after copying or a recovered pull. Check
                         # the source-free projection with that one field aligned.
-                        complete = _remote(session, research_id, report_id)
+                        complete = _remote(session, research_id, report_id, source_kind=row['source_kind'])
                         projected = complete.get('projection')
                         if (complete.get('publication') == remote and complete.get('authoring') == authoring
                                 and isinstance(projected, dict) and 'updated_at' in projected):

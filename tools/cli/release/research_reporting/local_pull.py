@@ -15,7 +15,7 @@ from .authoring.tree_store import atomic_write, load_head, load_node, tree_lock,
 from .authoring.submission_status import require_no_pending
 from .generation import report_workspace_lock
 from .git import commit_report_workspace
-from .local_publication import ensure_publication_table, manager_session
+from .local_publication import ensure_publication_table, manager_session, publication_endpoint, publication_query
 from .report_workspace_identity import report_workspace_id_for
 
 
@@ -23,10 +23,10 @@ class LocalReportSyncConflict(ValueError):
     """Local and remote report histories cannot safely be advanced automatically."""
 
 
-def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False, requires_edit: bool = False) -> dict:
+def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False, requires_edit: bool = False, source_kind: str = 'local') -> dict:
     from .public_research.object_uploads import projection_hash
-    value = session.get('/api/research/local-report-publication', query={
-        'research_id': research_id, 'report_id': report_id, 'branch_ref': 'main',
+    value = session.get(publication_endpoint(source_kind, research_id, report_id), query={
+        **publication_query(source_kind, research_id, report_id), 'branch_ref': 'main',
         **({'metadata_only': '1'} if metadata_only else {}),
         **({'requires_edit': '1'} if requires_edit else {})})
     record, bundle, projection = value.get('publication'), value.get('authoring'), value.get('projection')
@@ -112,11 +112,12 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
     lock = store.workspace_root / '.locks' / ('publication-' + report_workspace_id_for(report_id) + '-' + manager_hash[:16])
     ensure_publication_table(store)
     with report_workspace_lock(lock):
-        remote = _remote(session, research_id, report_id)
-        record, bundle = remote['publication'], remote['authoring']
         with store._connect() as db:
             base = db.execute('SELECT * FROM report_publications WHERE report_id=? AND manager_hash=?',
                               (report_id, manager_hash)).fetchone()
+        source_kind = base['source_kind'] if base else 'local'
+        remote = _remote(session, research_id, report_id, source_kind=source_kind)
+        record, bundle = remote['publication'], remote['authoring']
         if base and base['publication_id'] != record['publication_id']:
             raise LocalReportSyncConflict('remote publication identity changed')
         paths = report_tree_paths(root, 'main')
@@ -130,7 +131,7 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                 has_recovery = db.execute('SELECT 1 FROM report_pull_recovery WHERE report_id=? AND manager_hash=?',
                                           (report_id, manager_hash)).fetchone() is not None
             if has_recovery:
-                edit_check = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True)
+                edit_check = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind=source_kind)
                 if edit_check != {'publication': remote['publication'], 'authoring': remote['authoring']}:
                     raise LocalReportSyncConflict('remote report changed during recovery')
             if has_recovery and _recover_pull(store, root, paths, manager_hash, report_id, remote, base, local):
@@ -148,8 +149,9 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             require_no_pending(paths, local)
             expected = (local['generation'], local['root_ref'])
         publication_id, digest = record['publication_id'], bundle['sha256']
-        query = urlencode({'research_id': research_id, 'report_id': report_id})
-        response = session.download(f'/api/research/local-report-publication/{publication_id}/attachments/report_authoring/{digest}?{query}',
+        query = urlencode(publication_query(source_kind, research_id, report_id))
+        url = publication_endpoint(source_kind, research_id, report_id) + f'/{publication_id}/attachments/report_authoring/{digest}'
+        response = session.download(url + ('?' + query if query else ''),
                                     maximum_bytes=8 * 1024 * 1024)
         if len(response.content) != bundle['size_bytes'] or hashlib.sha256(response.content).hexdigest() != digest:
             raise ValueError('remote report bundle checksum or size mismatch')
@@ -158,7 +160,7 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             imported = import_report_bundle(payload=response.content, expected_sha256=digest, package_root=staged_root,
                 branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
             staged_head = imported['head']
-            if _remote(session, research_id, report_id) != remote:
+            if _remote(session, research_id, report_id, source_kind=source_kind) != remote:
                 raise LocalReportSyncConflict('remote report changed during download')
             target_lock = store.workspace_root / '.locks' / report_workspace_id_for(report_id)
             with report_workspace_lock(target_lock), tree_lock(paths):

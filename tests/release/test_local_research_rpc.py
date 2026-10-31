@@ -217,12 +217,12 @@ def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_pat
         if i < 5:
             ids.append(report['report_id'])
             with rpc.store._connect() as db:
-                db.execute('INSERT INTO report_publications VALUES (?, ?, ?, ?, ?, ?, ?)',
+                db.execute('INSERT INTO report_publications (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref) VALUES (?, ?, ?, ?, ?, ?, ?)',
                     (report['report_id'], hashlib.sha256(manager['endpoint'].encode()).hexdigest(), 'p-'+'a'*64, 'rev', version['generation'], 'f'*64, version['root_ref']))
         else:
             # A receipt for another Manager does not authorize synchronization here.
             with rpc.store._connect() as db:
-                db.execute('INSERT INTO report_publications VALUES (?, ?, ?, ?, ?, ?, ?)',
+                db.execute('INSERT INTO report_publications (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref) VALUES (?, ?, ?, ?, ?, ?, ?)',
                     (report['report_id'], hashlib.sha256(b'https://other-manager.test').hexdigest(), 'p-'+'b'*64, 'rev', version['generation'], 'f'*64, version['root_ref']))
     visited = []
     monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], object()))
@@ -262,7 +262,7 @@ def test_sync_receipt_recovery_does_not_overwrite_concurrent_receipt(tmp_path, m
     digest = build_upload_projection(load_snapshot(package_root=root, branch_id='main'))['projection_hash']
     ensure_publication_table(rpc.store)
     with rpc.store._connect() as db:
-        db.execute('INSERT INTO report_publications VALUES (?, ?, ?, ?, ?, ?, ?)',
+        db.execute('INSERT INTO report_publications (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref) VALUES (?, ?, ?, ?, ?, ?, ?)',
                    (report['report_id'], hashlib.sha256(manager['endpoint'].encode()).hexdigest(),
                     'p-'+'a'*64, 'old', 999, 'f'*64, 'old-root'))
     monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], object()))

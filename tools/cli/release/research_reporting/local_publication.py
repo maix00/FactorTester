@@ -5,7 +5,7 @@ import base64
 import hashlib
 import json
 import re
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from tools.cli.http import HttpSession
 from .authoring.tree_paths import report_tree_paths
@@ -53,6 +53,8 @@ def ensure_publication_table(store):
         columns = {row['name'] for row in db.execute('PRAGMA table_info(report_publications)')}
         if 'local_root_ref' not in columns:
             db.execute("ALTER TABLE report_publications ADD COLUMN local_root_ref TEXT NOT NULL DEFAULT ''")
+        if 'source_kind' not in columns:
+            db.execute("ALTER TABLE report_publications ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'local'")
         # Synchronization pages one Manager at a time. The primary key starts
         # with report_id and would otherwise scan reports belonging to every
         # Manager before finding the next eligible page.
@@ -70,6 +72,20 @@ def ensure_publication_table(store):
             PRIMARY KEY(report_id, manager_hash))''')
 
 
+def publication_endpoint(source_kind: str, research_id: str, report_id: str) -> str:
+    """Use the publication authority that owns this report, never infer it by name."""
+    if source_kind == 'local':
+        return '/api/research/local-report-publication'
+    if source_kind == 'catalog':
+        return '/api/research/' + quote(research_id, safe='') + '/reports/' + quote(report_id, safe='') + '/couchdb-publication'
+    raise ValueError('invalid report publication source')
+
+
+def publication_query(source_kind: str, research_id: str, report_id: str) -> dict:
+    publication_endpoint(source_kind, research_id, report_id)
+    return {'research_id': research_id, 'report_id': report_id} if source_kind == 'local' else {}
+
+
 def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                          research_id: str, report_id: str) -> dict:
     endpoint, session = manager_session(binding, manager)
@@ -80,12 +96,14 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
     with report_workspace_lock(lock):
         ensure_publication_table(store)
         with store._connect() as db:
-            row = db.execute('SELECT revision, publication_id FROM report_publications WHERE report_id=? AND manager_hash=?',
+            row = db.execute('SELECT revision, publication_id, source_kind FROM report_publications WHERE report_id=? AND manager_hash=?',
                              (report_id, manager_hash)).fetchone()
             expected_revision = row['revision'] if row else None
+        source_kind = row['source_kind'] if row else 'local'
+        endpoint_path = publication_endpoint(source_kind, research_id, report_id)
         if row:
-            preflight = session.get('/api/research/local-report-publication', query={'research_id': research_id,
-                'report_id': report_id, 'branch_ref': 'main', 'metadata_only': '1', 'requires_publish': '1'})
+            preflight = session.get(endpoint_path, query={**publication_query(source_kind, research_id, report_id),
+                'branch_ref': 'main', 'metadata_only': '1', 'requires_publish': '1'})
             record = preflight.get('publication') if preflight.get('success') is True else None
             if (preflight.get('publish_authorized') is not True or not isinstance(record, dict)
                     or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
@@ -107,8 +125,8 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
         encoded_size = len(json.dumps({'projection': projection, 'authoring': authoring}, ensure_ascii=False).encode('utf-8'))
         if encoded_size > 30 * 1024 * 1024:
             raise ValueError('report publication exceeds Manager request limit')
-        response = session.post('/api/research/local-report-publication', {'research_id': research_id,
-            'report_id': report_id, 'branch_ref': 'main', 'projection': projection, 'authoring': authoring,
+        response = session.post(endpoint_path, {**publication_query(source_kind, research_id, report_id),
+            'branch_ref': 'main', 'projection': projection, 'authoring': authoring,
             'expected_revision': expected_revision})
         value = response.get('publication') if response.get('success') is True else None
         if (not isinstance(value, dict) or value.get('report_id') != report_id
