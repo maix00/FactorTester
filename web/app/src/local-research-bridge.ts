@@ -242,6 +242,16 @@ export class LocalResearchClient {
     return {publication_id:value.publication_id,revision:value.revision,generation:value.generation as number};
   }
 
+  async pullReport(profileId:string,researchId:string,reportId:string):Promise<{status:"updated"|"up_to_date";local_modified:boolean}> {
+    this.requireAction("pull_report");
+    const profile_id=inputText(profileId,512),research_id=inputText(researchId,512),report_id=inputText(reportId,512);
+    this.requireProfile(profile_id);const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"pull_report",profile_id,research_id,report_id});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    if((reply.status!=="updated"&&reply.status!=="up_to_date")||typeof reply.local_modified!=="boolean") throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {status:reply.status,local_modified:reply.local_modified};
+  }
+
   /** The caller retains operation_id for retries; this client never retries writes. */
   async create(input: LocalResearchCreate): Promise<LocalResearch> {
     this.requireAction("create");

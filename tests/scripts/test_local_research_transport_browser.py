@@ -42,13 +42,16 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             browser = playwright.chromium.launch(channel="chrome", headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 900}, locale="zh-CN")
             page.set_default_timeout(10000)
-            published = []
+            published, pulled = [], []
             def native(request):
                 if request.get('action') == 'publish_report':
                     published.append(request['report_id'])
                     return {'success': True, 'schema': 'tr-local-research-bridge:v1', 'publication': {
                         'publication_id': 'p-' + 'a' * 64, 'revision': '1-test', 'generation': 2,
                         'report_id': request['report_id']}}
+                if request.get('action') == 'pull_report':
+                    pulled.append(request['report_id'])
+                    return {'success': True, 'schema': 'tr-local-research-bridge:v1', 'status': 'up_to_date', 'local_modified': False}
                 envelope = {"binding": {"issuer": "https://identity.test/realm", "identity_id": "stable-1"},
                             "profile": {"profile_id": "self", "display_name": "Alice"}, "request": request,
                             "manager": {"endpoint":"http://127.0.0.1:7998", "token":"", "certificate_pem":"", "cookies":[]}}
@@ -111,6 +114,12 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                 if published: break
                 page.wait_for_timeout(100)
             assert len(published) == 1
+            dialog.get_by_role("button", name="获取服务器版本").click()
+            page.locator(".ant-popconfirm:visible").get_by_role("button", name="获取服务器版本").click()
+            for _ in range(30):
+                if pulled: break
+                page.wait_for_timeout(100)
+            assert pulled == published
             if os.environ.get("TR_UI_SCREENSHOT"):
                 page.screenshot(path=os.environ["TR_UI_SCREENSHOT"])
             assert not errors
