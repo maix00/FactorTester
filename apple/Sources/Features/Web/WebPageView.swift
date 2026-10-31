@@ -39,6 +39,9 @@ final class WebPageSession {
         )
         #if os(macOS)
         webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: LocalResearchBridgeContract.messageName
+        )
+        webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientLocalCatalogBridgeContract.messageName
         )
         webView?.configuration.userContentController.removeScriptMessageHandler(
@@ -128,6 +131,7 @@ struct WebPageView: View {
                     visitorID: externalURL == nil
                         ? VisitorIdentityStore.current() : "",
                     webSession: activeWebSession,
+                    localResearchSession: externalURL == nil ? session : nil,
                     allowsLocalCatalog: externalURL == nil
                         && (presentation == .standalone
                             || ClientLocalCatalogBridgeContract.allowsEmbeddedPage(
@@ -294,6 +298,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let visitorID: String
     let webSession: WebPageSession?
     let allowsLocalCatalog: Bool
+    let localResearchSession: SessionStore?
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
     let onNavigation: ((String) -> Void)?
     let onExternalURL: ((URL) -> Void)?
@@ -311,6 +316,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         clientAccess: Bool = false,
         visitorID: String = "",
         webSession: WebPageSession? = nil,
+        localResearchSession: SessionStore? = nil,
         allowsLocalCatalog: Bool = false,
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
         onNavigation: ((String) -> Void)? = nil,
@@ -330,6 +336,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.clientAccess = clientAccess
         self.visitorID = visitorID
         self.webSession = webSession
+        self.localResearchSession = localResearchSession
         self.allowsLocalCatalog = allowsLocalCatalog
         self.onReference = onReference
         self.onNavigation = onNavigation
@@ -367,6 +374,15 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                 forName: ClientWebAuthenticationMessage.handlerName
             )
             #if os(macOS)
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: LocalResearchBridgeContract.messageName
+            )
+            if let localResearchSession, let serverOrigin {
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    LocalResearchBridge(session: localResearchSession, endpoint: serverOrigin),
+                    contentWorld: .page, name: LocalResearchBridgeContract.messageName
+                )
+            }
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ClientLocalCatalogBridgeContract.messageName
             )
@@ -409,6 +425,12 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         }
         let configuration = WKWebViewConfiguration()
         #if os(macOS)
+        if let localResearchSession, let serverOrigin {
+            configuration.userContentController.addScriptMessageHandler(
+                LocalResearchBridge(session: localResearchSession, endpoint: serverOrigin),
+                contentWorld: .page, name: LocalResearchBridgeContract.messageName
+            )
+        }
         if allowsLocalCatalog {
             configuration.userContentController.addScriptMessageHandler(
                 ClientLocalCatalogBridge(),
@@ -506,6 +528,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             forName: ClientWebAuthenticationMessage.handlerName
         )
         #if os(macOS)
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: LocalResearchBridgeContract.messageName
+        )
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientLocalCatalogBridgeContract.messageName
         )

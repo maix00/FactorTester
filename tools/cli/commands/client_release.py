@@ -15,6 +15,7 @@ from urllib.error import URLError
 import click
 
 from tools.cli.commands.client_adapter import client_adapter
+from tools.cli.commands.client_local_research import local_research_request
 from tools.cli.commands.client_catalog import (
     catalog_local_run,
     catalog_source,
@@ -105,6 +106,7 @@ def _run_release_with_host_python(
     )
 
 
+client.add_command(local_research_request)
 client.add_command(client_adapter)
 client.add_command(client_profile)
 client.add_command(catalog_source, name="source")
