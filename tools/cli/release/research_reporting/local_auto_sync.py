@@ -9,6 +9,12 @@ from .authoring.tree_store import load_head, tree_lock
 from .local_publication import ensure_publication_table, manager_session, publish_local_report
 from .local_pull import LocalReportSyncConflict, _remote, pull_local_report
 
+_PUBLICATION_PAGE = '''SELECT report.report_id, report.research_id, publication.revision,
+                   publication.generation, publication.local_root_ref
+            FROM report_publications AS publication JOIN reports AS report ON report.report_id=publication.report_id
+            WHERE publication.manager_hash=? AND report.profile_id=? AND report.ready=1 AND publication.report_id>?
+            ORDER BY publication.report_id LIMIT ?'''
+
 
 def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: str,
                            after_report_id: str, limit: int) -> dict:
@@ -19,11 +25,7 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
     manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
     ensure_publication_table(store)
     with store._connect() as db:
-        rows = db.execute('''SELECT report.report_id, report.research_id, publication.revision,
-                   publication.generation, publication.local_root_ref
-            FROM report_publications AS publication JOIN reports AS report ON report.report_id=publication.report_id
-            WHERE publication.manager_hash=? AND report.profile_id=? AND report.ready=1 AND report.report_id>?
-            ORDER BY report.report_id LIMIT ?''', (manager_hash, profile, after_report_id, limit + 1)).fetchall()
+        rows = db.execute(_PUBLICATION_PAGE, (manager_hash, profile, after_report_id, limit + 1)).fetchall()
     results = []
     for row in rows[:limit]:
         report_id, research_id = row['report_id'], row['research_id']

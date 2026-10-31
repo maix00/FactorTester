@@ -127,6 +127,11 @@ def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_pat
             with rpc.store._connect() as db:
                 db.execute('INSERT INTO report_publications VALUES (?, ?, ?, ?, ?, ?, ?)',
                     (report['report_id'], hashlib.sha256(manager['endpoint'].encode()).hexdigest(), 'p-'+'a'*64, 'rev', version['generation'], 'f'*64, version['root_ref']))
+        else:
+            # A receipt for another Manager does not authorize synchronization here.
+            with rpc.store._connect() as db:
+                db.execute('INSERT INTO report_publications VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    (report['report_id'], hashlib.sha256(b'https://other-manager.test').hexdigest(), 'p-'+'b'*64, 'rev', version['generation'], 'f'*64, version['root_ref']))
     visited = []
     monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], object()))
     monkeypatch.setattr(local_auto_sync, '_remote', lambda _session, _research, report, **_kwargs: (visited.append(report) or {'publication': {'revision':'rev'}}))
@@ -138,3 +143,8 @@ def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_pat
         request['after_report_id'] = result['next_report_id']
     assert visited == sorted(ids) and [row['report_id'] for row in all_rows] == sorted(ids)
     assert all(row['status'] == 'unchanged' for row in all_rows)
+    with rpc.store._connect() as db:
+        plan = db.execute('EXPLAIN QUERY PLAN ' + local_auto_sync._PUBLICATION_PAGE,
+            (hashlib.sha256(manager['endpoint'].encode()).hexdigest(), 'self', '', 3)).fetchall()
+    assert any('report_publications_manager_report' in row['detail'] for row in plan)
+    assert not any('TEMP B-TREE' in row['detail'] for row in plan)

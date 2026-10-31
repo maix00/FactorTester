@@ -49,6 +49,11 @@ def ensure_publication_table(store):
         columns = {row['name'] for row in db.execute('PRAGMA table_info(report_publications)')}
         if 'local_root_ref' not in columns:
             db.execute("ALTER TABLE report_publications ADD COLUMN local_root_ref TEXT NOT NULL DEFAULT ''")
+        # Synchronization pages one Manager at a time. The primary key starts
+        # with report_id and would otherwise scan reports belonging to every
+        # Manager before finding the next eligible page.
+        db.execute('''CREATE INDEX IF NOT EXISTS report_publications_manager_report
+            ON report_publications(manager_hash, report_id)''')
 
 
 def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str,
