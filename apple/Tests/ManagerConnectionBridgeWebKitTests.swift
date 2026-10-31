@@ -44,6 +44,59 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         content.removeScriptMessageHandler(forName: ManagerConnectionBridgeContract.messageName)
     }
 
+    func testSwitchChecksTargetOverHTTPBeforeSelectingIt() async throws {
+        let python = "/opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/python"
+        guard FileManager.default.isExecutableFile(atPath: python) else { throw XCTSkip("GTHT Python is unavailable") }
+        let serverCode = """
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Handler(BaseHTTPRequestHandler):
+ def do_GET(self):
+  if self.path != '/api/session' or self.headers.get('Authorization') != 'Bearer isolated-test-token':
+   self.send_response(401); self.end_headers(); return
+  body=json.dumps({'username':'alice','keycloak_issuer':'https://identity.test/realm','keycloak_subject':'subject','tr_identity_id':'alice-id'}).encode()
+  self.send_response(200); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+ def log_message(self, *args): pass
+server=HTTPServer(('127.0.0.1',0),Handler)
+print(server.server_port, flush=True)
+server.serve_forever()
+"""
+        let process = Process(); process.executableURL = URL(fileURLWithPath: python); process.arguments = ["-u", "-c", serverCode]
+        let pipe = Pipe(); process.standardOutput = pipe; process.standardError = Pipe(); try process.run()
+        defer { if process.isRunning { process.terminate(); process.waitUntilExit() } }
+        var bytes = Data()
+        while bytes.count < 10 {
+            let chunk = try XCTUnwrap(try pipe.fileHandleForReading.read(upToCount: 1))
+            if chunk.isEmpty || chunk == Data([10]) { break }
+            bytes.append(chunk)
+        }
+        let port = try XCTUnwrap(Int(String(decoding: bytes, as: UTF8.self)))
+        let target = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)"))
+        ManagerSessionTokenStore.save("isolated-test-token", for: target)
+        defer { ManagerSessionTokenStore.remove(for: target) }
+        let value: [String: Any] = ["username": "alice", "keep_login": true,
+                                    "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
+        let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
+        let session = SessionStore(api: ManagerBridgeTestAPI(user: user), managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
+        let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
+        var applied: URL?
+        let content = WKUserContentController()
+        content.addScriptMessageHandler(ManagerConnectionBridge(session: session, endpoint: endpoint,
+            restoreDevice: { _, _ in false }, apply: { applied = $0 }), contentWorld: .page, name: ManagerConnectionBridgeContract.messageName)
+        let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent(); config.userContentController = content
+        let view = WKWebView(frame: .zero, configuration: config); view.navigationDelegate = self
+        loaded = expectation(description: "Manager test page")
+        view.loadHTMLString("<html><body>Manager</body></html>", baseURL: endpoint)
+        await fulfillment(of: [try XCTUnwrap(loaded)], timeout: 10)
+        let capabilities = try await message(view, ["action": "capabilities"])
+        XCTAssertEqual(capabilities["success"] as? Bool, true)
+        let result = try await message(view, ["action": "switch", "url": target.absoluteString])
+        XCTAssertEqual(result["auth_state"] as? String, "authorized")
+        XCTAssertEqual(session.user?.stableIdentityID, "alice-id")
+        XCTAssertEqual(applied, target)
+        content.removeScriptMessageHandler(forName: ManagerConnectionBridgeContract.messageName)
+    }
+
     private func message(_ view: WKWebView, _ input: [String: Any]) async throws -> [String: Any] {
         let result = try await view.callAsyncJavaScript("return await window.webkit.messageHandlers.tradeResearchManager.postMessage(input)",
                                                        arguments: ["input": input], in: nil, contentWorld: .page)
