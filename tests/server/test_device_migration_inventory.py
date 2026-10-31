@@ -36,3 +36,13 @@ def test_inventory_requires_manager_identity():
     import pytest
     with pytest.raises(ValueError):
         classify_devices(manager_id="", records=[], identities={})
+
+
+def test_legacy_public_denial_is_never_silently_converted_to_grant():
+    base = {"device_id": "device-1234567890123456", "username": "alice", "source_server_id": "manager", "public_key": KEY, "enabled": True}
+    rows = classify_devices(manager_id="manager", records=[base | {"public_access": False}], identities={"alice": [IDENTITY]})
+    assert rows[0]["status"] == "legacy_policy_review"
+    rows = classify_devices(manager_id="manager", records=[base | {"enabled": False, "public_access": False}], identities={"alice": [IDENTITY]})
+    assert rows[0]["status"] == "denied"
+    rows = classify_devices(manager_id="manager", records=[base | {"public_access": "false"}], identities={"alice": [IDENTITY]})
+    assert rows[0]["status"] == "needs_repair"

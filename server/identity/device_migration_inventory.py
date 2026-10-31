@@ -42,7 +42,19 @@ def classify_devices(*, manager_id: str, records: list[dict], identities: dict[s
                 try:
                     item["resource_ref"] = device_resource_ref(server_id=target, identity_id=stable,
                                                                device_id=device_id, public_key=row.get("public_key"))
-                    item["status"] = "grant" if row.get("enabled") is True else "denied"
+                    old_public = row.get("public_access")
+                    if "public_access" in row and type(old_public) is not bool:
+                        item["status"] = "needs_repair"
+                        item.pop("resource_ref", None)
+                    elif row.get("enabled") is False:
+                        item["status"] = "denied"
+                    elif old_public is False:
+                        # Some installations already converted this legacy
+                        # field to the allowlist policy and others did not.
+                        # Do not silently create a grant from an ambiguous bit.
+                        item["status"] = "legacy_policy_review"
+                    else:
+                        item["status"] = "grant"
                 except (TypeError, ValueError):
                     item["status"] = "needs_repair"
         result.append(item)
