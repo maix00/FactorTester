@@ -12,6 +12,14 @@ from server.manager.http.visitor_access import clear_visitor_cookie
 from server.manager.storage.control_db import ControlDatabaseError
 
 
+def _may_write_public_research(state, session) -> bool:
+    """A public Manager requires live Keycloak permission, including local clients."""
+    if not bool(getattr(state, 'public_server', False)):
+        return True
+    from server.identity.server_admission import current_manager_role
+    return current_manager_role(session, 'public_server:login')
+
+
 class WriteRoutesMixin:
     """Dispatch state-changing routes after the public-entry gate."""
 
@@ -227,6 +235,14 @@ class WriteRoutesMixin:
                 and self._deferred_job_cleanup_route(parsed, method="POST")):
             return
         if self._proxy_job_request(parsed, method="POST"):
+            return
+        if parsed.path in {
+            '/api/research-publications/sync',
+            '/api/research-publications/publish',
+            '/api/research-publications/settings',
+        } and bool(getattr(self.state, 'public_server', False)) and not _may_write_public_research(self.state, self._session()):
+            json_response(self, {'success': False, 'code': 'public_server_login_required',
+                                 'error': 'Keycloak public server access is required'}, 403)
             return
         if self.path == "/api/research-publications/sync":
             client_session = self._session()
