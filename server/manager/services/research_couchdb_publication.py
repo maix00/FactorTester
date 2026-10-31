@@ -175,7 +175,8 @@ class ResearchCouchPublicationService:
                          'authorization': 'keycloak', 'revision': document['_rev']}
         if metadata_only:
             authorize_now()
-            return {'publication': public_record, **({'authoring': authoring} if authoring is not None else {})}
+            return {'publication': public_record, **({'authoring': authoring} if authoring is not None else {}),
+                    **({'edit_authorized': True} if requires_edit else {})}
         key = attachment or 'projection.json'
         if attachment and not any(attachment.startswith(kind + '/') for kind in (
                 'research_asset', 'research_attachment', 'research_local_resource', 'report_authoring')):

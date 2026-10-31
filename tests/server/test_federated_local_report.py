@@ -48,7 +48,7 @@ def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tm
             if not live['report'] or (requires_edit and not live['edit']): raise PermissionError('report access revoked')
             calls.append((publication_ref, branch_ref, attachment))
             if attachment: return {'content': b'exact-report-object', 'content_type': 'image/png'}
-            return {'publication': {'publication_id': PUBLICATION, 'report_id': REPORT,
+            return {**({'edit_authorized': True} if requires_edit else {}), 'publication': {'publication_id': PUBLICATION, 'report_id': REPORT,
                                     'storage_server_id': 'target', 'branch_ref': 'main'},
                     'projection': {'report_id': REPORT}}
     monkeypatch.setattr(local_report_publication, 'LocalReportPublicationService', ReportService)
@@ -95,7 +95,7 @@ def test_browser_remote_report_does_not_fall_back_to_local_or_stale(tmp_path, mo
     gateway = SimpleNamespace(public_data=lambda route, **kw: calls.append((route, kw)) or {
         'publication': {'publication_id': PUBLICATION, 'report_id': REPORT,
                         'storage_server_id': 'target', 'branch_ref': 'main'},
-        'projection': {'report_id': REPORT}})
+        'projection': {'report_id': REPORT}, 'edit_authorized': True})
     state = SimpleNamespace(server_id='source', federation_gateway=gateway)
     monkeypatch.setattr(server_admission, 'server_admission', lambda *_args, **_kw: (True, ''))
     monkeypatch.setattr(execution_nodes, 'peer_execution_route', lambda _state, peer: peer)
@@ -115,6 +115,11 @@ def test_browser_remote_report_does_not_fall_back_to_local_or_stale(tmp_path, mo
     edit_query = query + '&metadata_only=1&requires_edit=1'
     assert Handler()._get_research_catalog_routes(SimpleNamespace(path=parsed.path, query=edit_query))
     assert responses[-1][0] == 200 and calls[-1][1]['payload']['requires_edit'] is True
+    state.federation_gateway = SimpleNamespace(public_data=lambda *_a, **_kw: {
+        'publication': {'publication_id': PUBLICATION, 'report_id': REPORT,
+                        'storage_server_id': 'target', 'branch_ref': 'main'}})
+    assert Handler()._get_research_catalog_routes(SimpleNamespace(path=parsed.path, query=edit_query))
+    assert responses[-1][0] == 403  # An older peer did not verify edit permission.
     monkeypatch.setattr(server_admission, 'server_admission', lambda *_args, **_kw: (False, 'revoked'))
     assert Handler()._get_research_catalog_routes(parsed)
     assert responses[-1][0] == 403

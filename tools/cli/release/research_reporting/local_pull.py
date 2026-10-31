@@ -30,7 +30,8 @@ def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = 
         **({'metadata_only': '1'} if metadata_only else {}),
         **({'requires_edit': '1'} if requires_edit else {})})
     record, bundle, projection = value.get('publication'), value.get('authoring'), value.get('projection')
-    if (value.get('success') is not True or not isinstance(record, dict) or not isinstance(bundle, dict) or (not metadata_only and not isinstance(projection, dict))
+    if (value.get('success') is not True or (requires_edit and value.get('edit_authorized') is not True)
+            or not isinstance(record, dict) or not isinstance(bundle, dict) or (not metadata_only and not isinstance(projection, dict))
             or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
             or not re.fullmatch(r'p-[0-9a-f]{64}', str(record.get('publication_id') or ''))
             or not isinstance(record.get('revision'), str) or not record['revision'] or len(record['revision']) > 256

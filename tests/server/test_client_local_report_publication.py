@@ -20,7 +20,7 @@ from tools.cli.release.research_reporting.public_research.projection import buil
 
 def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_access(tmp_path, monkeypatch):
     service, _manager, store, auth = harness(tmp_path / 'manager')
-    transport = {'tamper': False, 'metadata': 0, 'downloads': 0, 'posts': 0}
+    transport = {'tamper': False, 'omit_edit': False, 'metadata': 0, 'downloads': 0, 'posts': 0}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args): pass
@@ -43,6 +43,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                     value = service.read(**args, branch_ref=query['branch_ref'][0], metadata_only=metadata_only,
                                          requires_publish=query.get('requires_publish') == ['1'],
                                          requires_edit=query.get('requires_edit') == ['1'])
+                    if transport['omit_edit']: value.pop('edit_authorized', None)
                     return self.reply(200, {'success': True, **value})
                 if len(parts) == 7 and parts[4] == 'attachments':
                     transport['downloads'] += 1
@@ -202,6 +203,9 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         auth['write'] = False
         assert rpc.request(auto)['reports'][0]['status'] == 'denied'
         auth['write'] = True
+        transport['omit_edit'] = True
+        assert rpc.request(auto)['reports'][0]['status'] == 'unavailable'
+        transport['omit_edit'] = False
         # Recovery must not hide a user's uncommitted changes, even when the
         # report HEAD matches the interrupted pull.
         (local_root / 'user-note.txt').write_text('keep this change')

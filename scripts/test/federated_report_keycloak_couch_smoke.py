@@ -134,6 +134,23 @@ def exercise(*, couch, **case):
             del request['payload']['attachment']
             assert read()['publication']['publication_id'] == published['publication_id']
 
+            # A read-only recipient may view the report but cannot recover an
+            # editable local snapshot. Exercise the metadata preflight through
+            # both real realms and the signed peer endpoint.
+            request['payload'].update(metadata_only=True, requires_edit=True)
+            denied(lambda: read())
+            with identity_request():
+                bind_verified_identity(owner_token, owner_session)
+                service.set_grant(session=owner_session, research_id=research_id, report_id=report_id,
+                                  identity_id='stable-alice', scopes=['read', 'write'])
+            assert read()['publication']['publication_id'] == published['publication_id']
+            with identity_request():
+                bind_verified_identity(owner_token, owner_session)
+                service.set_grant(session=owner_session, research_id=research_id, report_id=report_id,
+                                  identity_id='stable-alice', scopes=['read'])
+            denied(lambda: read())
+            del request['payload']['metadata_only']; del request['payload']['requires_edit']
+
             with identity_request():
                 bind_verified_identity(owner_token, owner_session)
                 service.set_grant(session=owner_session, research_id=research_id, report_id=report_id,
@@ -165,6 +182,7 @@ def main():
         run(sandbox, on_ready=lambda **case: exercise(couch=couch, **case))
     print(json.dumps({'two_real_keycloak_realms': True, 'real_couchdb': True, 'signed_peer_http': True,
         'target_report_and_admission': 'live_keycloak', 'source_and_target_revocation': True,
+        'edit_permission_preflight': True,
         'distinct_owner_and_shared_recipient': True, 'same_source_session_after_revoke': True,
         'bounded_attachment_bytes': 2 * 1024 * 1024,
         'browser_source_gateway': 'covered_by_focused_test'}, sort_keys=True))
