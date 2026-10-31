@@ -139,6 +139,10 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                 return {'status': 'up_to_date', 'local_modified': (local['generation'] != base['generation'] or local['root_ref'] != base['local_root_ref'])}
             baseline_ok = bool(base and base['local_root_ref'] and local['generation'] == base['generation'] and local['root_ref'] == base['local_root_ref'])
             identical = local['generation'] == bundle['generation'] and local['root_ref'] == bundle['root_ref']
+            if has_recovery and not baseline_ok:
+                # A journal whose committed state did not pass recovery must
+                # not fall back to a second download or overwrite local work.
+                raise LocalReportSyncConflict('interrupted pull requires conflict resolution')
             if not baseline_ok and not identical:
                 raise LocalReportSyncConflict('local report changed since the last confirmed synchronization')
             require_no_pending(paths, local)

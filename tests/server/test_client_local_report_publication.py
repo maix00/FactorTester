@@ -213,7 +213,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert (local_root / 'user-note.txt').read_text() == 'keep this change'
         (local_root / 'user-note.txt').unlink()
         assert rpc.request(auto)['reports'][0]['status'] == 'updated'
-        assert transport['downloads'] == downloads_before + 1  # rejected dirty attempt only
+        assert transport['downloads'] == downloads_before  # rejected before downloading again
         with rpc.store._connect() as db:
             assert db.execute('SELECT count(*) FROM report_pull_recovery').fetchone()[0] == 0
         assert rpc.request(pull)['status'] == 'up_to_date'
