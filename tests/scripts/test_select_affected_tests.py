@@ -53,6 +53,13 @@ def test_local_research_publication_selects_focused_client_and_server_contracts(
     assert "tests/server/test_research_catalog_keycloak_session.py" in targets
     assert "tests/server/test_client_local_report_publication.py" in targets
     assert "tests/server" not in targets
+    mode, targets = selector.select({"server/manager/services/research_catalog.py",
+                                     "tools/cli/release/research_reporting/local_rpc.py",
+                                     "apple/Sources/Features/Web/LocalResearchBridge.swift"})
+    assert mode == "SCOPED"
+    assert "tests/server/test_research_catalog_keycloak_reads.py" in targets
+    assert "tests/server/test_client_server_research_import.py" in targets
+    assert "tests/server" not in targets and "tests/cli" not in targets
 
 
 def test_skill_change_checks_activation_and_skill_tests():

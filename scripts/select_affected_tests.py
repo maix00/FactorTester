@@ -600,6 +600,30 @@ EXACT_PATH_TESTS["server/manager/http/research_catalog_routes.py"] = (
     "tests/server/test_federated_local_report.py",
     "tests/server/test_federated_public_data.py",
 )
+EXACT_PATH_TESTS["server/manager/services/research_catalog.py"] = (
+    "tests/server/test_research_catalog.py",
+    "tests/server/test_research_catalog_keycloak_reads.py",
+    "tests/server/test_research_catalog_keycloak_session.py",
+    "tests/server/test_research_catalog_sync.py",
+    "tests/server/test_research_branches.py",
+    "tests/server/test_research_keycloak_share_links.py",
+    "tests/server/test_research_principal_identity.py",
+    "tests/server/test_research_profile_keycloak_branch.py",
+    "tests/server/test_research_transfer_keycloak.py",
+    "tests/server/test_server_research_collaboration.py",
+    "tests/release/test_report_collaboration_workflow.py",
+)
+for _path in (
+    "tools/cli/release/research_reporting/local_rpc.py",
+    "tools/cli/release/research_reporting/local_server_research.py",
+    "apple/Sources/Features/Web/LocalResearchBridge.swift",
+    "apple/Tests/LocalResearchBridgeWebKitTests.swift",
+):
+    EXACT_PATH_TESTS[_path] = (
+        "tests/release/test_local_research_rpc.py",
+        "tests/server/test_client_server_research_import.py",
+        "tests/server/test_client_local_report_publication.py",
+    )
 EXACT_PATH_TESTS["tools/factors/alpha_plan.py"] = (*FACTOR_PLAN_TESTS,"tests/server/test_nautilus_strategy_runspec.py")
 EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)
