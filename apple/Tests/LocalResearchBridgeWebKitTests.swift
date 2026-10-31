@@ -30,9 +30,11 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
         let store = SessionStore(api: api, managerAPI: LocalResearchManagerAPI(), bridge: { _ in true }, credentialLoader: { nil })
         let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
         let controller = WKUserContentController()
+        var runnerCalled = false
         controller.addScriptMessageHandler(LocalResearchBridge(session: store, endpoint: endpoint, runner: { envelope in
-            try await ReleaseCommand.runObject(["-m", "tools.cli.app", "client", "local-research-request"],
-                                               executable: python, stdinJSON: envelope)
+            runnerCalled = true
+            return try await ReleaseCommand.runObject(["-m", "tools.cli.app", "client", "local-research-request"],
+                                                      executable: python, stdinJSON: envelope, timeout: .seconds(8))
         }), contentWorld: .page, name: LocalResearchBridgeContract.messageName)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -43,7 +45,10 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
         view.loadHTMLString("<html><body>Research</body></html>", baseURL: endpoint)
         await fulfillment(of: [try XCTUnwrap(loaded)], timeout: 10)
         let capability = try await message(view, ["action": "capabilities"])
-        XCTAssertEqual(capability["success"] as? Bool, true)
+        guard capability["success"] as? Bool == true else {
+            XCTFail("Bridge handshake failed: \(capability["code"] as? String ?? "unknown"); runner called: \(runnerCalled)")
+            return
+        }
         XCTAssertTrue((capability["actions"] as? [String])?.contains("publish_report") == true)
         XCTAssertNil(capability["manager"])
         let created = try await message(view, ["action": "create", "profile_id": "self", "title": "WK test", "description": "", "operation_id": "test-operation"])
