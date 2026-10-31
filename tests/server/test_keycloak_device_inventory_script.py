@@ -21,6 +21,10 @@ def test_inventory_distinguishes_legacy_denial_and_other_manager_without_keys():
     assert result['summary']['keycloak_live_grants_checked'] is False
     assert 'public_key' not in json.dumps(result)
     assert result == plan(snapshot, {'accounts': [ACCOUNT]}, manager_id='lan')
+    changed = {**snapshot, 'sources': {'public': {'devices': [{**remote, 'public_key': {**KEY, 'x': 'B' * 43}}]}}}
+    changed_result = plan(changed, {'accounts': [ACCOUNT]}, manager_id='lan')
+    assert changed_result['summary']['statuses'] == result['summary']['statuses']
+    assert changed_result['summary']['sha256'] != result['summary']['sha256']
 
 
 def test_inventory_rejects_ambiguous_identity_and_manager():

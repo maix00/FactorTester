@@ -93,7 +93,17 @@ def plan(snapshot: dict, directory: dict, *, manager_id: str) -> dict:
     if len(records) > 100_000 or any(not isinstance(row, dict) for row in records):
         raise ValueError('device snapshot records are invalid or too large')
     entries = classify_devices(manager_id=manager_id, records=records, identities=identities)
-    entries.sort(key=lambda item: (str(item.get('username') or ''), str(item.get('device_id') or '')))
+    # Freeze the identity, key and historical permission evidence even for
+    # records needing repair or belonging to another Manager. Equal counts or
+    # equal usernames cannot establish that the same devices were reviewed.
+    for entry, record in zip(entries, records, strict=True):
+        evidence = {key: record.get(key) for key in ('device_id', 'username', 'public_key',
+                    'enabled', 'source_server_id', 'public_access', 'quota_exempt') if key in record}
+        encoded = json.dumps(evidence, ensure_ascii=False, sort_keys=True, allow_nan=False,
+                             separators=(',', ':')).encode()
+        entry['source_sha256'] = hashlib.sha256(encoded).hexdigest()
+    entries.sort(key=lambda item: (str(item.get('username') or ''), str(item.get('device_id') or ''),
+                                   item['source_sha256']))
     frozen = {'manager_id': manager_id, 'entries': entries}
     digest = hashlib.sha256(json.dumps(frozen, ensure_ascii=False, sort_keys=True,
                                       separators=(',', ':')).encode()).hexdigest()
