@@ -89,11 +89,18 @@ class ResearchCouchPublicationService:
             keycloak_resource_id=resource_id, projection=projection, expected_revision=expected_revision,
             authorize_now=authorize_now)
 
-    def read(self, *, session: dict, research_id: str, report_id: str, publication_ref: str,
-             attachment: str = '') -> dict:
+    def read(self, *, session: dict, research_id: str, report_id: str, publication_ref: str = '',
+             branch_ref: str = '', attachment: str = '') -> dict:
         resource_id, owner_id, owner_ref, authorize_now = self._context(
             session=session, research_id=research_id, report_id=report_id, scopes=('read',))
         authorize_now()
+        if branch_ref:
+            derived = publication_id(self.state.server_id, owner_id, report_id, branch_ref)
+            if publication_ref and publication_ref != derived:
+                raise PermissionError('report publication does not belong to the selected branch')
+            publication_ref = derived
+        if not re.fullmatch(r'p-[0-9a-f]{64}', str(publication_ref or '')):
+            raise ValueError('report publication or branch identity is required')
         document = get_research_report(self.store, publication_ref)
         branch = str(document.get('branch_ref') or '')
         if (document.get('publication_id') != publication_ref or document.get('research_id') != research_id

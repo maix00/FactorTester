@@ -82,6 +82,9 @@ def test_http_route_reads_exact_publication_and_attachment_without_legacy_refres
     handler = Handler()
     assert handler._get_research_catalog_routes(SimpleNamespace(path=base, query=''))
     assert replies[-1][0] == 200 and replies[-1][1]['projection']['report_id'] == 'report-1'
+    branch_path = base.rsplit('/', 1)[0]
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=branch_path, query='branch_ref=main'))
+    assert replies[-1][1]['publication']['publication_id'] == receipt['publication_id']
     assert handler._get_research_catalog_routes(SimpleNamespace(path=base + '/attachments/research_asset/image-1', query=''))
     assert handler.status == 200 and handler.wfile.getvalue() == b'picture'
     assert handler.headers['X-Content-Type-Options'] == 'nosniff'

@@ -83,8 +83,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             return True
         viewer = str(session["username"])
         publication = re.fullmatch(
-            r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication/(p-[0-9a-f]{64})"
-            r"(?:/attachments/(research_asset|research_attachment|research_local_resource)/([^/]+))?",
+            r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication"
+            r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource)/([^/]+))?)?",
             parsed.path,
         )
         if publication is None:
@@ -97,7 +97,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                               if publication.group(4) else '')
                 value = self._research_couch_service().read(session=session,
                     research_id=unquote(publication.group(1)), report_id=unquote(publication.group(2)),
-                    publication_ref=publication.group(3), attachment=attachment)
+                    publication_ref=publication.group(3) or '',
+                    branch_ref='' if publication.group(3) else str(query.get('branch_ref', [''])[0]),
+                    attachment=attachment)
                 if attachment:
                     raw, content_type = value['content'], value['content_type']
                     self.send_response(200)

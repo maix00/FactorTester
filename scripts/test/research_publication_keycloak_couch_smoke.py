@@ -99,6 +99,8 @@ def exercise(*, couch, **case):
             read_target = target + '/' + receipt['publication_id']
             status, body = read(read_target)
             assert status == 200 and json.loads(body)['projection']['report_id'] == 'report-1'
+            status, body = read(target + '?branch_ref=main')
+            assert status == 200 and json.loads(body)['publication']['publication_id'] == receipt['publication_id']
             status, body = read(read_target + '/attachments/research_asset/one')
             assert status == 200 and body == b'only-selected-object'
             sibling_target = target.replace('/reports/report-1/', '/reports/private-sibling/') + '/' + receipt['publication_id']

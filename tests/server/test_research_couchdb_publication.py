@@ -105,6 +105,10 @@ def test_read_and_attachment_use_current_exact_report_permission_and_verify_inte
     args = {'session': SESSION, 'research_id': 'research-1', 'report_id': 'report-1',
             'publication_ref': receipt['publication_id']}
     assert service.read(**args)['projection']['report_id'] == 'report-1'
+    assert service.read(session=SESSION, research_id='research-1', report_id='report-1',
+                        branch_ref='main')['publication']['publication_id'] == receipt['publication_id']
+    with pytest.raises(PermissionError):
+        service.read(**args, branch_ref='another-branch')
     assert service.read(**args, attachment='research_asset/image-1')['content'] == b'picture'
     auth['read'] = False
     with pytest.raises(PermissionError): service.read(**args)
