@@ -21,7 +21,6 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
       try{
         const page=await client.syncReports(profiles[profileIndex].profile_id,cursor,4);
         if(!alive||!client.isCurrent(snapshot))return;
-        transportWarning=false;
         let changed=false;
         for(const item of page.reports){
           if(item.status==="updated"||item.status==="published")changed=true;
@@ -39,6 +38,9 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
         else {cursor="";profileIndex=(profileIndex+1)%profiles.length;}
         const more=!!page.next_report_id||profileIndex!==0;
         if(!more){
+          // A successful first page does not mean the whole scan recovered.
+          // Clear the warning only after every page and Profile has succeeded.
+          transportWarning=false;
           if(remoteUpdated)notify({code:"research.report.sync.changed",type:"info",message:t("localResearch.syncUpdated")});
           remoteUpdated=false;
           for(const status of warned)if(!seen.has(status))warned.delete(status);

@@ -1,0 +1,68 @@
+"""Exercise the actual React sync scheduler with deterministic native replies."""
+from __future__ import annotations
+
+import json
+import subprocess
+import threading
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parents[2]
+APP = ROOT / 'web/app'
+
+
+def test_multipage_failure_notifies_once_until_complete_recovery(tmp_path):
+    harness, bundle = tmp_path / 'sync.tsx', tmp_path / 'sync.js'
+    harness.write_text(f'''
+import React from {json.dumps(str(APP / 'node_modules/react/index.js'))};
+import {{createRoot}} from {json.dumps(str(APP / 'node_modules/react-dom/client.js'))};
+import {{useLocalReportSync}} from {json.dumps(str(APP / 'src/use-local-report-sync.ts'))};
+import {{bindNotificationSink}} from {json.dumps(str(APP / 'src/notifications/core.ts'))};
+import {json.dumps(str(APP / 'src/i18n.ts'))};
+const state = (window as any).fixture = {{timers:[],notices:[],fail:true,calls:[]}};
+const original = window.setTimeout.bind(window);
+window.setTimeout = ((fn:any,delay?:number,...args:any[]) => {{
+  if (delay===250 || delay===60000) {{state.timers.push(() => fn(...args)); return 1;}}
+  return original(fn,delay,...args);
+}}) as typeof setTimeout;
+window.clearTimeout = (() => {{}}) as typeof clearTimeout;
+let now=100000; Date.now=()=>now;
+bindNotificationSink((notice,done)=>{{state.notices.push(notice.code);done();}});
+const client={{snapshot:()=>1,isCurrent:()=>true,syncReports:async (_profile:string,cursor:string) => {{
+  state.calls.push(cursor);
+  if(!cursor)return {{reports:[],next_report_id:'report-1'}};
+  if(state.fail)throw Error('offline');
+  return {{reports:[],next_report_id:null}};
+}}}};
+const caps={{actions:['sync_reports'],profiles:[{{profile_id:'self',display_name:'Self'}}]}};
+function App() {{useLocalReportSync(client as any,caps as any,true,()=>{{}});return <div>sync</div>;}}
+createRoot(document.getElementById('root')!).render(<App/>);
+(window as any).step = async () => {{now+=4000;const f=state.timers.shift();if(!f)throw Error('missing scheduled sync');f();for(let i=0;i<8;i++)await Promise.resolve();}};
+''', encoding='utf-8')
+    subprocess.run([str(APP / 'node_modules/.bin/esbuild'), str(harness), '--bundle', '--format=iife',
+                    '--target=es2020', f'--outfile={bundle}'], cwd=APP, check=True, capture_output=True)
+    (tmp_path / 'index.html').write_text('<div id="root"></div><script src="/sync.js"></script>', encoding='utf-8')
+    server = ThreadingHTTPServer(('127.0.0.1', 0), partial(SimpleHTTPRequestHandler, directory=str(tmp_path)))
+    worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel='chrome', headless=True)
+            try:
+                page = browser.new_page()
+                page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
+                page.wait_for_function('window.fixture?.timers.length > 0')
+                for _ in range(4): page.evaluate('window.step()')
+                assert page.evaluate('window.fixture.calls') == ['', 'report-1', '', 'report-1']
+                assert page.evaluate('window.fixture.notices') == ['research.report.sync.unavailable']
+                page.evaluate('window.fixture.fail=false')
+                for _ in range(2): page.evaluate('window.step()')
+                page.evaluate('window.fixture.fail=true')
+                for _ in range(2): page.evaluate('window.step()')
+                assert page.evaluate('window.fixture.notices') == ['research.report.sync.unavailable'] * 2
+            finally:
+                browser.close()
+    finally:
+        server.shutdown(); server.server_close(); worker.join(timeout=3)
