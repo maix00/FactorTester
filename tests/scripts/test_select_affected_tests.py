@@ -37,6 +37,17 @@ def test_known_module_selects_cross_module_consumers():
     assert "tests/server" in targets
 
 
+def test_local_research_publication_selects_focused_client_and_server_contracts():
+    mode, targets = selector.select({"tools/cli/release/research_reporting/local_publication.py"})
+    assert mode == "SCOPED"
+    assert set(targets) == {
+        "tests/release/test_local_research_rpc.py",
+        "tests/server/test_client_local_report_publication.py",
+        "tests/server/test_client_server_research_import.py",
+        "tests/server/test_local_report_publication.py",
+    }
+
+
 def test_skill_change_checks_activation_and_skill_tests():
     assert selector.select({"skills/traderesearch-research-skill/SKILL.md"}) == (
         "SCOPED",

@@ -578,6 +578,12 @@ for _path in (
 ):
     EXACT_PATH_TESTS[_path] = CLI_NAMING_TESTS
 EXACT_PATH_TESTS["vendor/py-alpha-lib"] = ALPHA_RUNTIME_TESTS
+EXACT_PATH_TESTS["tools/cli/release/research_reporting/local_publication.py"] = (
+    "tests/release/test_local_research_rpc.py",
+    "tests/server/test_client_local_report_publication.py",
+    "tests/server/test_client_server_research_import.py",
+    "tests/server/test_local_report_publication.py",
+)
 EXACT_PATH_TESTS["tools/factors/alpha_plan.py"] = (*FACTOR_PLAN_TESTS,"tests/server/test_nautilus_strategy_runspec.py")
 EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)
