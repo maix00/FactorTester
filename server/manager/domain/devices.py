@@ -501,11 +501,7 @@ class DeviceRegistry:
         key = normalise_public_key(public_key)
         if self.control_store is not None:
             record = self.control_store.device(identifier)
-            if (
-                record is None
-                or not bool(record.get("enabled"))
-                or record.get("public_key") != key
-            ):
+            if record is None or not bool(record.get("enabled")) or record.get("public_key") != key:
                 raise PermissionError("device is not approved")
             _verify_public_key_signature(
                 key, challenge=bytes(challenge), signature=signature,
@@ -551,6 +547,20 @@ class DeviceRegistry:
                     self._save()
         return dict(record)
 
+    def key_binding(self, *, username: str, device_id: str) -> dict[str, object] | None:
+        """Resolve one device key; its authorization is decided by Keycloak."""
+        identifier = normalise_device_id(device_id)
+        owner = str(username or "").strip()
+        if not owner:
+            return None
+        if self.control_store is not None:
+            row = self.control_store.device(identifier)
+            return dict(row) if row and row.get("username") == owner else None
+        with self._lock:
+            matches = [row for row in self._all_locked()
+                       if row.get("device_id") == identifier and row.get("username") == owner]
+        return dict(matches[0]) if len(matches) == 1 else None
+
 
 class DeviceChallengeStore:
     """Short-lived, one-use challenges kept in Manager memory."""
@@ -560,7 +570,7 @@ class DeviceChallengeStore:
         self._lock = threading.RLock()
         self._values: dict[str, tuple[bytes, float]] = {}
         self._device_login_tickets: dict[
-            str, tuple[str, str, str, float]
+            str, tuple[str, str, str, float, str]
         ] = {}
 
     def issue(self) -> tuple[str, bytes]:
@@ -584,7 +594,7 @@ class DeviceChallengeStore:
         return value[0]
 
     def issue_device_login_ticket(
-        self, *, username: str, device_id: str, origin: str,
+        self, *, username: str, device_id: str, origin: str, public_key: object,
     ) -> str:
         """Bind a verified device proof to one subsequent Keycloak OIDC flow."""
         principal = str(username or "").strip()
@@ -603,12 +613,13 @@ class DeviceChallengeStore:
                 self._device_login_tickets.pop(next(iter(self._device_login_tickets)))
             self._device_login_tickets[ticket] = (
                 principal, identifier, trusted_origin, now + self.ttl_seconds,
+                device_public_key_digest(public_key),
             )
         return ticket
 
     def consume_device_login_ticket(
         self, ticket: object, *, origin: str,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str]:
         """Consume one device-to-OIDC binding; reject replay or origin changes."""
         key = str(ticket or "").strip()
         with self._lock:
@@ -619,4 +630,4 @@ class DeviceChallengeStore:
             or not secrets.compare_digest(value[2], str(origin or "").strip().rstrip("/"))
         ):
             raise PermissionError("device login ticket is invalid or expired")
-        return value[0], value[1]
+        return value[0], value[1], value[4]

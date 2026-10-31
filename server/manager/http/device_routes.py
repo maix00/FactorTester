@@ -159,6 +159,17 @@ class DeviceNetworkRoutesMixin:
                 device_name=str(payload.get("device_name") or ""),
                 **self._device_request_metadata(),
             )
+            # Registration is explicit: a verified signature alone must never
+            # create an authorization grant. A failed grant leaves the local
+            # record disabled until the user deliberately registers again.
+            try:
+                from server.identity.keycloak_device import register_device
+                register_device(session=session, server_id=self.state.server_id,
+                                device_id=str(payload.get("device_id") or ""),
+                                public_key=payload.get("public_key"))
+            except Exception:
+                self.state.device_registry.revoke(str(payload.get("device_id") or ""))
+                raise
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device enrollment failed: {exc}\n")
             json_response(self, {
@@ -168,6 +179,10 @@ class DeviceNetworkRoutesMixin:
             return
         except (DeviceRegistryError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        except Exception:
+            json_response(self, {"success": False, "code": "keycloak_authorization_unavailable",
+                                 "error": "Keycloak authorization is unavailable"}, 503)
             return
         json_response(self, {
             "success": True,
@@ -202,6 +217,12 @@ class DeviceNetworkRoutesMixin:
             )
             if record is None:
                 raise PermissionError("device was not found")
+            binding = self.state.device_registry.key_binding(username=str(session["username"]), device_id=device_id)
+            if binding is None:
+                raise PermissionError("device key was not found")
+            from server.identity.keycloak_device import revoke_device
+            revoke_device(session=session, server_id=self.state.server_id, device_id=device_id,
+                          public_key=binding.get("public_key"))
             device = self.state.device_registry.revoke(device_id)
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
@@ -215,6 +236,10 @@ class DeviceNetworkRoutesMixin:
             return
         except (DeviceRegistryError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        except Exception:
+            json_response(self, {"success": False, "code": "keycloak_authorization_unavailable",
+                                 "error": "Keycloak authorization is unavailable"}, 503)
             return
         json_response(self, {
             "success": True,
@@ -260,6 +285,7 @@ class DeviceNetworkRoutesMixin:
                 username=str(record.get("username") or ""),
                 device_id=str(record.get("device_id") or ""),
                 origin=self._request_origin(),
+                public_key=record.get("public_key"),
             )
             from server.identity.manager_oidc import _safe_next_path
             from urllib.parse import urlencode
