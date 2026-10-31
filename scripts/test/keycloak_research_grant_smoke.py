@@ -31,7 +31,7 @@ class NoProfileGrants:
         return {pair: {"can_view": False, "can_download": False} for pair in profiles}
 
 
-def run(sandbox):
+def run(sandbox, *, on_ready=None):
     realm, client_id = "research-grant", "research-client"
     secret, password = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
     sandbox.request("POST", "/admin/realms", token=sandbox.admin, body={
@@ -62,6 +62,11 @@ def run(sandbox):
             "credentials": [{"type": "password", "value": password, "temporary": False}]})
     users = {name: sandbox.find(realm, "users?" + urlencode({"username": name, "exact": "true"}),
                                 name, field="username") for name in ("owner", "member", "late")}
+    if on_ready is not None:
+        sandbox.api("POST", realm, "clients/" + client_row["id"] + "/roles", {"name": "public_server:login"})
+        public_role = sandbox.api("GET", realm, "clients/" + client_row["id"] + "/roles/public_server%3Alogin")
+        sandbox.api("POST", realm, "users/" + users["owner"]["id"] + "/role-mappings/clients/" + client_row["id"],
+                    [public_role])
     client = ServiceOIDCClient(sandbox.base, realm, client_id, client_secret=secret)
     issuer = "http://localhost:8080/realms/" + realm
     sessions = {}
@@ -110,6 +115,10 @@ def run(sandbox):
         catalog = ResearchCatalog(database, research_authorizer=KeycloakResearchAuthorization(),
             profile_authorizer=NoProfileGrants(), profile_grant_manager=manager,
             profile_identity_resolver=resolver)
+        if on_ready is not None:
+            on_ready(sandbox=sandbox, realm=realm, client_id=client_id, client_uuid=client_row['id'],
+                     client=client, issuer=issuer, sessions=sessions, settings=settings, users=users,
+                     manager=manager, catalog=catalog, research_id=ref, public_role=public_role)
         with identity_request():
             bind_verified_identity(*sessions["owner"])
             created = catalog.create_research(owner_ref="owner", title="Keycloak-created Research")

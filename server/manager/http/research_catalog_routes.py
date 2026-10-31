@@ -19,6 +19,22 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             raise RuntimeError("Research catalog is unavailable")
         return service
 
+    def _research_couch_service(self):
+        import os
+        from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+        from server.manager.services.research_couchdb_publication import ResearchCouchPublicationService
+
+        couch = str(os.environ.get("TRADERESEARCH_COUCHDB_URL")
+                    or os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+        if not couch:
+            raise OSError("Research report store is unavailable")
+        database = str(os.environ.get("TRADERESEARCH_COUCHDB_DB")
+                       or os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects").strip()
+        store = CouchDBObjectStore(couch, database,
+            username=os.environ.get("TRADERESEARCH_COUCHDB_USER") or os.environ.get("FACTORTESTER_COUCHDB_USER", ""),
+            password=os.environ.get("TRADERESEARCH_COUCHDB_PASSWORD") or os.environ.get("FACTORTESTER_COUCHDB_PASSWORD", ""))
+        return ResearchCouchPublicationService(state=self.state, catalog=self._research_catalog_service(), store=store)
+
     def _refresh_research_catalog(self, principal: str) -> None:
         client = getattr(self.state, "client_state", None)
         if client is not None:
@@ -66,13 +82,37 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         if session is None:
             return True
         viewer = str(session["username"])
-        self._refresh_research_catalog(viewer)
+        publication = re.fullmatch(
+            r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication/(p-[0-9a-f]{64})"
+            r"(?:/attachments/(research_asset|research_attachment|research_local_resource)/([^/]+))?",
+            parsed.path,
+        )
+        if publication is None:
+            self._refresh_research_catalog(viewer)
         service = self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
-            if self._get_report_branch_route(parsed, viewer):
+            if publication:
+                attachment = ((publication.group(4) + '/' + unquote(publication.group(5)))
+                              if publication.group(4) else '')
+                value = self._research_couch_service().read(session=session,
+                    research_id=unquote(publication.group(1)), report_id=unquote(publication.group(2)),
+                    publication_ref=publication.group(3), attachment=attachment)
+                if attachment:
+                    raw, content_type = value['content'], value['content_type']
+                    self.send_response(200)
+                    self.send_header('Content-Type', content_type)
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.send_header('Cache-Control', 'private, no-store')
+                    self.send_header('Content-Disposition', 'attachment' if content_type == 'application/octet-stream' else 'inline')
+                    self.send_header('Content-Length', str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return True
+                payload = value
+            elif self._get_report_branch_route(parsed, viewer):
                 return True
-            if parsed.path == "/api/research/capabilities/keycloak-sharing":
+            elif parsed.path == "/api/research/capabilities/keycloak-sharing":
                 payload = {"capabilities": service.keycloak_sharing_capabilities()}
             elif parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
@@ -219,7 +259,15 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         report_id=str(query.get("report_id", [""])[0]))}
                 else:
                     raise KeyError("research route not found")
-        except (LookupError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+        except (LookupError, PermissionError, TypeError, ValueError, RuntimeError, OSError) as exc:
+            if publication and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
+                from urllib.error import HTTPError
+                missing = isinstance(exc, FileNotFoundError) or isinstance(exc, HTTPError) and exc.code == 404
+                json_response(self, {"success": False,
+                    "code": "research_publication_not_found" if missing else "research_store_unavailable",
+                    "error": "Research publication not found" if missing else "Research report store is unavailable"},
+                    404 if missing else 503)
+                return True
             self._research_catalog_error(exc)
             return True
         json_response(self, {"success": True, **payload})
@@ -300,8 +348,18 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             return True
         actor = str(session["username"])
         service = self._research_catalog_service()
+        publication = re.fullmatch(r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication", parsed.path)
         try:
-            data = self._research_catalog_body()
+            data = self._research_catalog_body(32 * 1024 * 1024 if publication else 2 * 1024 * 1024)
+            if publication:
+                if set(data) - {"branch_ref", "projection", "expected_revision"}:
+                    raise ValueError("unsupported report publication fields")
+                value = self._research_couch_service().publish(
+                    session=session, research_id=unquote(publication.group(1)), report_id=unquote(publication.group(2)),
+                    branch_ref=str(data.get("branch_ref") or ""), projection=data.get("projection"),
+                    expected_revision=data.get("expected_revision"))
+                json_response(self, {"success": True, "publication": value}, 201)
+                return True
             if self._post_report_branch_route(parsed, actor, data):
                 return True
             if parsed.path in {"/api/research", "/api/research/keycloak-create"}:
@@ -427,7 +485,16 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {"success": True, "evidence_link": value}, 201)
                 return True
             raise KeyError("research route not found")
-        except (LookupError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+        except (LookupError, PermissionError, TypeError, ValueError, RuntimeError, OSError) as exc:
+            from server.jobs.storage.couchdb_research_publication import ResearchPublicationConflict
+            if isinstance(exc, ResearchPublicationConflict):
+                json_response(self, {"success": False, "code": "research_publication_conflict",
+                                     "error": "Research publication revision changed"}, 409)
+                return True
+            if publication and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
+                json_response(self, {"success": False, "code": "research_store_unavailable",
+                                     "error": "Research report store is unavailable"}, 503)
+                return True
             self._research_catalog_error(exc)
             return True
 

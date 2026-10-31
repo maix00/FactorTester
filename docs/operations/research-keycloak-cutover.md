@@ -28,6 +28,10 @@ python -m scripts.migrations.keycloak_research_stage plan \
 
 Profile 盘点可显式增加 `--include-postgres --postgres-settings <Manager 的 control-database.json>`；连接地址和密码只在进程内使用，不写入终端输出或回执。工具在独立只读、可重复读事务中按指定 principal 分批读取 `control_profiles` 与 `control_account_domain_entities` 的授权字段，并分别核对后者的 payload 与权限 envelope；不会读取会话正文。SQLite、缓存文件与 PostgreSQL 是不同快照，`postgres_checked=true` 不表示它们同一时点一致，更不是切换许可。客户端数据、稳定身份与动态层级仍需单独核对。
 
+单报告的 Keycloak/CouchDB 发布入口为 `POST /api/research/{research_id}/reports/{report_id}/couchdb-publication`。请求包含 `branch_ref`、所选报告的完整 `projection` 和 `expected_revision`；首次发布为 `null`，更新时必须提供上次返回的 CouchDB revision。对应读取入口在该地址后加 `/{publication_id}`；附件读取再加 `/attachments/{object_kind}/{object_id}`。两者都实时校验目标服务器准入及精确报告的 Keycloak scope，发布需要 `write` 和 `share`，读取需要 `read`。无权限、离线、版本冲突或内容哈希不一致均不能写入或返回内容。
+
+此入口只提交显式选择的单个报告及随投影提供的资源，报告与附件在同一 CouchDB 文档中按版本原子提交；每次请求最多 32 MiB，单个资源最多 8 MiB、资源总量最多 20 MiB。尚不支持 7997 分片上传、客户端本地报告首次注册或跨 Manager 自动发布。旧 Research 整图的自动出站已停用，旧待发记录留待核对；这不代表旧入站镜像、整个研究的批量共享或历史授权迁移已经完成。
+
 ## 隔离演练与分批准备
 
 在临时 SQLite 副本和隔离 Keycloak realm 先执行，不触碰真实业务对象：
