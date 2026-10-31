@@ -28,6 +28,9 @@ final class SessionStore: ObservableObject {
     private let credentialSaver: CredentialSaver
     private let managerDeviceSessionRestorer: ManagerDeviceSessionRestorer
     private var restoreTask: Task<Bool, Never>?
+    // An in-flight refresh must not restore a session after logout or a
+    // newer login. Updates after suspension check this generation.
+    private var authenticationGeneration: UInt64 = 0
 
     init(
         api: any SessionAPI = APIClient.shared,
@@ -63,14 +66,17 @@ final class SessionStore: ObservableObject {
     /// 启动 / 设置变更后刷新当前登录态。
     @discardableResult
     func refresh() async -> Bool {
+        let generation = authenticationGeneration
         do {
             let refreshed = try await api.me()
+            guard generation == authenticationGeneration else { return false }
             // Some server versions answer `/api/me` with HTTP 200 and an
             // empty identity after a restart instead of returning 401.  It
             // is still an expired cookie, so try the Keychain credentials
             // before exposing a logged-out screen.
             guard refreshed.isLoggedIn else {
-                if await restoreSavedSessionWithRetry() { return true }
+                if await restoreSavedSessionWithRetry() { return generation == authenticationGeneration }
+                guard generation == authenticationGeneration else { return false }
                 user = refreshed
                 isManagerLoggedIn = false
                 return false
@@ -79,8 +85,11 @@ final class SessionStore: ObservableObject {
             if !confirmed.keepLogin {
                 do {
                     confirmed = try await confirmPersistentSession()
+                    guard generation == authenticationGeneration else { return false }
                 } catch {
-                    if await restoreSavedSessionWithRetry() { return true }
+                    guard generation == authenticationGeneration else { return false }
+                    if await restoreSavedSessionWithRetry() { return generation == authenticationGeneration }
+                    guard generation == authenticationGeneration else { return false }
                     lastError = L10n.format(
                         "登录会话未能持久化：%@",
                         error.localizedDescription
@@ -97,12 +106,16 @@ final class SessionStore: ObservableObject {
                 principalRef: confirmed.username ?? "",
                 reportError: false
             )
+            guard generation == authenticationGeneration else { return false }
             await refreshManagerSession()
+            guard generation == authenticationGeneration else { return false }
             if !refreshed.isLoggedIn { isManagerLoggedIn = false }
             return refreshed.isLoggedIn
         } catch let error as APIError {
+            guard generation == authenticationGeneration else { return false }
             if case .unauthorized = error {
-                if await restoreSavedSessionWithRetry() { return true }
+                if await restoreSavedSessionWithRetry() { return generation == authenticationGeneration }
+                guard generation == authenticationGeneration else { return false }
                 user = nil
                 isManagerLoggedIn = false
             } else {
@@ -110,20 +123,11 @@ final class SessionStore: ObservableObject {
             }
             return isLoggedIn
         } catch {
+            guard generation == authenticationGeneration else { return false }
             // 网络抖动、服务器升级或详情接口故障不应被解释成登出。
             lastError = error.localizedDescription
             return isLoggedIn
         }
-    }
-
-    private func seedUser(from response: AuthResponse, fallbackUsername: String) {
-        user = UserInfo(
-            username: response.username ?? fallbackUsername,
-            alias: response.alias,
-            role: response.role,
-            isAdmin: response.isAdmin ?? false,
-            keepLogin: true
-        )
     }
 
     private func clearAuthentication() {
@@ -132,28 +136,31 @@ final class SessionStore: ObservableObject {
     }
 
     func login(username: String, password: String) async -> Bool {
+        authenticationGeneration &+= 1
+        restoreTask?.cancel()
+        restoreTask = nil
+        let generation = authenticationGeneration
         isWorking = true; lastError = nil
-        defer { isWorking = false }
+        defer { if generation == authenticationGeneration { isWorking = false } }
         do {
             let resp = try await api.login(
                 username: username,
                 password: password
             )
+            guard generation == authenticationGeneration else { return false }
             if resp.success {
-                seedUser(from: resp, fallbackUsername: username)
-                try? CanonicalFactorLibraryAccessStore.ensureDefault(
-                    for: resp.username ?? username
-                )
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
                     username: username,
-                    password: password
+                    password: password,
+                    generation: generation
                 )
             } else {
                 lastError = resp.error ?? L10n.text("登录失败")
                 return false
             }
         } catch {
+            guard generation == authenticationGeneration else { return false }
             lastError = (error as? APIError)?.errorDescription ?? error.localizedDescription
             return false
         }
@@ -201,29 +208,32 @@ final class SessionStore: ObservableObject {
     }
 
     func register(username: String, password: String, organizationId: String) async -> Bool {
+        authenticationGeneration &+= 1
+        restoreTask?.cancel()
+        restoreTask = nil
+        let generation = authenticationGeneration
         isWorking = true; lastError = nil
-        defer { isWorking = false }
+        defer { if generation == authenticationGeneration { isWorking = false } }
         do {
             let resp = try await api.register(
                 username: username,
                 password: password,
                 organizationId: organizationId
             )
+            guard generation == authenticationGeneration else { return false }
             if resp.success {
-                seedUser(from: resp, fallbackUsername: username)
-                try? CanonicalFactorLibraryAccessStore.ensureDefault(
-                    for: resp.username ?? username
-                )
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
                     username: username,
-                    password: password
+                    password: password,
+                    generation: generation
                 )
             } else {
                 lastError = resp.error ?? L10n.text("注册失败")
                 return false
             }
         } catch {
+            guard generation == authenticationGeneration else { return false }
             lastError = (error as? APIError)?.errorDescription ?? error.localizedDescription
             return false
         }
@@ -232,15 +242,18 @@ final class SessionStore: ObservableObject {
     private func completeAuthentication(
         principalRef: String,
         username: String,
-        password: String
+        password: String,
+        generation: UInt64
     ) async -> Bool {
         do {
             let confirmed = try await confirmPersistentSession()
+            guard generation == authenticationGeneration else { return false }
             user = confirmed
             try? CanonicalFactorLibraryAccessStore.ensureDefault(
                 for: confirmed.username ?? principalRef
             )
         } catch {
+            guard generation == authenticationGeneration else { return false }
             clearAuthentication()
             lastError = L10n.format(
                 "登录状态未能持久化：%@",
@@ -254,8 +267,10 @@ final class SessionStore: ObservableObject {
         )
         do {
             try await managerAPI.login(username: username, password: password)
+            guard generation == authenticationGeneration else { return false }
             isManagerLoggedIn = true
         } catch {
+            guard generation == authenticationGeneration else { return false }
             isManagerLoggedIn = false
             // Manager 是所有客户端模块的统一入口；暂时不可用不能反向使
             // 已成功的业务端口登录失效，页面会明确显示入口不可用。
@@ -273,7 +288,7 @@ final class SessionStore: ObservableObject {
             principalRef: principalRef,
             reportError: false
         )
-        return true
+        return generation == authenticationGeneration
     }
 
     private func confirmPersistentSession() async throws -> UserInfo {
@@ -302,22 +317,28 @@ final class SessionStore: ObservableObject {
         if let restoreTask {
             return await restoreTask.value
         }
+        let generation = authenticationGeneration
         let task = Task { @MainActor [weak self] in
             guard let self else { return false }
             return await self.performRestoreSavedSessionWithRetry()
         }
         restoreTask = task
         let restored = await task.value
-        restoreTask = nil
-        return restored
+        if generation == authenticationGeneration { restoreTask = nil }
+        return generation == authenticationGeneration && restored
     }
 
     private func performRestoreSavedSessionWithRetry() async -> Bool {
-        if await restoreSavedSessionAttempt() { return true }
+        let generation = authenticationGeneration
+        guard !Task.isCancelled else { return false }
+        if await restoreSavedSessionAttempt() { return generation == authenticationGeneration }
+        guard generation == authenticationGeneration, !Task.isCancelled else { return false }
         guard credentialLoader() != nil else { return false }
         for delay in [500_000_000, 1_000_000_000] {
-            try? await Task.sleep(nanoseconds: UInt64(delay))
-            if await restoreSavedSessionAttempt() { return true }
+            do { try await Task.sleep(nanoseconds: UInt64(delay)) } catch { return false }
+            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
+            if await restoreSavedSessionAttempt() { return generation == authenticationGeneration }
+            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             guard credentialLoader() != nil else {
                 return false
             }
@@ -326,6 +347,8 @@ final class SessionStore: ObservableObject {
     }
 
     private func restoreSavedSessionAttempt() async -> Bool {
+        let generation = authenticationGeneration
+        guard !Task.isCancelled else { return false }
         guard let credentials = credentialLoader() else {
             return false
         }
@@ -334,23 +357,28 @@ final class SessionStore: ObservableObject {
                 username: credentials.username,
                 password: credentials.password
             )
+            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             guard response.success else {
                 SessionCredentialStore.clear()
                 clearAuthentication()
                 return false
             }
             let confirmed = try await confirmPersistentSession()
+            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             user = confirmed
             try? CanonicalFactorLibraryAccessStore.ensureDefault(
                 for: confirmed.username ?? credentials.username
             )
             await refreshManagerSession(credentials: credentials)
+            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             let bridged = await bridgeClientSession(
                 principalRef: response.username ?? credentials.username
             )
+            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             if !bridged { lastError = nil }
             return true
         } catch let error as APIError {
+            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             if case .unauthorized = error {
                 SessionCredentialStore.clear()
                 clearAuthentication()
@@ -359,6 +387,7 @@ final class SessionStore: ObservableObject {
             }
             return false
         } catch {
+            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
             lastError = error.localizedDescription
             return false
         }
@@ -370,9 +399,11 @@ final class SessionStore: ObservableObject {
     private func refreshManagerSession(
         credentials: SavedSessionCredentials? = nil
     ) async {
+        let generation = authenticationGeneration
         let expectedUsername = user?.username ?? ""
         do {
             if try await managerAPI.restoreSession() {
+                guard generation == authenticationGeneration else { return }
                 isManagerLoggedIn = true
                 return
             }
@@ -381,8 +412,11 @@ final class SessionStore: ObservableObject {
             // public path uses only the bound device; private LAN may use the
             // app credential already used to restore the service session.
         }
+        guard generation == authenticationGeneration else { return }
         do {
-            switch try await managerDeviceSessionRestorer(expectedUsername) {
+            let restored = try await managerDeviceSessionRestorer(expectedUsername)
+            guard generation == authenticationGeneration else { return }
+            switch restored {
             case .authenticated(let username):
                 guard !expectedUsername.isEmpty, username == expectedUsername else {
                     isManagerLoggedIn = false
@@ -397,6 +431,7 @@ final class SessionStore: ObservableObject {
                 break
             }
         } catch {
+            guard generation == authenticationGeneration else { return }
             // Public Managers accept only the approved device identity.  A
             // failed or revoked device must never fall back to a password.
             isManagerLoggedIn = false
@@ -413,8 +448,10 @@ final class SessionStore: ObservableObject {
                 username: credentials.username,
                 password: credentials.password
             )
+            guard generation == authenticationGeneration else { return }
             isManagerLoggedIn = true
         } catch {
+            guard generation == authenticationGeneration else { return }
             isManagerLoggedIn = false
         }
     }
@@ -435,6 +472,10 @@ final class SessionStore: ObservableObject {
     }
 
     func logout() async {
+        authenticationGeneration &+= 1
+        restoreTask?.cancel()
+        restoreTask = nil
+        isWorking = false
         SessionCredentialStore.clear()
         user = nil
         isManagerLoggedIn = false

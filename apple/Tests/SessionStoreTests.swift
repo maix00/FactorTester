@@ -22,6 +22,36 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNil(try decode(["username": "alice"]).localResearchIdentity)
     }
 
+    func testLateRefreshCannotRestoreIdentityAfterLogout() async throws {
+        let api = DelayedSessionAPI(user: try user(username: "alice"))
+        let store = SessionStore(
+            api: api, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true },
+            credentialLoader: { nil }
+        )
+        let refreshing = Task { await store.refresh() }
+        await api.waitUntilRequested()
+        await store.logout()
+        api.complete()
+        let refreshed = await refreshing.value
+        XCTAssertFalse(refreshed)
+        XCTAssertNil(store.user)
+        XCTAssertFalse(store.isManagerLoggedIn)
+    }
+
+    func testLateManagerRestoreCannotMarkLoggedInAfterLogout() async throws {
+        let api = FakeSessionAPI(user: try user(username: "alice"))
+        let manager = DelayedManagerSessionAPI()
+        let store = SessionStore(api: api, managerAPI: manager, bridge: { _ in true }, credentialLoader: { nil })
+        let refreshing = Task { await store.refresh() }
+        await manager.waitUntilRequested()
+        await store.logout()
+        manager.complete()
+        let refreshed = await refreshing.value
+        XCTAssertFalse(refreshed)
+        XCTAssertNil(store.user)
+        XCTAssertFalse(store.isManagerLoggedIn)
+    }
+
     func testNilUsernameIsNotAnAuthenticatedIdentity() async throws {
         let api = FakeSessionAPI(user: try user(username: nil))
         let store = SessionStore(
@@ -388,4 +418,57 @@ private final class FakeSessionAPI: SessionAPI {
         events.append("keep:\(keep)")
         if let keepLoginError { throw keepLoginError }
     }
+}
+
+@MainActor
+private final class DelayedSessionAPI: SessionAPI {
+    private let user: UserInfo
+    private var pending: CheckedContinuation<UserInfo, Never>?
+    private var onRequest: CheckedContinuation<Void, Never>?
+    private var requested = false
+
+    init(user: UserInfo) { self.user = user }
+    func waitUntilRequested() async {
+        if requested { return }
+        await withCheckedContinuation { onRequest = $0 }
+    }
+    func complete() { pending?.resume(returning: user); pending = nil }
+    func me() async throws -> UserInfo {
+        await withCheckedContinuation { continuation in
+            pending = continuation
+            requested = true
+            onRequest?.resume()
+            onRequest = nil
+        }
+    }
+    func login(username: String, password: String) async throws -> AuthResponse {
+        throw APIError.unauthorized
+    }
+    func register(username: String, password: String, organizationId: String) async throws -> AuthResponse {
+        throw APIError.unauthorized
+    }
+    func logout() async throws {}
+    func setKeepLogin(_ keep: Bool) async throws {}
+}
+
+@MainActor
+private final class DelayedManagerSessionAPI: ManagerSessionAPI {
+    private var pending: CheckedContinuation<Bool, Never>?
+    private var onRequest: CheckedContinuation<Void, Never>?
+    private var requested = false
+    func waitUntilRequested() async {
+        if requested { return }
+        await withCheckedContinuation { onRequest = $0 }
+    }
+    func complete() { pending?.resume(returning: true); pending = nil }
+    func restoreSession() async throws -> Bool {
+        await withCheckedContinuation { continuation in
+            pending = continuation
+            requested = true
+            onRequest?.resume()
+            onRequest = nil
+        }
+    }
+    func login(username: String, password: String) async throws {}
+    func logout() async {}
 }
