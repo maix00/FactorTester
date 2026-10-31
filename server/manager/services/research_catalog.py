@@ -103,9 +103,11 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         if synchronizer.local.path.resolve() != self.db_path:
             raise ValueError("research catalog and outbox must share one database")
         self._synchronizer = synchronizer
-        # In Keycloak mode legacy ACL columns are not the current sharing
-        # authority, so they cannot trigger cross-Manager publication.
-        self._synchronizer.research_legacy_sharing = self._research_authorizer is None
+        # The old Research graph has no authenticated destination or live
+        # Keycloak public-access decision. Never publish it automatically;
+        # retain existing outbox records for reviewed migration instead.
+        # Explicit report publication uses the Keycloak/CouchDB path.
+        self._synchronizer.research_legacy_sharing = False
         self._schedule_refresh = schedule_refresh
 
     @contextmanager

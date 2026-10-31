@@ -8,7 +8,7 @@ from server.manager.storage.account_domain.research_sync import backfill_researc
 from tests.scripts.test_worktree_manager_account_domain_sync import MemoryControlStore
 
 
-def replicas(tmp_path):
+def replicas(tmp_path, *, exercise_legacy=True):
     control = MemoryControlStore()
     values = []
     for name in ('public', 'internal'):
@@ -16,12 +16,16 @@ def replicas(tmp_path):
         catalog = ResearchCatalog(path)
         sync = AccountDomainSyncService(sqlite_path=path, control_store=control, manager_id=name)
         catalog.set_synchronizer(sync)
+        if exercise_legacy:
+            # Isolated migration compatibility tests only; production does not
+            # enable the legacy graph publisher.
+            sync.research_legacy_sharing = True
         values.append((catalog, sync))
     return values, control
 
 
 def test_private_research_and_owner_only_workspaces_never_enter_automatic_outbox(tmp_path):
-    ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path)
+    ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path, exercise_legacy=False)
     rid = author.create_research(owner_ref='alice', title='local', profile_ref='work')['research_id']
     author.register_report(rid, actor='alice', report_id='private-report', profile_ref='self')
     author.update_research(rid, actor='alice', title='local edit')
@@ -31,6 +35,17 @@ def test_private_research_and_owner_only_workspaces_never_enter_automatic_outbox
     assert incoming.pull(principal='alice')['applied'] == 0
     assert mirror.list_researches(viewer='alice') == [] and control.rows == {}
     assert author.get_research_summary(rid, viewer='alice')['title'] == 'local edit'
+
+
+def test_shared_research_graph_is_not_automatically_published_without_destination_authorization(tmp_path):
+    ((author, outgoing), (_mirror, _incoming)), control = replicas(tmp_path, exercise_legacy=False)
+    rid = author.create_research(owner_ref='alice', title='shared', visibility='public')['research_id']
+    author.register_report(rid, actor='alice', report_id='selected')
+    assert outgoing.local.pending(principal='alice') == []
+    assert backfill_researches(outgoing, 'alice') == 0
+    _queue_old_private_projection(outgoing, rid)
+    assert outgoing.flush(principal='alice')['blocked'] == 1
+    assert control.rows == {}
 
 
 def test_large_private_research_does_not_hit_shared_envelope_limit(tmp_path):

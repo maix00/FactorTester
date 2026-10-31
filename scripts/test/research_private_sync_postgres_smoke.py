@@ -35,7 +35,12 @@ def main():
 
         private = author.create_research(owner_ref="alice", title="private sentinel")['research_id']
         author.register_report(private, actor="alice", report_id="private-report", title="private report sentinel")
+        safe_default = author.create_research(owner_ref="alice", title="shared default", visibility="public")['research_id']
+        author.register_report(safe_default, actor="alice", report_id="default-report")
         assert not outgoing.local.pending(principal="alice")
+        # Exercise historical migration compatibility only after verifying the
+        # real runtime default never auto-uploads a full Research graph.
+        outgoing.research_legacy_sharing = True
         # Queue a private projection produced by the former implementation.
         with connect_sqlite(author_path, readonly=True) as conn:
             old = snapshot(conn, private)
@@ -63,7 +68,8 @@ def main():
         retained = outgoing.local.pending(principal="alice", include_blocked=True)
         assert len(retained) == 1 and retained[0]['entity_id'] == private
         assert retained[0]['last_error'] == 'research_sync_needs_review'
-        print(json.dumps({"real_postgres": True, "private_not_transmitted": True,
+        print(json.dumps({"real_postgres": True, "default_graph_upload_disabled": True,
+            "legacy_compatibility_test_only": True, "private_not_transmitted": True,
             "old_private_retained_for_review": True, "shared_metadata_and_revocation": True,
             "keycloak_tested": False, "couchdb_tested": False}, sort_keys=True))
 
