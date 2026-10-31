@@ -49,7 +49,7 @@ class AgentRoutesMixin:
         session = self._agent_session()
         if session is None:
             return None
-        if can_use_agent_assistant(session):
+        if can_use_agent_assistant(session, public_server=bool(getattr(self.state, "public_server", False))):
             return session
         json_response(
             self,

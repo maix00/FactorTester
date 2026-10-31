@@ -135,19 +135,16 @@ def test_reject_wrong_audience_and_revoked_token():
     assert verifier.session('revoked') is None
 
 
-def test_keycloak_permission_does_not_use_local_super_admin(monkeypatch):
+def test_agent_permission_is_scoped_to_manager_location(monkeypatch):
     from server.permissions.agent_assistant import can_use_agent_assistant
     from server.identity import server_admission
     calls = []
+    session = {'username': 'alice', 'role': 'super_admin', 'keycloak_roles': ('agent_assistant:use',)}
     monkeypatch.setattr(server_admission, 'current_manager_role',
-                        lambda session, role: calls.append((session, role)) or False)
-    session = {'username': 'alice', 'role': 'super_admin',
-               'keycloak_roles': ('agent_assistant:use',)}
-    assert not can_use_agent_assistant(session)
-    assert calls == [(session, 'agent_assistant:use')]
-    monkeypatch.setattr(server_admission, 'current_manager_role',
-                        lambda current, role: current is session and role == 'agent_assistant:use')
-    assert can_use_agent_assistant(session)
+                        lambda current, role: calls.append((current, role)) or role == 'agent_assistant:internal:use')
+    assert can_use_agent_assistant(session, public_server=False)
+    assert not can_use_agent_assistant(session, public_server=True)
+    assert calls == [(session, 'agent_assistant:internal:use'), (session, 'agent_assistant:public:use')]
 
 
 def test_manager_keycloak_mode_uses_verified_session(monkeypatch):

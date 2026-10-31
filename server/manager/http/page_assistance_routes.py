@@ -540,7 +540,7 @@ class PageAssistanceRoutesMixin:
                 or str(user.get("keycloak_issuer") or "") != binding.get("issuer")
                 or str(user.get("tr_identity_id") or "") != binding.get("identity_id")
                 or not server_admission(user, state=self.state, use_cache=False)[0]
-                or not can_use_agent_assistant(user)):
+                or not can_use_agent_assistant(user, public_server=bool(getattr(self.state, "public_server", False)))):
             raise PermissionError("delegated Keycloak session is no longer authorized")
         if not self._profile_exists(principal, identifier):
             raise PermissionError("Profile does not belong to current account")

@@ -103,7 +103,7 @@ class AgentAppServerRoutesMixin:
         if session is None:
             raise AgentAppServerError("login required")
         principal = self._agent_principal(session)
-        if not can_use_agent_assistant(session):
+        if not can_use_agent_assistant(session, public_server=bool(getattr(self.state, "public_server", False))):
             raise AgentAppServerError(
                 "Agent Assistant use is not permitted",
                 code="permission_denied",

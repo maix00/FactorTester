@@ -140,7 +140,7 @@ def test_agent_capability_requires_live_user_and_uses_active_turn_workspace(monk
     monkeypatch.setattr(user_session, "keycloak_session", lambda value, **kwargs: user if
                         value == token and kwargs == {"use_cache": False, "fail_on_unavailable": True} else None)
     monkeypatch.setattr(server_admission, "server_admission", lambda *_args, **_kwargs: (True, "ok"))
-    monkeypatch.setattr(agent_assistant, "can_use_agent_assistant", lambda session: session == user)
+    monkeypatch.setattr(agent_assistant, "can_use_agent_assistant", lambda session, *, public_server: session == user)
     class Handler(routes.PageAssistanceRoutesMixin):
         state = object()
         headers = {"X-FactorTester-Agent-Profile": "self"}

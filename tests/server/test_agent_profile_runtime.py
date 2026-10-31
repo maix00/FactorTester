@@ -629,7 +629,7 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
         payload={
             "label": "provider",
@@ -652,7 +652,7 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
     )
     assert listing._get_agent_routes(urlparse("/api/client/agent-models")) is True
@@ -685,7 +685,7 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
     )
     provider_id = response["provider"]["provider_id"]
@@ -754,7 +754,7 @@ def test_agent_route_denies_a_revoked_role_even_if_token_still_has_it(tmp_path, 
     )
     monkeypatch.setattr(server_admission, "current_manager_role", lambda *_args: False)
     handler = _AgentRouteHandler(service, session={
-        "username": PRINCIPAL, "keycloak_roles": ("agent_assistant:use",),
+        "username": PRINCIPAL, "keycloak_roles": ("agent_assistant:internal:use",),
     })
     assert handler._get_agent_routes(urlparse("/api/client/agent-models")) is True
     assert handler.response_status == 403
@@ -770,10 +770,10 @@ def test_force_release_rejects_revoked_admin_even_when_assistant_is_allowed(tmp_
         server_id="public-1",
     )
     monkeypatch.setattr(server_admission, "current_manager_role",
-                        lambda _session, role: role == "agent_assistant:use")
+                        lambda _session, role: role == "agent_assistant:internal:use")
     handler = _AgentRouteHandler(service, session={
         "username": PRINCIPAL, "role": "super_admin",
-        "keycloak_roles": ("agent_assistant:use", "admin_console:manage"),
+        "keycloak_roles": ("agent_assistant:internal:use", "admin_console:manage"),
     }, payload={"claim_id": "claim", "force": True})
     assert handler._post_agent_routes(urlparse("/api/client/profile-claims/release"))
     assert handler.response_status == 403
@@ -791,7 +791,7 @@ def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path, mon
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
         payload={
             "label": "provider",
@@ -843,7 +843,7 @@ def test_agent_provider_listing_never_contacts_upstream_providers(
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
     )
 

@@ -9,7 +9,7 @@ from server.permissions.roles import DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE
 
 MANAGER_ROLES = (
     'admin_console:read', 'admin_console:manage', 'public_server:login',
-    'factor:develop', 'agent_assistant:use', DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE,
+    'factor:develop', 'agent_assistant:public:use', 'agent_assistant:internal:use', DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE,
 )
 
 

@@ -465,7 +465,7 @@ class _Handler(AgentRoutesMixin):
         self.wfile = io.BytesIO()
 
     def _session(self):
-        return {"username": PRINCIPAL, "keycloak_roles": ["agent_assistant:use"]}
+        return {"username": PRINCIPAL, "keycloak_roles": ["agent_assistant:internal:use"]}
 
     def _json_body(self, _maximum):
         return self._payload

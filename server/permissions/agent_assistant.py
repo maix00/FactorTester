@@ -8,8 +8,9 @@ RESOURCE_REF = "global"
 ACTION = "use"
 
 
-def can_use_agent_assistant(session: object) -> bool:
-    """Require the current Keycloak role, not just a stale token claim."""
+def can_use_agent_assistant(session: object, *, public_server: bool) -> bool:
+    """Require the live Keycloak role for this Manager's execution location."""
     from server.identity.server_admission import current_manager_role
 
-    return current_manager_role(session, f"{RESOURCE_TYPE}:{ACTION}")
+    location = "public" if public_server else "internal"
+    return current_manager_role(session, f"{RESOURCE_TYPE}:{location}:{ACTION}")
