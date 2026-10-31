@@ -44,7 +44,8 @@ struct ClientWebShellView: View {
             let wasLoggedIn = session.isLoggedIn
             let selected = await ManagerEndpointDiscoveryService.shared
                 .selectBestManager(
-                    organizationID: session.user?.organizationId
+                    organizationID: session.user?.organizationId,
+                    expectedUsername: session.user?.username
                 )
             // Do not send stored credentials to a newly discovered Manager.
             // Only a target session for the same stable identity is accepted.
