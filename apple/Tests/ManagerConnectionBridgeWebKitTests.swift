@@ -12,7 +12,8 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         let value: [String: Any] = ["username": "alice", "keep_login": true,
                                     "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
         let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
-        let session = SessionStore(api: ManagerBridgeTestAPI(user: user), managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
+        let api = ManagerBridgeTestAPI(user: user)
+        let session = SessionStore(api: api, managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
         let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
         var applied: URL?
         var targetUnavailable = true
@@ -30,6 +31,14 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         let capabilities = try await message(view, ["action": "capabilities"])
         XCTAssertEqual(capabilities["success"] as? Bool, true)
         XCTAssertEqual(session.user?.stableIdentityID, "alice-id")
+        api.user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: ["username": "visitor", "visitor_login": true]))
+        _ = try await message(view, ["action": "capabilities"])
+        let stale = try await message(view, ["action": "current"])
+        XCTAssertEqual(stale["auth_state"] as? String, "unauthorized")
+        let blocked = try await message(view, ["action": "switch", "url": "https://test-manager.invalid:54321"])
+        XCTAssertEqual(blocked["code"] as? String, "manager_session_changed")
+        api.user = user
+        _ = try await message(view, ["action": "capabilities"])
         let target = "https://test-manager.invalid:54321"
         let unavailable = try await message(view, ["action": "switch", "url": target])
         XCTAssertEqual(unavailable["code"] as? String, "manager_unavailable")
@@ -105,7 +114,7 @@ server.serve_forever()
 }
 
 private final class ManagerBridgeTestAPI: SessionAPI {
-    let user: UserInfo
+    var user: UserInfo
     init(user: UserInfo) { self.user = user }
     func me() async throws -> UserInfo { user }
     func login(username: String, password: String) async throws -> AuthResponse { throw APIError.unauthorized("no") }

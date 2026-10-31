@@ -34,6 +34,8 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
     private let probeOverride: Probe?
     private let apply: Apply
     private let restoreDevice: DeviceRestore
+    private var verifiedIdentity: LocalResearchIdentity?
+    private var verificationGeneration: UInt64 = 0
     private var switching = false
 
     init(session: SessionStore, endpoint: URL, probe: Probe? = nil,
@@ -65,24 +67,30 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             return
         }
         if action == "capabilities", Set(body.keys) == ["action"] {
+            verificationGeneration &+= 1
+            let generation = verificationGeneration
+            verifiedIdentity = nil
             let webView = message.webView
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let webView {
                     await WebSessionCookieSynchronizer.importManagerSession(from: webView, endpoint: self.endpoint)
                 }
-                if ManagerConfig.shared.baseURL == self.endpoint { _ = await session.confirmWebIdentity() }
-                guard ManagerConfig.shared.baseURL == self.endpoint else {
+                var confirmed = false
+                if ManagerConfig.shared.baseURL == self.endpoint { confirmed = await session.confirmWebIdentity() }
+                guard ManagerConfig.shared.baseURL == self.endpoint, generation == self.verificationGeneration else {
                     replyHandler(["success": false, "code": "manager_session_changed"], nil)
                     return
                 }
+                if confirmed { self.verifiedIdentity = session.user?.localResearchIdentity }
                 replyHandler(self.reply(["actions": ["current", "switch"]]), nil)
             }
             return
         }
         if action == "current", Set(body.keys) == ["action"] {
+            let authorized = verifiedIdentity != nil && session.user?.localResearchIdentity == verifiedIdentity
             replyHandler(reply(["url": endpoint.absoluteString,
-                                "auth_state": session.user?.localResearchIdentity == nil ? "unauthorized" : "authorized"]), nil)
+                                "auth_state": authorized ? "authorized" : "unauthorized"]), nil)
             return
         }
         guard action == "switch", Set(body.keys) == ["action", "url"],
@@ -90,12 +98,16 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             replyHandler(["success": false, "code": "manager_invalid_url"], nil)
             return
         }
+        guard session.user?.localResearchIdentity == verifiedIdentity else {
+            replyHandler(["success": false, "code": "manager_session_changed"], nil)
+            return
+        }
         guard !switching else {
             replyHandler(["success": false, "code": "manager_switch_pending"], nil)
             return
         }
         switching = true
-        let expected = session.user?.localResearchIdentity
+        let expected = verifiedIdentity
         let username = session.user?.username
         let webView = message.webView
         Task { @MainActor [weak self] in
