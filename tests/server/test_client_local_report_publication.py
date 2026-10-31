@@ -107,6 +107,8 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                 'report_id': selected['report_id'], 'component_id': 'chapter-1', 'kind': 'chapter', 'parent_id': '',
                 'title': 'First', 'body': '', **head}
         next_head = rpc.request(edit)['version']
+        with rpc.store._connect() as db:
+            previous_receipt = dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone())
         auth['share'] = False
         posts_before = transport['posts']
         assert rpc.request(auto)['reports'][0]['status'] == 'denied'
@@ -115,6 +117,21 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert rpc.request(auto)['reports'][0]['status'] == 'published'
         second = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main', metadata_only=True)['publication']
         assert second['generation'] == 1 and second['revision'] != published['revision']
+        # Simulate a process exit after the server accepted the new report but
+        # before the local publication receipt was persisted.
+        with rpc.store._connect() as db:
+            db.execute('''UPDATE report_publications SET revision=?, generation=?, projection_hash=?, local_root_ref=?
+                          WHERE report_id=? AND manager_hash=?''',
+                       (previous_receipt['revision'], previous_receipt['generation'], previous_receipt['projection_hash'],
+                        previous_receipt['local_root_ref'], selected['report_id'], previous_receipt['manager_hash']))
+        posts_before, downloads_before = transport['posts'], transport['downloads']
+        assert rpc.request(auto)['reports'][0]['status'] == 'unchanged'
+        assert transport['posts'] == posts_before and transport['downloads'] == downloads_before
+        with rpc.store._connect() as db:
+            recovered = db.execute('SELECT revision, generation, local_root_ref FROM report_publications WHERE report_id=?',
+                                   (selected['report_id'],)).fetchone()
+        assert (recovered['revision'], recovered['generation'], recovered['local_root_ref']) == (
+            second['revision'], next_head['generation'], next_head['root_ref'])
         shutil.copytree(tmp_path / 'client', tmp_path / 'client-2')
         other = LocalResearchRPC(tmp_path / 'client-2', issuer=SESSION['keycloak_issuer'], identity_id=SESSION['tr_identity_id'],
                                  profiles=[{'profile_id': 'self', 'display_name': 'Alice'}], manager=manager)

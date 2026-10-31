@@ -202,7 +202,8 @@ def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_pat
                     (report['report_id'], hashlib.sha256(b'https://other-manager.test').hexdigest(), 'p-'+'b'*64, 'rev', version['generation'], 'f'*64, version['root_ref']))
     visited = []
     monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], object()))
-    monkeypatch.setattr(local_auto_sync, '_remote', lambda _session, _research, report, **_kwargs: (visited.append(report) or {'publication': {'revision':'rev'}}))
+    monkeypatch.setattr(local_auto_sync, '_remote', lambda _session, _research, report, **_kwargs: (visited.append(report) or {
+        'publication': {'revision':'rev', 'publication_id': 'p-'+'a'*64}, 'authoring': {}}))
     request = {'action':'sync_reports', 'profile_id':'self', 'after_report_id':'', 'limit':2}
     all_rows = []
     while True:
@@ -216,3 +217,34 @@ def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_pat
             (hashlib.sha256(manager['endpoint'].encode()).hexdigest(), 'self', '', 3)).fetchall()
     assert any('report_publications_manager_report' in row['detail'] for row in plan)
     assert not any('TEMP B-TREE' in row['detail'] for row in plan)
+
+
+def test_sync_receipt_recovery_does_not_overwrite_concurrent_receipt(tmp_path, monkeypatch):
+    import hashlib
+    from tools.cli.release.research_reporting import local_auto_sync
+    from tools.cli.release.research_reporting.local_publication import ensure_publication_table
+
+    manager = {'endpoint': 'https://manager.test', 'subject': 'subject', 'token': '', 'certificate_pem': '', 'cookies': []}
+    rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'}], manager=manager)
+    research = rpc.request({'action':'create', 'profile_id':'self', 'title':'R', 'description':'', 'operation_id':'r'})['research']
+    report = rpc.request({'action':'create_report', 'profile_id':'self', 'research_id':research['research_id'],
+                          'title':'Report', 'operation_id':'report'})['report']
+    version = rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'],
+                           'report_id':report['report_id']})['version']
+    ensure_publication_table(rpc.store)
+    with rpc.store._connect() as db:
+        db.execute('INSERT INTO report_publications VALUES (?, ?, ?, ?, ?, ?, ?)',
+                   (report['report_id'], hashlib.sha256(manager['endpoint'].encode()).hexdigest(),
+                    'p-'+'a'*64, 'old', 999, 'f'*64, 'old-root'))
+    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], object()))
+    def concurrent_update(*_args, **_kwargs):
+        with rpc.store._connect() as db:
+            db.execute('UPDATE report_publications SET revision=? WHERE report_id=?', ('newer', report['report_id']))
+        return {'publication': {'revision':'remote', 'publication_id':'p-'+'a'*64, 'projection_hash':'e'*64},
+                'authoring': version}
+    monkeypatch.setattr(local_auto_sync, '_remote', concurrent_update)
+    result = rpc.request({'action':'sync_reports', 'profile_id':'self', 'after_report_id':'', 'limit':2})
+    assert result['reports'][0]['status'] == 'conflict'
+    with rpc.store._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'newer'
