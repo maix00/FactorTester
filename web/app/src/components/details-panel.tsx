@@ -9,8 +9,8 @@ export function DetailsCancelButton({ onCancel, closePanel, disabled }: { onCanc
   const dismiss = useContext(DismissContext), { t } = useTranslation();
   return <Button disabled={disabled} onClick={closePanel && dismiss ? dismiss : onCancel}>{t("configuration.cancel")}</Button>;
 }
-export function DetailsPanel({ title, onClose, children, width = 960 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }): React.ReactElement {
-  const mobile = useCompactLayout(), { t } = useTranslation();
+export function DetailsPanel({ title, onClose, children, width = 960, forceFullscreen = false }: { title: string; onClose: () => void; children: React.ReactNode; width?: number; forceFullscreen?: boolean }): React.ReactElement {
+  const compact = useCompactLayout(), mobile = compact || forceFullscreen, { t } = useTranslation();
   const id = useRef(crypto.randomUUID()), close = useRef(onClose); close.current = onClose;
   useEffect(() => {
     if (!mobile) return;

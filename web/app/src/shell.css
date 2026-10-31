@@ -502,6 +502,8 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-library-filters .ant-input-search { flex:1; min-width:180px; }
 .tr-library-filters .ant-select { width:210px; flex-shrink:0; }
 .tr-research-page { min-height:100%; }
+.tr-table-expand { display:flex; justify-content:flex-end; margin-bottom:4px; }
+.tr-table-expand .ant-btn { font-size:13px; }
 .tr-research-mobile-meta { display:flex; flex-wrap:wrap; gap:4px 14px; padding-top:6px; font-size:12px; }
 .tr-research-mobile-reference { display:inline-flex; align-items:baseline; gap:4px; min-width:0; max-width:100%; }
 .tr-research-mobile-reference > span:first-child { color:var(--muted); flex-shrink:0; }
