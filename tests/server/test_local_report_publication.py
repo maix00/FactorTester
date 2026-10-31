@@ -102,6 +102,17 @@ def test_initial_publication_registers_only_report_and_reuses_it_for_branches(tm
                         branch_ref='main')['projection']['report_id'] == REPORT
 
 
+def test_metadata_read_does_not_read_report_bodies_and_honors_revocation(tmp_path, monkeypatch):
+    service, _manager, store, auth = harness(tmp_path)
+    publish(service)
+    monkeypatch.setattr(store, 'get_attachment', lambda *_args: (_ for _ in ()).throw(AssertionError('body read')))
+    value = service.read(session=SESSION, research_id=RESEARCH, report_id=REPORT, branch_ref='main', metadata_only=True)
+    assert value['publication']['report_id'] == REPORT and 'projection' not in value
+    auth['read'] = False
+    with pytest.raises(PermissionError):
+        service.read(session=SESSION, research_id=RESEARCH, report_id=REPORT, branch_ref='main', metadata_only=True)
+
+
 @pytest.mark.parametrize('revoked', ['admit', 'write', 'share'])
 def test_retry_never_recreates_revoked_public_access_or_report_policy(tmp_path, revoked):
     service, manager, store, auth = harness(tmp_path)

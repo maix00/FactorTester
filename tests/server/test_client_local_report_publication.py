@@ -19,7 +19,7 @@ from tools.cli.release.research_reporting.public_research.projection import buil
 
 def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_access(tmp_path, monkeypatch):
     service, _manager, store, auth = harness(tmp_path / 'manager')
-    transport = {'tamper': False}
+    transport = {'tamper': False, 'metadata': 0, 'downloads': 0, 'posts': 0}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args): pass
@@ -37,9 +37,13 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
             try:
                 args = {'session': SESSION, 'research_id': query['research_id'][0], 'report_id': query['report_id'][0]}
                 if len(parts) == 3:
-                    value = service.read(**args, branch_ref=query['branch_ref'][0])
+                    metadata_only = query.get('metadata_only') == ['1']
+                    if metadata_only: transport['metadata'] += 1
+                    value = service.read(**args, branch_ref=query['branch_ref'][0], metadata_only=metadata_only,
+                                         requires_publish=query.get('requires_publish') == ['1'])
                     return self.reply(200, {'success': True, **value})
                 if len(parts) == 7 and parts[4] == 'attachments':
+                    transport['downloads'] += 1
                     value = service.read(**args, publication_ref=parts[3], attachment=parts[5] + '/' + parts[6])
                     raw = value['content']
                     if transport['tamper']: raw = raw[:-1] + bytes([raw[-1] ^ 1])
@@ -51,6 +55,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
             if self.path != '/api/research/local-report-publication' or self.headers.get('Authorization') != 'Bearer test-token':
                 return self.reply(401, {})
             data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            transport['posts'] += 1
             try:
                 value = service.publish_local(session=SESSION, **data)
                 self.reply(201, {'success': True, 'publication': value})
@@ -81,6 +86,11 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         manager['subject'] = SESSION['keycloak_subject']
         published = rpc.request(request)['publication']
         assert rpc.request(request)['publication'] == published
+        auto = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
+        metadata_before = transport['metadata']
+        auto_result = rpc.request(auto)
+        assert auto_result['reports'] == [{'research_id': research['research_id'], 'report_id': selected['report_id'], 'status': 'unchanged'}]
+        assert auto_result['next_report_id'] is None and transport['metadata'] == metadata_before + 1 and transport['downloads'] == 0
         published_view = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')
         authoring_path = 'report_authoring/' + published_view['authoring']['sha256']
         assert service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main', attachment=authoring_path)['content']
@@ -97,7 +107,13 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                 'report_id': selected['report_id'], 'component_id': 'chapter-1', 'kind': 'chapter', 'parent_id': '',
                 'title': 'First', 'body': '', **head}
         next_head = rpc.request(edit)['version']
-        second = rpc.request(request)['publication']
+        auth['share'] = False
+        posts_before = transport['posts']
+        assert rpc.request(auto)['reports'][0]['status'] == 'denied'
+        assert transport['posts'] == posts_before
+        auth['share'] = True
+        assert rpc.request(auto)['reports'][0]['status'] == 'published'
+        second = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main', metadata_only=True)['publication']
         assert second['generation'] == 1 and second['revision'] != published['revision']
         shutil.copytree(tmp_path / 'client', tmp_path / 'client-2')
         other = LocalResearchRPC(tmp_path / 'client-2', issuer=SESSION['keycloak_issuer'], identity_id=SESSION['tr_identity_id'],
@@ -140,7 +156,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         _local_report, local_root = rpc.store._report_root('self', research['research_id'], selected['report_id'])
         assert subprocess.check_output(['git', '-C', str(local_root), 'status', '--porcelain'], text=True).strip() == ''
         monkeypatch.setattr(local_pull, 'commit_report_workspace', original_commit)
-        assert rpc.request(pull)['status'] == 'updated'
+        assert rpc.request(auto)['reports'][0]['status'] == 'updated'
         assert rpc.request(pull)['status'] == 'up_to_date'
         index = rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})
         assert [chapter['title'] for chapter in index['index']['chapters']] == ['First', 'Second']
@@ -154,6 +170,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
             branch_ref='main', projection=build_upload_projection(snapshot), expected_revision=remote_revision, authoring=authoring)
         assert rpc.request(request) == {'success': False, 'code': 'local_report_publication_conflict'}
         assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        assert rpc.request(auto)['reports'][0]['status'] == 'conflict'
         assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First', 'Second', 'Third']
         auth['admit'] = False
         assert rpc.request(request) == {'success': False, 'code': 'local_report_publication_denied'}

@@ -46,10 +46,12 @@ class LocalResearchRPC:
                                      'parent_id', 'title', 'body', 'generation', 'root_ref'},
             'publish_report': {'action', 'profile_id', 'research_id', 'report_id'},
             'pull_report': {'action', 'profile_id', 'research_id', 'report_id'},
+            'sync_reports': {'action', 'profile_id', 'after_report_id', 'limit'},
         }
         if self.manager is None:
             keys.pop('publish_report')
             keys.pop('pull_report')
+            keys.pop('sync_reports')
         if not isinstance(action, str) or action not in keys or set(message) != keys[action]:
             raise ValueError('invalid local Research message')
         for key in keys[action] - {'action', 'limit', 'offset', 'generation'}:
@@ -103,7 +105,7 @@ class LocalResearchRPC:
                 if exc.status in {401, 403}:
                     return {'success': False, 'code': 'local_report_publication_denied'}
                 raise
-        else:
+        elif action == 'pull_report':
             from tools.cli.http import HttpClientError
             from .local_pull import LocalReportSyncConflict, pull_local_report
             try:
@@ -115,4 +117,8 @@ class LocalResearchRPC:
                 if exc.status in {401, 403}:
                     return {'success': False, 'code': 'local_report_publication_denied'}
                 raise
+        else:
+            from .local_auto_sync import sync_published_reports
+            value = sync_published_reports(self.store, binding=self.binding, manager=self.manager,
+                profile_id=message['profile_id'], after_report_id=message['after_report_id'], limit=message['limit'])
         return {'success': True, 'schema': SCHEMA, **value}

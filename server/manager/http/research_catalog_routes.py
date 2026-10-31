@@ -109,6 +109,16 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     research_id, report_id = query['research_id'][0], query['report_id'][0]
                     publication_ref, kind, object_id = local_publication.group(1), local_publication.group(2), local_publication.group(3)
                 attachment = (kind + '/' + unquote(object_id)) if kind else ''
+                if query.get('metadata_only', ['0']) not in (['0'], ['1']):
+                    raise ValueError('invalid report metadata option')
+                metadata_only = query.get('metadata_only') == ['1']
+                if query.get('requires_publish', ['0']) not in (['0'], ['1']):
+                    raise ValueError('invalid report authorization option')
+                requires_publish = query.get('requires_publish') == ['1']
+                if metadata_only and attachment:
+                    raise ValueError('metadata is not an attachment')
+                if requires_publish and not metadata_only:
+                    raise ValueError('publish preflight requires metadata')
                 if len(query.get('server_id', [])) > 1:
                     raise ValueError('only one report server may be selected')
                 server_id = str(query.get('server_id', [''])[0] or '').strip()
@@ -120,7 +130,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     value = self.state.federation_gateway.public_data(route, kind='shared-report', operation='read',
                         principal=viewer, delegated_user_token=self._bearer_token(), payload={
                             'research_id': research_id, 'report_id': report_id,
-                            'publication_ref': publication_ref or '', 'branch_ref': branch_ref, 'attachment': attachment})
+                            'publication_ref': publication_ref or '', 'branch_ref': branch_ref, 'attachment': attachment,
+                            'metadata_only': metadata_only, 'requires_publish': requires_publish})
                     if not server_admission(session, state=self.state, use_cache=False)[0]:
                         raise PermissionError('current Manager access is not authorized')
                     if attachment:
@@ -135,18 +146,20 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         value = {'content': raw, 'content_type': media if media in _SAFE_MEDIA else 'application/octet-stream'}
                     else:
                         record, projected = value.get('publication'), value.get('projection')
-                        if (not isinstance(record, dict) or not isinstance(projected, dict)
-                                or record.get('report_id') != report_id or projected.get('report_id') != report_id
+                        if (not isinstance(record, dict) or (not metadata_only and not isinstance(projected, dict))
+                                or record.get('report_id') != report_id or (not metadata_only and projected.get('report_id') != report_id)
                                 or record.get('storage_server_id') != server_id
                                 or (publication_ref and record.get('publication_id') != publication_ref)
                                 or (branch_ref and record.get('branch_ref') != branch_ref)):
                             raise PermissionError('peer report identity does not match')
-                        value = {'publication': record, 'projection': projected,
+                        value = {'publication': record, **({'projection': projected} if not metadata_only else {}),
                                  **({'authoring': value['authoring']} if 'authoring' in value else {})}
                 else:
                     value = self._research_couch_service(local=bool(local_publication)).read(session=session,
                         research_id=research_id, report_id=report_id,
-                        publication_ref=publication_ref or '', branch_ref=branch_ref, attachment=attachment)
+                        publication_ref=publication_ref or '', branch_ref=branch_ref, attachment=attachment,
+                        **({'metadata_only': True} if metadata_only else {}),
+                        **({'requires_publish': True} if requires_publish else {}))
                 if attachment:
                     raw, content_type = value['content'], value['content_type']
                     self.send_response(200)

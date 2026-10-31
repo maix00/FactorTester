@@ -59,6 +59,18 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
     manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
     lock = store.workspace_root / '.locks' / ('publication-' + report_workspace_id_for(report_id) + '-' + manager_hash[:16])
     with report_workspace_lock(lock):
+        ensure_publication_table(store)
+        with store._connect() as db:
+            row = db.execute('SELECT revision, publication_id FROM report_publications WHERE report_id=? AND manager_hash=?',
+                             (report_id, manager_hash)).fetchone()
+            expected_revision = row['revision'] if row else None
+        if row:
+            preflight = session.get('/api/research/local-report-publication', query={'research_id': research_id,
+                'report_id': report_id, 'branch_ref': 'main', 'metadata_only': '1', 'requires_publish': '1'})
+            record = preflight.get('publication') if preflight.get('success') is True else None
+            if (not isinstance(record, dict) or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
+                    or record.get('publication_id') != row['publication_id']):
+                raise PermissionError('report publication identity changed')
         paths = report_tree_paths(root, 'main')
         with tree_lock(paths):
             head = load_head(paths)
@@ -75,11 +87,6 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
         encoded_size = len(json.dumps({'projection': projection, 'authoring': authoring}, ensure_ascii=False).encode('utf-8'))
         if encoded_size > 30 * 1024 * 1024:
             raise ValueError('report publication exceeds Manager request limit')
-        ensure_publication_table(store)
-        with store._connect() as db:
-            row = db.execute('SELECT revision FROM report_publications WHERE report_id=? AND manager_hash=?',
-                             (report_id, manager_hash)).fetchone()
-            expected_revision = row['revision'] if row else None
         response = session.post('/api/research/local-report-publication', {'research_id': research_id,
             'report_id': report_id, 'branch_ref': 'main', 'projection': projection, 'authoring': authoring,
             'expected_revision': expected_revision})

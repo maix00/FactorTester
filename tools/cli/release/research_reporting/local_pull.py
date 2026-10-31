@@ -23,19 +23,20 @@ class LocalReportSyncConflict(ValueError):
     """Local and remote report histories cannot safely be advanced automatically."""
 
 
-def _remote(session, research_id: str, report_id: str) -> dict:
+def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False) -> dict:
     from .public_research.object_uploads import projection_hash
     value = session.get('/api/research/local-report-publication', query={
-        'research_id': research_id, 'report_id': report_id, 'branch_ref': 'main'})
+        'research_id': research_id, 'report_id': report_id, 'branch_ref': 'main',
+        **({'metadata_only': '1'} if metadata_only else {})})
     record, bundle, projection = value.get('publication'), value.get('authoring'), value.get('projection')
-    if (value.get('success') is not True or not isinstance(record, dict) or not isinstance(bundle, dict) or not isinstance(projection, dict)
+    if (value.get('success') is not True or not isinstance(record, dict) or not isinstance(bundle, dict) or (not metadata_only and not isinstance(projection, dict))
             or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
             or not re.fullmatch(r'p-[0-9a-f]{64}', str(record.get('publication_id') or ''))
             or not isinstance(record.get('revision'), str) or not record['revision'] or len(record['revision']) > 256
             or type(record.get('generation')) is not int or record['generation'] < 0
             or not re.fullmatch(r'[0-9a-f]{64}', str(record.get('projection_hash') or ''))
-            or projection.get('report_id') != report_id or projection.get('generation') != record['generation']
-            or projection.get('projection_hash') != record['projection_hash'] or projection_hash(projection) != record['projection_hash']
+            or (not metadata_only and (projection.get('report_id') != report_id or projection.get('generation') != record['generation']
+                or projection.get('projection_hash') != record['projection_hash'] or projection_hash(projection) != record['projection_hash']))
             or set(bundle) != {'sha256', 'root_ref', 'generation', 'size_bytes'}
             or not re.fullmatch(r'[0-9a-f]{64}', str(bundle.get('sha256') or ''))
             or bundle.get('generation') != record['generation']

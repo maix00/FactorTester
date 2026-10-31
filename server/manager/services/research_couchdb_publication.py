@@ -121,8 +121,11 @@ class ResearchCouchPublicationService:
             authorize_now=authorize_now, prepared=_prepared, authoring=_authoring)
 
     def read(self, *, session: dict, research_id: str, report_id: str, publication_ref: str = '',
-             branch_ref: str = '', attachment: str = '') -> dict:
-        scopes = ('read', 'write') if attachment.startswith('report_authoring/') else ('read',)
+             branch_ref: str = '', attachment: str = '', metadata_only: bool = False, requires_publish: bool = False) -> dict:
+        if (type(metadata_only) is not bool or type(requires_publish) is not bool
+                or (metadata_only and attachment) or (requires_publish and not metadata_only)):
+            raise ValueError('invalid report metadata request')
+        scopes = ('read', 'write', 'share') if requires_publish else ('read', 'write') if attachment.startswith('report_authoring/') else ('read',)
         resource_id, owner_id, owner_ref, authorize_now = self._context(
             session=session, research_id=research_id, report_id=report_id, scopes=scopes)
         authorize_now()
@@ -155,6 +158,23 @@ class ResearchCouchPublicationService:
         if attachment.startswith('report_authoring/') and (
                 authoring is None or attachment != 'report_authoring/' + authoring['sha256']):
             raise ValueError('report authoring identity is invalid')
+        record = document.get('publication')
+        if (not isinstance(record, dict) or record.get('publication_id') != publication_ref
+                or record.get('report_id') != report_id or record.get('owner_ref') != owner_ref
+                or record.get('branch_ref') != branch or record.get('storage_server_id') != self.state.server_id
+                or record.get('projection_hash') != document.get('projection_hash')
+                or not re.fullmatch(r'[0-9a-f]{64}', str(record.get('projection_hash') or ''))
+                or record.get('generation') != document.get('generation')
+                or type(record.get('generation')) is not int or record['generation'] < 0
+                or not isinstance(document.get('_rev'), str) or not document['_rev']):
+            raise ValueError('report publication metadata is invalid')
+        fields = ('publication_id', 'report_id', 'owner_ref', 'title', 'generation',
+                  'projection_hash', 'branch_ref', 'storage_server_id')
+        public_record = {**{key: record[key] for key in fields if key in record},
+                         'authorization': 'keycloak', 'revision': document['_rev']}
+        if metadata_only:
+            authorize_now()
+            return {'publication': public_record, **({'authoring': authoring} if authoring is not None else {})}
         key = attachment or 'projection.json'
         if attachment and not any(attachment.startswith(kind + '/') for kind in (
                 'research_asset', 'research_attachment', 'research_local_resource', 'report_authoring')):
@@ -183,17 +203,6 @@ class ResearchCouchPublicationService:
                 or result.get('projection_hash') != document.get('projection_hash')
                 or projection_hash(result) != document.get('projection_hash')):
             raise ValueError('report projection integrity check failed')
-        record = document.get('publication')
-        if (not isinstance(record, dict) or record.get('publication_id') != publication_ref
-                or record.get('report_id') != report_id or record.get('owner_ref') != owner_ref
-                or record.get('branch_ref') != branch or record.get('storage_server_id') != self.state.server_id
-                or record.get('projection_hash') != document.get('projection_hash')
-                or record.get('generation') != document.get('generation')
-                or not isinstance(document.get('_rev'), str)):
-            raise ValueError('report publication metadata is invalid')
         authorize_now()
-        fields = ('publication_id', 'report_id', 'owner_ref', 'title', 'generation',
-                  'projection_hash', 'branch_ref', 'storage_server_id')
-        return {'publication': {**{key: record[key] for key in fields if key in record},
-                                'authorization': 'keycloak', 'revision': document['_rev']},
+        return {'publication': public_record,
                 'projection': result, **({'authoring': authoring} if authoring is not None else {})}

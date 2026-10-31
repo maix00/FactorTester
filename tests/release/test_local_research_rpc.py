@@ -106,3 +106,35 @@ def test_local_report_uses_existing_report_tree_and_retry_recovers(tmp_path, mon
         other.request(read)
     with pytest.raises(ValueError):
         rpc.request({**request, 'title': 'Different'})
+
+
+def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_path, monkeypatch):
+    import hashlib
+    from tools.cli.release.research_reporting import local_auto_sync
+    from tools.cli.release.research_reporting.local_publication import ensure_publication_table
+
+    manager = {'endpoint': 'https://manager.test', 'subject': 'subject', 'token': '', 'certificate_pem': '', 'cookies': []}
+    rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'}], manager=manager)
+    research = rpc.request({'action':'create', 'profile_id':'self', 'title':'R', 'description':'', 'operation_id':'r'})['research']
+    ids = []
+    ensure_publication_table(rpc.store)
+    for i in range(6):
+        report = rpc.request({'action':'create_report', 'profile_id':'self', 'research_id':research['research_id'], 'title':f'R{i}', 'operation_id':f'create-{i}'})['report']
+        version = rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':report['report_id']})['version']
+        if i < 5:
+            ids.append(report['report_id'])
+            with rpc.store._connect() as db:
+                db.execute('INSERT INTO report_publications VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    (report['report_id'], hashlib.sha256(manager['endpoint'].encode()).hexdigest(), 'p-'+'a'*64, 'rev', version['generation'], 'f'*64, version['root_ref']))
+    visited = []
+    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], object()))
+    monkeypatch.setattr(local_auto_sync, '_remote', lambda _session, _research, report, **_kwargs: (visited.append(report) or {'publication': {'revision':'rev'}}))
+    request = {'action':'sync_reports', 'profile_id':'self', 'after_report_id':'', 'limit':2}
+    all_rows = []
+    while True:
+        result = rpc.request(request); all_rows.extend(result['reports'])
+        if result['next_report_id'] is None: break
+        request['after_report_id'] = result['next_report_id']
+    assert visited == sorted(ids) and [row['report_id'] for row in all_rows] == sorted(ids)
+    assert all(row['status'] == 'unchanged' for row in all_rows)
