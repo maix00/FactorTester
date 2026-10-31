@@ -55,7 +55,8 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
         let report = try await message(view, ["action": "create_report", "profile_id": "self", "research_id": researchID,
                                               "title": "WK report", "operation_id": "report-operation"])
         let reportRow = try XCTUnwrap(report["report"] as? [String: Any])
-        let reports = try await message(view, ["action": "list_profile_reports", "profile_id": "self", "limit": 20, "offset": 0])
+        let reports = try await message(view, ["action": "list_profile_reports", "profile_id": "self", "limit": 20, "offset": 0,
+                                                "expected_revision": NSNull()])
         let result = try XCTUnwrap((reports["reports"] as? [[String: Any]])?.first)
         XCTAssertEqual(result["report_id"] as? String, reportRow["report_id"] as? String)
         XCTAssertEqual((result["research"] as? [String: Any])?["research_id"] as? String, researchID)

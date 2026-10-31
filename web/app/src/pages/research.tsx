@@ -24,6 +24,7 @@ import { ResearchRelations } from "../components/research-relations.tsx";
 import { ResearchSharing } from "../components/research-sharing.tsx";
 import { LocalResearchCreate, LocalResearchDetail } from "../components/local-research-page.tsx";
 import { useLocalResearchContext } from "../local-research-context.tsx";
+import type { LocalReportWithResearch, LocalResearchPage } from "../local-research-bridge.ts";
 import { notify } from "../notifications/core.ts";
 import { linkedResearchID, reportBranches, reportRowID, researchRowID, selectReportBranch } from "../research-model.ts";
 type Row = Record<string, any>;
@@ -95,14 +96,15 @@ function ResearchPageForSession(): React.ReactElement {
     let nextProfile=0,total=0;
     const groups:Row[][]=Array.from({length:profiles.length},()=>[]);
     const loadProfile=async(item:typeof profiles[number])=>{
-      const collected:Row[]=[]; let offset=0;
+      const collected:Row[]=[]; let offset=0,expectedRevision:number|null=null;
       for(let page=0;page<50;page++){
-        const result=tab==="researches" ? await client.list(item.profile_id,{offset,limit:200}) : await client.listProfileReports(item.profile_id,{offset,limit:200});
+        const result:LocalResearchPage|{reports:LocalReportWithResearch[];next_offset:number|null;revision:number}=tab==="researches" ? await client.list(item.profile_id,{offset,limit:200}) : await client.listProfileReports(item.profile_id,{offset,limit:200,expectedRevision});
         if(!active || !client.isCurrent(snapshot))return [];
         const values="researches" in result ? result.researches : result.reports;
         total+=values.length;
         if(total>10000)throw new Error("local_research_too_many");
         collected.push(...values.map(value=>({...value,__local:true,owner_ref:principal,profile_id:item.profile_id})));
+        if("revision" in result)expectedRevision=result.revision;
         if(result.next_offset===null)return collected;
         offset=result.next_offset;
       }
@@ -110,7 +112,7 @@ function ResearchPageForSession(): React.ReactElement {
     };
     void Promise.all(Array.from({length:Math.min(4,profiles.length)},async()=>{
       while(active){const index=nextProfile++;if(index>=profiles.length)return;groups[index]=await loadProfile(profiles[index]);}
-    })).then(()=>{if(active && client.isCurrent(snapshot))setLocalRows(groups.flat());}).catch(reason=>{if(active && client.isCurrent(snapshot)){setLocalRows([]);notify({code:"research.local.load",type:"error",message:reason instanceof Error && reason.message==="local_research_too_many" ? t("localResearch.errors.local_research_too_many") : t("localResearch.errors.default")});}});
+    })).then(()=>{if(active && client.isCurrent(snapshot))setLocalRows(groups.flat());}).catch(reason=>{if(active && client.isCurrent(snapshot)){setLocalRows([]);const code=reason instanceof Error?reason.message:"";notify({code:"research.local.load",type:"error",message:["local_research_too_many","local_research_listing_changed"].includes(code) ? t(`localResearch.errors.${code}`) : t("localResearch.errors.default")});}});
     return()=>{active=false;};
   },[tab,local.phase,local.client,local.capabilities,principal,revision,localRevision,t]);
   useEffect(()=>{

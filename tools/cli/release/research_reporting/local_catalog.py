@@ -18,6 +18,10 @@ from tools.cli.release.local_profile_contracts import validate_local_identifier
 from tools.cli.release.locations import validate_client_root
 
 
+class LocalResearchListingChanged(ValueError):
+    """A multi-page local listing was changed between requests."""
+
+
 class LocalResearchCatalog:
     def __init__(self, root: Path, *, issuer: str, identity_id: str, profiles: set[str]) -> None:
         issuer = str(issuer or '').strip().rstrip('/')
@@ -51,6 +55,15 @@ class LocalResearchCatalog:
                 FOREIGN KEY(research_id) REFERENCES researches(research_id))''')
             db.execute('''CREATE INDEX IF NOT EXISTS reports_profile_page
                 ON reports(profile_id, ready, created_at DESC, report_id DESC)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS local_directory_revision (
+                id INTEGER PRIMARY KEY CHECK (id=1), revision INTEGER NOT NULL)''')
+            db.execute('INSERT OR IGNORE INTO local_directory_revision VALUES (1,0)')
+            for table in ('researches', 'reports'):
+                for operation in ('INSERT', 'UPDATE', 'DELETE'):
+                    db.execute(f'''CREATE TRIGGER IF NOT EXISTS local_directory_{table}_{operation.lower()}
+                        AFTER {operation} ON {table} BEGIN
+                          UPDATE local_directory_revision SET revision=revision+1 WHERE id=1;
+                        END''')
 
     @contextmanager
     def _connect(self):
@@ -169,12 +182,16 @@ class LocalResearchCatalog:
             items = [self._report_public(row) for row in rows[:limit]]
             return {'reports': items, 'next_offset': offset + len(items) if len(rows) > limit else None}
 
-    def list_profile_reports(self, *, profile_id: str, limit: int, offset: int) -> dict:
+    def list_profile_reports(self, *, profile_id: str, limit: int, offset: int, expected_revision: int | None) -> dict:
         """List one verified Profile's report metadata without opening report trees."""
         profile = self._profile(profile_id)
         if not 1 <= limit <= 200 or not 0 <= offset <= 1_000_000:
             raise ValueError('invalid local report page')
         with self._connect() as db:
+            db.execute('BEGIN')
+            revision = db.execute('SELECT revision FROM local_directory_revision WHERE id=1').fetchone()['revision']
+            if expected_revision is not None and expected_revision != revision:
+                raise LocalResearchListingChanged('local report directory changed during pagination')
             rows = db.execute('''SELECT report.report_id, report.research_id, report.profile_id,
                     report.title, report.created_at, research.title AS research_title,
                     research.profile_id AS research_profile_id,
@@ -192,7 +209,8 @@ class LocalResearchCatalog:
                 'title': row['research_title'],
                 'created_at': row['research_created_at'], 'updated_at': row['research_updated_at'],
             }} for row in rows[:limit]]
-            return {'reports': items, 'next_offset': offset + len(items) if len(rows) > limit else None}
+            return {'reports': items, 'next_offset': offset + len(items) if len(rows) > limit else None,
+                    'revision': revision}
 
     def get_report_index(self, *, profile_id: str, research_id: str, report_id: str) -> dict:
         from .authoring.tree_projection import load_report_index

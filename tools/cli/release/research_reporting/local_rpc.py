@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .local_catalog import LocalResearchCatalog
+from .local_catalog import LocalResearchCatalog, LocalResearchListingChanged
 
 SCHEMA = 'tr-local-research-bridge:v1'
 
@@ -39,7 +39,7 @@ class LocalResearchRPC:
             'get': {'action', 'profile_id', 'research_id'},
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
-            'list_profile_reports': {'action', 'profile_id', 'limit', 'offset'},
+            'list_profile_reports': {'action', 'profile_id', 'limit', 'offset', 'expected_revision'},
             'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
             'get_report': {'action', 'profile_id', 'research_id', 'report_id'},
             'get_report_chapter': {'action', 'profile_id', 'research_id', 'report_id', 'chapter_id'},
@@ -55,7 +55,7 @@ class LocalResearchRPC:
             keys.pop('sync_reports')
         if not isinstance(action, str) or action not in keys or set(message) != keys[action]:
             raise ValueError('invalid local Research message')
-        for key in keys[action] - {'action', 'limit', 'offset', 'generation'}:
+        for key in keys[action] - {'action', 'limit', 'offset', 'generation', 'expected_revision'}:
             value = message[key]
             if (not isinstance(value, str) or len(value) > (10000 if key in {'description', 'body'} else 512)
                     or any((ord(char) < 32 and not (key in {'description', 'body'} and char in '\n\r\t'))
@@ -72,8 +72,16 @@ class LocalResearchRPC:
                 value = self.store.list_reports(profile_id=message['profile_id'], research_id=message['research_id'],
                     limit=message['limit'], offset=message['offset'])
             else:
-                value = self.store.list_profile_reports(profile_id=message['profile_id'],
-                    limit=message['limit'], offset=message['offset'])
+                revision = message['expected_revision']
+                if revision is not None and (type(revision) is not int or revision < 0):
+                    raise ValueError('invalid local directory revision')
+                if (message['offset'] == 0) != (revision is None):
+                    raise ValueError('local directory continuation requires a revision')
+                try:
+                    value = self.store.list_profile_reports(profile_id=message['profile_id'],
+                        limit=message['limit'], offset=message['offset'], expected_revision=revision)
+                except LocalResearchListingChanged:
+                    return {'success': False, 'code': 'local_research_listing_changed'}
         elif action == 'get':
             row = self.store.get(profile_id=message['profile_id'], research_id=message['research_id'])
             if row is None:

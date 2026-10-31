@@ -56,9 +56,9 @@ def test_profile_report_directory_is_bounded_and_profile_scoped(tmp_path):
             row = rpc.request({'action': 'create_report', 'profile_id': profile, 'research_id': research['research_id'],
                                'title': f'Report {profile} {number}', 'operation_id': f'{profile}-{number}'})['report']
             created[row['report_id']] = (profile, research)
-    request = {'action': 'list_profile_reports', 'profile_id': 'self', 'limit': 1, 'offset': 0}
+    request = {'action': 'list_profile_reports', 'profile_id': 'self', 'limit': 1, 'offset': 0, 'expected_revision': None}
     first = rpc.request(request)
-    second = rpc.request({**request, 'offset': first['next_offset']})
+    second = rpc.request({**request, 'offset': first['next_offset'], 'expected_revision': first['revision']})
     rows = first['reports'] + second['reports']
     assert len(rows) == 2 and second['next_offset'] is None
     assert all('description' not in row['research'] for row in rows)
@@ -66,6 +66,14 @@ def test_profile_report_directory_is_bounded_and_profile_scoped(tmp_path):
                {key: value for key, value in created[row['report_id']][1].items() if key != 'description'} == row['research']
                for row in rows)
     assert len({row['report_id'] for row in rows}) == 2
+    with rpc.store._connect() as db:
+        db.execute('UPDATE reports SET title=? WHERE report_id=?', ('changed', rows[0]['report_id']))
+    assert rpc.request({**request, 'offset': first['next_offset'], 'expected_revision': first['revision']}) == {
+        'success': False, 'code': 'local_research_listing_changed'}
+    fresh = rpc.request(request)
+    assert fresh['success'] is True and fresh['revision'] > first['revision']
+    with pytest.raises(ValueError):
+        rpc.request({**request, 'offset': 1})
     with pytest.raises(PermissionError):
         rpc.request({**request, 'profile_id': 'other'})
     with pytest.raises(ValueError):

@@ -16,18 +16,20 @@ test("profile report directory validates its profile and linked research", async
   const {description:_description,...summary}=record;
   const row={report_id:"report:one",research_id:record.research_id,profile_id:"self",title:"Report",created_at:100,research:summary};
   let received:Record<string,unknown>|undefined;
-  let response=ok({reports:[row]});
+  let response=ok({reports:[row],revision:2});
   const client=localResearchBridge(host(message=>{
     if(message.action==="capabilities")return ok({actions:["list_profile_reports"],profiles:[{profile_id:"self",display_name:"Self"}]});
     received=message;return response;
   }))!;
   await client.capabilities(currentBinding);
   assert.deepEqual((await client.listProfileReports("self",{limit:1})).reports,[row]);
-  assert.deepEqual(received,{action:"list_profile_reports",profile_id:"self",offset:0,limit:1});
-  response=ok({reports:[{...row,research:{...record,research_id:"other"}}]});
+  assert.deepEqual(received,{action:"list_profile_reports",profile_id:"self",offset:0,limit:1,expected_revision:null});
+  response=ok({reports:[{...row,research:{...record,research_id:"other"}}],revision:2});
   await assert.rejects(client.listProfileReports("self"),code("local_research_invalid_response"));
-  response=ok({reports:[{...row,profile_id:"other"}]});
+  response=ok({reports:[{...row,profile_id:"other"}],revision:2});
   await assert.rejects(client.listProfileReports("self"),code("local_research_invalid_response"));
+  response=ok({reports:[row],revision:3});
+  await assert.rejects(client.listProfileReports("self",{offset:1,expectedRevision:2}),code("local_research_invalid_response"));
 });
 
 test("capability detection never invokes an absent or incomplete host", () => {
