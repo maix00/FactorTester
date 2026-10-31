@@ -91,9 +91,9 @@ final class SessionStoreTests: XCTestCase {
     }
 
     func testAdoptingManagerSessionCannotChangeStableUser() async throws {
-        func verified(_ stable: String) throws -> UserInfo {
+        func verified(_ stable: String, subject: String = "subject", issuer: String = "https://id.example/realms/a") throws -> UserInfo {
             let fields: [String: Any] = ["username": "alice", "keep_login": true,
-                "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject", "tr_identity_id": stable]
+                "keycloak_issuer": issuer, "keycloak_subject": subject, "tr_identity_id": stable]
             return try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: fields))
         }
         let alice = try verified("stable-alice")
@@ -102,6 +102,8 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(confirmed)
         let original = alice.localResearchIdentity
         XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: try verified("different")))
+        XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: try verified("stable-alice", subject: "different")))
+        XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: try verified("stable-alice", subject: "different", issuer: "https://id.example/realms/a/")))
         XCTAssertEqual(store.user?.stableIdentityID, "stable-alice")
         XCTAssertTrue(store.adoptManagerSession(expected: original, candidate: nil))
         XCTAssertNil(store.user)

@@ -60,10 +60,13 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 class Handler(BaseHTTPRequestHandler):
+ calls = 0
  def do_GET(self):
   if self.path != '/api/session' or self.headers.get('Authorization') != 'Bearer isolated-test-token':
    self.send_response(401); self.end_headers(); return
-  body=json.dumps({'username':'alice','keycloak_issuer':'https://identity.test/realm','keycloak_subject':'subject','tr_identity_id':'alice-id'}).encode()
+  Handler.calls += 1
+  subject = 'subject' if Handler.calls == 1 else 'different-subject'
+  body=json.dumps({'username':'alice','keycloak_issuer':'https://identity.test/realm','keycloak_subject':subject,'tr_identity_id':'alice-id'}).encode()
   self.send_response(200); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
  def log_message(self, *args): pass
 server=HTTPServer(('127.0.0.1',0),Handler)
@@ -103,6 +106,9 @@ server.serve_forever()
         XCTAssertEqual(result["auth_state"] as? String, "authorized")
         XCTAssertEqual(session.user?.stableIdentityID, "alice-id")
         XCTAssertEqual(applied, target)
+        let changedSubject = try await message(view, ["action": "switch", "url": target.absoluteString])
+        XCTAssertEqual(changedSubject["auth_state"] as? String, "unauthorized")
+        XCTAssertNil(session.user)
         content.removeScriptMessageHandler(forName: ManagerConnectionBridgeContract.messageName)
     }
 

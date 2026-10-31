@@ -167,7 +167,7 @@ final class SessionStore: ObservableObject {
         guard user?.localResearchIdentity == expected else { return false }
         if let candidate {
             guard let expected, let actual = candidate.localResearchIdentity,
-                  actual.stableID == expected.stableID else { return false }
+                  expected.matchesStableIDAndSameIssuerSubject(actual) else { return false }
         }
         authenticationGeneration &+= 1
         restoreTask?.cancel()

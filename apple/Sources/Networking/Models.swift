@@ -5,6 +5,15 @@ struct LocalResearchIdentity: Equatable {
     let issuer: String
     let subject: String
     let stableID: String
+
+    /// The same issuer cannot assign one principal to two distinct subjects.
+    /// This check alone does not verify identity across different issuers.
+    func matchesStableIDAndSameIssuerSubject(_ other: LocalResearchIdentity) -> Bool {
+        guard stableID == other.stableID else { return false }
+        let a = issuer.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let b = other.issuer.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return a != b || subject == other.subject
+    }
 }
 
 /// 与 Manager `/api/session`、`/auth/login`、`/auth/register` 的 JSON 契约对应。
