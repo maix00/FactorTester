@@ -10,6 +10,18 @@ from tools.data.sqlite.db import connect_sqlite
 from server.identity.keycloak_authorization import AuthorizationUnavailable
 
 
+def ensure_link_journal(conn):
+    """Create link identity/recovery metadata, never an authorization grant."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS research_share_link_issuers (
+        link_id TEXT PRIMARY KEY, identity_id TEXT NOT NULL, subject TEXT NOT NULL
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS research_share_link_claims (
+        link_id TEXT NOT NULL, identity_id TEXT NOT NULL, subject TEXT NOT NULL,
+        status TEXT NOT NULL, created_at REAL NOT NULL,
+        PRIMARY KEY(link_id,identity_id)
+    )""")
+
+
 class ResearchShareLinksMixin:
     def _share_manager(self):
         manager = self._profile_grant_manager

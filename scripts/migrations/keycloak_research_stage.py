@@ -82,13 +82,34 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
                 mark(parent, "dynamic_hierarchy_not_verified")
             if row["visibility"] == "public":
                 mark(parent, "public_policy_not_verified")
+    links_by_research: dict[str, list[dict[str, str]]] = {}
     for link in inventory["links"]:
-        if link["state"] != "active":
+        if link["state"] not in {"active", "redeemed"}:
             continue
         parent = str(link.get("research_id") or "")
-        if not parent:
-            parent = str(reports.get(str(link.get("report_id") or ""), {}).get("research_id") or "")
-        mark(parent, "active_share_link_not_migrated")
+        kind, report_id = str(link.get("target_kind") or ""), str(link.get("report_id") or "")
+        owner = identities.get(str(link.get("owner_ref") or ""), "")
+        claimant_name = str(link.get("redeemed_by") or "")
+        claimant = identities.get(claimant_name, "") if claimant_name else ""
+        if (parent not in research or kind not in {"research", "report"}
+                or (kind == "research" and report_id)
+                or (kind == "report" and (report_id not in reports or str(reports[report_id]["research_id"]) != parent))
+                or str(link.get("mode") or "") not in {"one_time", "permanent"}
+                or not owner or (claimant_name and not claimant)
+                or not str(link.get("link_id") or "")):
+            mark(parent, "share_link_identity_or_target_unresolved")
+            continue
+        research_owner = identities.get(str(research[parent]["owner_ref"]), "")
+        target_owner = (identities.get(str(reports[report_id]["owner_ref"]), "")
+                        if kind == "report" else research_owner)
+        if owner != research_owner or owner != target_owner:
+            mark(parent, "share_link_issuer_scope_not_mapped")
+            continue
+        links_by_research.setdefault(parent, []).append({
+            "link_id": str(link["link_id"]), "issuer_identity": owner,
+            "claimant_identity": claimant, "target_kind": kind,
+            "target_ref": parent if kind == "research" else report_id,
+        })
 
     groups = []
     for research_id, row in sorted(research.items()):
@@ -97,7 +118,7 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
                                key=lambda item: str(item["report_id"]))
         group: dict[str, Any] = {
             "research_id": research_id, "state": "needs_repair" if reasons[research_id] else "ready",
-            "reasons": sorted(reasons[research_id]), "resources": [], "grants": [],
+            "reasons": sorted(reasons[research_id]), "resources": [], "grants": [], "links": [],
         }
         if group["state"] == "ready":
             group["resources"].append({"kind": "research", "ref": research_id,
@@ -130,6 +151,13 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
                                             "source": "explicit", "scopes": ["read"]})
             group["resources"].sort(key=lambda item: (item["kind"], item["ref"]))
             group["grants"].sort(key=lambda item: (item["kind"], item["ref"], item["source"], item["identity"]))
+            group["links"] = sorted(links_by_research.get(research_id, []), key=lambda item: item["link_id"])
+            for link in group["links"]:
+                kind = "research" if link["target_kind"] == "research" else "research_report"
+                if link["claimant_identity"] and not _expected(group, link["claimant_identity"]).get((kind, link["target_ref"], "read"), False):
+                    group.update(state="needs_repair", reasons=["share_link_claimant_access_not_mapped"],
+                                 resources=[], grants=[], links=[])
+                    break
         groups.append(group)
     # Orphan report rows must block the whole stage; never infer deletion.
     if any(str(row["research_id"]) not in research for row in reports.values()):
@@ -148,6 +176,7 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
         "needs_repair_researches": sum(item["state"] == "needs_repair" for item in groups),
         "resources_to_stage": sum(len(item["resources"]) for item in groups),
         "grants_to_stage": sum(len(item["grants"]) for item in groups),
+        "links_to_bind": sum(len(item["links"]) for item in groups),
         "unresolved_rows": inventory["summary"]["unresolved"],
         "reasons": dict(Counter(reason for item in groups for reason in item["reasons"])),
         "cutover_ready": False,
@@ -227,6 +256,7 @@ def _stage_plan_locked(*, database: str | Path, backup: str | Path, reviewed_pla
     _verify_backup(database, backup, current["source_sha256"])
     subjects = _subjects(adapter, current["directory"])
     actions = decisions = 0
+    link_bindings: list[tuple[str, str, str, str, str]] = []
     for group in current["groups"]:
         if group["state"] != "ready":
             continue
@@ -255,11 +285,54 @@ def _stage_plan_locked(*, database: str | Path, backup: str | Path, reviewed_pla
             actual = evaluator.evaluate(identity, candidates=candidates)
             compare_research_decisions(expected, actual)
             decisions += len(actual)
+        for link in group["links"]:
+            issuer_identity = link["issuer_identity"]
+            target_kind = "research" if link["target_kind"] == "research" else "research_report"
+            # A link is not an ACL. Its issuer must still have the exact live
+            # Keycloak share rights checked on every subsequent redemption.
+            grants.require_link_issuer_share(identity_id=issuer_identity, subject=subjects[issuer_identity],
+                research_id=group["research_id"], resource_type=target_kind, resource_ref=link["target_ref"])
+            claimant = link["claimant_identity"]
+            if claimant and not _expected(group, claimant).get((target_kind, link["target_ref"], "read"), False):
+                raise AuthorizationUnavailable("redeemed Research link claimant has no migrated access")
+            link_bindings.append((link["link_id"], issuer_identity, subjects[issuer_identity],
+                                  claimant, subjects[claimant] if claimant else ""))
         record({"event": "scope_parity", "ref_sha256": _hash(group["research_id"])})
     if legacy_authorization_snapshot_sha256(database) != current["source_sha256"] or _subjects(adapter, current["directory"]) != subjects:
         raise ValueError("Research data or Keycloak directory changed during staging")
+    if link_bindings:
+        # Bind the existing token metadata only after policy parity. Never
+        # replace an existing binding or grant: concurrent/revoked state must
+        # be reviewed rather than silently resurrected.
+        with sqlite3.connect(database, timeout=5) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("BEGIN IMMEDIATE")
+            if legacy_authorization_snapshot_digest(db) != current["source_sha256"]:
+                raise ValueError("Research authorization changed before link binding")
+            from server.manager.services.research_share_links import ensure_link_journal
+            ensure_link_journal(db)
+            for link_id, identity, subject, claimant, claimant_subject in link_bindings:
+                existing = db.execute("SELECT identity_id,subject FROM research_share_link_issuers WHERE link_id=?", (link_id,)).fetchone()
+                if existing is not None and (existing["identity_id"], existing["subject"]) != (identity, subject):
+                    raise ValueError("Research link issuer binding conflicts with migration")
+                if existing is None:
+                    db.execute("INSERT INTO research_share_link_issuers (link_id,identity_id,subject) VALUES (?,?,?)",
+                               (link_id, identity, subject))
+                claims = db.execute("SELECT identity_id,subject,status FROM research_share_link_claims WHERE link_id=?", (link_id,)).fetchall()
+                if claimant:
+                    if claims and (len(claims) != 1 or (claims[0]["identity_id"], claims[0]["subject"], claims[0]["status"]) != (claimant, claimant_subject, "applied")):
+                        raise ValueError("Research link claimant binding conflicts with migration")
+                    if not claims:
+                        db.execute("INSERT INTO research_share_link_claims (link_id,identity_id,subject,status,created_at) VALUES (?,?,?,'applied',?)",
+                                   (link_id, claimant, claimant_subject, time.time()))
+                elif claims:
+                    raise ValueError("Research link has unexpected claims")
+            if legacy_authorization_snapshot_digest(db) != current["source_sha256"]:
+                raise ValueError("Research authorization changed during link binding")
+        for link_id, *_ in link_bindings:
+            record({"event": "link_binding", "ref_sha256": _hash(link_id)})
     return {"actions": actions, "scope_decisions": decisions,
-            "needs_repair_researches": current["summary"]["needs_repair_researches"]}
+            "links_bound": len(link_bindings), "needs_repair_researches": current["summary"]["needs_repair_researches"]}
 
 
 def _read_private_json(path: str | Path) -> Any:

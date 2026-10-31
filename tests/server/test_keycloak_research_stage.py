@@ -79,8 +79,7 @@ class StagedKeycloak:
             raise RuntimeError("resource conflict")
         self.resources[key] = data
     def _reconcile_user_grant(self, *, resource_type, resource_ref, source, identity_id, subject, scopes,
-                              require_identical):
-        assert require_identical
+                              require_identical=False):
         assert self.directory.users[identity_id]["id"] == subject
         key = (resource_type, resource_ref, source, identity_id)
         if key in self.grants and self.grants[key] != tuple(scopes):
@@ -100,6 +99,19 @@ class StagedKeycloak:
                     allowed.update(granted)
             result.update({(kind, ref, scope): scope in allowed for scope in scopes})
         return result
+    def require_link_issuer_share(self, *, identity_id, subject, research_id, resource_type, resource_ref):
+        assert self.directory.users[identity_id]['id'] == subject
+        decisions = self.evaluate(identity_id, candidates=[('research', research_id, ('read', 'manage')),
+                                  (resource_type, resource_ref, ('share',))])
+        if not all(decisions.values()):
+            raise PermissionError('link issuer is not authorized')
+    def identity_provider(self, username):
+        for identity, user in self.directory.users.items():
+            if user['username'] == username and user['enabled']:
+                return SimpleNamespace(identity_id=identity, subject=user['id'], username=username)
+        return None
+    def user_by_identity(self, identity):
+        return self.directory.users.get(identity)
 
 
 def test_plan_preserves_unmapped_hierarchy_links_and_uses_transaction_snapshot(legacy):
@@ -111,9 +123,10 @@ def test_plan_preserves_unmapped_hierarchy_links_and_uses_transaction_snapshot(l
     assert "unmapped_owner" in groups[ids["unknown"]]["reasons"]
     assert "dynamic_hierarchy_not_verified" in groups[ids["upper"]]["reasons"]
     assert "non_active_object" in groups[ids["archived"]]["reasons"]
-    assert "active_share_link_not_migrated" in groups[ids["live_link"]]["reasons"]
-    assert result["summary"]["ready_researches"] == 1
-    assert result["summary"]["needs_repair_researches"] == 4
+    assert groups[ids["live_link"]]["state"] == "ready"
+    assert len(groups[ids["live_link"]]["links"]) == 1
+    assert result["summary"]["ready_researches"] == 2
+    assert result["summary"]["needs_repair_researches"] == 3
     assert result["summary"]["cutover_ready"] is False
     assert not any(item["resources"] or item["grants"] for item in groups.values()
                    if item["state"] == "needs_repair")
@@ -135,12 +148,94 @@ def test_staging_retries_uncertain_remote_write_and_compares_all_scopes(legacy):
         stage_plan(**kwargs)
     resources, policies = len(keycloak.resources), len(keycloak.grants)
     result = stage_plan(**kwargs)
-    ready = next(group for group in reviewed["groups"] if group["research_id"] == ids["good"])
-    assert len(keycloak.resources) == len(ready["resources"]) >= resources
-    assert len(keycloak.grants) == len(ready["grants"]) >= policies
-    assert result["scope_decisions"] == len(ready["resources"]) * len(directory.users) * 7
-    assert result["needs_repair_researches"] == 4
+    ready = [group for group in reviewed["groups"] if group["state"] == "ready"]
+    assert len(keycloak.resources) == sum(len(group["resources"]) for group in ready) >= resources
+    assert len(keycloak.grants) == sum(len(group["grants"]) for group in ready) >= policies
+    assert result["scope_decisions"] == sum(len(group["resources"]) for group in ready) * len(directory.users) * 7
+    assert result["needs_repair_researches"] == 3 and result['links_bound'] == 1
     assert any(event["event"] == "scope_parity" for event in journal)
+
+
+def test_redeemed_and_unused_links_keep_exact_keycloak_identities(tmp_path):
+    path = tmp_path / 'research.sqlite'
+    catalog = ResearchCatalog(path)
+    research = catalog.create_research(owner_ref='alice', title='Links')['research_id']
+    used = catalog.create_share_link(target_kind='research', research_id=research, actor='alice', mode='one_time')
+    unused = catalog.create_share_link(target_kind='research', research_id=research, actor='alice', mode='one_time')
+    catalog.redeem_share_link(used['token'], actor='bob')
+    backup = tmp_path / 'backup.sqlite'; _backup(path, backup)
+    reviewed = build_plan(path, ACCOUNTS, issuer=ISSUER)
+    directory = Directory(); keycloak = StagedKeycloak(directory); journal = []
+    kwargs = dict(database=path, backup=backup, reviewed_plan=reviewed, accounts=ACCOUNTS,
+                  adapter=directory, grants=keycloak, evaluator=keycloak, record=journal.append, issuer=ISSUER)
+    assert stage_plan(**kwargs)['links_bound'] == 2
+    assert stage_plan(**kwargs)['links_bound'] == 2
+    with sqlite3.connect(path) as db:
+        issuers = db.execute('SELECT link_id,identity_id,subject FROM research_share_link_issuers ORDER BY link_id').fetchall()
+        claims = db.execute('SELECT link_id,identity_id,subject,status FROM research_share_link_claims').fetchall()
+    assert issuers == sorted([(used['link_id'], 'id-a', 'subject-a'), (unused['link_id'], 'id-a', 'subject-a')])
+    assert claims == [(used['link_id'], 'id-b', 'subject-b', 'applied')]
+    assert all('token' not in event for event in journal)
+    migrated = ResearchCatalog(path, research_authorizer=object(), profile_authorizer=object(), profile_grant_manager=keycloak)
+    with pytest.raises(PermissionError, match='already been redeemed'):
+        migrated.redeem_share_link(used['token'], actor='alice')
+    assert migrated.redeem_share_link(used['token'], actor='bob')['research_id'] == research
+    assert migrated.redeem_share_link(unused['token'], actor='bob')['research_id'] == research
+    with pytest.raises(PermissionError, match='already been redeemed'):
+        migrated.redeem_share_link(unused['token'], actor='alice')
+
+
+def test_link_binding_conflict_rolls_back_all_new_bindings(legacy):
+    path, backup, ids = legacy
+    ResearchCatalog(path).create_share_link(target_kind='research', research_id=ids['live_link'], actor='alice', mode='one_time')
+    _backup(path, backup)
+    reviewed = build_plan(path, ACCOUNTS, issuer=ISSUER, now=1)
+    links = next(item for item in reviewed['groups'] if item['research_id'] == ids['live_link'])['links']
+    assert len(links) == 2
+    link_id = links[-1]['link_id']
+    with sqlite3.connect(path) as db:
+        from server.manager.services.research_share_links import ensure_link_journal
+        ensure_link_journal(db)
+        db.execute('INSERT INTO research_share_link_issuers VALUES (?,?,?)', (link_id, 'other', 'subject-other'))
+    directory = Directory(); keycloak = StagedKeycloak(directory)
+    with pytest.raises(ValueError, match='issuer binding conflicts'):
+        stage_plan(database=path, backup=backup, reviewed_plan=reviewed, accounts=ACCOUNTS,
+                   adapter=directory, grants=keycloak, evaluator=keycloak, record=lambda _x: None, issuer=ISSUER, now=1)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT link_id,identity_id,subject FROM research_share_link_issuers').fetchall() == [(link_id, 'other', 'subject-other')]
+
+
+def test_link_with_missing_issuer_blocks_that_research(legacy):
+    path, _backup_path, ids = legacy
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE research_catalog_share_links SET owner_ref='unknown' WHERE research_id=?", (ids['live_link'],))
+    group = next(item for item in build_plan(path, ACCOUNTS, issuer=ISSUER, now=1)['groups'] if item['research_id'] == ids['live_link'])
+    assert group['state'] == 'needs_repair'
+    assert 'share_link_identity_or_target_unresolved' in group['reasons']
+    assert not group['links'] and not group['resources']
+
+
+def test_link_issuer_must_still_have_live_keycloak_share(legacy):
+    path, backup, ids = legacy
+    reviewed = build_plan(path, ACCOUNTS, issuer=ISSUER, now=1)
+    class RevokedKeycloak(StagedKeycloak):
+        def require_link_issuer_share(self, **_kwargs):
+            raise PermissionError('link issuer is not authorized')
+    directory = Directory(); keycloak = RevokedKeycloak(directory)
+    with pytest.raises(PermissionError, match='link issuer is not authorized'):
+        stage_plan(database=path, backup=backup, reviewed_plan=reviewed, accounts=ACCOUNTS,
+                   adapter=directory, grants=keycloak, evaluator=keycloak, record=lambda _x: None, issuer=ISSUER, now=1)
+    with sqlite3.connect(path) as db:
+        assert not db.execute("SELECT name FROM sqlite_master WHERE name='research_share_link_issuers'").fetchall()
+
+
+def test_link_issuer_without_mapped_share_scope_requires_repair(legacy):
+    path, _backup_path, ids = legacy
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE research_catalog_share_links SET owner_ref='bob' WHERE research_id=?", (ids['live_link'],))
+    group = next(item for item in build_plan(path, ACCOUNTS, issuer=ISSUER, now=1)['groups'] if item['research_id'] == ids['live_link'])
+    assert group['state'] == 'needs_repair'
+    assert 'share_link_issuer_scope_not_mapped' in group['reasons']
 
 
 def test_staging_rejects_backup_source_or_plan_drift_before_keycloak_writes(legacy):

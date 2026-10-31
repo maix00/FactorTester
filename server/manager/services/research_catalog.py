@@ -90,14 +90,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
             )""")
             # Link metadata and recovery intents are not permission decisions.
             # The link's actual user grant remains exclusively in Keycloak.
-            conn.execute("""CREATE TABLE IF NOT EXISTS research_share_link_issuers (
-                link_id TEXT PRIMARY KEY, identity_id TEXT NOT NULL, subject TEXT NOT NULL
-            )""")
-            conn.execute("""CREATE TABLE IF NOT EXISTS research_share_link_claims (
-                link_id TEXT NOT NULL, identity_id TEXT NOT NULL, subject TEXT NOT NULL,
-                status TEXT NOT NULL, created_at REAL NOT NULL,
-                PRIMARY KEY(link_id,identity_id)
-            )""")
+            from server.manager.services.research_share_links import ensure_link_journal
+            ensure_link_journal(conn)
 
     def set_synchronizer(self, synchronizer, schedule_refresh=None) -> None:
         if synchronizer.local.path.resolve() != self.db_path:
