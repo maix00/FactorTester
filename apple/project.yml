@@ -106,6 +106,19 @@ targets:
               - factortester
         <<: *ats
 
+  FactorTester-Client-iOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: iOSUITests
+    dependencies:
+      - target: FactorTester-Client-iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client.iosuitests
+        GENERATE_INFOPLIST_FILE: YES
+
   FactorTester-ClientTests:
     type: bundle.unit-test
     platform: macOS
@@ -139,6 +152,14 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
+  FactorTester-Client-iOS-UI:
+    build:
+      targets:
+        FactorTester-Client-iOS: all
+        FactorTester-Client-iOSUITests: [test]
+    test:
+      targets:
+        - FactorTester-Client-iOSUITests
   FactorTester-Client-macOS:
     build:
       targets:
