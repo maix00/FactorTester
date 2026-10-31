@@ -13,8 +13,10 @@ export type LocalResearch = {
   created_at: number;
   updated_at: number;
 };
-export type LocalResearchCapabilities = { actions: string[]; profiles: LocalResearchProfile[] };
+export type LocalResearchBinding = { issuer: string; identity_id: string };
+export type LocalResearchCapabilities = { binding: LocalResearchBinding; actions: string[]; profiles: LocalResearchProfile[] };
 export type LocalResearchCreate = { profile_id: string; title: string; description: string; operation_id: string };
+export type LocalResearchPage = { researches: LocalResearch[]; next_offset: number | null };
 
 type NativeHandler = { postMessage: (message: Record<string, unknown>) => unknown };
 type NativeHost = { webkit?: { messageHandlers?: { tradeResearchLocalResearch?: unknown } } };
@@ -37,6 +39,23 @@ function text(value: unknown, maximum: number, allowEmpty = false, multiline = f
 }
 
 function identifier(value: unknown): string { return text(value, 512); }
+function binding(value:unknown):LocalResearchBinding {
+  if (!isRecord(value)) throw new LocalResearchBridgeError("local_research_invalid_response");
+  const issuer=text(value.issuer,2048), identity_id=identifier(value.identity_id);
+  try {
+    const url=new URL(issuer);
+    if (!['http:','https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || issuer!==issuer.trim()) throw new Error("invalid issuer");
+  } catch { throw new LocalResearchBridgeError("local_research_invalid_response"); }
+  return {issuer,identity_id};
+}
+
+/** Compare issuer literally except for trailing slashes; stable ID alone is insufficient. */
+export function sameLocalResearchBinding(left:LocalResearchBinding,right:LocalResearchBinding):boolean {
+  try {
+    const a=binding(left), b=binding(right);
+    return a.issuer.replace(/\/+$/,"")===b.issuer.replace(/\/+$/,"") && a.identity_id===b.identity_id;
+  } catch { return false; }
+}
 function timestamp(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new LocalResearchBridgeError("local_research_invalid_response");
   return value;
@@ -76,49 +95,63 @@ export class LocalResearchClient {
   private generation = 0;
   private closed = false;
   private actions: Set<string> | null = null;
+  private profiles: Set<string> | null = null;
   private capabilitySequence = 0;
   private readonly handler: NativeHandler;
 
   constructor(handler: NativeHandler) { this.handler=handler; }
 
   /** Invalidation hides late results; it cannot cancel a native write already in progress. */
-  invalidate(): void { this.generation += 1; this.actions=null; }
+  invalidate(): void { this.generation += 1; this.actions=null; this.profiles=null; }
   close(): void { this.closed = true; this.invalidate(); }
   /** UI consumers should also check this snapshot immediately before updating state. */
   snapshot(): number { return this.generation; }
   isCurrent(snapshot:number): boolean { return !this.closed && this.generation===snapshot; }
 
-  async capabilities(): Promise<LocalResearchCapabilities> {
+  async capabilities(expected:LocalResearchBinding): Promise<LocalResearchCapabilities> {
     const generation=this.generation;
     const sequence=++this.capabilitySequence;
     this.actions=null;
+    this.profiles=null;
+    let expectedBinding:LocalResearchBinding;
+    try { expectedBinding=binding(expected); }
+    catch { throw new LocalResearchBridgeError("local_research_session_unverified"); }
     const reply=await this.call({action:"capabilities"});
     this.requireCurrent(generation);
     if (sequence!==this.capabilitySequence) throw new LocalResearchBridgeError("local_research_capabilities_superseded");
     if (!Array.isArray(reply.actions) || !Array.isArray(reply.profiles)) throw new LocalResearchBridgeError("local_research_invalid_response");
+    const current=binding(reply.binding);
+    if (!sameLocalResearchBinding(current,expectedBinding)) throw new LocalResearchBridgeError("local_research_session_mismatch");
     const actions=reply.actions.map(value=>text(value,64)), profiles=reply.profiles.map(profile);
     if (new Set(actions).size!==actions.length || new Set(profiles.map(value=>value.profile_id)).size!==profiles.length) throw new LocalResearchBridgeError("local_research_invalid_response");
     this.actions=new Set(actions);
-    return {actions,profiles};
+    this.profiles=new Set(profiles.map(value=>value.profile_id));
+    return {binding:current,actions,profiles};
   }
 
-  async list(): Promise<LocalResearch[]> {
+  async list(profileId:string, options:{offset?:number;limit?:number} = {}): Promise<LocalResearchPage> {
     this.requireAction("list");
-    const generation=this.generation;
-    const reply=await this.call({action:"list"});
-    this.requireCurrent(generation);
+    const profile_id=inputText(profileId,512), offset=options.offset ?? 0, limit=options.limit ?? 100;
+    this.requireProfile(profile_id);
+    if (!Number.isSafeInteger(offset) || offset<0 || offset>1_000_000 || !Number.isSafeInteger(limit) || limit<1 || limit>200) throw new LocalResearchBridgeError("local_research_invalid_input");
+    const generation=this.generation, sequence=this.capabilitySequence;
+    const reply=await this.call({action:"list",profile_id,offset,limit});
+    this.requireAuthorizedSnapshot(generation,sequence);
     if (!Array.isArray(reply.researches)) throw new LocalResearchBridgeError("local_research_invalid_response");
     const rows=reply.researches.map(research);
-    if (new Set(rows.map(value=>JSON.stringify([value.profile_id,value.research_id]))).size!==rows.length) throw new LocalResearchBridgeError("local_research_invalid_response");
-    return rows;
+    if (rows.length>limit || rows.some(value=>value.profile_id!==profile_id) || new Set(rows.map(value=>value.research_id)).size!==rows.length) throw new LocalResearchBridgeError("local_research_invalid_response");
+    const next=reply.next_offset;
+    if (next!==null && (!Number.isSafeInteger(next) || next!==offset+rows.length || rows.length===0 || (next as number)>1_000_000)) throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {researches:rows,next_offset:next as number|null};
   }
 
   async get(profileId: string, researchId: string): Promise<LocalResearch> {
     this.requireAction("get");
-    const generation=this.generation;
     const profile_id=inputText(profileId,512), research_id=inputText(researchId,512);
+    this.requireProfile(profile_id);
+    const generation=this.generation, sequence=this.capabilitySequence;
     const reply=await this.call({action:"get",profile_id,research_id});
-    this.requireCurrent(generation);
+    this.requireAuthorizedSnapshot(generation,sequence);
     const value=research(reply.research);
     if (value.profile_id!==profile_id || value.research_id!==research_id) throw new LocalResearchBridgeError("local_research_invalid_response");
     return value;
@@ -127,11 +160,12 @@ export class LocalResearchClient {
   /** The caller retains operation_id for retries; this client never retries writes. */
   async create(input: LocalResearchCreate): Promise<LocalResearch> {
     this.requireAction("create");
-    const generation=this.generation;
     const profile_id=inputText(input.profile_id,512), title=inputText(input.title,256).trim();
+    this.requireProfile(profile_id);
+    const generation=this.generation, sequence=this.capabilitySequence;
     const description=inputText(input.description,10000,true,true), operation_id=inputText(input.operation_id,128);
     const reply=await this.call({action:"create",profile_id,title,description,operation_id});
-    this.requireCurrent(generation);
+    this.requireAuthorizedSnapshot(generation,sequence);
     const value=research(reply.research);
     if (value.profile_id!==profile_id || value.title!==title || value.description!==description) throw new LocalResearchBridgeError("local_research_invalid_response");
     return value;
@@ -144,6 +178,15 @@ export class LocalResearchClient {
 
   private requireCurrent(generation:number):void {
     if (!this.isCurrent(generation)) throw new LocalResearchBridgeError("local_research_session_changed");
+  }
+
+  private requireProfile(profileId:string):void {
+    if (!this.profiles?.has(profileId)) throw new LocalResearchBridgeError("local_research_profile_unavailable");
+  }
+
+  private requireAuthorizedSnapshot(generation:number,sequence:number):void {
+    this.requireCurrent(generation);
+    if (sequence!==this.capabilitySequence || !this.actions || !this.profiles) throw new LocalResearchBridgeError("local_research_capabilities_superseded");
   }
 
   private async call(message: Record<string, unknown>): Promise<Record<string, unknown>> {
