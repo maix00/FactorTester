@@ -382,11 +382,16 @@ class KeycloakResearchGrantManager:
         caller = self.identity_provider(actor)
         if caller is None:
             raise PermissionError("Research creation requires a verified Keycloak identity")
-        settings = self.settings_provider()
-        pat = self.token_provider(settings)
-        name = keycloak_resource_name("research", research_id)
-        query = urlencode({"name": name, "first": 0, "max": 10, "deep": "true"})
-        _, found, _ = self.request(settings, pat, "GET", f"resource_set?{query}")
+        try:
+            settings = self.settings_provider()
+            pat = self.token_provider(settings)
+            name = keycloak_resource_name("research", research_id)
+            query = urlencode({"name": name, "first": 0, "max": 10, "deep": "true"})
+            _, found, _ = self.request(settings, pat, "GET", f"resource_set?{query}")
+        except (AuthorizationUnavailable, ValueError, PermissionError):
+            raise
+        except Exception as exc:
+            raise AuthorizationUnavailable("Research Keycloak registration is unavailable") from exc
         rows = found if isinstance(found, list) else found.get("resources", []) if isinstance(found, dict) else None
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
             raise AuthorizationUnavailable("invalid Keycloak Research resource search")

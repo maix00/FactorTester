@@ -111,6 +111,16 @@ def run(sandbox):
             profile_authorizer=NoProfileGrants(), profile_grant_manager=manager,
             profile_identity_resolver=resolver)
         with identity_request():
+            bind_verified_identity(*sessions["owner"])
+            created = catalog.create_research(owner_ref="owner", title="Keycloak-created Research")
+            assert created["access"]["can_manage"] is True
+            try:
+                catalog.create_research(owner_ref="owner", title="Must not be public", visibility="public")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("strict Research creation accepted a legacy public ACL")
+        with identity_request():
             bind_verified_identity(*sessions["member"])
             assert catalog.list_researches(viewer="member") == []
         with identity_request():
@@ -209,10 +219,11 @@ def run(sandbox):
             else:
                 raise AssertionError("revoked link was redeemed")
         with sqlite3.connect(database) as db:
-            assert db.execute("SELECT authorized_users_json FROM research_catalog_researches").fetchone()[0] == "[]"
+            assert {row[0] for row in db.execute("SELECT authorized_users_json FROM research_catalog_researches")} == {"[]"}
+            assert db.execute("SELECT count(*) FROM research_catalog_researches WHERE title='Must not be public'").fetchone()[0] == 0
     return {"real_keycloak": True, "real_catalog": True, "same_token_revocation": True,
             "revoked_page_context_removed": True, "real_link_redemption": True,
-            "issuer_and_link_revocation": True, "legacy_acl_written": False,
+            "issuer_and_link_revocation": True, "real_research_creation": True, "legacy_acl_written": False,
             "local_redeem_seconds": round(redemption_seconds, 3),
             "profile_membership_provider": "denial-only test double", "agent_runtime_admission": "test double"}
 

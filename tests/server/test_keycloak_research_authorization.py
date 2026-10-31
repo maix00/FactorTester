@@ -57,6 +57,17 @@ def test_failed_new_research_registration_cleans_up_only_the_checked_owner():
                         "owner_subject": "subject-a"}]
 
 
+def test_new_research_preflight_outage_is_unavailable_and_does_not_create_or_cleanup():
+    def offline(*_args):
+        raise ConnectionError("offline")
+    manager = KeycloakResearchGrantManager(identity_provider=_identity,
+        settings_provider=lambda: {}, token_provider=lambda _s: "pat", request=offline,
+        ensure_resource=lambda **_kwargs: pytest.fail("must not create after failed preflight"),
+        delete_resource=lambda **_kwargs: pytest.fail("must not delete an unverified resource"))
+    with pytest.raises(AuthorizationUnavailable, match="registration is unavailable"):
+        manager.create_research_resource(actor="alice", research_id="research:random")
+
+
 def test_report_registration_requires_verified_research_and_report_authority():
     calls, allowed = [], {("research", "share"), ("research_report", "manage")}
     def decision(_token, *, resource_type, resource_ref, scope):
