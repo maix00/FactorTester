@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from server.manager.http import research_catalog_routes
 
 
@@ -82,3 +84,48 @@ def test_normal_user_principal_picker_does_not_gain_admin_directory(monkeypatch)
                         lambda _handler, body, status=200: responses.append((body, status)))
     assert Handler()._get_research_catalog_routes(SimpleNamespace(path="/api/research/principals", query=""))
     assert responses[-1][0]["principals"] == []
+
+
+@pytest.mark.parametrize("path", ["/api/research", "/api/research/reports"])
+@pytest.mark.parametrize("scope", ["mine", "all", "subordinates"])
+def test_research_lists_use_verified_session_for_directory(monkeypatch, path, scope):
+    """The live Manager directory expects claims, never a bare username."""
+    from server.manager.http import job_list_routes
+    from server.identity import keycloak_directory
+
+    session = {"username": "alice", "keycloak_subject": "subject", "keycloak_groups": ["/scope"]}
+    calls, responses = [], []
+
+    class Service:
+        def list_researches(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+        def list_reports_for_scope(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+    class Handler(research_catalog_routes.ResearchCatalogRoutesMixin, job_list_routes.JobListRoutesMixin):
+        state = SimpleNamespace(research_catalog=Service())
+
+        def _session(self):
+            return session
+
+        def _research_catalog_publication_branches(self, reports, viewer):
+            return reports
+
+    def groups(claims):
+        assert claims is session
+        return ["/scope"]
+
+    monkeypatch.setattr(job_list_routes, "current_administrative_groups", groups)
+    monkeypatch.setattr(job_list_routes, "current_manager_role", lambda claims, role: False)
+    monkeypatch.setattr(keycloak_directory, "managed_users_for_claims",
+                        lambda **kwargs: [{"username": "alice"}, {"username": "bob"}])
+    monkeypatch.setattr(research_catalog_routes, "json_response",
+                        lambda _handler, body, status=200: responses.append((body, status)))
+
+    assert Handler()._get_research_catalog_routes(SimpleNamespace(path=path, query=f"scope={scope}"))
+    assert responses[0][1] == 200
+    assert calls[0]["viewer"] == "alice"
+    assert calls[0]["subordinate_refs"] == (["bob"] if scope == "subordinates" else [])
