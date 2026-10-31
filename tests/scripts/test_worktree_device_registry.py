@@ -103,7 +103,7 @@ def test_device_registry_keeps_only_minimal_client_and_ip_audit_metadata(tmp_pat
         )
 
 
-def test_existing_device_snapshot_is_migrated_to_allowlist_policy(tmp_path) -> None:
+def test_legacy_device_fields_are_preserved_until_reviewed_migration(tmp_path) -> None:
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_key = _jwk(private_key.public_key())
     path = tmp_path / "devices.json"
@@ -124,15 +124,77 @@ def test_existing_device_snapshot_is_migrated_to_allowlist_policy(tmp_path) -> N
         "sources": {},
     }), encoding="utf-8")
 
+    original = path.read_bytes()
     registry = DeviceRegistry(path, server_id="public-main", public_server=True)
+    assert path.read_bytes() == original  # Reading must not rewrite migration evidence.
     record = registry.list(username="alice@default")[0]
 
     assert "public_access" not in record
     assert "quota_exempt" not in record
     persisted = json.loads(path.read_text(encoding="utf-8"))
     migrated = persisted["devices"]["device-legacy-123456"]
-    assert "public_access" not in migrated
-    assert "quota_exempt" not in migrated
+    assert migrated["public_access"] is False
+    assert migrated["quota_exempt"] is False
+    registry.enroll(username='alice@default', device_id='device-second-123456', public_key=public_key)
+    persisted = json.loads(path.read_text(encoding='utf-8'))
+    assert persisted['devices']['device-legacy-123456']['public_access'] is False
+    assert persisted['devices']['device-legacy-123456']['quota_exempt'] is False
+    assert 'device-second-123456' in persisted['devices']
+
+
+def test_invalid_legacy_record_is_reported_without_overwrite(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    path = tmp_path / 'devices.json'
+    path.write_text(json.dumps({'schema_version': 3, 'server_id': 'local', 'generation': 0,
+        'devices': {'device-good-123456': {'username': 'alice', 'public_key': public_key, 'enabled': True},
+                    'device-bad-1234567': {'username': 'bob', 'public_key': public_key, 'enabled': 'false'}},
+        'sources': {}}))
+    original = path.read_bytes()
+    registry = DeviceRegistry(path, server_id='local')
+    assert registry.backend_status()['migration_repair_count'] == 1
+    assert len(registry.list()) == 1  # malformed state is never interpreted as enabled
+    with pytest.raises(ValueError, match='migration repair'):
+        registry.enroll(username='alice', device_id='device-new-1234567', public_key=public_key)
+    with pytest.raises(ValueError, match='migration repair'):
+        registry.revoke('device-good-123456')
+    assert registry.verify(device_id='device-good-123456', public_key=public_key,
+        challenge=b'challenge', signature=_signature(private_key, b'challenge'),
+        last_seen_ip='203.0.113.9')['username'] == 'alice'
+    assert path.read_bytes() == original
+
+
+def test_mirror_update_cannot_discard_unmigrated_device_fields(tmp_path) -> None:
+    public_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    path = tmp_path / 'devices.json'
+    device = {'device_id': 'device-peer-123456', 'username': 'alice', 'public_key': public_key,
+              'enabled': True, 'public_access': False}
+    path.write_text(json.dumps({'schema_version': 3, 'server_id': 'local', 'generation': 0,
+                                'devices': {}, 'sources': {'peer': {'generation': 1, 'devices': [device]}}}))
+    registry = DeviceRegistry(path, server_id='local')
+    with pytest.raises(ValueError, match='legacy device fields'):
+        registry.apply_snapshot(source_server_id='peer', generation=2, devices=[])
+    assert json.loads(path.read_text())['sources']['peer']['devices'][0]['public_access'] is False
+    assert registry.apply_snapshot(source_server_id='peer', generation=2, devices=[device])
+    assert json.loads(path.read_text())['sources']['peer']['devices'][0]['public_access'] is False
+    with pytest.raises(ValueError, match='duplicate device IDs'):
+        registry.apply_snapshot(source_server_id='peer', generation=3, devices=[device, device])
+    with pytest.raises(ValueError, match='another device source'):
+        registry.apply_snapshot(source_server_id='other', generation=1, devices=[device])
+    changed = {**device, 'public_access': True}
+    with pytest.raises(ValueError, match='legacy device fields'):
+        registry.apply_snapshot(source_server_id='peer', generation=3, devices=[changed])
+    assert json.loads(path.read_text())['sources']['peer']['generation'] == 2
+
+
+def test_new_mirror_preserves_legacy_fields_for_migration(tmp_path) -> None:
+    public_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='local')
+    device = {'device_id': 'device-peer-123456', 'username': 'alice', 'public_key': public_key,
+              'enabled': True, 'public_access': False}
+    assert registry.apply_snapshot(source_server_id='peer', generation=1, devices=[device])
+    stored = json.loads((tmp_path / 'devices.json').read_text())
+    assert stored['sources']['peer']['devices'][0]['public_access'] is False
 
 
 def test_public_server_accepts_all_allowlisted_devices(tmp_path) -> None:

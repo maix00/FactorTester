@@ -95,6 +95,8 @@ def _normalise_record(
         raise DeviceRegistryError("username is required")
     device_id = normalise_device_id(value.get("device_id"))
     public_key = normalise_public_key(value.get("public_key"))
+    if "enabled" in value and type(value["enabled"]) is not bool:
+        raise DeviceRegistryError("device enabled state must be boolean")
     current = time.time() if now is None else float(now)
     try:
         created_at = float(value.get("created_at") or current)
@@ -190,6 +192,13 @@ class DeviceRegistry:
         self._generation = 0
         self._local: dict[str, dict[str, object]] = {}
         self._sources: dict[str, dict[str, object]] = {}
+        # Retain legacy fields only for migration inventory. They are never
+        # returned as an authorization decision or exposed in device listings.
+        self._legacy_local: dict[str, dict[str, object]] = {}
+        self._legacy_sources: dict[str, dict[str, dict[str, object]]] = {}
+        self._legacy_source_metadata: dict[str, dict[str, object]] = {}
+        self._legacy_root: dict[str, object] = {}
+        self._repair_count = 0
         if self.control_store is None:
             self._load()
 
@@ -204,12 +213,19 @@ class DeviceRegistry:
             "server_id": self.server_id,
             "public_server": self.public_server,
             "device_policy": "public_allowlist_only",
+            # PostgreSQL requires a separate inventory; this in-process JSON
+            # loader cannot say whether its records need migration repair.
+            "migration_repair_required": self._repair_count > 0 if self.control_store is None else None,
+            "migration_repair_count": self._repair_count if self.control_store is None else None,
         }
 
     def _load(self) -> None:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError, json.JSONDecodeError):
+            self._repair_count += 1
             return
         if (
             not isinstance(payload, dict)
@@ -219,70 +235,100 @@ class DeviceRegistry:
                 DEVICE_REGISTRY_SCHEMA_VERSION,
             }
         ):
+            self._repair_count += 1
             return
+        self._legacy_root = {key: value for key, value in payload.items()
+                             if key not in {"schema_version", "server_id", "generation", "devices", "sources"}}
         try:
             self._generation = max(0, int(payload.get("generation") or 0))
         except (TypeError, ValueError):
             self._generation = 0
-        migrated = False
-        local = payload.get("devices") or {}
+            self._repair_count += 1
+        local = payload.get("devices", {})
         if isinstance(local, dict):
             for device_id, value in local.items():
                 try:
-                    if isinstance(value, dict) and any(
-                        key in value for key in ("public_access", "quota_exempt")
-                    ):
-                        migrated = True
                     record = _normalise_record(
                         {**value, "device_id": device_id},
                         source_server_id=self.server_id,
                     )
                 except (TypeError, DeviceRegistryError):
+                    self._repair_count += 1
                     continue
                 self._local[record["device_id"]] = record
-        sources = payload.get("sources") or {}
+                self._legacy_local[record["device_id"]] = {
+                    key: item for key, item in value.items() if key not in record
+                }
+        else:
+            self._repair_count += 1
+        sources = payload.get("sources", {})
         if not isinstance(sources, dict):
-            sources = {}
+            self._repair_count += 1
+            return
         for source_id, value in sources.items():
             if not isinstance(value, dict) or str(source_id) == self.server_id:
+                self._repair_count += 1
                 continue
             try:
                 generation = max(0, int(value.get("generation") or 0))
             except (TypeError, ValueError):
+                self._repair_count += 1
                 continue
             records: dict[str, dict[str, object]] = {}
-            for item in value.get("devices") or []:
+            raw_devices = value.get("devices", [])
+            if not isinstance(raw_devices, list):
+                self._repair_count += 1
+                continue
+            legacy: dict[str, dict[str, object]] = {}
+            for item in raw_devices:
                 try:
-                    if isinstance(item, dict) and any(
-                        key in item for key in ("public_access", "quota_exempt")
-                    ):
-                        migrated = True
                     record = _normalise_record(
                         item, source_server_id=str(source_id),
                     )
                 except (TypeError, DeviceRegistryError):
+                    self._repair_count += 1
+                    continue
+                if record["device_id"] in records:
+                    self._repair_count += 1
                     continue
                 records[record["device_id"]] = record
+                legacy[record["device_id"]] = {key: item for key, item in item.items() if key not in record}
+            self._legacy_sources[str(source_id)] = legacy
+            self._legacy_source_metadata[str(source_id)] = {
+                key: item for key, item in value.items() if key not in {"generation", "devices"}
+            }
             self._sources[str(source_id)] = {
                 "generation": generation,
                 "devices": records,
             }
-        if migrated:
-            self._save()
+        seen: set[str] = set()
+        for item in self._all_locked():
+            identifier = str(item["device_id"])
+            if identifier in seen:
+                self._repair_count += 1
+            seen.add(identifier)
+
+    def _require_writable(self) -> None:
+        if self._repair_count:
+            raise DeviceRegistryError("device directory contains records requiring migration repair")
 
     def _save(self) -> None:
         temporary = self.path.with_name(
             f".{self.path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
         )
         payload = {
+            **self._legacy_root,
             "schema_version": DEVICE_REGISTRY_SCHEMA_VERSION,
             "server_id": self.server_id,
             "generation": self._generation,
-            "devices": self._local,
+            "devices": {identifier: {**self._legacy_local.get(identifier, {}), **record}
+                        for identifier, record in self._local.items()},
             "sources": {
                 source: {
+                    **self._legacy_source_metadata.get(source, {}),
                     "generation": value["generation"],
-                    "devices": list(value["devices"].values()),
+                    "devices": [{**self._legacy_sources.get(source, {}).get(identifier, {}), **record}
+                                for identifier, record in value["devices"].items()],
                 }
                 for source, value in self._sources.items()
             },
@@ -342,6 +388,7 @@ class DeviceRegistry:
             )
             return _public_record(record)
         with self._lock:
+            self._require_writable()
             if any(
                 item.get("device_id") == candidate["device_id"]
                 for item in self._all_locked()
@@ -364,6 +411,7 @@ class DeviceRegistry:
                 raise DeviceRegistryError("device cannot be re-enrolled with this identity or key")
             return _public_record(record)
         with self._lock:
+            self._require_writable()
             record = self._local.get(identifier)
             if (record is None or record.get("enabled") or record.get("username") != owner
                     or record.get("public_key") != key):
@@ -419,6 +467,7 @@ class DeviceRegistry:
                 raise DeviceRegistryError("device was not found")
             return _public_record(record)
         with self._lock:
+            self._require_writable()
             record = self._local.get(identifier)
             if record is None:
                 raise DeviceRegistryError("device was not found on this server")
@@ -496,13 +545,38 @@ class DeviceRegistry:
         if not isinstance(devices, list) or len(devices) > 2000:
             raise DeviceRegistryError("snapshot devices must be a list of at most 2000 records")
         records: dict[str, dict[str, object]] = {}
+        incoming_legacy: dict[str, dict[str, object]] = {}
         for item in devices:
             record = _normalise_record(item, source_server_id=source)
+            if record["device_id"] in records:
+                raise DeviceRegistryError("snapshot contains duplicate device IDs")
             records[record["device_id"]] = record
+            incoming_legacy[record["device_id"]] = {
+                key: item[key] for key in ("public_access", "quota_exempt") if key in item
+            }
         with self._lock:
+            self._require_writable()
             previous = self._sources.get(source)
             if previous is not None and revision < int(previous["generation"]):
                 return False
+            other_ids = set(self._local)
+            for other_source, value in self._sources.items():
+                if other_source != source:
+                    other_ids.update(value["devices"])
+            if other_ids.intersection(records):
+                raise DeviceRegistryError("snapshot conflicts with another device source")
+            # Never erase pre-cutover fields by accepting a later mirror that
+            # omitted or replaced the corresponding device identity.
+            for identifier, fields in self._legacy_sources.get(source, {}).items():
+                if fields and (identifier not in records or identifier not in previous["devices"]
+                        or any(records[identifier][key] != previous["devices"][identifier][key]
+                               for key in ("username", "public_key"))):
+                    raise DeviceRegistryError("legacy device fields require migration before snapshot replacement")
+                for key, value in fields.items():
+                    if key in incoming_legacy[identifier] and incoming_legacy[identifier][key] != value:
+                        raise DeviceRegistryError("legacy device fields require migration before snapshot replacement")
+                    incoming_legacy[identifier][key] = value
+            self._legacy_sources[source] = incoming_legacy
             self._sources[source] = {
                 "generation": revision,
                 "devices": records,
@@ -558,7 +632,7 @@ class DeviceRegistry:
         if observed:
             with self._lock:
                 local = self._local.get(identifier)
-                if local is not None:
+                if local is not None and not self._repair_count:
                     record = {
                         **local,
                         "last_seen_ip": observed,
