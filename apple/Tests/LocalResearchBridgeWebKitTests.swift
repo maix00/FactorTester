@@ -51,6 +51,7 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
         }
         XCTAssertTrue((capability["actions"] as? [String])?.contains("publish_report") == true)
         XCTAssertTrue((capability["actions"] as? [String])?.contains("import_research") == true)
+        XCTAssertTrue((capability["actions"] as? [String])?.contains("queue_researches") == true)
         XCTAssertNil(capability["manager"])
         let created = try await message(view, ["action": "create", "profile_id": "self", "title": "WK test", "description": "", "operation_id": "test-operation"])
         let row = try XCTUnwrap(created["research"] as? [String: Any])
@@ -66,6 +67,9 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
         let result = try XCTUnwrap((reports["reports"] as? [[String: Any]])?.first)
         XCTAssertEqual(result["report_id"] as? String, reportRow["report_id"] as? String)
         XCTAssertEqual((result["research"] as? [String: Any])?["research_id"] as? String, researchID)
+        let queued = try await message(view, ["action": "queue_researches", "profile_id": "self",
+                                              "research_ids": ["research:v1:RRRRRRRRRRRRRRRRRRRRRRRR"]])
+        XCTAssertEqual(queued["queued"] as? Int, 1)
         api.user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: ["username": "visitor", "visitor_login": true]))
         let rejected = try await message(view, ["action": "capabilities"])
         XCTAssertEqual(rejected["success"] as? Bool, false)

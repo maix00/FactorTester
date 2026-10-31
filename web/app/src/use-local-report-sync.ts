@@ -43,7 +43,7 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
         if(changed)callback.current();
         if(page.next_report_id)cursor=page.next_report_id;
         else {cursor="";profileIndex=(profileIndex+1)%profiles.length;}
-        const more=!!page.next_report_id||profileIndex!==0;
+        const more=!!page.next_report_id||profileIndex!==0||page.researches_pending_more===true;
         if(!more){
           // A successful first page does not mean the whole scan recovered.
           // Clear the warning only after every page and Profile has succeeded.

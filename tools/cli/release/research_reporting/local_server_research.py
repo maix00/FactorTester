@@ -112,7 +112,7 @@ def import_server_research(store, *, binding: dict, manager: dict, profile_id: s
                 'status': status}
 
 
-def retry_pending_server_research(store, *, binding: dict, manager: dict, profile_id: str, limit: int) -> list[dict]:
+def retry_pending_server_research(store, *, binding: dict, manager: dict, profile_id: str, limit: int) -> tuple[list[dict], bool]:
     from tools.cli.http import HttpClientError
     profile = store._profile(profile_id)
     endpoint = str(manager.get('endpoint') or '').rstrip('/')
@@ -139,4 +139,9 @@ def retry_pending_server_research(store, *, binding: dict, manager: dict, profil
                 db.execute('UPDATE server_research_pending SET last_attempt=? WHERE research_id=? AND manager_hash=? AND profile_id=?',
                            (time.time(), research_id, manager_hash, profile))
         result.append({'research_id': research_id, 'status': status})
-    return result
+    # Drain newly discovered items promptly; failed items wait for the normal
+    # retry interval rather than creating a busy loop.
+    with store._connect() as db:
+        more = db.execute('''SELECT 1 FROM server_research_pending WHERE manager_hash=? AND profile_id=?
+                             AND last_attempt=0 LIMIT 1''', (manager_hash, profile)).fetchone() is not None
+    return result, more

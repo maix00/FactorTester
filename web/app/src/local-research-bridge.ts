@@ -317,7 +317,7 @@ export class LocalResearchClient {
     return reply.queued as number;
   }
 
-  async syncReports(profileId:string,afterReportId="",limit=4):Promise<{reports:{report_id:string;research_id:string;status:string}[];researches:{research_id:string;status:string}[];next_report_id:string|null}> {
+  async syncReports(profileId:string,afterReportId="",limit=4):Promise<{reports:{report_id:string;research_id:string;status:string}[];researches:{research_id:string;status:string}[];researches_pending_more:boolean;next_report_id:string|null}> {
     this.requireAction("sync_reports");const profile_id=inputText(profileId,512),after_report_id=inputText(afterReportId,160,true);
     this.requireProfile(profile_id);
     if(!Number.isSafeInteger(limit)||limit<1||limit>16)throw new LocalResearchBridgeError("local_research_invalid_input");
@@ -339,7 +339,8 @@ export class LocalResearchClient {
       return {research_id:identifier(value.research_id),status:String(value.status)};
     });
     if(new Set(researches.map(value=>value.research_id)).size!==researches.length)throw new LocalResearchBridgeError("local_research_invalid_response");
-    return {reports,researches,next_report_id:next as string|null};
+    if(reply.researches_pending_more!==undefined&&typeof reply.researches_pending_more!=="boolean")throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {reports,researches,researches_pending_more:reply.researches_pending_more===true,next_report_id:next as string|null};
   }
 
   /** The caller retains operation_id for retries; this client never retries writes. */

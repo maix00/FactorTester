@@ -75,6 +75,12 @@ def test_owned_research_import_retries_and_never_overwrites_local_changes(tmp_pa
         with pytest.raises(ValueError, match='conflicts'): rpc.request(request)
         assert rpc.store.get(profile_id='self', research_id=research_id)['title'] == 'Local edit'
         assert rpc.request(sync)['researches'][0]['status'] == 'conflict'
+        pending = ['research:v1:' + char * 24 for char in 'ABC']
+        assert rpc.request({'action':'queue_researches', 'profile_id':'self', 'research_ids':pending})['queued'] == 3
+        first = rpc.request({**sync, 'limit':2})
+        assert len(first['researches']) == 2 and first['researches_pending_more'] is True
+        second = rpc.request({**sync, 'limit':2})
+        assert second['researches_pending_more'] is False
     finally:
         server.shutdown(); server.server_close(); worker.join(timeout=3)
 
