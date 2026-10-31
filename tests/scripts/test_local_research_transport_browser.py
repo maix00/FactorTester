@@ -42,9 +42,16 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             browser = playwright.chromium.launch(channel="chrome", headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 900}, locale="zh-CN")
             page.set_default_timeout(10000)
+            published = []
             def native(request):
+                if request.get('action') == 'publish_report':
+                    published.append(request['report_id'])
+                    return {'success': True, 'schema': 'tr-local-research-bridge:v1', 'publication': {
+                        'publication_id': 'p-' + 'a' * 64, 'revision': '1-test', 'generation': 2,
+                        'report_id': request['report_id']}}
                 envelope = {"binding": {"issuer": "https://identity.test/realm", "identity_id": "stable-1"},
-                            "profile": {"profile_id": "self", "display_name": "Alice"}, "request": request}
+                            "profile": {"profile_id": "self", "display_name": "Alice"}, "request": request,
+                            "manager": {"endpoint":"http://127.0.0.1:7998", "token":"", "certificate_pem":"", "cookies":[]}}
                 process = subprocess.run([sys.executable, "-m", "tools.cli.app", "client", "local-research-request"],
                                          input=json.dumps(envelope), cwd=ROOT, text=True, capture_output=True,
                                          env={**os.environ, "TRADERESEARCH_CLIENT_ROOT": str(tmp_path / "client")}, timeout=15)
@@ -97,6 +104,13 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
             dialog.get_by_role("button", name="本机报告验收").click()
             dialog.get_by_role("button", name="编辑报告内容").click()
             dialog.get_by_text("真实存储的段落内容").wait_for()
+            assert not published
+            dialog.get_by_role("button", name="发布到服务器").click()
+            page.locator(".ant-popconfirm:visible").get_by_role("button", name="发布到服务器").click()
+            for _ in range(30):
+                if published: break
+                page.wait_for_timeout(100)
+            assert len(published) == 1
             if os.environ.get("TR_UI_SCREENSHOT"):
                 page.screenshot(path=os.environ["TR_UI_SCREENSHOT"])
             assert not errors

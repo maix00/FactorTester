@@ -231,6 +231,17 @@ export class LocalResearchClient {
     this.requireAuthorizedSnapshot(generation,sequence);return reportVersion(reply.version);
   }
 
+  async publishReport(profileId:string,researchId:string,reportId:string):Promise<{publication_id:string;revision:string;generation:number}> {
+    this.requireAction("publish_report");
+    const profile_id=inputText(profileId,512),research_id=inputText(researchId,512),report_id=inputText(reportId,512);
+    this.requireProfile(profile_id);const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"publish_report",profile_id,research_id,report_id});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    const value=reply.publication;
+    if(!isRecord(value)||value.report_id!==report_id||typeof value.publication_id!=="string"||!/^p-[0-9a-f]{64}$/.test(value.publication_id)||typeof value.revision!=="string"||!value.revision||value.revision.length>256||!Number.isSafeInteger(value.generation)||(value.generation as number)<0) throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {publication_id:value.publication_id,revision:value.revision,generation:value.generation as number};
+  }
+
   /** The caller retains operation_id for retries; this client never retries writes. */
   async create(input: LocalResearchCreate): Promise<LocalResearch> {
     this.requireAction("create");
