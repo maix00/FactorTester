@@ -23,8 +23,7 @@ import { ResearchEdit } from "../components/research-edit.tsx";
 import { ResearchRelations } from "../components/research-relations.tsx";
 import { ResearchSharing } from "../components/research-sharing.tsx";
 import { LocalResearchCreate, LocalResearchDetail } from "../components/local-research-page.tsx";
-import { useLocalResearch } from "../use-local-research.ts";
-import { useLocalReportSync } from "../use-local-report-sync.ts";
+import { useLocalResearchContext } from "../local-research-context.tsx";
 import { notify } from "../notifications/core.ts";
 import { linkedResearchID, reportBranches, reportRowID, researchRowID, selectReportBranch } from "../research-model.ts";
 type Row = Record<string, any>;
@@ -38,7 +37,7 @@ function ResearchPageForSession(): React.ReactElement {
   const { t } = useTranslation();
   const { session, openAuth } = useAuth();
   const instance = usePageInstance();
-  const local = useLocalResearch(session, instance.mobile);
+  const local = useLocalResearchContext();
   const [localRows,setLocalRows]=useState<Row[]>([]);
   const [creatingLocal,setCreatingLocal]=useState(false);
   const [localProfile,setLocalProfile]=useState<string | null>(null);
@@ -48,8 +47,8 @@ function ResearchPageForSession(): React.ReactElement {
   const [authority, setAuthority] = useState<"legacy"|"keycloak"|null>(null);
   const [tab, setTab] = useState("researches"), [rows, setRows] = useState<Row[]>([]);
   const [page, setPage] = useState(1), [size, setSize] = useState(20), [revision, setRevision] = useState(0);
-  const syncLocalReports = useLocalReportSync(local.client, local.capabilities, instance.active !== false,
-    () => setRevision(value => value + 1));
+  const syncLocalReports = local.requestSync;
+  useEffect(() => { if (local.syncRevision) setRevision(value => value + 1); }, [local.syncRevision]);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<unknown>(null), [editor, setEditor] = useState(false);
   const [detailPrincipal, setDetailPrincipal] = useState<string | null>(null);

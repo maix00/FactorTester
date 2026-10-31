@@ -6,6 +6,7 @@ import { loadScript } from "./assets.ts";
 import { request } from "./configuration/api.ts";
 import { notify } from "./notifications/core.ts";
 import { keycloakErrorKey, managerRegistrationEnabled } from "./auth-model.ts";
+import { LocalResearchProvider } from "./local-research-context.tsx";
 
 export type AuthSession = {
   username?: string;
@@ -60,7 +61,7 @@ function currentPath(): string {
   return `${location.pathname}${location.search}`;
 }
 
-export function AuthGate({ children }: { children: React.ReactNode }): React.ReactElement {
+export function AuthGate({ children, mobile = false }: { children: React.ReactNode; mobile?: boolean }): React.ReactElement {
   const {t}=useTranslation();
   const [dialogMode,setDialogMode]=useState<"login"|"register"|null>(null);
   const [session, setSession] = useState<AuthSession>(null);
@@ -115,7 +116,7 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
   const authenticated=(next:AuthSession):void=>{notifyNative("session-updated");setSession(next);setDialogMode(null);};
   if(checking)return <div className="tr-auth-loading" role="status">{t("loading")}</div>;
   return <AuthContext.Provider value={value}>
-    {session ? <div key={session.username||"session"} className="tr-authenticated-app" inert={Boolean(dialogMode)} aria-hidden={dialogMode?true:undefined}>{children}</div>:null}
+    {session ? <div key={session.username||"session"} className="tr-authenticated-app" inert={Boolean(dialogMode)} aria-hidden={dialogMode?true:undefined}><LocalResearchProvider session={session} mobile={mobile}>{children}</LocalResearchProvider></div>:null}
     {!session || dialogMode ? <AuthOverlay key={dialogMode||"login"} mode={dialogMode||"login"} entry={entry} unavailable={unavailable} authError={authError}
       onClose={session?()=>setDialogMode(null):undefined} onAuthenticated={authenticated}/>:null}
   </AuthContext.Provider>;

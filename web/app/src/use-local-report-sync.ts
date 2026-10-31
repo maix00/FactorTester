@@ -10,6 +10,7 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
   callback.current=onChanged;
   useEffect(()=>{
     if(!active||!client||!capabilities?.actions.includes("sync_reports")||!capabilities.profiles.length)return;
+    noticed.current.clear();
     const snapshot=client.snapshot(),profiles=capabilities.profiles;
     let alive=true,running=false,requested=false,timer:number|undefined,profileIndex=0,cursor="";
     const schedule=(delay:number)=>{if(timer!==undefined)window.clearTimeout(timer);if(alive)timer=window.setTimeout(()=>void tick(),delay);};
@@ -48,8 +49,11 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
       }
     };
     wake.current=()=>{if(running)requested=true;else {cursor="";profileIndex=0;schedule(250);}};
+    const resume=()=>{if(document.visibilityState==="visible" && navigator.onLine)wake.current?.();};
+    window.addEventListener("online",resume);
+    document.addEventListener("visibilitychange",resume);
     schedule(250);
-    return()=>{alive=false;wake.current=null;if(timer!==undefined)window.clearTimeout(timer);};
+    return()=>{alive=false;wake.current=null;window.removeEventListener("online",resume);document.removeEventListener("visibilitychange",resume);if(timer!==undefined)window.clearTimeout(timer);};
   },[client,capabilities,active,t]);
   return useCallback(()=>wake.current?.(),[]);
 }

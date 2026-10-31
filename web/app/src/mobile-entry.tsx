@@ -16,4 +16,4 @@ import "./shell.css";
 setupIonicReact({ mode: "md" });
 
 const mount = document.querySelector<HTMLElement>("[data-tr-web-app]");
-if (mount) { captureResearchShare(); createRoot(mount).render(<AuthGate><MobileShell /><ResearchShareRedeemer /></AuthGate>); }
+if (mount) { captureResearchShare(); createRoot(mount).render(<AuthGate mobile><MobileShell /><ResearchShareRedeemer /></AuthGate>); }
