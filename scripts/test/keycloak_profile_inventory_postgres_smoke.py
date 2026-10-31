@@ -6,43 +6,15 @@ connects to an existing database. No credentials or Profile payloads are logged.
 from __future__ import annotations
 
 import json
-import os
-import secrets
-import subprocess
-import time
-
 import psycopg
 
 from scripts.migrations.keycloak_profile_inventory import build_inventory, read_postgres
+from scripts.test.postgres_sandbox import postgres_sandbox
 
 
 def main():
-    name, password = "tr-profile-inventory-" + secrets.token_hex(6), secrets.token_urlsafe(24)
-    started = False
-    try:
-        try:
-            subprocess.run(["docker", "run", "--detach", "--rm", "--pull=never", "--name", name,
-                "--memory=256m", "--cpus=0.5", "-p", "127.0.0.1::5432",
-                "-e", "POSTGRES_PASSWORD", "postgres:17-alpine"],
-                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                env={**os.environ, "POSTGRES_PASSWORD": password})
-        except subprocess.CalledProcessError:
-            raise RuntimeError("temporary PostgreSQL could not start") from None
-        started = True
-        address = subprocess.check_output(["docker", "port", name, "5432/tcp"], text=True).strip()
-        port = int(address.rsplit(":", 1)[1])
-        settings = {"host": "127.0.0.1", "port": port, "user": "postgres", "password": password,
-                    "dbname": "postgres", "connect_timeout": 2}
-        deadline = time.monotonic() + 45
-        while True:
-            try:
-                writer = psycopg.connect(**settings)
-                break
-            except psycopg.OperationalError:
-                if time.monotonic() > deadline:
-                    raise RuntimeError("temporary PostgreSQL did not start") from None
-                time.sleep(0.5)
-        with writer:
+    with postgres_sandbox("tr-profile-inventory") as settings:
+        with psycopg.connect(**settings) as writer:
             writer.execute("""CREATE TABLE control_profiles (
                 principal text,profile_id text,payload jsonb,PRIMARY KEY(principal,profile_id))""")
             writer.execute("""CREATE TABLE control_account_domain_entities (
@@ -93,11 +65,5 @@ def main():
         print(json.dumps({"real_postgres": True, "repeatable_snapshot": True,
                           "principal_scoped": True, "payload_omitted": True,
                           "postgres_observations": len(rows), "cutover_ready": False}, sort_keys=True))
-    finally:
-        if started:
-            subprocess.run(["docker", "rm", "-f", name], check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
-
 if __name__ == "__main__":
     main()
