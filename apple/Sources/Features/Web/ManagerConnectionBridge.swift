@@ -107,7 +107,9 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
         if action == "current", Set(body.keys) == ["action"] {
             let authorized = verifiedIdentity != nil && session.user?.localResearchIdentity == verifiedIdentity
             replyHandler(reply(["url": endpoint.absoluteString,
-                                "auth_state": authorized ? "authorized" : "unauthorized"]), nil)
+                                // A failed native handshake may mean a transient
+                                // error or missing identity claims, not a denial.
+                                "auth_state": authorized ? "authorized" : "unavailable"]), nil)
             return
         }
         if action == "enroll_device", Set(body.keys) == ["action"] {

@@ -34,7 +34,7 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         api.user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: ["username": "visitor", "visitor_login": true]))
         _ = try await message(view, ["action": "capabilities"])
         let stale = try await message(view, ["action": "current"])
-        XCTAssertEqual(stale["auth_state"] as? String, "unauthorized")
+        XCTAssertEqual(stale["auth_state"] as? String, "unavailable")
         let blocked = try await message(view, ["action": "switch", "url": "https://test-manager.invalid:54321"])
         XCTAssertEqual(blocked["code"] as? String, "manager_session_changed")
         api.user = user

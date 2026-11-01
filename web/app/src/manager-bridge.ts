@@ -25,6 +25,10 @@ export function managerURL(value:unknown):string {
 export function sameManagerURL(left:unknown,right:unknown):boolean {
   try{return managerURL(left)===managerURL(right);}catch{return false;}
 }
+export function canSwitchManager(connection:ManagerConnection|null,target:unknown):boolean {
+  if(!connection || connection.auth_state==="unavailable")return false;
+  try{return managerURL(target)!==managerURL(connection.url);}catch{return false;}
+}
 function connection(value:Record<string,unknown>):ManagerConnection {
   let url:string;
   try{url=managerURL(value.url);}catch{throw new ManagerBridgeError("manager_invalid_response");}
