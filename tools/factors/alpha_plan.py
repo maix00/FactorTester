@@ -102,6 +102,8 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             ):
                 value = window.window.value if isinstance(window,WindowBarsExpr) else window.value
                 if session_calendar is not None and isinstance(value,(str,pd.Timedelta)) and pd.Timedelta(value)>=pd.Timedelta(days=1):
+                    if expr.trunc_start is not None or expr.trunc_end is not None:
+                        raise ValueError('session rolling does not support truncation')
                     duration=pd.Timedelta(value)
                     if duration % pd.Timedelta(days=1):raise ValueError("session window must contain whole trading days")
                     lookback=int(duration / pd.Timedelta(days=1))
@@ -227,9 +229,15 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             child = build(expr.operands[0])
             if child is None:
                 return None
+            if source_freq is None:
+                return None
+            signal_ns = int(pd.Timedelta(str(expr.signal_freq)).value)
+            source_ns = int(pd.Timedelta(source_freq.value).value)
+            if source_ns <= 0 or signal_ns <= 0 or signal_ns % source_ns:
+                return None
             node = {
                 "kind": "signal", "child": child,
-                "signal_ns": int(pd.Timedelta(str(expr.signal_freq)).value),
+                "signal_ns": signal_ns, "observed_period": signal_ns // source_ns,
                 "basepoint": expr.basepoint, "include_current": True,
                 "partial": "drop", "scope_anchor": "start", "sessions": [],
             }
