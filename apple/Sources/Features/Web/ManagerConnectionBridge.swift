@@ -5,6 +5,24 @@ enum ManagerConnectionBridgeContract {
     static let messageName = "tradeResearchManager"
     static let schema = "tr-manager-bridge:v1"
 
+    /// Cookie storage is host-scoped, not port-scoped. Only a token stored
+    /// for the complete target endpoint may be sent during a switch probe.
+    static func probeRequest(target: URL, token: String) -> URLRequest? {
+        guard let url = URL(string: "/api/session", relativeTo: target)?.absoluteURL else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        return request
+    }
+
+    static func probeSessionConfiguration() -> URLSessionConfiguration {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
+        config.timeoutIntervalForRequest = 8
+        return config
+    }
+
     static func endpoint(_ raw: String) -> URL? {
         guard raw == raw.trimmingCharacters(in: .whitespacesAndNewlines), raw.utf8.count <= 2048,
               !raw.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
@@ -153,9 +171,6 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             let result: ProbeResult
             if let probe = self.probeOverride { result = await probe(target, expected, username) }
             else {
-                if ManagerSessionTokenStore.read(for: target).isEmpty, let webView {
-                    await WebSessionCookieSynchronizer.importManagerSession(from: webView, endpoint: target)
-                }
                 result = await self.targetSession(target, expected: expected, username: username)
             }
             guard ManagerConfig.shared.baseURL == self.endpoint,
@@ -206,43 +221,21 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     private func probe(_ target: URL, expected: LocalResearchIdentity) async -> ProbeResult {
-        guard let host = target.host, let url = URL(string: "/api/session", relativeTo: target)?.absoluteURL else { return .unavailable }
-        let config = URLSessionConfiguration.ephemeral
-        config.httpCookieStorage = nil
-        config.httpShouldSetCookies = false
-        config.timeoutIntervalForRequest = 8
+        guard let host = target.host,
+              let request = ManagerConnectionBridgeContract.probeRequest(
+                target: target, token: ManagerSessionTokenStore.read(for: target)
+              ) else { return .unavailable }
+        let config = ManagerConnectionBridgeContract.probeSessionConfiguration()
         let network = URLSession(configuration: config, delegate: SelfSignedTrustDelegate(allowedHosts: [host], rejectsRedirects: true), delegateQueue: nil)
         defer { network.finishTasksAndInvalidate() }
-        var request = URLRequest(url: url)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let token = ManagerSessionTokenStore.read(for: target)
-        // Other applications may use the same host. Only the Manager's own
-        // session cookie belongs in this preflight request.
-        let cookies = (HTTPCookieStorage.shared.cookies(for: url) ?? []).filter { $0.name == "ft-manager-session" }
-        var usedCookie = token.isEmpty && !cookies.isEmpty
-        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        else if !cookies.isEmpty {
-            request.allHTTPHeaderFields = (request.allHTTPHeaderFields ?? [:]).merging(HTTPCookie.requestHeaderFields(with: cookies)) { old, _ in old }
-        }
         do {
-            var (data, response) = try await network.data(for: request)
-            // A stale endpoint token must not hide a valid Manager cookie.
-            if !token.isEmpty, !cookies.isEmpty,
-               let http = response as? HTTPURLResponse, http.statusCode == 401 || http.statusCode == 403 {
-                request.setValue(nil, forHTTPHeaderField: "Authorization")
-                request.allHTTPHeaderFields = (request.allHTTPHeaderFields ?? [:]).merging(HTTPCookie.requestHeaderFields(with: cookies)) { old, _ in old }
-                (data, response) = try await network.data(for: request)
-                usedCookie = true
-            }
+            let (data, response) = try await network.data(for: request)
             guard let http = response as? HTTPURLResponse else { return .unavailable }
             if http.statusCode == 401 || http.statusCode == 403 { return .unauthorized }
             guard http.statusCode == 200 else { return .unavailable }
             let user = try JSONDecoder().decode(UserInfo.self, from: data)
             guard let actual = user.localResearchIdentity,
                   expected.matchesVerifiedSameRealmIdentity(actual) else { return .unauthorized }
-            if usedCookie, let cookie = cookies.first, !cookie.value.isEmpty {
-                ManagerSessionTokenStore.save(cookie.value, for: target)
-            }
             return .authorized(user)
         } catch { return .unavailable }
     }
