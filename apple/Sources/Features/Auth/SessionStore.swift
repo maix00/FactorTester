@@ -167,7 +167,7 @@ final class SessionStore: ObservableObject {
         guard user?.localResearchIdentity == expected else { return false }
         if let candidate {
             guard let expected, let actual = candidate.localResearchIdentity,
-                  expected.matchesStableIDAndSameIssuerSubject(actual) else { return false }
+                  expected.matchesVerifiedSameRealmIdentity(actual) else { return false }
         }
         authenticationGeneration &+= 1
         restoreTask?.cancel()
@@ -197,7 +197,7 @@ final class SessionStore: ObservableObject {
             guard candidate.isLoggedIn, !candidate.visitorLogin,
                   candidate.authentication != "agent",
                   let actual = candidate.localResearchIdentity,
-                  expected.matchesStableIDAndSameIssuerSubject(actual) else { return false }
+                  expected.matchesVerifiedSameRealmIdentity(actual) else { return false }
             user = candidate
             return true
         } catch {

@@ -104,6 +104,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: try verified("different")))
         XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: try verified("stable-alice", subject: "different")))
         XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: try verified("stable-alice", subject: "different", issuer: "https://id.example/realms/a/")))
+        XCTAssertFalse(store.adoptManagerSession(expected: original, candidate: try verified("stable-alice", issuer: "https://other.example/realms/a")))
         XCTAssertEqual(store.user?.stableIdentityID, "stable-alice")
         XCTAssertTrue(store.adoptManagerSession(expected: original, candidate: nil))
         XCTAssertNil(store.user)
@@ -128,10 +129,14 @@ final class SessionStoreTests: XCTestCase {
             issuer: original.issuer + "/", subject: "different-subject", stableID: original.stableID))
         XCTAssertFalse(differentSubject)
         XCTAssertNil(store.user)
+        let differentIssuer = await store.validateManagerChange(expectedIdentity: LocalResearchIdentity(
+            issuer: "https://other.example/realms/a", subject: original.subject, stableID: original.stableID))
+        XCTAssertFalse(differentIssuer)
+        XCTAssertNil(store.user)
         let matched = await store.validateManagerChange(expectedIdentity: original)
         XCTAssertTrue(matched)
         XCTAssertEqual(store.user?.username, "alice")
-        XCTAssertEqual(api.events, ["me", "me", "me"])
+        XCTAssertEqual(api.events, ["me", "me", "me", "me"])
     }
 
     func testNilUsernameIsNotAnAuthenticatedIdentity() async throws {

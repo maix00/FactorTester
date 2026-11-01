@@ -6,13 +6,13 @@ struct LocalResearchIdentity: Equatable {
     let subject: String
     let stableID: String
 
-    /// The same issuer cannot assign one principal to two distinct subjects.
-    /// This check alone does not verify identity across different issuers.
-    func matchesStableIDAndSameIssuerSubject(_ other: LocalResearchIdentity) -> Bool {
+    /// Without a verified federation proof only the same issuer and subject
+    /// can identify the same person. Stable IDs from other issuers are untrusted.
+    func matchesVerifiedSameRealmIdentity(_ other: LocalResearchIdentity) -> Bool {
         guard stableID == other.stableID else { return false }
         let a = issuer.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let b = other.issuer.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return a != b || subject == other.subject
+        return a == b && subject == other.subject
     }
 }
 

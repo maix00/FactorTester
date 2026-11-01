@@ -200,7 +200,7 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard http.statusCode == 200 else { return .unavailable }
             let user = try JSONDecoder().decode(UserInfo.self, from: data)
             guard let actual = user.localResearchIdentity,
-                  expected.matchesStableIDAndSameIssuerSubject(actual) else { return .unauthorized }
+                  expected.matchesVerifiedSameRealmIdentity(actual) else { return .unauthorized }
             if usedCookie, let cookie = cookies.first, !cookie.value.isEmpty {
                 ManagerSessionTokenStore.save(cookie.value, for: target)
             }
