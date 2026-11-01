@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import secrets
+import subprocess
+import sys
 import tempfile
+import time
+from contextlib import contextmanager, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,9 +22,51 @@ from server.identity import keycloak_authorization, keycloak_device
 from server.identity.keycloak import KeycloakAdminAdapter
 from scripts.migrations.keycloak_device_inventory import read_keycloak_directory
 from scripts.migrations.keycloak_device_stage import KeycloakDeviceStageBackend, review, stage
+from scripts.migrations import keycloak_device_stage_cli
 from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
 from server.manager.domain.devices import DeviceRegistry
 from server.manager.http import device_routes
+
+
+@contextmanager
+def restored_device_postgres(*, username, key, device_id):
+    """Disposable PostgreSQL: dump and restore a real scoped device table."""
+    import psycopg
+    from psycopg.types.json import Jsonb
+
+    name, password = 'tr-device-pg-' + secrets.token_hex(6), secrets.token_hex(24)
+    started = False
+    try:
+        subprocess.run(['docker', 'run', '--rm', '-d', '--pull=never', '--name', name,
+                        '--memory=256m', '--cpus=1', '--pids-limit=100', '-p', '127.0.0.1::5432',
+                        '-e', 'POSTGRES_PASSWORD=' + password, 'postgres:17-alpine'],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        started = True
+        port = subprocess.check_output(['docker', 'port', name, '5432/tcp'], text=True).strip().rsplit(':', 1)[1]
+        base = f'postgresql://postgres:{password}@127.0.0.1:{port}'
+        deadline = time.monotonic() + 40
+        while True:
+            try:
+                with psycopg.connect(base + '/postgres?sslmode=disable', autocommit=True) as db:
+                    db.execute('CREATE DATABASE device_live')
+                    db.execute('CREATE DATABASE device_restored')
+                break
+            except psycopg.OperationalError:
+                if time.monotonic() > deadline: raise
+                time.sleep(0.5)
+        with psycopg.connect(base + '/device_live?sslmode=disable') as db:
+            db.execute('''CREATE TABLE control_devices (device_id TEXT NOT NULL, username TEXT NOT NULL,
+                public_key JSONB NOT NULL, enabled BOOLEAN NOT NULL, source_server_id TEXT NOT NULL,
+                PRIMARY KEY (source_server_id, device_id))''')
+            db.execute('INSERT INTO control_devices VALUES (%s,%s,%s,%s,%s)',
+                       (device_id, username, Jsonb(key), True, 'manager-1'))
+        dump = subprocess.check_output(['docker', 'exec', name, 'pg_dump', '-U', 'postgres', '-Fc', 'device_live'])
+        subprocess.run(['docker', 'exec', '-i', name, 'pg_restore', '-U', 'postgres', '-d', 'device_restored'],
+                       input=dump, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        yield base + '/device_live?sslmode=disable', base + '/device_restored?sslmode=disable'
+    finally:
+        if started:
+            subprocess.run(['docker', 'rm', '-f', name], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
 def run(sandbox: Sandbox) -> dict[str, str]:
@@ -107,6 +156,31 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         assert not keycloak_device.may_use_device(token=other_token, session=other, **migrated)
         assert keycloak_device.revoke_device(session=owner, **migrated)
         assert not keycloak_device.may_use_device(token=owner_token, session=owner, **migrated)
+        # Exercise the operator entry against an actual dump/restored database.
+        # The realm backup here is only a disposable fixture; it is not a
+        # Keycloak restore rehearsal or evidence about a production backup.
+        cli_device = 'device-cli-migration-123456'
+        with restored_device_postgres(username=old_name, key=key, device_id=cli_device) as (live_url, backup_url):
+            plan_file, journal = Path(temp) / 'cli-plan.json', Path(temp) / 'cli-journal.jsonl'
+            kc_fixture = Path(temp) / 'kc-fixture'
+            kc_fixture.write_bytes(b'disposable fixture, not a realm export')
+            kc_fixture.chmod(0o600)
+            common = ['device-stage', '--manager-id', 'manager-1', '--principal', old_name,
+                      '--plan', str(plan_file)]
+            from server.manager.storage.control_db import CONTROL_DATABASE_ENV
+            with patch.dict(os.environ, {CONTROL_DATABASE_ENV: live_url, 'TR_DEVICE_RESTORED_DB_URL': backup_url}), \
+                 redirect_stdout(StringIO()):
+                with patch.object(sys, 'argv', [common[0], 'review', *common[1:]]):
+                    keycloak_device_stage_cli.main()
+                with patch.object(sys, 'argv', [common[0], 'stage', *common[1:], '--journal', str(journal),
+                    '--keycloak-backup', str(kc_fixture), '--keycloak-backup-sha256',
+                    hashlib.sha256(kc_fixture.read_bytes()).hexdigest(), '--device-writes-quiesced']):
+                    keycloak_device_stage_cli.main()
+            cli_args = {**args, 'device_id': cli_device}
+            assert keycloak_device.may_use_device(token=owner_token, session=owner, **cli_args)
+            assert not keycloak_device.may_use_device(token=other_token, session=other, **cli_args)
+            assert keycloak_device.revoke_device(session=owner, **cli_args)
+            assert not keycloak_device.may_use_device(token=owner_token, session=owner, **cli_args)
         keycloak_device.register_device(session=owner, **args)
         registry = DeviceRegistry(Path(temp) / 'devices.json', server_id='manager-1')
         registry.enroll(username='owner', device_id=device_id, public_key=key)
@@ -132,7 +206,7 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         assert replies[-1][1]['registered_device_count'] == 2 and replies[-1][1]['public_device_count'] == 0
         assert not keycloak_device.revoke_device(session=owner, **args)
     return {"owner": "allowed", "other_user": "denied", "other_key": "denied", "live_inventory": "verified",
-            "legacy_stage": "verified",
+            "legacy_stage": "verified", "postgres_restore_cli": "verified",
             "same_token_after_revoke": "denied"}
 
 

@@ -5,6 +5,13 @@ import pytest
 from tools.cli.release.research_reporting.local_rpc import SCHEMA, LocalResearchRPC
 
 
+class EmptyOwnedReportDirectory:
+    def get(self, path, *, query):
+        assert path == '/api/research/owned-local-report-sync'
+        assert set(query) == {'cursor', 'limit'}
+        return {'success': True, 'reports': [], 'next_cursor': None}
+
+
 @pytest.mark.parametrize('overrides', [
     {'visitor_login': True}, {'role': 'visitor'}, {'authentication': 'agent'},
     {'username': ''}, {'username': None}, {'tr_identity_id': 'someone-else'},
@@ -225,7 +232,7 @@ def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_pat
                 db.execute('INSERT INTO report_publications (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref) VALUES (?, ?, ?, ?, ?, ?, ?)',
                     (report['report_id'], hashlib.sha256(b'https://other-manager.test').hexdigest(), 'p-'+'b'*64, 'rev', version['generation'], 'f'*64, version['root_ref']))
     visited = []
-    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], object()))
+    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], EmptyOwnedReportDirectory()))
     monkeypatch.setattr(local_auto_sync, '_remote', lambda _session, _research, report, **_kwargs: (visited.append(report) or {
         'publication': {'revision':'rev', 'publication_id': 'p-'+'a'*64}, 'authoring': {}}))
     request = {'action':'sync_reports', 'profile_id':'self', 'after_report_id':'', 'limit':2}
@@ -265,7 +272,7 @@ def test_sync_receipt_recovery_does_not_overwrite_concurrent_receipt(tmp_path, m
         db.execute('INSERT INTO report_publications (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref) VALUES (?, ?, ?, ?, ?, ?, ?)',
                    (report['report_id'], hashlib.sha256(manager['endpoint'].encode()).hexdigest(),
                     'p-'+'a'*64, 'old', 999, 'f'*64, 'old-root'))
-    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], object()))
+    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], EmptyOwnedReportDirectory()))
     monkeypatch.setattr(local_auto_sync, '_remote', lambda *_args, **_kwargs: {
         'publication': {'revision':'remote', 'publication_id':'p-'+'a'*64, 'projection_hash':'e'*64},
         'authoring': version})
