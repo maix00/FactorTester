@@ -157,6 +157,13 @@ def exercise(*, couch, **case):
             snapshot = load_snapshot(package_root=package, branch_id='main')
             source = bundle_from_snapshot(snapshot, package_root=package, branch_id='main')
             digest = hashlib.sha256(source).hexdigest()
+            inconsistent = build_upload_projection(snapshot)
+            inconsistent['title'] = 'Different display title'
+            inconsistent['projection_hash'] = projection_hash(inconsistent)
+            status, _ = publish({'branch_ref': 'main', 'projection': inconsistent,
+                'expected_revision': receipt['revision'], 'authoring': {'sha256': digest,
+                    'root_ref': snapshot['head']['root_ref'], 'content_base64': base64.b64encode(source).decode('ascii')}})
+            assert status == 400 and get_research_report(store, receipt['publication_id'])['_rev'] == receipt['revision']
             status, editable = publish({'branch_ref': 'main', 'projection': build_upload_projection(snapshot),
                 'expected_revision': receipt['revision'], 'authoring': {'sha256': digest,
                     'root_ref': snapshot['head']['root_ref'], 'content_base64': base64.b64encode(source).decode('ascii')}})
@@ -291,7 +298,7 @@ def main():
         run(sandbox, on_ready=lambda **case: exercise(couch=couch, **case))
     print(json.dumps({'real_manager_http': True, 'real_keycloak': True, 'real_couchdb': True,
         'single_report_and_attachment': True, 'same_token_role_revocation': True,
-        'catalog_editable_source_roundtrip': True, 'catalog_desktop_import': True, 'catalog_two_client_sync': True, 'catalog_automatic_discovery': True,
+        'catalog_editable_source_roundtrip': True, 'mismatched_authoring_rejected': True, 'catalog_desktop_import': True, 'catalog_two_client_sync': True, 'catalog_automatic_discovery': True,
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
         'cross_manager_tested': False}, sort_keys=True))
