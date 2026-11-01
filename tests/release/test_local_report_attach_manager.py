@@ -1,4 +1,8 @@
 import hashlib
+import io
+import json
+import zipfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -43,6 +47,9 @@ def report(tmp_path, monkeypatch):
         def get(self, path):
             assert path == '/api/session'
             return identity
+        def download(self, _path, *, maximum_bytes):
+            assert maximum_bytes == 8 * 1024 * 1024
+            return SimpleNamespace(content=data)
     owner_metadata = {'research_title': 'Research', 'revision': 'owner-revision'}
     monkeypatch.setattr(local_catalog_import, '_remote', lambda *_args, **_kwargs: metadata)
     monkeypatch.setattr(local_catalog_import, '_owner_metadata', lambda *_args: owner_metadata)
@@ -69,6 +76,26 @@ def test_rejects_different_source_bytes_without_creating_receipt(report):
         local_catalog_import._attach_identical_shared_report(**report)
     with report['store']._connect() as db:
         assert db.execute('SELECT count(*) FROM report_publications').fetchone()[0] == 0
+
+
+def test_equivalent_imported_head_can_attach_after_validating_remote_bundle(report):
+    from tools.cli.release.research_reporting.authoring.tree_schema import canonical_bytes
+    original = report['session'].download('', maximum_bytes=8 * 1024 * 1024).content
+    with zipfile.ZipFile(io.BytesIO(original)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        objects = [(name, archive.read(name)) for name in archive.namelist() if name != 'manifest.json']
+    manifest['head']['changed_node_ids'] = [] if manifest['head']['changed_node_ids'] else ['root']
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as archive:
+        for name, content in [('manifest.json', canonical_bytes(manifest)), *objects]:
+            archive.writestr(zipfile.ZipInfo(name), content)
+    data = output.getvalue()
+    assert data != original
+    bundle = {**report['metadata']['authoring'], 'sha256': hashlib.sha256(data).hexdigest(), 'size_bytes': len(data)}
+    report['metadata']['authoring'] = bundle
+    report['remote']['authoring'] = bundle
+    report['session'].download = lambda _path, maximum_bytes: SimpleNamespace(content=data)
+    assert local_catalog_import._attach_identical_shared_report(**report)['status'] == 'attached'
 
 
 def test_denied_when_session_changes_before_receipt(report):

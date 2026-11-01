@@ -67,7 +67,7 @@ def _owner_metadata(session, research_id, report_id, metadata):
 
 def _attach_identical_shared_report(store, *, root, existing, metadata, remote, owner_metadata,
                                     session, identity, research_id, report_id, manager_hash):
-    """Attach a second Manager only when the existing local version is identical."""
+    """Attach a second Manager only when the editable report content agrees."""
     from .authoring.tree_bundle import bundle_from_snapshot, validate_report_bundle
     from .authoring.tree_paths import report_tree_paths
     from .authoring.tree_projection import project_snapshot
@@ -80,15 +80,57 @@ def _attach_identical_shared_report(store, *, root, existing, metadata, remote, 
     paths = report_tree_paths(root, 'main')
     with tree_lock(paths):
         head = load_head(paths)
-        if (head['report_id'], head['generation'], head['root_ref']) != (
-                report_id, bundle['generation'], bundle['root_ref']):
+        if (head['report_id'], head['generation']) != (report_id, bundle['generation']):
             raise LocalReportSyncConflict('local and Manager report versions differ')
         data = bundle_from_snapshot(project_snapshot(paths, head), package_root=root, branch_id='main')
-    if len(data) != bundle['size_bytes'] or hashlib.sha256(data).hexdigest() != bundle['sha256']:
-        raise LocalReportSyncConflict('local and Manager report source bytes differ')
-    manifest, _files = validate_report_bundle(payload=data, expected_sha256=bundle['sha256'], report_id=report_id,
-        source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
-    del data, _files  # Release bundle bytes before revalidating current assets.
+    local_sha = hashlib.sha256(data).hexdigest()
+    local_manifest, _local_files = validate_report_bundle(payload=data, expected_sha256=local_sha, report_id=report_id,
+        source_generation=head['generation'], source_root_ref=head['root_ref'])
+    del _local_files
+    if len(data) == bundle['size_bytes'] and local_sha == bundle['sha256']:
+        manifest, _files = validate_report_bundle(payload=data, expected_sha256=bundle['sha256'], report_id=report_id,
+            source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
+        del data, _files
+    else:
+        # Imports rewrite local asset paths and transient head metadata, so
+        # equivalent reports need not have byte-identical ZIPs or root refs.
+        # Validate the remote bundle and both source-free projections before
+        # accepting that equivalence. Keep all temporary bytes bounded.
+        del data
+        attachment = publication_endpoint('local', research_id, report_id) + '/' + record['publication_id'] + '/attachments/report_authoring/' + bundle['sha256']
+        query = publication_query('local', research_id, report_id)
+        response = session.download(attachment + '?' + urlencode(query), maximum_bytes=8 * 1024 * 1024)
+        if len(response.content) != bundle['size_bytes'] or hashlib.sha256(response.content).hexdigest() != bundle['sha256']:
+            raise LocalReportSyncConflict('Manager report source bytes differ')
+        with tempfile.TemporaryDirectory(prefix='report-attach-', dir=store.workspace_root) as temporary:
+            staged = Path(temporary) / 'report'
+            imported = import_report_bundle(payload=response.content, expected_sha256=bundle['sha256'], package_root=staged,
+                branch_id='main', report_id=report_id, source_generation=bundle['generation'],
+                source_root_ref=bundle['root_ref'], restore_artifacts=False)
+            manifest = imported['source_manifest']
+            del imported  # No Job artifacts are installed for this comparison.
+            if manifest.get('source_branch_id') != 'main':
+                raise LocalReportSyncConflict('Manager report source branch differs')
+            if not bundle_matches_projection(package_root=staged, source_manifest=manifest,
+                    remote_projection=remote['projection'], expected_hash=record['projection_hash']):
+                raise LocalReportSyncConflict('Manager report source and projection differ')
+            staged_paths = report_tree_paths(staged, 'main')
+            with tree_lock(staged_paths):
+                staged_head = load_head(staged_paths)
+                staged_data = bundle_from_snapshot(project_snapshot(staged_paths, staged_head),
+                                                   package_root=staged, branch_id='main')
+            staged_manifest, _staged_files = validate_report_bundle(payload=staged_data,
+                expected_sha256=hashlib.sha256(staged_data).hexdigest(), report_id=report_id,
+                source_generation=staged_head['generation'], source_root_ref=staged_head['root_ref'])
+            del staged_data, _staged_files
+            # This field only invalidates a local rendering cache; importing a
+            # bundle resets it to root. All other authoring metadata, nodes,
+            # asset identities and object hashes must agree exactly.
+            local_manifest['head'].pop('changed_node_ids')
+            staged_manifest['head'].pop('changed_node_ids')
+            if local_manifest != staged_manifest:
+                raise LocalReportSyncConflict('local and Manager editable report trees differ')
+        del response
     if not bundle_matches_projection(package_root=root, source_manifest=manifest,
                                      remote_projection=remote['projection'], expected_hash=record['projection_hash']):
         raise LocalReportSyncConflict('local report and Manager projection differ')
@@ -104,7 +146,7 @@ def _attach_identical_shared_report(store, *, root, existing, metadata, remote, 
             raise LocalReportSyncConflict('local report changed during attachment')
         # Assets are outside the immutable tree and can change independently.
         current_data = bundle_from_snapshot(project_snapshot(paths, current_head), package_root=root, branch_id='main')
-        if hashlib.sha256(current_data).hexdigest() != bundle['sha256']:
+        if hashlib.sha256(current_data).hexdigest() != local_sha:
             raise LocalReportSyncConflict('local report assets changed during attachment')
         with store._connect() as db:
             db.execute('BEGIN IMMEDIATE')

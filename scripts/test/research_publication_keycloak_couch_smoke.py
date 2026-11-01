@@ -275,9 +275,9 @@ def exercise(*, couch, **case):
             assert fresh.request(local_sync)['reports'][0]['status'] == 'published'
             assert source.request(local_sync)['reports'][0]['status'] == 'updated'
             assert source.request({'action':'get_report', **local_ids})['index']['chapters'][0]['title'] == 'Fresh device edit'
-            # A second Manager cannot yet adopt a resource registered by the
-            # first, even with the same owner and shared realm. Keep the
-            # failure explicit; do not recreate a potentially revoked policy.
+            # A second Manager in this shared realm can adopt only the same
+            # research-bound resource with the owner's current authorization.
+            # Both instances share the temporary object store in this fixture.
             peer_state = manager_runtime.ManagerState(Path(__file__).resolve().parents[2], sys.executable,
                 server_role='main', server_id='publication-peer', state_root=root / 'peer-state', data_root=root / 'peer-data')
             peer_state.research_catalog = catalog
@@ -292,19 +292,46 @@ def exercise(*, couch, **case):
                 source_on_peer = LocalResearchRPC(root / 'local-source', issuer=verified['keycloak_issuer'],
                     identity_id=verified['tr_identity_id'], profiles=[{'profile_id':'self', 'display_name':'Owner'}],
                     manager={**native_manager, 'endpoint': peer_endpoint})
+                peer_client = LocalResearchRPC(root / 'local-fresh', issuer=verified['keycloak_issuer'],
+                    identity_id=verified['tr_identity_id'], profiles=[{'profile_id':'self', 'display_name':'Owner'}],
+                    manager={**native_manager, 'endpoint': peer_endpoint})
                 # Both in-process states otherwise share one process-wide
                 # deployment environment, which deliberately rejects two
                 # distinct server IDs. Isolate just that deployment lookup;
                 # token, role, object policy and CouchDB remain real.
                 with patch.object(server_admission, '_context',
                                   lambda state=None: (True, state.server_id, ())):
-                    from tools.cli.http import HttpClientError
-                    try:
-                        source_on_peer.request({'action':'publish_report', **local_ids})
-                    except HttpClientError as error:
-                        assert error.status == 503
-                    else:
-                        raise AssertionError('cross-Manager resource adoption requires explicit authorization proof')
+                    shared_resource = manager._resource(settings, pat, 'research_report', shared['report_id'])
+                    shared_id = str(shared_resource.get('_id') or shared_resource.get('id'))
+                    shared_policy = next(row for row in manager._resource_policies(settings, pat, shared_id)
+                                         if str(row.get('name') or '').endswith(':owner'))
+                    original_policy = {'name': shared_policy['name'], 'description': shared_policy['description'],
+                        'users': [users['owner']['id']], 'scopes': shared_policy['scopes'], 'logic': 'POSITIVE'}
+                    manager.request(settings, pat, 'PUT', 'uma-policy/' + shared_policy['id'],
+                        {**original_policy, 'scopes': [scope for scope in original_policy['scopes'] if scope != 'share']})
+                    denied = source_on_peer.request({'action':'publish_report', **local_ids})
+                    assert denied['success'] is False and denied['code'] == 'local_report_publication_denied'
+                    live_policy = next(row for row in manager._resource_policies(settings, pat, shared_id)
+                                       if row['id'] == shared_policy['id'])
+                    assert 'share' not in live_policy['scopes']
+                    manager.request(settings, pat, 'PUT', 'uma-policy/' + shared_policy['id'], original_policy)
+                    published_peer = source_on_peer.request({'action':'publish_report', **local_ids})
+                    assert published_peer['success'] is True
+                    peer_result = peer_client.request(local_sync)
+                    if not any(item['report_id'] == shared['report_id'] and item['status'] == 'attached'
+                               for item in peer_result['report_imports']):
+                        from tools.cli.release.research_reporting.local_catalog_import import import_shared_local_report
+                        import_shared_local_report(peer_client.store, binding=peer_client.binding, manager=peer_client.manager,
+                            profile_id='self', research_id=research['research_id'], report_id=shared['report_id'])
+                    assert any(item['report_id'] == shared['report_id'] and item['status'] == 'attached'
+                               for item in peer_result['report_imports']), peer_result
+                    version = peer_client.request({'action':'get_report', **local_ids})['version']
+                    peer_client.request({'action':'add_report_component', **local_ids, 'component_id':'peer-section',
+                        'kind':'chapter', 'parent_id':'', 'title':'Peer edit', 'body':'', **version})
+                    assert peer_client.request(local_sync)['reports'][0]['status'] == 'published'
+                    assert source_on_peer.request(local_sync)['reports'][0]['status'] == 'updated'
+                    assert source.request(local_sync)['reports'][0]['status'] == 'published'
+                    assert source.request({'action':'get_report', **local_ids})['index']['chapters'][-1]['title'] == 'Peer edit'
             finally:
                 peer_http.shutdown(); peer_http.server_close(); peer_thread.join(timeout=5)
             with sqlite3.connect('file:' + str(catalog.db_path) + '?mode=ro', uri=True) as conn:
@@ -369,7 +396,7 @@ def main():
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
         'local_fresh_device_discovery_and_bidirectional_sync': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
-        'cross_manager_adoption_blocked': True, 'cross_manager_tested': False}, sort_keys=True))
+        'shared_realm_two_manager_client_mediated_sync': True, 'independent_realms_tested': False}, sort_keys=True))
 
 
 if __name__ == '__main__':
