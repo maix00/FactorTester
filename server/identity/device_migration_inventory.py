@@ -15,8 +15,10 @@ def classify_devices(*, manager_id: str, records: list[dict], identities: dict[s
     target = str(manager_id or "").strip()
     if not target or len(target) > 256:
         raise ValueError("Manager identity is required")
+    # Keycloak's device reference normalises surrounding whitespace. Detect
+    # collisions using that same identity before considering any grant.
     counts = Counter((str(row.get("source_server_id") or "").strip(),
-                      str(row.get("device_id") or "")) for row in records)
+                      str(row.get("device_id") or "").strip()) for row in records)
     result = []
     for row in records:
         device_id = str(row.get("device_id") or "")
@@ -24,13 +26,18 @@ def classify_devices(*, manager_id: str, records: list[dict], identities: dict[s
         item = {"device_id": device_id, "username": owner}
         source = str(row.get("source_server_id") or "").strip()
         matches = identities.get(owner, [])
-        if not source or type(row.get("enabled")) is not bool:
+        if (not source or type(row.get("source_server_id")) is not str
+                or row["source_server_id"] != source or type(row.get("enabled")) is not bool):
             item["status"] = "needs_repair"
         elif source != target:
             # Mirror records cannot be re-granted under this Manager's identity.
             item["status"] = "outside_manager"
-        elif counts[(source, device_id)] != 1:
+        elif counts[(source, device_id.strip())] != 1:
             item["status"] = "conflict"
+        elif type(row.get("device_id")) is not str or device_id != device_id.strip():
+            # The Manager's metadata lookup uses the stored key, so changing
+            # it silently in Keycloak would not migrate the actual device.
+            item["status"] = "needs_repair"
         elif len(matches) != 1:
             item["status"] = "invalid_identity"
         else:

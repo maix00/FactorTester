@@ -72,6 +72,20 @@ def test_existing_resource_is_not_regranted_and_ambiguous_legacy_grant_blocks(tm
     assert not args['journal'].exists()
 
 
+def test_normalized_duplicate_blocks_before_any_keycloak_write(tmp_path):
+    first = SNAPSHOT['devices'][0]
+    duplicate = {**first, 'device_id': ' ' + first['device_id'] + ' '}
+    snapshot = {**SNAPSHOT, 'devices': [first, duplicate]}
+    reviewed = review(snapshot, DIRECTORY, manager_id='lan', issuer=ISSUER)
+    assert reviewed['statuses'] == {'conflict': 2}
+    calls = []
+    args = _args(tmp_path, backup_snapshot=snapshot, live_snapshot=lambda: snapshot,
+                 reviewed=reviewed, create=lambda *items: calls.append(items))
+    with pytest.raises(ValueError, match='unresolved'):
+        stage(**args)
+    assert not calls and not args['journal'].exists()
+
+
 def test_partial_failure_leaves_durable_intent_and_never_retries(tmp_path):
     calls = []
     def fail(ref, subject, intent):

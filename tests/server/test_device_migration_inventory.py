@@ -23,6 +23,20 @@ def test_inventory_refuses_duplicate_devices_and_ambiguous_users():
     assert rows[0]["status"] == "invalid_identity"
 
 
+def test_inventory_rejects_normalized_collisions_and_malformed_stored_keys():
+    record = {"device_id": "device-1234567890123456", "username": "alice",
+              "source_server_id": "manager", "public_key": KEY, "enabled": True}
+    padded = {**record, "device_id": "  " + record["device_id"] + "  "}
+    rows = classify_devices(manager_id="manager", records=[record, padded], identities={"alice": [IDENTITY]})
+    assert [row["status"] for row in rows] == ["conflict", "conflict"]
+    assert [row["device_id"] for row in rows] == [record["device_id"], padded["device_id"]]
+    assert all("resource_ref" not in row for row in rows)
+    for malformed in (padded, {**record, "source_server_id": " manager "},
+                      {**record, "device_id": 1234567890123456}):
+        row, = classify_devices(manager_id="manager", records=[malformed], identities={"alice": [IDENTITY]})
+        assert row["status"] == "needs_repair" and "resource_ref" not in row
+
+
 def test_same_device_registered_by_two_managers_is_not_a_local_conflict():
     record = {"device_id": "device-1234567890123456", "username": "alice",
               "source_server_id": "manager", "public_key": KEY, "enabled": True}
