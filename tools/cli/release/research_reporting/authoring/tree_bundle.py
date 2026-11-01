@@ -13,6 +13,7 @@ import zipfile
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
+from tools.cli.release.bounded_file import read_bounded_file
 
 from .tree_paths import report_tree_paths
 from .tree_hierarchy import validate_parent_child
@@ -77,7 +78,7 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
         for candidate in candidates:
             candidate = candidate.resolve()
             if candidate.is_relative_to(root) and candidate.is_file():
-                resolved = (candidate.read_bytes(), asset['media_type'], candidate.name)
+                resolved = (read_bounded_file(candidate, MAX_BUNDLE_BYTES), asset['media_type'], candidate.name)
                 break
         if resolved is None:
             resolved = read_local_asset(snapshot, asset_id)
@@ -93,8 +94,8 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
         path = _resolve_local_resource(resources, target)
         if path is None or not path.is_file():
             raise ValueError('report bundle local resource is unavailable')
-        links.append({'target': target, **capture(path.read_bytes(), path.name)})
-    job_artifacts = export_job_artifacts(snapshot, capture)
+        links.append({'target': target, **capture(read_bounded_file(path, MAX_BUNDLE_BYTES), path.name)})
+    job_artifacts = export_job_artifacts(snapshot, capture, maximum_bytes=MAX_BUNDLE_BYTES)
     manifest = {'schema_version': 2, 'source_branch_id': branch_id,
                 'head': head, 'nodes': nodes, 'assets': assets, 'links': links, 'job_artifacts': job_artifacts}
     encoded = canonical_bytes(manifest)

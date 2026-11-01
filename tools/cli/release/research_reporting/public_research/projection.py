@@ -10,6 +10,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from tools.cli.release.bounded_file import read_bounded_file
 
 from .attachments import build_related_objects
 
@@ -188,8 +189,8 @@ def read_local_resource(
         if path is None:
             return None
         try:
-            raw = path.read_bytes()
-        except OSError:
+            raw = read_bounded_file(path, _LOCAL_RESOURCE_MAX_BYTES)
+        except (OSError, ValueError):
             return None
         if not raw or len(raw) > _LOCAL_RESOURCE_MAX_BYTES:
             return None
@@ -231,8 +232,8 @@ def read_local_asset(
         expected_hash = str(value.get("content_hash") or "")
         for path in candidates:
             try:
-                raw = path.read_bytes()
-            except OSError:
+                raw = read_bounded_file(path, _ASSET_MAX_BYTES)
+            except (OSError, ValueError):
                 continue
             if (
                 not raw
@@ -470,8 +471,8 @@ def public_assets(
         for asset_root in asset_roots:
             path = asset_root / item["filename"]
             try:
-                raw = path.read_bytes()
-            except OSError:
+                raw = read_bounded_file(path, _ASSET_MAX_BYTES)
+            except (OSError, ValueError):
                 continue
             if raw and len(raw) <= _ASSET_MAX_BYTES and total_bytes + len(raw) <= _ASSET_TOTAL_BYTES:
                 if hashlib.sha256(raw).hexdigest() == item["content_hash"]:
@@ -486,8 +487,8 @@ def public_assets(
             path = _job_artifact_path(external_ref, item["filename"])
             if path is not None:
                 try:
-                    raw = path.read_bytes()
-                except OSError:
+                    raw = read_bounded_file(path, _ASSET_MAX_BYTES)
+                except (OSError, ValueError):
                     raw = b""
                 if (
                     raw and len(raw) <= _ASSET_MAX_BYTES
@@ -539,7 +540,7 @@ def _job_artifact_path(external_ref: str, filename: str) -> Path | None:
     if any(part in {".", ".."} for part in parts):
         return None
     from tools.cli.release.job_cache import cached_job_artifact, default_job_cache_root
-    cached = cached_job_artifact(job_id=parts[0], name=parts[1])
+    cached = cached_job_artifact(job_id=parts[0], name=parts[1], include_content=False)
     if cached is not None:
         return Path(cached["path"])
     safe_name = Path(filename).name
@@ -683,8 +684,8 @@ def _capture_local_resource(
     path = _resolve_local_resource(resources, target)
     if path is not None:
         try:
-            raw = path.read_bytes()
-        except OSError:
+            raw = read_bounded_file(path, _LOCAL_RESOURCE_MAX_BYTES)
+        except (OSError, ValueError):
             raw = b""
         collector = resources if isinstance(resources, _LocalResources) else None
         total = collector.total_bytes if collector is not None else 0

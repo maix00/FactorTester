@@ -85,7 +85,8 @@ def _cache_job_artifact_locked(
 
 
 def cached_job_artifact(
-    *, job_id: str, name: str, expected_hash: str = "",
+    *, job_id: str, name: str, expected_hash: str = "", maximum_bytes: int | None = None,
+    include_content: bool = True,
 ) -> dict[str, Any] | None:
     """Return verified cached bytes only when their server hash still matches."""
     directory = _job_directory(job_id, create=False)
@@ -100,9 +101,25 @@ def cached_job_artifact(
         return None
     filename = _filename(str(item.get("file_name") or ""))
     path = directory / filename
-    if not path.is_file() or _digest_path(path) != digest:
+    if not path.is_file():
         return None
-    return {"path": path, "raw": path.read_bytes(), **item}
+    try:
+        if not include_content:
+            if maximum_bytes is not None and path.stat().st_size > maximum_bytes:
+                raise ValueError('file exceeds size limit')
+            if _digest_path(path) != digest:
+                return None
+            return {"path": path, **item}
+        if maximum_bytes is None:
+            raw = path.read_bytes()
+        else:
+            from tools.cli.release.bounded_file import read_bounded_file
+            raw = read_bounded_file(path, maximum_bytes)
+    except OSError:
+        return None
+    if hashlib.sha256(raw).hexdigest() != digest:
+        return None
+    return {"path": path, "raw": raw, **item}
 
 
 def job_cache_directory(job_id: str) -> Path:
@@ -152,4 +169,5 @@ def _filename(value: str) -> str:
 
 
 def _digest_path(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()

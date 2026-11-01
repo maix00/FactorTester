@@ -44,10 +44,10 @@ def artifact_requests(snapshot):
     return requests
 
 
-def export_job_artifacts(snapshot, capture):
+def export_job_artifacts(snapshot, capture, *, maximum_bytes):
     result = []
     for (job, name), expected in sorted(artifact_requests(snapshot).items()):
-        cached = cached_job_artifact(job_id=job, name=name, expected_hash=expected)
+        cached = cached_job_artifact(job_id=job, name=name, expected_hash=expected, maximum_bytes=maximum_bytes)
         if cached is None:
             raise ValueError(f'full Job artifact is unavailable: {job}/{name}')
         result.append({'job_id': job, 'name': name, 'content_type': cached['content_type'],
