@@ -9,7 +9,7 @@ from tools.cli.release.research_reporting.authoring.tree_bundle import export_re
 from tools.cli.release.research_reporting.authoring.tree_model import initialize_tree, add_component, add_asset, load_snapshot
 
 
-def _source(tmp_path):
+def _source(tmp_path, *, external_ref=None):
     source = tmp_path / 'source'
     initialize_tree(package_root=source, branch_id='main', report_id='same-report', title='Report')
     file = source / 'branches/main/evidence.txt'
@@ -27,6 +27,7 @@ def _source(tmp_path):
         'asset_ref': 'asset:plot', 'media_type': 'image/png', 'filename': 'plot.png',
         'caption': 'caption', 'alt_text': 'plot', 'local_ref': 'assets/plot.png',
         'content_hash': hashlib.sha256(image.read_bytes()).hexdigest(),
+        **({'external_ref': external_ref} if external_ref else {}),
     })
     head = load_snapshot(package_root=source, branch_id='main')['head']
     return source, head
@@ -54,12 +55,13 @@ def test_bundle_preserves_editable_tree_resources_and_retry(tmp_path):
     assert load_snapshot(package_root=source, branch_id='main')['head'] == head
 
 
-def test_imported_bundle_projection_matches_original_with_assets_and_local_links(tmp_path):
+@pytest.mark.parametrize("external_ref", [None, "factortester-artifact://jobs/job-1/plot.png"])
+def test_imported_bundle_projection_matches_original_with_assets_and_local_links(tmp_path, external_ref):
     from tools.cli.release.research_reporting.local_projection_validation import bundle_matches_projection
     from tools.cli.release.research_reporting.public_research.object_uploads import detach_object_bytes, projection_hash
     from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
 
-    source, head = _source(tmp_path)
+    source, head = _source(tmp_path, external_ref=external_ref)
     assets = source / 'branches/main/assets'
     assets.mkdir()
     (assets / 'plot.png').write_bytes((source / 'assets/plot.png').read_bytes())

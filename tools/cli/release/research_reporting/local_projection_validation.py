@@ -8,7 +8,9 @@ from urllib.parse import quote
 
 from .authoring.tree_projection import load_snapshot
 from .public_research.object_uploads import detach_object_bytes, projection_hash
-from .public_research.projection import asset_id_for, build_upload_projection, component_content_revision
+from .public_research.projection import (
+    _job_artifact_path, asset_id_for, build_upload_projection, component_content_revision,
+)
 
 
 def bundle_matches_projection(*, package_root: Path, source_manifest: dict,
@@ -20,14 +22,19 @@ def bundle_matches_projection(*, package_root: Path, source_manifest: dict,
     No report state or publication receipt is modified by this check.
     """
     source_head = source_manifest['head']
-    filenames = {asset_id_for(str(item['asset_ref'])): str(item.get('filename') or 'image').split('/')[-1]
-                 for item in source_head['assets']}
+    source_assets = {asset_id_for(str(item['asset_ref'])): item for item in source_head['assets']}
     projection, _uploads = detach_object_bytes(build_upload_projection(
         load_snapshot(package_root=package_root, branch_id='main')))
     for item in projection['assets']:
-        if item['asset_id'] not in filenames:
+        source_asset = source_assets.get(item['asset_id'])
+        if source_asset is None:
             return False
-        item['filename'] = filenames[item['asset_id']]
+        item['filename'] = str(source_asset.get('filename') or 'image').split('/')[-1]
+        # Import embeds the bytes locally and removes this source-only URI.
+        # Reconstruct the original projection using the validated source head.
+        external_ref = str(source_asset.get('external_ref') or '').strip()
+        if _job_artifact_path(external_ref, item['filename']) is not None:
+            item['external_ref'] = external_ref
 
     source_nodes = {str(node['node_id']): node for node in source_manifest['nodes'].values()}
     for component in projection['components']:
