@@ -43,6 +43,35 @@ def test_member_lookup_requires_exact_effective_name_and_unique_stable_identity(
         resolve_keycloak_research_member("Alice")
 
 
+def test_member_lookup_accepts_keycloak_login_name_with_distinct_legacy_name(monkeypatch):
+    from server.identity import federation_identity_sync
+    row = {"id": "subject-a", "username": "alice", "enabled": True,
+           "attributes": {"tr_identity_id": ["identity-a"],
+                          "legacy_username": ["org@Alice@legacy"]}}
+    class Directory:
+        def user_representation(self, name):
+            return row if name.casefold() == 'alice' else None
+        def _page(self, _path, *, max_items):
+            return [row]
+        def user_by_identity_id(self, stable):
+            return row if stable == 'identity-a' else None
+    monkeypatch.setattr(federation_identity_sync, 'manager_keycloak_admin_adapter', Directory)
+    expected = {"identity_id": "identity-a", "subject": "subject-a"}
+    assert resolve_keycloak_research_member('Alice') == expected
+    assert resolve_keycloak_research_member('org@Alice@legacy') == expected
+    with pytest.raises(LookupError, match='missing or ambiguous'):
+        resolve_keycloak_research_member('ali')
+
+    class Collision(Directory):
+        def _page(self, _path, *, max_items):
+            return [{"id": "subject-b", "username": "other", "enabled": True,
+                     "attributes": {"tr_identity_id": ["identity-b"],
+                                    "legacy_username": ["Alice"]}}]
+    monkeypatch.setattr(federation_identity_sync, 'manager_keycloak_admin_adapter', Collision)
+    with pytest.raises(LookupError, match='missing or ambiguous'):
+        resolve_keycloak_research_member('Alice')
+
+
 def test_failed_new_research_registration_cleans_up_only_the_checked_owner():
     removed = []
     def fail_create(**_kwargs):

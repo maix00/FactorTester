@@ -302,9 +302,16 @@ def resolve_keycloak_research_member(principal: str) -> dict[str, str]:
             continue
         if legacy is not None and (not isinstance(legacy, list) or len(legacy) != 1 or not isinstance(legacy[0], str)):
             raise LookupError("Research member's Keycloak name is ambiguous")
-        effective = legacy[0] if legacy else str(row.get("username") or "")
+        username = str(row.get("username") or "")
         subject = str(row.get("id") or "")
-        if effective == selected and subject:
+        # Keycloak's canonical login name and the historical, qualified
+        # principal are both valid references to this user.  A migrated user
+        # can have both; preferring the latter makes the login name unusable.
+        # Keep the old principal exact while matching login names with the
+        # same case-insensitive semantics as user_representation().  Collect
+        # all candidates so a collision between the two namespaces fails shut.
+        if subject and (username.casefold() == selected.casefold()
+                        or bool(legacy and legacy[0] == selected)):
             matches[subject] = row
     if len(matches) != 1:
         raise LookupError("Research member's Keycloak identity is missing or ambiguous")
