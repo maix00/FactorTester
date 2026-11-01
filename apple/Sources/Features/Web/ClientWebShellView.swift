@@ -9,14 +9,14 @@ struct ClientWebShellView: View {
     @EnvironmentObject private var managerConfig: ManagerConfig
     @Environment(\.openURL) private var openURL
 
-    @State private var webSession = WebPageSession()
     @State private var deviceLoginPath: String?
 
     var body: some View {
+        // Let WebPageView own its session: changing the Manager identity
+        // below then replaces the WebView instead of reusing the old origin.
         WebPageView(
             path: deviceLoginPath ?? "/app",
             presentation: .standalone,
-            webSession: webSession,
             onExternalURL: openExternalURL
         )
         .id(managerConfig.baseURL?.absoluteString ?? "manager-unconfigured")
