@@ -17,32 +17,58 @@ export function ReportEditor({ publicationID, onUpdated, requester = request, ap
   const [document,setDocument] = useState<DocumentValue | null>(null), [canWrite,setCanWrite] = useState<boolean | null>(null);
   const [chapters,setChapters] = useState<ChapterSummary[]>([]), [chapterID,setChapterID] = useState(""), [chapter,setChapter] = useState<ReportChapter | null>(null);
   const [attachments,setAttachments] = useState<Attachment[]>([]), [selected,setSelected] = useState<string[]>([]);
+  const [attachmentError,setAttachmentError] = useState(false);
   const [title,setTitle] = useState(""), [body,setBody] = useState(""), [chapterTitle,setChapterTitle] = useState("");
   const [editing,setEditing] = useState(false), [busy,setBusy] = useState(false), [chapterLoading,setChapterLoading] = useState(false);
+  const [requestedPublication,setRequestedPublication] = useState("");
+  const enabled = requestedPublication === publicationID && !!publicationID;
   const [loadError,setLoadError] = useState(""), [chapterError,setChapterError] = useState(""), [needsReview,setNeedsReview] = useState(false), [chapterRevision,setChapterRevision] = useState(0);
-  const operationPending = useRef(false), operationRequest = useRef<AbortController | null>(null), loadRevision = useRef(0);
+  const operationPending = useRef(false), operationRequest = useRef<AbortController | null>(null), loadRevision = useRef(0), attachmentRevision = useRef(0);
   const activePublication = useRef(publicationID); activePublication.current = publicationID;
   const base = `/api/research-reports/${encodeURIComponent(publicationID)}`;
 
-  const load = async (signal?:AbortSignal): Promise<boolean> => {
+  const load = async (signal?:AbortSignal, notifyFailure = false): Promise<boolean> => {
     const revision = ++loadRevision.current;
     try {
-      const [doc,agent,files] = await Promise.all([requester(base,{signal}),requester(`${base}/agent`,{signal}),requester(`${base}/attachments`,{signal})]);
+      const [doc,agent] = await Promise.all([requester(base,{signal}),requester(`${base}/agent`,{signal})]);
       if (signal?.aborted || revision !== loadRevision.current || activePublication.current !== publicationID) return false;
-      if (!doc.document?._rev || !Array.isArray(agent.manifest?.chapters) || !Array.isArray(files.attachments)) throw new Error(t("researchDetail.invalidResponse"));
+      if (!doc.document?._rev || !Array.isArray(agent.manifest?.chapters)) throw new Error(t("researchDetail.invalidResponse"));
       const next = agent.manifest.chapters as ChapterSummary[];
       setDocument(doc.document); setCanWrite(typeof doc.access?.can_write === "boolean" ? doc.access.can_write : null);
-      setChapters(next); setAttachments(files.attachments); setChapterID(previous => next.some(item => item.chapter_id === previous) ? previous : String(next[0]?.chapter_id || ""));
+      setChapters(next); setChapterID(previous => next.some(item => item.chapter_id === previous) ? previous : String(next[0]?.chapter_id || ""));
       setLoadError(""); return true;
     } catch (reason) {
-      if (!signal?.aborted && revision === loadRevision.current && activePublication.current === publicationID) setLoadError(reason instanceof Error ? reason.message : String(reason));
+      if (!signal?.aborted && revision === loadRevision.current && activePublication.current === publicationID) {
+        const description = reason instanceof Error ? reason.message : String(reason);
+        setLoadError(description);
+        if (notifyFailure) notify({code:"report.editor.load.failed",type:"error",message:`${t("report.editContents")} · ${t("loadFailed")}`,description});
+      }
       return false;
     }
   };
   useEffect(() => {
-    const controller = new AbortController(); setDocument(null); setCanWrite(null); setChapters([]); setChapter(null); setAttachments([]); setChapterID(""); setLoadError(""); setNeedsReview(false); setSelected([]); setEditing(false); setTitle(""); setBody(""); setChapterTitle("");
-    void load(controller.signal);
+    const controller = new AbortController(); setDocument(null); setCanWrite(null); setChapters([]); setChapter(null); setChapterID(""); setLoadError(""); setNeedsReview(false); setSelected([]); setEditing(enabled); setTitle(""); setBody(""); setChapterTitle("");
+    if (enabled) void load(controller.signal, true);
     return () => { controller.abort(); operationRequest.current?.abort(); ++loadRevision.current; };
+  }, [publicationID,enabled]);
+  const loadAttachments = async (signal?:AbortSignal, notifyFailure = false): Promise<void> => {
+    const revision = ++attachmentRevision.current;
+    try {
+      const value = await requester(`${base}/attachments`,{signal});
+      if (signal?.aborted || revision !== attachmentRevision.current || activePublication.current !== publicationID) return;
+      if (!Array.isArray(value.attachments)) throw new Error(t("researchDetail.invalidResponse"));
+      setAttachments(value.attachments); setAttachmentError(false);
+    } catch (reason) {
+      if (!signal?.aborted && revision === attachmentRevision.current && activePublication.current === publicationID) {
+        setAttachmentError(true);
+        if (notifyFailure) notify({code:"report.attachments.load.failed",type:"error",message:`${t("report.attachments")} · ${t("loadFailed")}`,description:reason instanceof Error ? reason.message : String(reason)});
+      }
+    }
+  };
+  useEffect(() => {
+    const controller = new AbortController(); setAttachments([]); setAttachmentError(false);
+    void loadAttachments(controller.signal);
+    return () => {controller.abort(); ++attachmentRevision.current;};
   }, [publicationID]);
   useEffect(() => {
     const controller = new AbortController(); setChapter(null); setChapterError("");
@@ -67,7 +93,7 @@ export function ReportEditor({ publicationID, onUpdated, requester = request, ap
       if (activePublication.current !== publicationID) return false;
       const refreshed = await load(controller.signal);
       if (!refreshed && !controller.signal.aborted) setNeedsReview(true);
-      if (refreshed) {setChapterRevision(value => value + 1);onUpdated?.();notify({code:"report.operation.success",type:"success",message:t("operations.saved")});}
+      if (refreshed) {setChapterRevision(value => value + 1);void loadAttachments();onUpdated?.();notify({code:"report.operation.success",type:"success",message:t("operations.saved")});}
       return refreshed;
     } catch (reason) {
       if (!controller.signal.aborted && activePublication.current === publicationID) {
@@ -93,8 +119,8 @@ export function ReportEditor({ publicationID, onUpdated, requester = request, ap
   };
   const retryLoad = (): void => {
     if (editing && chapterID) setChapterLoading(true);
-    void load().then(refreshed => {
-      if (refreshed) {setChapterRevision(value => value + 1);onUpdated?.();}
+    void load(undefined,!needsReview).then(refreshed => {
+      if (refreshed) {setChapterRevision(value => value + 1);void loadAttachments();onUpdated?.();}
       else setChapterLoading(false);
     });
   };
@@ -119,13 +145,15 @@ export function ReportEditor({ publicationID, onUpdated, requester = request, ap
     return depth;
   };
   return <section className="tr-report-editor">
-    {loadError ? <Alert type="error" showIcon message={t("report.reloadRequired")} description={loadError} action={<Button onClick={retryLoad}>{t("retry")}</Button>} /> : null}
-    {!document && !loadError ? <Spin tip={t("loading")} /> : null}
-    {needsReview && !loadError ? <Alert type="warning" showIcon message={t("report.reviewAfterReload")} action={<Button disabled={chapterLoading || !!chapterError} onClick={() => setNeedsReview(false)}>{t("report.reviewed")}</Button>} /> : null}
-    {document && canWrite === null ? <Alert type="warning" showIcon message={t("report.writeUnknown")} action={<Button onClick={() => void load()}>{t("retry")}</Button>} /> : null}
-    {document && canWrite === false ? <p>{t("report.noWrite")}</p> : null}
-    {document && canWrite === true ? <Button onClick={() => setEditing(value => !value)}>{editing ? t("configuration.cancel") : t("report.editContents")}</Button> : null}
-    {editing && canWrite === true ? <>
+    {!enabled ? <Button onClick={() => setRequestedPublication(publicationID)}>{t("report.editContents")}</Button> : null}
+    {enabled && loadError && needsReview ? <Alert type="error" showIcon message={t("report.reloadRequired")} description={loadError} action={<Button onClick={retryLoad}>{t("retry")}</Button>} /> : null}
+    {enabled && loadError && !needsReview ? <Button onClick={retryLoad}>{t("retry")}</Button> : null}
+    {enabled && !document && !loadError ? <Spin tip={t("loading")} /> : null}
+    {enabled && needsReview && !loadError ? <Alert type="warning" showIcon message={t("report.reviewAfterReload")} action={<Button disabled={chapterLoading || !!chapterError} onClick={() => setNeedsReview(false)}>{t("report.reviewed")}</Button>} /> : null}
+    {enabled && document && canWrite === null ? <Alert type="warning" showIcon message={t("report.writeUnknown")} action={<Button onClick={() => void load()}>{t("retry")}</Button>} /> : null}
+    {enabled && document && canWrite === false ? <p>{t("report.noWrite")}</p> : null}
+    {enabled && document && canWrite === true ? <Button onClick={() => setEditing(value => !value)}>{editing ? t("configuration.cancel") : t("report.editContents")}</Button> : null}
+    {enabled && editing && canWrite === true ? <>
       {document?.projection_hash ? <Form layout="vertical" className="tr-report-add" onFinish={() => {
         if (!chapterTitle.trim()) return;
         void apply({op:"insert_chapter",chapter_id:nextID("chapter"),title:chapterTitle.trim(),after_chapter_id:chapters.at(-1)?.chapter_id || null}).then(saved => {if (saved) setChapterTitle("");});
@@ -158,6 +186,7 @@ export function ReportEditor({ publicationID, onUpdated, requester = request, ap
         </div></div>;
       })}</section> : null}
     </> : null}
+    {attachmentError ? <Button onClick={() => void loadAttachments(undefined,true)}>{t("report.attachments")}</Button> : null}
     {attachments.length ? <section className="tr-report-chapter"><h3>{t("report.attachments")}</h3>{attachments.map((file,index) => <div className="tr-report-component" key={file.path || file.name || index}><span>{file.path || file.name}</span>{file.name ? <Button type="link" onClick={() => void attachment(file)}>{t("jobs.download")}</Button> : null}</div>)}</section> : null}
   </section>;
 }

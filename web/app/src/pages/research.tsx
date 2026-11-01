@@ -15,7 +15,6 @@ import { useAuth } from "../auth.tsx";
 import { usePageInstance } from "../page-instance.ts";
 import { assistantResearchContexts } from "../assistant-research-context.ts";
 import { researchAuthority } from "../research-authority.ts";
-import { ReportEditor } from "../components/report-editor.tsx";
 import { ReportMarkdown } from "../components/report-markdown.tsx";
 import { ReportExport } from "../components/report-export.tsx";
 import { ReportBranchReader } from "../components/report-branch-reader.tsx";
@@ -60,7 +59,6 @@ function ResearchPageForSession(): React.ReactElement {
   const [detailPrincipal, setDetailPrincipal] = useState<string | null>(null);
   const [editingResearch, setEditingResearch] = useState(false);
   const [selectedPublicationID, setSelectedPublicationID] = useState("");
-  const [reportRevision, setReportRevision] = useState(0);
   const [readingChapter, setReadingChapter] = useState({publicationID:"",chapterID:""});
   const [researchLocation, setResearchLocation] = useState({id:"",section:"details"});
   const rowID = (row: Row, view = tab): string => view === "reports" ? reportRowID(row) : researchRowID(row);
@@ -228,7 +226,7 @@ function ResearchPageForSession(): React.ReactElement {
         }}>{t("localResearch.importReport")}</Button> : null}
         {linkedResearch && selected.report_id ? <Collapse className="tr-report-sharing" ghost items={[{key:"sharing",label:t("researchSharing.title"),children:<ResearchSharing key={`${linkedResearch}:${selected.report_id}`} target={{researchId:linkedResearch,reportId:String(selected.report_id)}} />}]} /> : null}
         {availableReportBranches.length ? <div className="tr-report-source-picker">
-          <span>{t("research.reportVersion")}</span>
+          <div className="tr-report-source-label"><span>{t("research.reportVersion")}</span>{selectedPublicationBranch ? <Tag>{t("report.readOnly")}</Tag> : null}</div>
           <Select
             aria-label={t("research.reportVersion")}
             value={selectedReportBranch?.publication_id}
@@ -241,7 +239,7 @@ function ResearchPageForSession(): React.ReactElement {
           {selectedReportBranch ? <ReportExport target={{...selected, ...selectedReportBranch, title:selected.title || selectedReportBranch.title}} /> : null}
         </div> : null}
         {selectedPublicationBranch?.publication_id
-          ? <><ReportBranchReader key={`reader:${selectedPublicationBranch.publication_id}:${reportRevision}`} target={{...selected,...selectedPublicationBranch}} initialChapterID={readingChapter.publicationID === selectedPublicationBranch.publication_id ? readingChapter.chapterID : ""} onChapterChange={chapterID => setReadingChapter({publicationID:selectedPublicationBranch.publication_id || "",chapterID})} /><ReportEditor key={`editor:${selectedPublicationBranch.publication_id}`} publicationID={selectedPublicationBranch.publication_id} onUpdated={() => setReportRevision(value => value + 1)} /><ReportMarkdown key={`markdown:${selectedPublicationBranch.publication_id}:${reportRevision}`} publicationID={selectedPublicationBranch.publication_id} /></>
+          ? <><ReportBranchReader key={`reader:${selectedPublicationBranch.publication_id}`} target={{...selected,...selectedPublicationBranch}} initialChapterID={readingChapter.publicationID === selectedPublicationBranch.publication_id ? readingChapter.chapterID : ""} onChapterChange={chapterID => setReadingChapter({publicationID:selectedPublicationBranch.publication_id || "",chapterID})} /><ReportMarkdown key={`markdown:${selectedPublicationBranch.publication_id}`} target={{...selected,...selectedPublicationBranch}} /></>
           : selectedReportBranch?.publication_id && ["client", "server_agent"].includes(String(selectedReportBranch.source_kind))
             ? <><Alert type="info" showIcon message={t("report.branchReadOnly")} /><ReportBranchReader key={selectedReportBranch.publication_id} target={{...selected,...selectedReportBranch}} /></>
             : <Alert type="info" showIcon message={t("research.reportVersionUnavailable")} description={selectedReportBranch ? t(`research.reportSources.${selectedReportBranch.source_kind || "unknown"}`) : selected.build_source === "workspace" ? t("research.reportSources.workspace") : undefined} />}
