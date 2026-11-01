@@ -51,6 +51,14 @@ def _require_unchanged_assets(root: Path, paths: dict, head: dict) -> None:
             raise LocalReportSyncConflict('local report asset changed without updating the report')
 
 
+def _assets_changed(root: Path, paths: dict, head: dict) -> bool:
+    try:
+        _require_unchanged_assets(root, paths, head)
+    except LocalReportSyncConflict:
+        return True
+    return False
+
+
 def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False, requires_edit: bool = False, source_kind: str = 'local') -> dict:
     from .public_research.object_uploads import projection_hash
     value = session.get(publication_endpoint(source_kind, research_id, report_id), query={
@@ -167,7 +175,7 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             if base and base['revision'] == record['revision']:
                 return {'status': 'up_to_date', 'local_modified': (
                     local['generation'] != base['generation'] or local['root_ref'] != base['local_root_ref']
-                    or not _workspace_is_clean(root))}
+                    or not _workspace_is_clean(root) or _assets_changed(root, paths, local))}
             baseline_ok = bool(base and base['local_root_ref'] and local['generation'] == base['generation'] and local['root_ref'] == base['local_root_ref'])
             identical = local['generation'] == bundle['generation'] and local['root_ref'] == bundle['root_ref']
             if has_recovery and not baseline_ok:

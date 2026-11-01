@@ -105,6 +105,18 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert not store.docs
         manager['subject'] = SESSION['keycloak_subject']
         published = rpc.request(request)['publication']
+        # A clean Git status is not proof that resources still match the
+        # immutable tree: an external edit may itself have been committed.
+        figure = selected_root / 'branches' / 'main' / 'assets' / 'figure.png'
+        figure.write_bytes(b'committed local figure edit')
+        commit_report_workspace(selected_root, message='Edit report figure externally')
+        assert subprocess.check_output(['git', '-C', str(selected_root), 'status', '--porcelain'], text=True).strip() == ''
+        unchanged_pull = {'action': 'pull_report', 'profile_id': 'self', 'research_id': research['research_id'],
+                          'report_id': selected['report_id']}
+        assert rpc.request(unchanged_pull) == {'success': True, 'schema': 'tr-local-research-bridge:v1',
+                                               'status': 'up_to_date', 'local_modified': True}
+        figure.write_bytes(raw_asset)
+        commit_report_workspace(selected_root, message='Restore report figure')
         posts_before = transport['posts']
         transport['omit_publish'] = True
         with pytest.raises(PermissionError):
