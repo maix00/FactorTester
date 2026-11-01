@@ -86,7 +86,8 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
         with tempfile.TemporaryDirectory(prefix='catalog-import-', dir=store.workspace_root) as temporary:
             staged = Path(temporary) / root_id
             imported = import_report_bundle(payload=response.content, expected_sha256=bundle['sha256'], package_root=staged,
-                branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
+                branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'],
+                restore_artifacts=False)
             # The projection and authoring bundle are separately validated by the
             # server. Compare their content before accepting either as the baseline.
             if not bundle_matches_projection(package_root=staged,
@@ -106,7 +107,9 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
             if target.exists() or target.is_symlink():
                 if target.is_symlink() or not target.is_dir() or _tree(target) != staged_tree:
                     raise LocalReportSyncConflict('existing report workspace differs from Manager source')
-            else:
+            from .authoring.bundle_job_artifacts import restore_job_artifacts
+            restore_job_artifacts(*imported['deferred_job_artifacts'])
+            if not target.exists():
                 os.rename(staged, target)
             operation = 'server-report-' + hashlib.sha256((manager_hash + '\0' + report_id).encode()).hexdigest()
             with store._connect() as db:

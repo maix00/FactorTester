@@ -170,7 +170,19 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                 branch_ref='main', projection=remote, expected_revision=second['revision'])
         latest = other.request({**edit, **next_head, 'component_id': 'chapter-2', 'title': 'Second'})['version']
         _report, root = other.store._report_root('self', research['research_id'], selected['report_id'])
+        # A valid remote tree may carry a full Job artifact that the receiving
+        # client has never cached. A rejected projection must not cache it.
+        from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
+        from tools.cli.release.research_reporting.authoring.tree_model import add_component
+        monkeypatch.setenv('TRADERESEARCH_JOB_CACHE_ROOT', str(tmp_path / 'source-job-cache'))
+        cache_job_artifact(job_id='job-1', name='evidence', filename='evidence.txt',
+            content_type='text/plain', raw=b'full Job evidence', server_url='http://source')
+        add_component(package_root=root, branch_id='main', component_id='job-evidence', kind='entry',
+            title='', parent_id='chapter-2', body='[Evidence](factortester-artifact://jobs/job-1/evidence)',
+            content=None, display_kind='')
+        commit_report_workspace(root, message='Add Job evidence')
         snapshot = load_snapshot(package_root=root, branch_id='main')
+        latest = {'generation': snapshot['head']['generation'], 'root_ref': snapshot['head']['root_ref']}
         bundle = export_report_bundle(package_root=root, branch_id='main', expected_generation=latest['generation'], expected_root_ref=latest['root_ref'])
         remote = build_upload_projection(snapshot)
         authoring = {'sha256': hashlib.sha256(bundle).hexdigest(), 'root_ref': latest['root_ref'], 'content_base64': base64.b64encode(bundle).decode()}
@@ -193,7 +205,9 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
             branch_ref='main', projection=inconsistent, expected_revision=second['revision'], authoring=authoring)
         with rpc.store._connect() as db:
             before = dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone())
+        monkeypatch.setenv('TRADERESEARCH_JOB_CACHE_ROOT', str(tmp_path / 'target-job-cache'))
         assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        assert cached_job_artifact(job_id='job-1', name='evidence') is None
         with rpc.store._connect() as db:
             assert dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone()) == before
             assert db.execute('SELECT count(*) FROM report_pull_recovery').fetchone()[0] == 0

@@ -1,9 +1,11 @@
 """Freeze full Job artifacts, including data omitted from table previews."""
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 import re
 
-from tools.cli.release.job_cache import cached_job_artifact, cache_job_artifact
+from tools.cli.release.job_cache import cached_job_artifact, cache_job_artifact, default_job_cache_root
 
 _URI = re.compile(r'factortester-artifact://jobs/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)')
 _REF = re.compile(r'job-artifact:([A-Za-z0-9._-]+):([A-Za-z0-9._-]+)')
@@ -52,10 +54,33 @@ def export_job_artifacts(snapshot, capture):
 def restore_job_artifacts(items, files):
     # Check every collision first. A fork must not replace another local Job
     # version merely because it uses the same display name.
+    destinations = {}
+    already_present = set()
     for item in items:
+        job, name, filename = item['job_id'], item['name'], item['filename']
+        if (not _REF.fullmatch(f'job-artifact:{job}:{name}') or job in {'.', '..'} or name in {'.', '..'}
+                or not isinstance(filename, str) or filename in {'', '.', '..'} or Path(filename).name != filename):
+            raise ValueError('Job artifact destination is invalid')
+        destination = default_job_cache_root() / job / filename
+        if destination.parent.is_symlink() or destination.is_symlink():
+            raise ValueError('Job artifact destination cannot be a symlink')
+        previous = destinations.setdefault(destination, item['sha256'])
+        if previous != item['sha256']:
+            raise ValueError('Job artifacts conflict at one local filename')
+        if destination.exists():
+            if not destination.is_file():
+                raise ValueError('Job artifact destination is not a file')
+            with destination.open('rb') as source:
+                digest = hashlib.file_digest(source, 'sha256').hexdigest()
+            if digest != item['sha256']:
+                raise ValueError('local Job artifact filename conflicts with imported content')
         cached = cached_job_artifact(job_id=item['job_id'], name=item['name'])
         if cached is not None and cached['content_hash'] != item['sha256']:
             raise ValueError('local Job artifact conflicts with the imported report version')
+        if cached is not None:
+            already_present.add((job, name))
     for item in items:
+        if (item['job_id'], item['name']) in already_present:
+            continue
         cache_job_artifact(job_id=item['job_id'], name=item['name'], filename=item['filename'],
                            content_type=item['content_type'], raw=files[item['sha256']], server_url='')

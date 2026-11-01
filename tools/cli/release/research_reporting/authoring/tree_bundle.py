@@ -180,7 +180,7 @@ def validate_report_bundle(*, payload: bytes, expected_sha256: str, report_id: s
 
 def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: Path,
                          branch_id: str, report_id: str, source_generation: int,
-                         source_root_ref: str) -> dict:
+                         source_root_ref: str, restore_artifacts: bool = True) -> dict:
     manifest, files = validate_report_bundle(payload=payload, expected_sha256=expected_sha256,
                                             report_id=report_id, source_generation=source_generation,
                                             source_root_ref=source_root_ref)
@@ -195,7 +195,8 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
                         'source_manifest': manifest}
             raise ValueError('target branch already exists with another origin')
         ensure_report_workspace_identity(Path(package_root), report_workspace_id=Path(package_root).name, report_id=report_id)
-        restore_job_artifacts(manifest['job_artifacts'], files)
+        if restore_artifacts:
+            restore_job_artifacts(manifest['job_artifacts'], files)
         replacements = {}
         resource_root = Path(package_root).resolve() / 'branches' / branch_id / 'resources'
         for item in manifest['links']:
@@ -234,4 +235,7 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
                      'source_branch_id': manifest['source_branch_id'], 'source_head': head}))
         write_head(paths, target_head)
         return {'paths': paths, 'head': target_head, 'inherited': True,
-                'source_manifest': manifest}
+                'source_manifest': manifest,
+                **({'deferred_job_artifacts': (manifest['job_artifacts'],
+                     {item['sha256']: files[item['sha256']] for item in manifest['job_artifacts']})}
+                   if not restore_artifacts else {})}

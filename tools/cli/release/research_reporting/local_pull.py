@@ -158,7 +158,8 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
         with tempfile.TemporaryDirectory(prefix='report-pull-', dir=store.workspace_root) as temporary:
             staged_root = Path(temporary) / report_workspace_id_for(report_id)
             imported = import_report_bundle(payload=response.content, expected_sha256=digest, package_root=staged_root,
-                branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
+                branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'],
+                restore_artifacts=False)
             staged_head = imported['head']
             # The Manager validates the projection and authoring bundle
             # separately. Both must describe the same report before the local
@@ -180,6 +181,10 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                 if status.stdout.strip():
                     raise LocalReportSyncConflict('local report workspace has uncommitted files')
                 prior_commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+                # A staged bundle must not modify the shared Job cache before
+                # content, authorization and local-version checks all pass.
+                from .authoring.bundle_job_artifacts import restore_job_artifacts
+                restore_job_artifacts(*imported['deferred_job_artifacts'])
                 registry_before = paths['binding_registry'].read_bytes() if paths['binding_registry'].exists() else None
                 staged_branch = staged_root / 'branches' / 'main'
                 target_branch = root / 'branches' / 'main'

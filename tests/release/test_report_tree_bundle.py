@@ -162,12 +162,17 @@ def test_bundle_preserves_full_job_table_beyond_preview(tmp_path, monkeypatch):
     options = dict(payload=payload, expected_sha256=hashlib.sha256(payload).hexdigest(), package_root=tmp_path / 'target',
                    branch_id='review', report_id='same-report', source_generation=snapshot['head']['generation'],
                    source_root_ref=snapshot['head']['root_ref'])
-    assert import_report_bundle(**options)['inherited']
+    staged = import_report_bundle(**options, restore_artifacts=False)
+    assert staged['inherited']
+    # Staging and rejecting a report must not mutate the shared Job cache.
+    assert cached_job_artifact(job_id='job-1', name='statistics') is None
     imported = load_snapshot(package_root=tmp_path / 'target', branch_id='review')
     assert '](resources/' in imported['components'][-1]['body']
     from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
     projected = build_upload_projection(imported)
     assert projected['local_resources'][-1]['available'] is True
+    from tools.cli.release.research_reporting.authoring.bundle_job_artifacts import restore_job_artifacts
+    restore_job_artifacts(*staged['deferred_job_artifacts'])
     assert cached_job_artifact(job_id='job-1', name='statistics', expected_hash=digest)['raw'] == raw
     assert b'349' in cached_job_artifact(job_id='job-1', name='statistics')['raw']
     cache_job_artifact(job_id='job-1', name='statistics', filename='statistics.csv', content_type='text/csv',
@@ -190,3 +195,31 @@ def test_branch_diff_detects_resource_changes_without_text_changes():
     assert result['component_change_count'] == 0
     assert result['resource_change_count'] == 2
     assert {item['resource_ref'] for item in result['resource_changes']} == {'data.csv', 'job:table'}
+
+
+def test_job_artifact_restore_preserves_existing_files_and_cache_metadata(tmp_path, monkeypatch):
+    from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
+    from tools.cli.release.research_reporting.authoring.bundle_job_artifacts import restore_job_artifacts
+
+    monkeypatch.setenv('TRADERESEARCH_JOB_CACHE_ROOT', str(tmp_path / 'cache'))
+    existing = b'existing artifact'
+    cache_job_artifact(job_id='job-1', name='original', filename='same.csv',
+        content_type='text/csv', raw=existing, server_url='https://original.example')
+    digest = hashlib.sha256(existing).hexdigest()
+    item = {'job_id': 'job-1', 'name': 'original', 'filename': 'same.csv',
+            'content_type': 'text/csv', 'sha256': digest, 'size_bytes': len(existing)}
+    manifest = tmp_path / 'cache' / 'job-1' / '.artifacts.json'
+    before = manifest.read_bytes()
+    restore_job_artifacts([item], {digest: existing})
+    assert manifest.read_bytes() == before
+    incoming = b'different artifact'
+    incoming_digest = hashlib.sha256(incoming).hexdigest()
+    collision = {**item, 'name': 'another', 'sha256': incoming_digest, 'size_bytes': len(incoming)}
+    with pytest.raises(ValueError, match='filename conflicts'):
+        restore_job_artifacts([collision], {incoming_digest: incoming})
+    fresh = {**collision, 'name': 'fresh', 'filename': 'fresh.csv'}
+    with pytest.raises(ValueError, match='filename conflicts'):
+        restore_job_artifacts([fresh, collision], {incoming_digest: incoming})
+    assert cached_job_artifact(job_id='job-1', name='fresh') is None
+    assert cached_job_artifact(job_id='job-1', name='original')['raw'] == existing
+    assert manifest.read_bytes() == before
