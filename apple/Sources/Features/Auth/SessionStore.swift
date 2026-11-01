@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 
 enum ManagerDeviceSessionRestore: Equatable {
     case notRequired
@@ -26,8 +27,10 @@ final class SessionStore: ObservableObject {
     private let bridgeOverride: ClientSessionBridge?
     private let credentialLoader: CredentialLoader
     private let credentialSaver: CredentialSaver
+    private let managerTokenReader: (URL?) -> String
     private let managerDeviceSessionRestorer: ManagerDeviceSessionRestorer
     private var restoreTask: Task<Bool, Never>?
+    private let cliSessionBridge = ClientSessionBridgeCoordinator()
     // An in-flight refresh must not restore a session after logout or a
     // newer login. Updates after suspension check this generation.
     private var authenticationGeneration: UInt64 = 0
@@ -38,6 +41,7 @@ final class SessionStore: ObservableObject {
         bridge: ClientSessionBridge? = nil,
         credentialLoader: @escaping CredentialLoader = SessionCredentialStore.load,
         credentialSaver: @escaping CredentialSaver = SessionCredentialStore.save,
+        managerTokenReader: ((URL?) -> String)? = nil,
         managerDeviceSessionRestorer: @escaping ManagerDeviceSessionRestorer =
             SessionStore.restoreConfiguredPublicManagerDeviceSession
     ) {
@@ -46,6 +50,8 @@ final class SessionStore: ObservableObject {
         bridgeOverride = bridge
         self.credentialLoader = credentialLoader
         self.credentialSaver = credentialSaver
+        self.managerTokenReader = managerTokenReader ?? (bridge == nil
+            ? { ManagerSessionTokenStore.read(for: $0) } : { _ in "" })
         self.managerDeviceSessionRestorer = managerDeviceSessionRestorer
     }
 
@@ -154,6 +160,16 @@ final class SessionStore: ObservableObject {
                 restoreTask = nil
             }
             user = candidate
+            #if os(macOS)
+            if let username = candidate.username, !username.isEmpty {
+                let ticket = authenticationGeneration
+                Task { @MainActor [weak self] in
+                    guard let self, self.authenticationGeneration == ticket,
+                          self.user?.localResearchIdentity == identity else { return }
+                    _ = await self.bridgeClientSession(principalRef: username, reportError: false, deduplicate: true)
+                }
+            }
+            #endif
             return true
         } catch {
             return false
@@ -244,8 +260,29 @@ final class SessionStore: ObservableObject {
 
     private func bridgeClientSession(
         principalRef: String,
-        reportError: Bool = true
+        reportError: Bool = true,
+        deduplicate: Bool = false
     ) async -> Bool {
+        let ticket = authenticationGeneration
+        let endpoint = ManagerConfig.shared.baseURL
+        let identity = user?.localResearchIdentity
+        // Hash in memory only; credentials never become queue identifiers or logs.
+        let token = deduplicate ? managerTokenReader(endpoint) : ""
+        if deduplicate && token.isEmpty { return false }
+        let key = deduplicate ? SHA256.hash(data: Data(((endpoint?.absoluteString ?? "") + "\0" +
+            (identity?.issuer ?? "") + "\0" + (identity?.subject ?? "") + "\0" +
+            (identity?.stableID ?? "") + "\0" + token).utf8)).map { String(format: "%02x", $0) }.joined() : nil
+        return await cliSessionBridge.submit(key: key, valid: { [weak self] in
+            guard let self else { return false }
+            return self.authenticationGeneration == ticket && ManagerConfig.shared.baseURL == endpoint &&
+                self.user?.localResearchIdentity == identity && self.user?.username == principalRef
+        }, operation: { [weak self] in
+            guard let self else { return false }
+            return await self.performClientSessionBridge(principalRef: principalRef, reportError: reportError)
+        })
+    }
+
+    private func performClientSessionBridge(principalRef: String, reportError: Bool) async -> Bool {
         if let bridgeOverride {
             return await bridgeOverride(principalRef)
         }
@@ -568,14 +605,19 @@ final class SessionStore: ObservableObject {
         let managerAPI = managerAPI
         let serverURL = ManagerConfig.shared.baseURL?.absoluteString
         let executable = ClientCLIResolution.executable()
-        try? await api.logout()
-        await managerAPI.logout()
-        if let serverURL {
-            _ = try? await ReleaseCommand.runObject([
-                "client", "profile", "clear-ui-session",
-                "--server-url", serverURL,
-            ], executable: executable)
+        let ticket = authenticationGeneration
+        await cliSessionBridge.invalidateAndClear {
+            if let serverURL {
+                _ = try? await ReleaseCommand.runObject([
+                    "client", "profile", "clear-ui-session",
+                    "--server-url", serverURL,
+                ], executable: executable)
+            }
         }
+        guard ticket == authenticationGeneration else { return }
+        try? await api.logout()
+        guard ticket == authenticationGeneration else { return }
+        await managerAPI.logout()
     }
 
     func updateSavedPassword(_ password: String) {

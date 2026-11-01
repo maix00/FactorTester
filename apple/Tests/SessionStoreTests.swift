@@ -69,6 +69,35 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(secondResult)
     }
 
+    func testWebIdentityBridgesChangedSessionOnlyOnce() async throws {
+        let fields: [String: Any] = ["username": "alice", "keep_login": true,
+            "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject", "tr_identity_id": "stable"]
+        let verified = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: fields))
+        let first = expectation(description: "first verified session")
+        let second = expectation(description: "updated verified session")
+        var token = "first"
+        var calls = 0
+        let store = SessionStore(api: FakeSessionAPI(user: verified), managerAPI: FakeManagerSessionAPI(),
+            bridge: { _ in
+                calls += 1
+                if calls == 1 { first.fulfill() }
+                if calls == 2 { second.fulfill() }
+                return true
+            }, credentialLoader: { nil }, managerTokenReader: { _ in token })
+        let firstConfirmed = await store.confirmWebIdentity()
+        XCTAssertTrue(firstConfirmed)
+        await fulfillment(of: [first], timeout: 2)
+        let repeatedConfirmed = await store.confirmWebIdentity()
+        XCTAssertTrue(repeatedConfirmed)
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(calls, 1)
+        token = "second"
+        let changedConfirmed = await store.confirmWebIdentity()
+        XCTAssertTrue(changedConfirmed)
+        await fulfillment(of: [second], timeout: 2)
+        XCTAssertEqual(calls, 2)
+    }
+
     func testWebIdentityConfirmationRequiresVerifiedIdentityAndDoesNotReplayCredentials() async throws {
         let fields: [String: Any] = ["username": "alice", "keep_login": true,
             "keycloak_issuer": "https://id.example/realms/a", "keycloak_subject": "subject",
