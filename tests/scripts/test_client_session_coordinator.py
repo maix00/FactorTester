@@ -31,6 +31,25 @@ def test_session_writes_are_deduplicated_and_logout_clears_last(tmp_path):
     precondition(count == 2)
     let denied = await coordinator.submit(key: "c", valid: { false }) { fatalError("invalid write executed") }
     precondition(!denied)
+    var clearContinuation: CheckedContinuation<Void, Never>?
+    let clear = Task { @MainActor in await coordinator.invalidateAndClear {
+      events.append("clear-start"); await withCheckedContinuation { clearContinuation = $0 }; events.append("clear-end")
+    }}
+    while clearContinuation == nil { await Task.yield() }
+    let newLogin = Task { @MainActor in await coordinator.submit(key: "new", valid: { true }) {
+      events.append("new-login"); return true
+    }}
+    await Task.yield()
+    precondition(!events.contains("new-login"))
+    clearContinuation?.resume()
+    await clear.value
+    let newLoginSucceeded = await newLogin.value
+    precondition(newLoginSucceeded)
+    precondition(Array(events.suffix(3)) == ["clear-start", "clear-end", "new-login"])
+    var attempts = 0
+    let failed = await coordinator.submit(key: "retry", valid: { true }) { attempts += 1; return false }
+    let retried = await coordinator.submit(key: "retry", valid: { true }) { attempts += 1; return true }
+    precondition(!failed && retried && attempts == 2)
   }
 }
 ''')
