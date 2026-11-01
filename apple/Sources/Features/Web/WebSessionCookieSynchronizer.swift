@@ -21,7 +21,7 @@ enum WebSessionCookieSynchronizer {
         let origin = endpoint ?? webView.url
         guard let host = origin?.host?.lowercased() else { return }
         let matching = cookies.filter { cookie in
-            cookieBelongsToHost(cookie, host: host)
+            cookie.name == "ft-manager-session" && cookieBelongsToHost(cookie, host: host)
         }
         for cookie in matching {
             HTTPCookieStorage.shared.setCookie(cookie)

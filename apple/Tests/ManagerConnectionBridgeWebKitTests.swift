@@ -112,6 +112,27 @@ server.serve_forever()
         content.removeScriptMessageHandler(forName: ManagerConnectionBridgeContract.messageName)
     }
 
+    func testWebSessionImportDoesNotCopyUnrelatedCookies() async throws {
+        let endpoint = try XCTUnwrap(URL(string: "https://cookie-test.invalid:54321"))
+        let session = try XCTUnwrap(HTTPCookie(properties: [.domain: "cookie-test.invalid", .path: "/",
+            .name: "ft-manager-session", .value: "session", .secure: "TRUE"]))
+        let other = try XCTUnwrap(HTTPCookie(properties: [.domain: "cookie-test.invalid", .path: "/",
+            .name: "unrelated", .value: "other", .secure: "TRUE"]))
+        let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: .zero, configuration: config)
+        await config.websiteDataStore.httpCookieStore.setCookie(session)
+        await config.websiteDataStore.httpCookieStore.setCookie(other)
+        defer {
+            HTTPCookieStorage.shared.deleteCookie(session)
+            HTTPCookieStorage.shared.deleteCookie(other)
+            ManagerSessionTokenStore.remove(for: endpoint)
+        }
+        await WebSessionCookieSynchronizer.importManagerSession(from: view, endpoint: endpoint)
+        let native = HTTPCookieStorage.shared.cookies(for: endpoint) ?? []
+        XCTAssertTrue(native.contains { $0.name == session.name })
+        XCTAssertFalse(native.contains { $0.name == other.name })
+    }
+
     func testAuthorizedSwitchClearsHostScopedCookiesBeforeApplyingTarget() async throws {
         let value: [String: Any] = ["username": "alice", "keep_login": true,
                                     "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]

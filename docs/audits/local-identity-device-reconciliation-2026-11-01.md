@@ -138,3 +138,5 @@ XCTest 启动器等待测试 worker 而未产生结果，不能计为测试通�
 macOS 应用和测试目标完成构建，iOS Simulator 应用构建成功。XCTest 测试宿主启动后未执行测试，已停止此次测试进程；独立程序直接编译并调用实际 `WebSessionCookieSynchronizer`，在非持久 WebKit 容器与原生 Cookie 存储中核对会话 Cookie 清除和其他 Cookie 保留，结果通过。新增的完整 WebKit 切换用例已编译但尚未由 XCTest 执行，实际授权切换端到端仍需验收。
 
 另以独立 WebKit 程序编译并执行实际 `ManagerConnectionBridge` 和 Cookie 同步代码，在隔离的非持久 Cookie 容器中模拟已授权目标，验证桥返回 authorized、应用目标且两处旧会话 Cookie 均已清除。该实验使用替身 SessionStore 与授权探测，不是实际两个 Manager 的授权端到端验收。
+
+WebView 向原生 Cookie 存储导入时也已限定为 Manager 会话 Cookie；此前实现会导入同域的其他 Cookie。独立 WebKit 程序验证只导入会话、切换清除会话并保留其他 Cookie；macOS 测试目标与 iOS 模拟器应用重新编译通过，新增 XCTest 用例尚未由卡住的测试宿主执行。
