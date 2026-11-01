@@ -298,6 +298,7 @@ def run_strategy_family_run_spec(
             start_utc=data_start,
             end_utc=str(window.get("end") or ""),
             target_root=Path(output_dir) / "catalogs",
+            max_input_bars=plan.get('max_input_bars'),
         )
         plan = {**plan, "catalog_inputs": catalogs}
     if plan.get("session_calendar") is None:

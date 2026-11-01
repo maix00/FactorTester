@@ -165,6 +165,7 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
     start_utc, end_utc = request.start_utc, request.end_utc
     start_ns, end_ns = request.start_ns, request.end_ns
     target_root = request.target_root
+    remaining = request.max_input_bars
     staging_requests = _contract_requests(request)
     bundle_identity = dict(
         bundle_id=request.bundle_id, bundle_version=request.bundle_version,
@@ -213,11 +214,15 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
             target = target_root / str(contract_uid).replace("|", "_")
             clipped_start = max(start_ns, spec.activation_ns)
             clipped_end = min(end_ns, spec.expiration_ns)
+            if remaining is not None and remaining <= 0:
+                raise ValueError("catalog staging exceeds the total Bar budget")
+            budget = min(100_000, remaining) if remaining is not None else 100_000
             if frequency == "MIN1":
-                stage_contract_minute_catalog(
+                receipt = stage_contract_minute_catalog(
                     contract_data_path_for(contract_uid, product), target,
                     contract_uid=contract_uid, instrument_spec=spec,
                     start_ns=clipped_start, end_ns=clipped_end,
+                    max_bars=budget,
                     **bundle_identity,
                 )
             else:
@@ -229,15 +234,21 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
                 codes = tuple(str(value) for value in (
                     parent.name, getattr(parent, "alias", None),
                 ) if value)
-                stage_contract_daily_catalog(
+                receipt = stage_contract_daily_catalog(
                     term_path, target, contract_uid=contract_uid,
                     instrument_spec=spec, start_ns=clipped_start, end_ns=clipped_end,
+                    max_bars=budget,
                     product_codes=set(codes),
                     session_for_day=_session_for_day(
                         parent, _trading_day_map(term_path),
                     ),
                     **bundle_identity,
                 )
+            if remaining is not None:
+                count = getattr(receipt, 'selected_count', None)
+                if type(count) is not int or count <= 0 or count > budget:
+                    raise ValueError("catalog receipt exceeds the total Bar budget")
+                remaining -= count
             product_key = str(contract_uid).split("|")[2]
             catalogs[product_key] = {
                 "catalog_dir": str(target), "contract_uid": str(contract_uid),

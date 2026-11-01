@@ -84,6 +84,39 @@ def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_pa
     assert len(calls) == 1
 
 
+def test_source_staging_spends_one_frozen_budget_across_products(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from server.services.nautilus_bridge import catalog_staging
+    from sources.LocalCNFutures import nautilus_catalog
+
+    contracts = [f'CFFEX|F|{code}|2403' for code in ('T', 'TL')]
+    parent = SimpleNamespace(get_contract_list=lambda start, end: [
+        {'uid': uid, 'start_ts': 1700611200000, 'end_ts': 1708387200000} for uid in contracts])
+    product = SimpleNamespace(get_parent_product=lambda: parent)
+    monkeypatch.setattr(nautilus_catalog, 'find_contract_product', lambda uid: product)
+    monkeypatch.setattr(nautilus_catalog, 'instrument_fields', lambda product: {
+        'multiplier': 10000, 'price_increment': .005})
+    monkeypatch.setattr(nautilus_catalog, 'contract_data_path_for', lambda *args: '/data/source.parquet')
+    monkeypatch.setattr(nautilus_catalog, 'build_contract_spec', lambda *args, **kwargs:
+                        SimpleNamespace(activation_ns=1700611200000000000, expiration_ns=1708473600000000000))
+    budgets = []
+    def stage(_source, _target, **kwargs):
+        budgets.append(kwargs['max_bars'])
+        count = 4
+        if count > kwargs['max_bars']: raise ValueError('selected window exceeds explicit max_bars budget')
+        return SimpleNamespace(selected_count=count)
+    monkeypatch.setattr(nautilus_catalog, 'stage_contract_minute_catalog', stage)
+    kwargs = dict(staging_requests=[{'paths': contracts}], source_key='LocalCNFuturesContractMIN1',
+                  frequency='MIN1', start_utc='2024-01-02T00:00:00Z',
+                  end_utc='2024-01-03T00:00:00Z', target_root=tmp_path)
+    with pytest.raises(ValueError, match='max_bars budget'):
+        catalog_staging.stage_run_spec_catalogs(**kwargs, max_input_bars=7)
+    assert budgets == [7, 3]
+    budgets.clear()
+    assert set(catalog_staging.stage_run_spec_catalogs(**kwargs, max_input_bars=8)) == {'T', 'TL'}
+    assert budgets == [8, 4]
+
+
 def test_stage_catalogs_rejects_multiple_contracts_for_one_product(monkeypatch, tmp_path):
     import pytest
     from types import SimpleNamespace
@@ -247,7 +280,7 @@ def test_staging_dispatches_source_owned_non_cn_loader(monkeypatch, tmp_path):
     actual = catalog_staging.stage_run_spec_catalogs(
         staging_requests=requests, source_key="ExampleRates", frequency="MIN15",
         start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
-        target_root=tmp_path)
+        target_root=tmp_path, max_input_bars=1234)
     assert actual is result
     assert len(captured) == 1
     from dataclasses import FrozenInstanceError
@@ -259,6 +292,7 @@ def test_staging_dispatches_source_owned_non_cn_loader(monkeypatch, tmp_path):
     assert captured[0].staging_requests[0].paths == ("neutral:rate",)
     assert captured[0].start_ns == 1704153600000000000
     assert captured[0].target_root is tmp_path
+    assert captured[0].max_input_bars == 1234
     assert captured[0].frequency == "MIN15"
     assert captured[0].related_members == ()
     assert captured[0].bundle_id == "external"

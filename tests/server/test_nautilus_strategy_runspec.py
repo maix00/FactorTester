@@ -193,6 +193,7 @@ def test_frozen_warmup_controls_staging_window(monkeypatch, tmp_path, warmup, ex
         "run_window": {"start": settings["start_utc"], "end": settings["end_utc"]},
         "catalog_staging": [{"paths": ["CFFEX|F|T|2403"]}],
         "session_calendar": object(),
+        "max_input_bars": 1234,
     }
     if expected_start is None:
         with pytest.raises(ValueError, match="custom warmup starts after the run window"):
@@ -202,6 +203,7 @@ def test_frozen_warmup_controls_staging_window(monkeypatch, tmp_path, warmup, ex
     result = strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec, plan=plan, output_dir=tmp_path)
     assert calls["start_utc"] == expected_start
     assert calls["end_utc"] == settings["end_utc"]
+    assert calls["max_input_bars"] == result["max_total_bars"] == 1234
     assert result["execution_plan"].start_utc == "2025-04-01T01:00:00+00:00"
 
 
