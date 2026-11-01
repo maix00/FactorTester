@@ -100,21 +100,30 @@ def test_source_staging_spends_one_frozen_budget_across_products(monkeypatch, tm
     monkeypatch.setattr(nautilus_catalog, 'build_contract_spec', lambda *args, **kwargs:
                         SimpleNamespace(activation_ns=1700611200000000000, expiration_ns=1708473600000000000))
     budgets = []
-    def stage(_source, _target, **kwargs):
+    def stage(_source, target, **kwargs):
         budgets.append(kwargs['max_bars'])
         count = 4
         if count > kwargs['max_bars']: raise ValueError('selected window exceeds explicit max_bars budget')
+        target.mkdir()
+        (target / 'receipt').write_text('staged')
         return SimpleNamespace(selected_count=count)
     monkeypatch.setattr(nautilus_catalog, 'stage_contract_minute_catalog', stage)
     kwargs = dict(staging_requests=[{'paths': contracts}], source_key='LocalCNFuturesContractMIN1',
                   frequency='MIN1', start_utc='2024-01-02T00:00:00Z',
                   end_utc='2024-01-03T00:00:00Z', target_root=tmp_path)
+    unrelated = tmp_path / 'unrelated'
+    unrelated.mkdir()
+    (unrelated / 'receipt').write_text('preserve')
     with pytest.raises(ValueError, match='max_bars budget'):
         catalog_staging.stage_run_spec_catalogs(**kwargs, max_input_bars=7)
     assert budgets == [7, 3]
+    assert not (tmp_path / 'CFFEX_F_T_2403').exists()
+    assert (unrelated / 'receipt').read_text() == 'preserve'
     budgets.clear()
     assert set(catalog_staging.stage_run_spec_catalogs(**kwargs, max_input_bars=8)) == {'T', 'TL'}
     assert budgets == [8, 4]
+    assert (tmp_path / 'CFFEX_F_T_2403' / 'receipt').exists()
+    assert (tmp_path / 'CFFEX_F_TL_2403' / 'receipt').exists()
 
 
 def test_stage_catalogs_rejects_multiple_contracts_for_one_product(monkeypatch, tmp_path):
