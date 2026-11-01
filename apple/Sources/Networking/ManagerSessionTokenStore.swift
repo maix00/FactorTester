@@ -11,18 +11,10 @@ enum ManagerSessionTokenStore {
               let account = account(for: baseURL) else { return "" }
         let current = read(service: service, account: account)
         if current.status != errSecItemNotFound { return current.token }
-        // Retag in place: this preserves the Keychain access attributes and
-        // never exports an existing credential during the migration.
-        let old = item(service: legacyService, account: account)
-        let status = SecItemUpdate(old as CFDictionary, [
-            kSecAttrService as String: service,
-            kSecAttrLabel as String: service,
-        ] as CFDictionary)
-        if status == errSecSuccess || status == errSecDuplicateItem {
-            return read(service: service, account: account).token
-        }
-        // If an OS or access policy prevents retagging, retain the original
-        // item and use it only when there is no current entry.
+        // Reads also occur in background endpoint probes. Mutating an older
+        // Keychain item here can block those probes and other Keychain users.
+        // Keep the old entry until a later explicit save succeeds under the
+        // current name; save() then removes the legacy entry.
         return read(service: legacyService, account: account).token
     }
 
