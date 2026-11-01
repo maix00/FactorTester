@@ -130,7 +130,7 @@ private struct SettingsLanguageView: View {
     var body: some View {
         SettingsPageShell(
             title: "语言",
-            subtitle: "选择 FTClient 的界面语言",
+            subtitle: "选择 TradeResearch 的界面语言",
             systemImage: "globe"
         ) {
             SettingsSectionCard("界面语言") {

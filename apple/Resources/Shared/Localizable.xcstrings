@@ -1601,35 +1601,35 @@
         }
       }
     },
-    "FTClient" : {
+    "TradeResearch" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FTClient"
+            "value" : "TradeResearch"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FTClient"
+            "value" : "TradeResearch"
           }
         }
       }
     },
-    "FTClient 已是最新状态" : {
+    "TradeResearch 已是最新状态" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FTClient Is Up to Date"
+            "value" : "TradeResearch Is Up to Date"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FTClient 已是最新状态"
+            "value" : "TradeResearch 已是最新状态"
           }
         }
       }
@@ -12765,19 +12765,19 @@
         }
       }
     },
-    "选择 FTClient 的界面语言" : {
+    "选择 TradeResearch 的界面语言" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose the FTClient interface language"
+            "value" : "Choose the TradeResearch interface language"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择 FTClient 的界面语言"
+            "value" : "选择 TradeResearch 的界面语言"
           }
         }
       }
