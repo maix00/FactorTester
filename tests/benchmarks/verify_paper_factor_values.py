@@ -49,6 +49,22 @@ def oracle(times,days,price,adjusted,window_days):
     return signal(np.where(deviation>=high,1.,np.where(deviation<=low,-1.,0.))),threshold
 
 
+
+def threshold_comparison(reference, candidate):
+    """Compare every formal observation, including mismatched missing values."""
+    reference = np.asarray(reference, dtype=float)
+    candidate = np.asarray(candidate, dtype=float)
+    if reference.ndim != 1 or reference.shape != candidate.shape or not reference.size:
+        raise ValueError('threshold comparison requires equal nonempty series')
+    ref_finite, actual_finite = np.isfinite(reference), np.isfinite(candidate)
+    valid = ref_finite & actual_finite
+    return {
+        'reference_nonfinite': int(np.count_nonzero(~ref_finite)),
+        'candidate_nonfinite': int(np.count_nonzero(~actual_finite)),
+        'finite_status_mismatches': int(np.count_nonzero(ref_finite != actual_finite)),
+        'max_abs_error': float(np.max(np.abs(reference[valid] - candidate[valid]))) if valid.any() else None,
+    }
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--factors',required=True,type=Path)
     parser.add_argument('--source',required=True,type=Path);parser.add_argument('--formal-start',required=True)
@@ -86,12 +102,18 @@ def main():
         return result,time.perf_counter()-started
     full,seconds=replay(0);suffix,subset_seconds=replay(int(np.searchsorted(times,bound)))
     expected,expected_threshold=oracle(times,days,price,adjusted,window_days)
+    oracle_threshold = threshold_comparison(expected_threshold[first:], full[:,1])
+    warmup_threshold = threshold_comparison(full[:,1], suffix[:,1])
     comparisons={
         'formal_signal_mismatches':int(np.count_nonzero(full[:,0]!=expected[first:])),
         'warmup_suffix_signal_mismatches':int(np.count_nonzero(full[:,0]!=suffix[:,0])),
-        'formal_threshold_nonfinite':int(np.count_nonzero(~np.isfinite(full[:,1]))),
-        'threshold_max_abs_error':float(np.nanmax(np.abs(full[:,1]-expected_threshold[first:]))),
-        'warmup_suffix_threshold_max_abs_error':float(np.nanmax(np.abs(full[:,1]-suffix[:,1])))}
+        'formal_threshold_nonfinite':oracle_threshold['candidate_nonfinite'],
+        'oracle_threshold_nonfinite':oracle_threshold['reference_nonfinite'],
+        'suffix_threshold_nonfinite':warmup_threshold['candidate_nonfinite'],
+        'oracle_threshold_finite_status_mismatches':oracle_threshold['finite_status_mismatches'],
+        'suffix_threshold_finite_status_mismatches':warmup_threshold['finite_status_mismatches'],
+        'threshold_max_abs_error':oracle_threshold['max_abs_error'],
+        'warmup_suffix_threshold_max_abs_error':warmup_threshold['max_abs_error']}
     with args.source.open('rb') as handle:source_sha256=hashlib.file_digest(handle,'sha256').hexdigest()
     with args.factors.open('rb') as handle:factor_sha256=hashlib.file_digest(handle,'sha256').hexdigest()
     result=dict(source=str(args.source),source_sha256=source_sha256,frozen_factor_sha256=factor_sha256,
@@ -103,6 +125,9 @@ def main():
     with args.output.open('x') as handle:json.dump(result,handle,indent=2)
     print(json.dumps(result))
     assert comparisons['formal_signal_mismatches']==comparisons['warmup_suffix_signal_mismatches']==comparisons['formal_threshold_nonfinite']==0
-    assert comparisons['threshold_max_abs_error']<1e-10 and comparisons['warmup_suffix_threshold_max_abs_error']<1e-10
+    assert comparisons['oracle_threshold_nonfinite']==comparisons['suffix_threshold_nonfinite']==0
+    assert comparisons['oracle_threshold_finite_status_mismatches']==comparisons['suffix_threshold_finite_status_mismatches']==0
+    assert comparisons['threshold_max_abs_error'] is not None and comparisons['threshold_max_abs_error']<1e-10
+    assert comparisons['warmup_suffix_threshold_max_abs_error'] is not None and comparisons['warmup_suffix_threshold_max_abs_error']<1e-10
 
 if __name__=='__main__':main()
