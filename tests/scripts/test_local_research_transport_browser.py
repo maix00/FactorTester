@@ -27,8 +27,11 @@ import {{ResearchPage}} from {json.dumps(str(APP / "src/pages/research.tsx"))};
 import {{PageInstanceProvider}} from {json.dumps(str(APP / "src/page-instance.ts"))};
 import {{AuthGate}} from {json.dumps(str(APP / "src/auth.tsx"))};
 import {{ObjectReferenceProvider}} from {json.dumps(str(APP / "src/components/object-reference-provider.tsx"))};
+import {{bindNotificationSink}} from {json.dumps(str(APP / "src/notifications/core.ts"))};
 import {json.dumps(str(APP / "src/i18n.ts"))};
 import {json.dumps(str(APP / "src/shell.css"))};
+(window as any).reportNotices=[];
+bindNotificationSink((notice,done)=>{{(window as any).reportNotices.push(notice);done();}});
 createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvider value={{{{
  id:'fixture',pageId:'research',mobile:false,args:{{}},active:true,open:()=>{{}}
 }}}}><ObjectReferenceProvider><ResearchPage /></ObjectReferenceProvider></PageInstanceProvider></AuthGate>);
@@ -55,7 +58,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                         'report_id': request['report_id']}}
                 if request.get('action') == 'pull_report':
                     pulled.append(request['report_id'])
-                    return {'success': True, 'schema': 'tr-local-research-bridge:v1', 'status': 'up_to_date', 'local_modified': False}
+                    return {'success': True, 'schema': 'tr-local-research-bridge:v1', 'status': 'up_to_date', 'local_modified': True}
                 envelope = {"binding": {"issuer": "https://identity.test/realm", "identity_id": "stable-1"},
                             "profile": {"profile_id": "self", "display_name": "Alice"}, "request": request,
                             "manager": {"endpoint":"http://127.0.0.1:7998", "subject":"subject", "token":"", "certificate_pem":"", "cookies":[]}}
@@ -151,6 +154,9 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                 if pulled: break
                 page.wait_for_timeout(100)
             assert pulled == published
+            page.wait_for_function("window.reportNotices.some(n => n.code === 'research.local.report.pulled')")
+            notice = page.evaluate("window.reportNotices.find(n => n.code === 'research.local.report.pulled')")
+            assert notice['type'] == 'warning' and notice['message'] == '服务器版本未变化；本机仍有未发布的修改。'
             if os.environ.get("TR_UI_SCREENSHOT"):
                 page.screenshot(path=os.environ["TR_UI_SCREENSHOT"])
             assert not errors
