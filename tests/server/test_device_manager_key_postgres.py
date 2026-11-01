@@ -37,6 +37,8 @@ def test_migration_preserves_records_and_isolates_manager_bindings():
         with scoped_connection() as connection:
             dry = migrate(connection)
         assert dry['count'] == 1 and dry['primary_key'] == ['device_id']
+        assert len(dry['mappings']) == 1 and dry['mappings'][0]['action'] == 'preserve'
+        assert 'device-shared-123456' not in str(dry)
         with scoped_connection() as connection:
             connection.execute('CREATE TABLE dependent_device (device_id TEXT REFERENCES control_devices(device_id))')
         with scoped_connection() as connection:
@@ -53,6 +55,7 @@ def test_migration_preserves_records_and_isolates_manager_bindings():
         with scoped_connection() as connection:
             result = migrate(connection, apply=True, reviewed_plan_sha256=dry['plan_sha256'])
         assert result['after']['records_sha256'] == dry['records_sha256']
+        assert result['after']['mappings'] == dry['mappings']
         store = object.__new__(PostgresControlStore)
         store.ensure_schema = lambda: None
         store._connection = scoped_connection

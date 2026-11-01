@@ -42,19 +42,27 @@ def inspect(connection) -> dict:
           count(*) - count(DISTINCT (source_server_id, device_id))
         FROM control_devices
         """).fetchone()
-    if counts[0] > 100_000:
+    if counts[0] > 10_000:
         raise ValueError('device inventory exceeds review budget')
     digest = hashlib.sha256()
+    mappings = []
     with connection.cursor(name='device_migration_inventory', row_factory=tuple_row) as cursor:
-        cursor.execute("""SELECT to_jsonb(d)::text FROM control_devices d
+        cursor.execute("""SELECT source_server_id, device_id, to_jsonb(d)::text FROM control_devices d
                           ORDER BY source_server_id, device_id""")
         while batch := cursor.fetchmany(501):
-            for (value,) in batch:
+            for source, device, value in batch:
                 digest.update(value.encode('utf-8') + b'\n')
+                # Review the identity mapping without disclosing names, keys,
+                # or historical authorization fields in terminal output.
+                identity = json.dumps([source, device], ensure_ascii=False,
+                                      separators=(',', ':')).encode()
+                mappings.append({'binding_sha256': hashlib.sha256(identity).hexdigest(),
+                                 'record_sha256': hashlib.sha256(value.encode()).hexdigest(),
+                                 'action': 'preserve'})
     evidence = {'count': counts[0], 'invalid_identity_count': counts[1],
                 'duplicate_binding_count': counts[2], 'foreign_key_count': dependencies,
                 'records_sha256': digest.hexdigest(), 'primary_key': columns,
-                'constraint_name': row['conname']}
+                'constraint_name': row['conname'], 'mappings': mappings}
     evidence['plan_sha256'] = hashlib.sha256(json.dumps(
         evidence, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return evidence
