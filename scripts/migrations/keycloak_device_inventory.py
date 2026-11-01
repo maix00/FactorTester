@@ -124,6 +124,14 @@ def plan(snapshot: dict, directory: dict, *, manager_id: str) -> dict:
         encoded = json.dumps(evidence, ensure_ascii=False, sort_keys=True, allow_nan=False,
                              separators=(',', ':')).encode()
         entry['source_sha256'] = hashlib.sha256(encoded).hexdigest()
+        # The device resource ref binds the stable identity, but its Keycloak
+        # owner policy binds the subject. Freeze both, including active state,
+        # so a remapped subject cannot pass review merely because the device
+        # and stable identity did not change. Do not expose the subject itself.
+        owner = str(record.get('username') or '')
+        owner_evidence = json.dumps(identities.get(owner, []), ensure_ascii=False,
+                                    sort_keys=True, allow_nan=False, separators=(',', ':')).encode()
+        entry['identity_sha256'] = hashlib.sha256(owner_evidence).hexdigest()
     entries.sort(key=lambda item: (str(item.get('username') or ''), str(item.get('device_id') or ''),
                                    item['source_sha256']))
     frozen = {'manager_id': manager_id, 'entries': entries}

@@ -35,6 +35,19 @@ def test_inventory_rejects_ambiguous_identity_and_manager():
         plan(snapshot, {'accounts': [ACCOUNT, {**ACCOUNT, 'username': 'bob'}]}, manager_id='lan')
 
 
+def test_inventory_digest_binds_keycloak_subject_even_when_stable_id_is_unchanged():
+    snapshot = {'server_id': 'lan', 'devices': [{
+        'device_id': 'device-local-12345', 'username': 'alice', 'public_key': KEY,
+        'enabled': True, 'source_server_id': 'lan',
+    }]}
+    first = plan(snapshot, {'accounts': [ACCOUNT]}, manager_id='lan')
+    changed = plan(snapshot, {'accounts': [{**ACCOUNT, 'keycloak_subject': 'new-subject'}]}, manager_id='lan')
+    assert first['summary']['statuses'] == changed['summary']['statuses'] == {'grant': 1}
+    assert first['entries'][0]['resource_ref'] == changed['entries'][0]['resource_ref']
+    assert first['summary']['sha256'] != changed['summary']['sha256']
+    assert 'new-subject' not in json.dumps(changed)
+
+
 def test_cli_writes_owner_only_plan_and_summary_without_device_data(tmp_path):
     snapshot = tmp_path / 'devices.json'
     directory = tmp_path / 'accounts.json'
