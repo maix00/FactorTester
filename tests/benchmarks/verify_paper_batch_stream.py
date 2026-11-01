@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--source', required=True, type=Path)
     parser.add_argument('--product', required=True)
     parser.add_argument('--formal-start', required=True)
+    parser.add_argument('--suffix-start', help='compare a second replay starting at this warmup timestamp')
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
 
@@ -124,11 +125,37 @@ def main():
         'process_peak_rss_bytes': int(peak_rss),
         'limitation': 'factor-only diagnostic, not a trading backtest or remote Job; time excludes data loading',
     }
+    suffix_mismatch = False
+    if args.suffix_start:
+        suffix_start = pd.Timestamp(args.suffix_start)
+        if suffix_start.tzinfo is None or suffix_start >= formal_start:
+            raise ValueError('suffix start must be timezone-aware and precede formal start')
+        first = int(np.searchsorted(times, suffix_start.value))
+        state = FactorPlanState(json.dumps({key: value for key, value in spec.items() if key != 'key_tuples'}), 1)
+        suffix = np.empty(len(times) - first)
+        started = time.perf_counter()
+        for i in range(first, len(times)):
+            for j, column in enumerate(spec['columns']):
+                row[j] = adjusted[i] if column == 'CLOSE_ADJUSTED' else price[i]
+            boundary[:] = i == first or days[i] != days[i - 1]
+            suffix[i - first] = state.update_context(int(times[i]), row, boundary)[0]
+        formal_positions = np.flatnonzero(times >= formal_start.value)
+        suffix_different = ~np.isclose(incremental[formal_positions], suffix[formal_positions - first],
+                                       equal_nan=True, rtol=1e-9, atol=1e-8)
+        suffix_mismatch = bool(suffix_different.any())
+        result['suffix_comparison'] = {
+            'requested_start': args.suffix_start, 'source_ordinal': first,
+            'formal_bar_rows_compared': len(formal_positions),
+            'mismatches': int(suffix_different.sum()),
+            'diagnostic_seconds': time.perf_counter() - started,
+        }
     with args.output.open('x', encoding='utf-8') as output:
         json.dump(result, output, indent=2)
     print(json.dumps(result, ensure_ascii=False))
     if different.any():
         raise SystemExit('batch and incremental factor values differ')
+    if suffix_mismatch:
+        raise SystemExit('factor values depend on the warmup replay start')
 
 
 if __name__ == '__main__':
