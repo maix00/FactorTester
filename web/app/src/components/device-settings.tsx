@@ -10,6 +10,7 @@ import { deviceAuthorizationState } from "../device-authorization.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
 import { TRDataTable } from "./data-table.tsx";
+import { managerBridge, type ManagerClient } from "../manager-bridge.ts";
 
 type Device = Record<string, any>;
 type DirectoryUser = { username: string; alias?: string; organization_name?: string; level_id?: string };
@@ -32,6 +33,20 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
   const [pending, setPending] = useState("");
   const [selectedID, setSelectedID] = useState("");
   const mutation = useRef<AbortController | null>(null);
+  const nativeBridge = useRef<ManagerClient | null>(null);
+  const [nativeEnrollment, setNativeEnrollment] = useState(false);
+
+  useEffect(() => {
+    if (scope !== "self") return;
+    const client = managerBridge(window);
+    if (!client) return;
+    let active = true;
+    nativeBridge.current = client;
+    void client.capabilities().then(() => client.current()).then(connection => {
+      if (active) setNativeEnrollment(connection.auth_state === "authorized" && client.supports("enroll_device"));
+    }).catch(() => { if (active) setNativeEnrollment(false); });
+    return () => { active = false; client.close(); if (nativeBridge.current === client) nativeBridge.current = null; };
+  }, [scope]);
 
   useEffect(() => () => mutation.current?.abort(), []);
   useEffect(() => {
@@ -134,6 +149,20 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     }
   };
 
+  const enrollNative = async (): Promise<void> => {
+    const client = nativeBridge.current;
+    if (!client || pending || loading) return;
+    setPending("native-enrollment");
+    try {
+      await client.enrollDevice();
+      if (nativeBridge.current !== client) return;
+      notify({ code: "devices.native.enrolled", type: "success", message: t("devices.nativeEnrolled") });
+      setRevision(value => value + 1);
+    } catch {
+      if (nativeBridge.current === client) notify({ code: "devices.native.enroll.failed", type: "error", message: t("devices.nativeEnrollFailed") });
+    } finally { if (nativeBridge.current === client) setPending(""); }
+  };
+
   const selected = devices.find(device => device.device_id === selectedID);
   const currentPage = Math.min(page, Math.max(1, Math.ceil(filtered.length / size)));
   const options = DEVICE_PLATFORMS.map(value => ({
@@ -173,7 +202,11 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
         options={userOptions}
         notFoundContent={directoryLoading ? t("loading") : t("adminFunctions.noUsersInScope")}
         style={{ minWidth: 260, flex: "1 1 280px" }} /> : null}
-      <Button icon={<ReloadOutlined />} aria-label={t("configuration.reload")}
+      {nativeEnrollment ? <Popconfirm title={t("devices.nativeEnrollConfirm")} onConfirm={enrollNative}
+        okText={t("devices.nativeEnroll")} cancelText={t("configuration.cancel")}>
+        <Button className="tr-device-register" loading={pending === "native-enrollment"} disabled={loading || !!pending}>{t("devices.nativeEnroll")}</Button>
+      </Popconfirm> : null}
+      <Button className="tr-device-reload" icon={<ReloadOutlined />} aria-label={t("configuration.reload")}
         onClick={() => setRevision(value => value + 1)} disabled={!!pending} />
     </div>
     <div className="tr-device-filter-row" role="group" aria-label={t("devices.platform")}>

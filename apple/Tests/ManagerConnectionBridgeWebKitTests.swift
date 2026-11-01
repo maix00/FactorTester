@@ -94,7 +94,7 @@ server.serve_forever()
         var applied: URL?
         let content = WKUserContentController()
         content.addScriptMessageHandler(ManagerConnectionBridge(session: session, endpoint: endpoint,
-            restoreDevice: { _, _ in false }, apply: { applied = $0 }), contentWorld: .page, name: ManagerConnectionBridgeContract.messageName)
+            restoreDevice: { _, _ in nil }, apply: { applied = $0 }), contentWorld: .page, name: ManagerConnectionBridgeContract.messageName)
         let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent(); config.userContentController = content
         let view = WKWebView(frame: .zero, configuration: config); view.navigationDelegate = self
         loaded = expectation(description: "Manager test page")

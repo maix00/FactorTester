@@ -40,19 +40,31 @@ createRoot(document.getElementById('root')!).render(<PageInstanceProvider value=
                     errors = []
                     page.on('pageerror', lambda error: errors.append(str(error)))
                     page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
-                    page.evaluate('''() => { window.fetch = async () => new Response(JSON.stringify({success:true, devices:[
+                    page.evaluate('''() => { window.nativeActions=[]; window.webkit={messageHandlers:{tradeResearchManager:{postMessage:async message=>{
+                      window.nativeActions.push(message.action);
+                      return {success:true,schema:'tr-manager-bridge:v1',...(message.action==='capabilities'?{actions:['current','switch','enroll_device']}: message.action==='current'?{url:location.origin,auth_state:'authorized'}:{})};
+                    }}}}; window.fetch = async () => new Response(JSON.stringify({success:true, devices:[
                       {device_id:'device-authorized-01',device_name:'工作电脑',client_type:'swift',enabled:true,keycloak_authorized:true},
                       {device_id:'device-denied-00001',device_name:'手机',client_type:'mobile',enabled:true,keycloak_authorized:false},
                       {device_id:'device-unknown-0001',device_name:'旧设备',client_type:'browser',enabled:true},
                       {device_id:'device-revoked-001',device_name:'已撤销设备',client_type:'browser',enabled:false}
                     ]}), {status:200,headers:{'Content-Type':'application/json'}}); }''')
                     page.add_script_tag(path=str(bundle))
+                    page.get_by_role('button', name='登记此设备', exact=True).click()
+                    page.get_by_text('允许此设备在此服务器发起自动登录？').wait_for()
+                    page.get_by_role('tooltip').get_by_role('button', name='登记此设备', exact=True).click()
+                    page.wait_for_function("window.nativeActions.includes('enroll_device')")
+                    page.get_by_role('tooltip').wait_for(state='hidden')
                     for name, state in (('工作电脑', '已授权'), ('手机', '未授权'), ('旧设备', '授权未核验'), ('已撤销设备', '已撤销')):
                         row = page.get_by_role('row').filter(has_text=name)
                         row.get_by_text(state, exact=True).wait_for()
                     search = page.get_by_label('搜索我的设备').bounding_box()
                     reload = page.get_by_role('button', name='重新读取').bounding_box()
+                    page.screenshot(path=str(tmp_path / f'devices-after-enrollment-{width}.png'))
+                    enroll = page.locator('.tr-device-register').bounding_box(timeout=3000)
                     assert search and reload and abs((search['y'] + search['height']/2) - (reload['y'] + reload['height']/2)) < 2
+                    assert enroll and search['x'] + search['width'] <= enroll['x'] + 1
+                    assert enroll['x'] + enroll['width'] <= reload['x'] + 1
                     assert reload['x'] + reload['width'] <= width + 1
                     if width < 600:
                         status = page.get_by_role('row').filter(has_text='旧设备').get_by_text('授权未核验', exact=True).bounding_box()
@@ -64,6 +76,18 @@ createRoot(document.getElementById('root')!).render(<PageInstanceProvider value=
                     page.wait_for_timeout(350)
                     page.screenshot(path=str(tmp_path / f'devices-{width}.png'))
                     page.close()
+                page = browser.new_page(viewport={'width': 390, 'height': 844}, locale='zh-CN')
+                page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
+                page.evaluate('''() => {
+                  window.webkit={messageHandlers:{tradeResearchManager:{postMessage:async message=>({success:true,
+                    schema:'tr-manager-bridge:v1',...(message.action==='capabilities'?{actions:['current','switch','enroll_device']}:
+                    {url:location.origin,auth_state:'unauthorized'})})}}};
+                  window.fetch=async()=>new Response(JSON.stringify({success:true,devices:[]}),{status:200,headers:{'Content-Type':'application/json'}});
+                }''')
+                page.add_script_tag(path=str(bundle))
+                page.get_by_label('搜索我的设备').wait_for()
+                assert page.get_by_role('button', name='登记此设备', exact=True).count() == 0
+                page.close()
                 page = browser.new_page(viewport={'width': 1440, 'height': 900}, locale='zh-CN')
                 page.set_default_timeout(8000)
                 page.goto(f'http://127.0.0.1:{server.server_port}/index.html?admin=1')

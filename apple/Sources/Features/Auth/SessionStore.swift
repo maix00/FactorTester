@@ -5,6 +5,7 @@ import CryptoKit
 enum ManagerDeviceSessionRestore: Equatable {
     case notRequired
     case authenticated(username: String)
+    case requiresWebLogin
 }
 
 /// 全局登录态 —— 包装 `/api/me`、`/login`、`/logout`，供整个 App 观察。
@@ -551,6 +552,9 @@ final class SessionStore: ObservableObject {
                 return
             case .notRequired:
                 break
+            case .requiresWebLogin:
+                isManagerLoggedIn = false
+                return
             }
         } catch {
             guard generation == authenticationGeneration else { return }
@@ -581,16 +585,10 @@ final class SessionStore: ObservableObject {
     private static func restoreConfiguredPublicManagerDeviceSession(
         expectedUsername: String
     ) async throws -> ManagerDeviceSessionRestore {
-        guard let endpoint = ManagerConfig.shared.baseURL,
-              let host = endpoint.host,
-              !ManagerEndpointPolicy.isPrivateNetwork(host) else {
-            return .notRequired
-        }
-        let result = try await ManagerDeviceAuthenticationService.shared.authenticate(
-            endpoint: endpoint,
-            expectedUsername: expectedUsername
-        )
-        return .authenticated(username: result.username)
+        guard ManagerConfig.shared.baseURL != nil else { return .notRequired }
+        // Device proof starts an OIDC browser flow; it cannot restore a
+        // Manager session until the Keycloak callback has succeeded.
+        return .requiresWebLogin
     }
 
     func logout() async {

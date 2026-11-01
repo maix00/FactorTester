@@ -50,8 +50,10 @@
 
 当前 Manager 的 `/api/device/verify` 在验签成功后返回 `requires_keycloak` 和
 `login_url`，浏览器还须完成 Keycloak 登录、回调与设备授权检查，才会建立
-Manager 会话。桌面 `ManagerDeviceAuthenticationService` 仍按旧合同解码
-`username` 和 `token`；因此不能用已通过设备登记或数据库测试证明桌面自动登录
-已经接通。桌面启动和切换 Manager 时还需要把一次性登录入口安全交给 WebView，
-仅在回调成功并重新验证 Manager 身份后导入会话；失败或目标身份不匹配时继续
-拒绝访问。当前实现尚未完成这一端到端链路，内网与公网均需实测。
+Manager 会话。此前桌面 `ManagerDeviceAuthenticationService` 仍按旧合同解码
+`username` 和 `token`；现已改为校验当前 Manager 的一次性登录入口并交给 WebView，
+验签本身不建立或保存会话。设备设置新增显式的原生登记动作；已有有效登记重试
+时不会因为 Keycloak 暂时不可用而撤销元数据。macOS/iOS 编译、独立交接地址检查、
+服务端聚焦测试和模拟网页交互已通过；Xcode 原生测试执行器在启动时卡住，未能
+获得 XCTest 结果。真实 Keychain、Keycloak 回调和 Manager 的端到端登记、登录、
+拒绝及跨服务器切换仍需在内网与公网分别实测，不能凭模拟测试声称全部完成。

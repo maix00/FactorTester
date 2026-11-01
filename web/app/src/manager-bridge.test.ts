@@ -25,6 +25,16 @@ test("capabilities and a validated current response precede changes",async()=>{
   assert.deepEqual(await client.current(),{url:"http://127.0.0.1:7998",auth_state:"authorized"});
   assert.deepEqual(calls,[{action:"capabilities"},{action:"current"}]);
 });
+test("native device enrollment requires the advertised capability and sends no identity",async()=>{
+  const calls:Record<string,unknown>[]=[];
+  const client=new ManagerClient({postMessage(message){calls.push(message);return response(message.action==="capabilities"?{actions:["current","switch","enroll_device"]}:{});}});
+  await assert.rejects(client.enrollDevice(),reason("manager_capability_unavailable"));
+  await client.capabilities();
+  assert.equal(client.supports("enroll_device"),true);
+  await client.enrollDevice();
+  assert.deepEqual(calls,[{action:"capabilities"},{action:"enroll_device"}]);
+  client.close();assert.equal(client.supports("enroll_device"),false);
+});
 test("switch requests contain only URL and result is never guessed",async()=>{
   const calls:Record<string,unknown>[]=[];
   const client=new ManagerClient({postMessage(message){calls.push(message);return response(message.action==="capabilities"?{actions:["current","switch"]}:{url:message.url,auth_state:"unauthorized"});}});

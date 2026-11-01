@@ -25,10 +25,10 @@ enum ManagerConnectionBridgeContract {
 
 @MainActor
 final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
-    enum ProbeResult { case authorized(UserInfo), unauthorized, unavailable }
+    enum ProbeResult { case authorized(UserInfo), handoff(URL), unauthorized, unavailable }
     typealias Probe = (URL, LocalResearchIdentity?, String?) async -> ProbeResult
     typealias Apply = (URL) -> Void
-    typealias DeviceRestore = (URL, String?) async -> Bool
+    typealias DeviceRestore = (URL, String?) async -> URL?
     private weak var session: SessionStore?
     private let endpoint: URL
     private let probeOverride: Probe?
@@ -40,11 +40,10 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     init(session: SessionStore, endpoint: URL, probe: Probe? = nil,
          restoreDevice: @escaping DeviceRestore = { target, username in
-             guard ManagerDeviceKeyStore.load() != nil else { return false }
+             guard ManagerDeviceKeyStore.load() != nil else { return nil }
              do {
-                 _ = try await ManagerDeviceAuthenticationService.shared.authenticate(endpoint: target, expectedUsername: username)
-                 return true
-             } catch { return false }
+                 return try await ManagerDeviceAuthenticationService.shared.beginOIDCLogin(endpoint: target, expectedUsername: username)
+             } catch { return nil }
          }, apply: @escaping Apply = { target in
         guard let scheme = target.scheme, let host = target.host, let port = target.port else { return }
         ManagerConfig.shared.save(scheme: scheme, host: host, port: String(port), serverID: "")
@@ -83,7 +82,7 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
                     return
                 }
                 if confirmed { self.verifiedIdentity = session.user?.localResearchIdentity }
-                replyHandler(self.reply(["actions": ["current", "switch"]]), nil)
+                replyHandler(self.reply(["actions": ["current", "switch", "enroll_device"]]), nil)
             }
             return
         }
@@ -91,6 +90,43 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             let authorized = verifiedIdentity != nil && session.user?.localResearchIdentity == verifiedIdentity
             replyHandler(reply(["url": endpoint.absoluteString,
                                 "auth_state": authorized ? "authorized" : "unauthorized"]), nil)
+            return
+        }
+        if action == "enroll_device", Set(body.keys) == ["action"] {
+            guard !switching, let identity = verifiedIdentity,
+                  session.user?.localResearchIdentity == identity,
+                  let username = session.user?.username, !username.isEmpty else {
+                replyHandler(["success": false, "code": "manager_session_changed"], nil)
+                return
+            }
+            switching = true
+            let generation = verificationGeneration
+            let webView = message.webView
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.switching = false }
+                if let webView { await WebSessionCookieSynchronizer.importManagerSession(from: webView, endpoint: self.endpoint) }
+                guard await session.confirmWebIdentity(), ManagerConfig.shared.baseURL == self.endpoint,
+                      session.user?.localResearchIdentity == identity,
+                      session.user?.username == username,
+                      self.verifiedIdentity == identity, self.verificationGeneration == generation else {
+                    replyHandler(["success": false, "code": "manager_session_changed"], nil)
+                    return
+                }
+                do {
+                    try await ManagerDeviceRegistryService.shared.enroll(endpoint: self.endpoint, username: username)
+                    guard ManagerConfig.shared.baseURL == self.endpoint,
+                          session.user?.localResearchIdentity == identity,
+                          session.user?.username == username,
+                          self.verifiedIdentity == identity, self.verificationGeneration == generation else {
+                        replyHandler(["success": false, "code": "manager_session_changed"], nil)
+                        return
+                    }
+                    replyHandler(self.reply([:]), nil)
+                } catch {
+                    replyHandler(["success": false, "code": "device_enrollment_failed"], nil)
+                }
+            }
             return
         }
         guard action == "switch", Set(body.keys) == ["action", "url"],
@@ -135,7 +171,7 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             let candidate: UserInfo?
             switch result {
             case .authorized(let user): candidate = user
-            case .unauthorized:
+            case .unauthorized, .handoff:
                 candidate = nil
                 await self.clearTargetSession(target, webView: webView)
             case .unavailable: return
@@ -147,6 +183,9 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
                 return
             }
             self.apply(target)
+            if case .handoff(let url) = result {
+                ManagerConfig.shared.queueDeviceLogin(url, for: target)
+            }
             #if os(macOS)
             if ManagerConfig.shared.baseURL == target {
                 ManagerCLISelectionSynchronizer.shared.schedule(target)
@@ -161,7 +200,7 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
         var result = await probe(target, expected: expected)
         if case .unauthorized = result {
             // An enrolled device may authenticate without sending a password.
-            if await restoreDevice(target, username) { result = await probe(target, expected: expected) }
+            if let handoff = await restoreDevice(target, username) { result = .handoff(handoff) }
         }
         return result
     }

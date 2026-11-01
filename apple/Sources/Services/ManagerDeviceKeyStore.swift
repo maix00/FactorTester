@@ -39,6 +39,7 @@ enum ManagerDeviceKeyStoreError: LocalizedError {
 /// Keychain/Secure Enclave storage used by the Swift client instead of
 /// browser IndexedDB. The server receives only `publicKey` and signatures.
 enum ManagerDeviceKeyStore {
+    private static let enrollmentLock = NSLock()
     private static let keyTagPrefix = "com.gtht.traderesearch.device-key."
     private static let legacyKeyTagPrefix = "com.gtht.factortester.device-key."
     private static let metadataService = "com.gtht.traderesearch.device"
@@ -91,6 +92,34 @@ enum ManagerDeviceKeyStore {
         UserDefaults.standard.set(credential.deviceID, forKey: currentDeviceIDKey)
         UserDefaults.standard.removeObject(forKey: legacyDeviceIDKey)
         return credential
+    }
+
+    /// Never replace a locked, corrupt, or previously registered identity.
+    static func ensureForEnrollment(username: String) throws -> ManagerDeviceCredential {
+        enrollmentLock.lock()
+        defer { enrollmentLock.unlock() }
+        let owner = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty else { throw ManagerDeviceKeyStoreError.keyUnavailable }
+        if let credential = load() {
+            guard credential.username.isEmpty || credential.username == owner else {
+                throw ManagerDeviceKeyStoreError.keyCreationFailed("Conflicting Keychain device identity")
+            }
+            return credential
+        }
+        for service in [metadataService, legacyMetadataService] {
+            let query: [CFString: Any] = [kSecClass: kSecClassGenericPassword,
+                kSecAttrService: service, kSecAttrAccount: metadataAccount,
+                kSecReturnAttributes: true, kSecMatchLimit: kSecMatchLimitOne]
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecItemNotFound else {
+                throw ManagerDeviceKeyStoreError.keyUnavailable
+            }
+        }
+        guard UserDefaults.standard.string(forKey: currentDeviceIDKey) == nil,
+              UserDefaults.standard.string(forKey: legacyDeviceIDKey) == nil else {
+            throw ManagerDeviceKeyStoreError.keyUnavailable
+        }
+        return try create(username: owner)
     }
 
     static func updateUsername(_ username: String) throws {

@@ -21,6 +21,52 @@ struct ManagerDeviceAudit: Decodable, Equatable {
 final class ManagerDeviceRegistryService {
     static let shared = ManagerDeviceRegistryService()
 
+    func enroll(endpoint: URL, username: String) async throws {
+        guard ManagerConnectionBridgeContract.endpoint(endpoint.absoluteString) != nil,
+              let url = URL(string: "/api/devices/enroll", relativeTo: endpoint)?.absoluteURL else {
+            throw APIError.notConfigured
+        }
+        let token = ManagerSessionTokenStore.read(for: endpoint)
+        guard !token.isEmpty else { throw APIError.unauthorized("Manager session required") }
+        let credential = try ManagerDeviceKeyStore.ensureForEnrollment(username: username)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("TradeResearch-Swift/1", forHTTPHeaderField: "User-Agent")
+        #if os(iOS)
+        request.setValue("mobile", forHTTPHeaderField: "X-FactorTester-Client")
+        #else
+        request.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
+        #endif
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "device_id": credential.deviceID, "public_key": credential.publicKey,
+        ])
+        let network = URLSession(configuration: .ephemeral,
+            delegate: SelfSignedTrustDelegate(allowedHosts: [url.host ?? ""]), delegateQueue: nil)
+        defer { network.finishTasksAndInvalidate() }
+        let (data, response) = try await network.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.unauthorized("Device enrollment was not authorized")
+        }
+        let value = try JSONDecoder().decode(EnrollmentResponse.self, from: data)
+        guard value.success, value.device.deviceID == credential.deviceID else {
+            throw APIError.server("Invalid device enrollment response")
+        }
+        try ManagerDeviceKeyStore.updateUsername(username)
+    }
+
+    private struct EnrollmentResponse: Decodable {
+        let success: Bool
+        let device: DeviceIdentity
+    }
+
+    private struct DeviceIdentity: Decodable {
+        let deviceID: String
+        enum CodingKeys: String, CodingKey { case deviceID = "device_id" }
+    }
+
     func currentDevice(endpoint: URL? = nil) async throws -> ManagerDeviceAudit? {
         guard let credential = ManagerDeviceKeyStore.load() else { return nil }
         guard let baseURL = endpoint ?? ManagerConfig.shared.baseURL,

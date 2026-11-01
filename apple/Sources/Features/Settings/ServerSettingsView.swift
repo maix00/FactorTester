@@ -208,7 +208,7 @@ struct ServerSettingsView: View {
                 return
             }
             do {
-                let result = try await ManagerDeviceAuthenticationService.shared.authenticate(
+                let handoff = try await ManagerDeviceAuthenticationService.shared.beginOIDCLogin(
                     endpoint: target
                 )
                 config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
@@ -218,11 +218,8 @@ struct ServerSettingsView: View {
                     port: managerPort
                 )
                 originManagerEndpoint = target
-                await refreshDeviceAudit()
-                testResult = "✓ " + L10n.format(
-                    "已通过原生设备密钥认证：%@",
-                    result.username
-                )
+                managerConfig.queueDeviceLogin(handoff, for: target)
+                testResult = "✓ " + L10n.text("已连接；请在主页按需登录")
                 if isInitialSetup, onConfigured == nil { dismiss() }
             } catch {
                 testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)

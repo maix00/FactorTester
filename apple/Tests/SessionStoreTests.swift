@@ -411,6 +411,20 @@ final class SessionStoreTests: XCTestCase {
         )
     }
 
+    func testDeviceProofWithoutOIDCCallbackDoesNotRestoreManagerOrUsePassword() async throws {
+        let api = FakeSessionAPI(user: try user(username: "alice"))
+        let manager = FakeManagerSessionAPI(restoreResult: false)
+        let store = SessionStore(
+            api: api, managerAPI: manager, bridge: { _ in true },
+            credentialLoader: { SavedSessionCredentials(username: "alice", password: "unused", serverURL: nil) },
+            managerDeviceSessionRestorer: { _ in .requiresWebLogin }
+        )
+        let succeeded = await store.refresh()
+        XCTAssertTrue(succeeded)
+        XCTAssertFalse(store.isManagerLoggedIn)
+        XCTAssertEqual(manager.loginCount, 0)
+    }
+
     func testFailedPublicDeviceRestoreDoesNotFallBackToPassword() async throws {
         let api = FakeSessionAPI(user: try user(username: "alice"))
         let manager = FakeManagerSessionAPI(restoreResult: false)

@@ -548,9 +548,10 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-device-client .ant-tag { flex:none; margin-inline-end:0; }
 .tr-device-client > span { min-width:0; overflow-wrap:anywhere; }
 @media(max-width:767px) {
-  .tr-device-controls { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+  .tr-device-controls { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; }
   .tr-device-controls .ant-input-search { grid-column:1; grid-row:1; width:100%; min-width:0; }
-  .tr-device-controls > .ant-btn { grid-column:2; grid-row:1; }
+  .tr-device-controls > .tr-device-register { grid-column:2; grid-row:1; }
+  .tr-device-controls > .tr-device-reload { grid-column:3; grid-row:1; }
   .tr-device-controls > .ant-select { grid-column:1 / -1; grid-row:2; width:100%; min-width:0; }
   .tr-device-filter-row { align-items:flex-start; flex-direction:column; }
   .tr-device-filter-row .ant-segmented { width:100%; }

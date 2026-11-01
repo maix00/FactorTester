@@ -46,6 +46,7 @@ export class ManagerClient {
   close():void{this.closed=true;this.generation++;this.actions=null;}
   snapshot():number{return this.generation;}
   isCurrent(value:number):boolean{return !this.closed && value===this.generation;}
+  supports(action:string):boolean{return !this.closed && !!this.actions?.has(action);}
   async capabilities():Promise<void>{
     const generation=this.generation,sequence=++this.sequence;
     this.actions=null;
@@ -60,6 +61,11 @@ export class ManagerClient {
     this.require("current");const generation=this.generation,sequence=this.sequence;
     const reply=await this.call({action:"current"});this.requireSnapshot(generation,sequence);
     return connection(reply);
+  }
+  async enrollDevice():Promise<void>{
+    this.require("enroll_device");
+    const generation=this.generation,sequence=this.sequence;
+    await this.call({action:"enroll_device"});this.requireSnapshot(generation,sequence);
   }
   /** Native must clear the old session, validate the target, and navigate.
    * The caller must not treat a dispatched request as a completed switch. */

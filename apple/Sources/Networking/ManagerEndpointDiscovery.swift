@@ -197,9 +197,13 @@ final class ManagerEndpointDiscoveryService {
         // Device authentication is best effort here. A public device may be
         // enrolled only on the public Manager, while an internal Manager can
         // still be the best data path for the logged-in organization.
-        _ = try? await ManagerDeviceAuthenticationService.shared.authenticate(
+        if !ManagerSessionTokenStore.read(for: endpoint).isEmpty,
+           let user = try? await APIClient.shared.me(), user.localResearchIdentity != nil { return }
+        if let handoff = try? await ManagerDeviceAuthenticationService.shared.beginOIDCLogin(
             endpoint: endpoint, expectedUsername: expectedUsername
-        )
+        ) {
+            ManagerConfig.shared.queueDeviceLogin(handoff, for: endpoint)
+        }
     }
 
     private struct InternalSelection {

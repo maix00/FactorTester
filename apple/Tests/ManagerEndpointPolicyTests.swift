@@ -10,4 +10,23 @@ final class ManagerEndpointPolicyTests: XCTestCase {
             XCTAssertFalse(ManagerEndpointPolicy.isPrivateNetwork(value), value)
         }
     }
+
+    func testDeviceProofHandoffStaysOnManagerAndHasOneTicket() throws {
+        let endpoint = try XCTUnwrap(URL(string: "https://manager.example:7998"))
+        let valid = "/auth/oidc/start?next=%2Fapp&device_ticket=abc-123"
+        let result = try XCTUnwrap(ManagerDeviceAuthenticationService.validatedHandoff(valid, endpoint: endpoint))
+        XCTAssertEqual(result.host, "manager.example")
+        XCTAssertEqual(result.port, 7998)
+        for invalid in [
+            "https://other.example/auth/oidc/start?device_ticket=abc",
+            "//other.example/auth/oidc/start?device_ticket=abc",
+            "/auth/oidc/callback?device_ticket=abc",
+            "/auth/oidc/start?device_ticket=abc&device_ticket=other",
+            "/auth/oidc/start?device_ticket=",
+            "/auth/oidc/start?device_ticket=abc&extra=1",
+            "/auth/oidc/start?device_ticket=abc#fragment",
+        ] {
+            XCTAssertNil(ManagerDeviceAuthenticationService.validatedHandoff(invalid, endpoint: endpoint), invalid)
+        }
+    }
 }
