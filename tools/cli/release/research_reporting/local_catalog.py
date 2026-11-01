@@ -292,7 +292,8 @@ class LocalResearchCatalog:
         if snapshot['head']['report_id'] != report_id:
             raise ValueError('local report identity is invalid')
         projection = build_upload_projection(snapshot, include_asset_bytes=False, include_local_resource_bytes=False)
-        return {'chapter': {'chapter_id': chapter_id, 'components': projection['components']},
+        return {'chapter': {'chapter_id': chapter_id, 'components': projection['components'],
+                            'bindings': projection['bindings']},
                 'version': {'generation': snapshot['head']['generation'], 'root_ref': snapshot['head']['root_ref']}}
 
     def add_report_component(self, *, profile_id: str, research_id: str, report_id: str,

@@ -196,6 +196,7 @@ def test_local_report_uses_existing_report_tree_and_retry_recovers(tmp_path, mon
         'research_id': research['research_id'], 'report_id': values[0]['report_id'], 'chapter_id': 'chapter-1'})
     assert chapter['version'] == latest
     assert [(x['kind'], x['body']) for x in chapter['chapter']['components']] == [('chapter', ''), ('entry', 'First\nsecond')]
+    assert chapter['chapter']['bindings'] == []
     assert subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain'], text=True).strip() == ''
     other = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='other',
                              profiles=[{'profile_id': 'self', 'display_name': 'Other'}])

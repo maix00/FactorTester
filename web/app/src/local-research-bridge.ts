@@ -257,14 +257,15 @@ export class LocalResearchClient {
     return {report:value,chapters,version:reportVersion(reply.version)};
   }
 
-  async getReportChapter(profileId:string,researchId:string,reportId:string,chapterId:string):Promise<{chapter_id:string;components:Record<string,unknown>[],version:LocalReportVersion}> {
+  async getReportChapter(profileId:string,researchId:string,reportId:string,chapterId:string):Promise<{chapter_id:string;components:Record<string,unknown>[],bindings:Record<string,unknown>[],version:LocalReportVersion}> {
     this.requireAction("get_report_chapter");
     const profile_id=inputText(profileId,512),research_id=inputText(researchId,512),report_id=inputText(reportId,512),chapter_id=inputText(chapterId,512);
     this.requireProfile(profile_id);const generation=this.generation,sequence=this.capabilitySequence;
     const reply=await this.call({action:"get_report_chapter",profile_id,research_id,report_id,chapter_id});
     this.requireAuthorizedSnapshot(generation,sequence);
-    if(!isRecord(reply.chapter)||reply.chapter.chapter_id!==chapter_id||!Array.isArray(reply.chapter.components)||reply.chapter.components.some(item=>!isRecord(item))) throw new LocalResearchBridgeError("local_research_invalid_response");
-    return {chapter_id,components:reply.chapter.components as Record<string,unknown>[],version:reportVersion(reply.version)};
+    if(!isRecord(reply.chapter)||reply.chapter.chapter_id!==chapter_id||!Array.isArray(reply.chapter.components)||reply.chapter.components.some(item=>!isRecord(item))||
+      (reply.chapter.bindings!==undefined&&(!Array.isArray(reply.chapter.bindings)||reply.chapter.bindings.some(item=>!isRecord(item))))) throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {chapter_id,components:reply.chapter.components as Record<string,unknown>[],bindings:(reply.chapter.bindings||[]) as Record<string,unknown>[],version:reportVersion(reply.version)};
   }
 
   async addReportComponent(input:{profileId:string;researchId:string;reportId:string;componentId:string;kind:"chapter"|"entry";parentId:string;title:string;body:string;version:LocalReportVersion}):Promise<LocalReportVersion> {

@@ -23,6 +23,10 @@ import "./report-branch-reader.css";
 
 type Row = Record<string, any>;
 type ImageResolver = (href:string) => {url:string | null} | null;
+export type ReportReaderSource = {
+  index: () => Promise<Row>;
+  chapter: (chapterID:string) => Promise<Row>;
+};
 
 function Markdown({ value, onOpen, resolveImage }: { value: string; onOpen: (reference:ReportReference,label:string) => void; resolveImage:ImageResolver }): React.ReactElement {
   const [engine,setEngine] = useState<FormulaRenderer | null>(null);
@@ -193,7 +197,7 @@ function ReportTreeNode({ node, assets, resources, bindings, target }: { node:Re
 }
 
 /** Read one authorized branch at a time, retaining only the selected chapter. */
-export function ReportBranchReader({ target, initialChapterID = "", onChapterChange }: { target: ReportExportTarget; initialChapterID?:string; onChapterChange?:(id:string) => void }): React.ReactElement {
+export function ReportBranchReader({ target, source, initialChapterID = "", onChapterChange }: { target: ReportExportTarget; source?:ReportReaderSource; initialChapterID?:string; onChapterChange?:(id:string) => void }): React.ReactElement {
   const { t } = useTranslation();
   const { session } = useAuth(), username = session?.username || "anonymous";
   const [fontSize,setFontSize] = useState(() => {try {return readReportFont(window.localStorage,username);} catch {return 16;}});
@@ -203,9 +207,9 @@ export function ReportBranchReader({ target, initialChapterID = "", onChapterCha
   const [error,setError] = useState(""), [loading,setLoading] = useState(false), [indexRevision,setIndexRevision] = useState(0), [chapterRevision,setChapterRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController(); setIndex(null); setChapter(null); setChapterID(""); setError("");
-    if (!indexURL) {setError(t("report.exportMissingSource"));return () => controller.abort();}
+    if (!source && !indexURL) {setError(t("report.exportMissingSource"));return () => controller.abort();}
     setLoading(true);
-    void request(indexURL,{signal:controller.signal}).then(result => {
+    void (source ? source.index() : request(indexURL!,{signal:controller.signal})).then(result => {
       if (controller.signal.aborted) return;
       if (!Array.isArray(result.chapters)) throw new Error(t("researchDetail.invalidResponse"));
       const chosen = result.chapters.some((item:Row) => item.component_id === initialChapterID) ? initialChapterID : String(result.chapters[0]?.component_id || "");
@@ -213,19 +217,19 @@ export function ReportBranchReader({ target, initialChapterID = "", onChapterCha
     }).catch(reason => {if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason));})
       .finally(() => {if (!controller.signal.aborted) setLoading(false);});
     return () => controller.abort();
-  }, [indexURL,indexRevision,t]);
+  }, [indexURL,indexRevision,source,t]);
   const chapterURL = chapterID ? reportResourceURL(target,["chapters",chapterID]) : null;
   useEffect(() => {
-    const controller = new AbortController(); setChapter(null); if (!chapterURL) return () => controller.abort();
+    const controller = new AbortController(); setChapter(null); if (!index || !chapterID || (!source && !chapterURL)) return () => controller.abort();
     setLoading(true); setError("");
-    void request(chapterURL,{signal:controller.signal}).then(result => {
+    void (source ? source.chapter(chapterID) : request(chapterURL!,{signal:controller.signal})).then(result => {
       if (controller.signal.aborted) return;
       if (!validReportComponents(result.components)) throw new Error(t("researchDetail.invalidResponse"));
       setChapter(result);
     }).catch(reason => {if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason));})
       .finally(() => {if (!controller.signal.aborted) setLoading(false);});
     return () => controller.abort();
-  }, [chapterURL,chapterRevision,t]);
+  }, [index,chapterID,chapterURL,chapterRevision,source,t]);
   const bindingsByComponent = useMemo(() => {
     const result = new Map<string, Row[]>();
     for (const binding of Array.isArray(chapter?.bindings) ? chapter.bindings : []) {
@@ -238,6 +242,6 @@ export function ReportBranchReader({ target, initialChapterID = "", onChapterCha
   const tree = useMemo(() => reportTree(Array.isArray(chapter?.components) ? chapter.components : []),[chapter]);
   return <section className="tr-report-reading" aria-label={t("report.read")} style={{"--tr-report-font-size":`${fontSize}px`} as React.CSSProperties}>
     {index?.chapters?.length ? <div className="tr-report-reading-toolbar"><label className="tr-report-reading-choice"><span>{t("report.chapter")}</span><Select aria-label={t("report.chapter")} value={chapterID || undefined} onChange={value => {setChapterID(value);onChapterChange?.(value);}} options={index.chapters.map((item:Row) => ({value:String(item.component_id || ""),label:String(item.title || item.component_id || "")})).filter((item:Row) => item.value)} /></label><Popover trigger="click" title={t("report.readingSettings")} content={<label className="tr-report-reading-font"><span>{t("report.fontSize")}</span><Select aria-label={t("report.fontSize")} value={fontSize} options={REPORT_FONT_SIZES.map(size => ({value:size,label:`${size} px`}))} onChange={setFontSize} /></label>}><Button type="text" icon={<FontSizeOutlined />} aria-label={t("report.readingSettings")} /></Popover></div> : null}
-    {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} action={<Button onClick={() => index ? setChapterRevision(value => value + 1) : setIndexRevision(value => value + 1)}>{t("retry")}</Button>} /> : chapter ? <article>{tree.map(node => <ReportTreeNode key={String(node.component.component_id)} node={node} assets={chapter.assets || []} resources={chapter.local_resources || []} bindings={bindingsByComponent} target={target} />)}</article> : index ? <Empty description={t("empty")} /> : null}
+    {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} action={<Button onClick={() => index && !source ? setChapterRevision(value => value + 1) : setIndexRevision(value => value + 1)}>{t("retry")}</Button>} /> : chapter ? <article>{tree.map(node => <ReportTreeNode key={String(node.component.component_id)} node={node} assets={chapter.assets || []} resources={chapter.local_resources || []} bindings={bindingsByComponent} target={target} />)}</article> : index ? <Empty description={t("empty")} /> : null}
   </section>;
 }

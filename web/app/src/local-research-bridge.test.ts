@@ -12,6 +12,19 @@ const ready = async (postMessage:(value:Record<string,unknown>)=>unknown) => {
   await client.capabilities(currentBinding);return client;
 };
 
+test("local chapter retains validated reference bindings and accepts older clients", async () => {
+  let chapter:Record<string,unknown>={chapter_id:"chapter-1",components:[],bindings:[{component_id:"entry-1",kind:"factor",target_ref:"factor:v2:x"}]};
+  const client=localResearchBridge(host(message=>message.action==="capabilities" ?
+    ok({actions:["get_report_chapter"],profiles:[{profile_id:"self",display_name:"Self"}]}) :
+    ok({chapter,version:{generation:1,root_ref:`nodes/aa/${"a".repeat(64)}.json`}})))!;
+  await client.capabilities(currentBinding);
+  assert.equal((await client.getReportChapter("self","research","report","chapter-1")).bindings.length,1);
+  chapter={chapter_id:"chapter-1",components:[]};
+  assert.deepEqual((await client.getReportChapter("self","research","report","chapter-1")).bindings,[]);
+  chapter={chapter_id:"chapter-1",components:[],bindings:[null]};
+  await assert.rejects(client.getReportChapter("self","research","report","chapter-1"),code("local_research_invalid_response"));
+});
+
 test("research directory validates revision and profile across pages", async () => {
   let response=ok({researches:[record],revision:2,next_offset:1});
   const client=localResearchBridge(host(message=>message.action==="capabilities" ?

@@ -152,3 +152,67 @@ createRoot(document.getElementById('root')!).render(<App />);
                 browser.close()
     finally:
         server.shutdown(); server.server_close(); worker.join(timeout=2)
+
+
+def test_local_report_reader_uses_native_chapters_and_refreshes_after_edit(tmp_path):
+    harness = tmp_path / 'local.tsx'
+    bundle = tmp_path / 'local.js'
+    harness.write_text(f'''
+import React from {json.dumps(str(APP / 'node_modules/react/index.js'))};
+import {{createRoot}} from {json.dumps(str(APP / 'node_modules/react-dom/client.js'))};
+import {{LocalResearchDetail}} from {json.dumps(str(APP / 'src/components/local-research-page.tsx'))};
+import {json.dumps(str(APP / 'src/i18n.ts'))};
+import {json.dumps(str(ROOT / 'server/manager/web/styles/app.css'))};
+import {json.dumps(str(APP / 'src/shell.css'))};
+const research={{research_id:'r1',profile_id:'self',title:'本机研究',description:'',updated_at:1}};
+const report={{report_id:'p1',research_id:'r1',profile_id:'self',title:'本机报告',created_at:1}};
+const f={{generation:1,race:new URLSearchParams(location.search).has('race'),items:[{{component_id:'c1',kind:'chapter',parent_id:null,title:'第一章'}},
+  {{component_id:'e1',kind:'entry',parent_id:'c1',title:'原段落',body:'本机保存的正文'}}]}};
+const version=()=>({{generation:f.generation,root_ref:'root'+f.generation}});
+const client={{snapshot:()=>1,isCurrent:()=>true,get:async()=>research,
+  listReports:async()=>({{reports:[report],next_offset:null}}),
+  getReport:async()=>({{report,chapters:[{{component_id:'c1',title:'第一章',preview:''}}],version:version()}}),
+  getReportChapter:async()=>{{if(f.race){{f.race=false;f.generation++;}}return {{chapter_id:'c1',components:f.items,version:version()}};}},
+  addReportComponent:async input=>{{f.items=[...f.items,{{component_id:input.componentId,kind:'entry',parent_id:'c1',title:input.title,body:input.body}}];f.generation++;return version();}}}};
+createRoot(document.getElementById('root')!).render(<LocalResearchDetail client={{client as any}}
+ capabilities={{{{actions:['get','list_reports','get_report','get_report_chapter','add_report_component'],profiles:[{{profile_id:'self',display_name:'Self'}}]}} as any}}
+ item={{research as any}} initialReport={{report as any}} onClose={{()=>{{}}}} />);
+''', encoding='utf-8')
+    subprocess.run([str(APP / 'node_modules/.bin/esbuild'), str(harness), '--bundle',
+                    '--format=iife', '--target=es2020', f'--outfile={bundle}'],
+                   cwd=APP, check=True, capture_output=True, text=True)
+    (tmp_path / 'index.html').write_text('<link rel="stylesheet" href="/local.css"><div id="root"></div><script src="/local.js"></script>', encoding='utf-8')
+    server = ThreadingHTTPServer(('127.0.0.1', 0), partial(SimpleHTTPRequestHandler, directory=str(tmp_path)))
+    worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel='chrome', headless=True)
+            try:
+                for viewport in ({'width': 1440, 'height': 900}, {'width': 390, 'height': 844}):
+                    page = browser.new_page(viewport=viewport, locale='zh-CN')
+                    page.set_default_timeout(5000)
+                    page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
+                    reader = page.locator('.tr-report-reading')
+                    reader.get_by_text('本机保存的正文').wait_for()
+                    page.get_by_role('button', name='编辑报告内容').click()
+                    page.get_by_label('段落标题').fill('新段落')
+                    page.get_by_label('段落正文').fill('新写入的正文')
+                    page.get_by_role('button', name='添加段落').click()
+                    reader.get_by_text('新写入的正文').wait_for()
+                    assert reader.count() == 1
+                    assert reader.locator('.tr-report-reading-text p').get_by_text('本机保存的正文', exact=True).count() == 1
+                    assert reader.locator('.ant-select-selection-item').inner_text() == '第一章'
+                    page.close()
+                page = browser.new_page(viewport={'width': 390, 'height': 844}, locale='zh-CN')
+                page.set_default_timeout(5000)
+                page.goto(f'http://127.0.0.1:{server.server_port}/index.html?race=1')
+                reader = page.locator('.tr-report-reading')
+                reader.get_by_text('报告已被其他操作修改，请重新读取并核对。').wait_for()
+                assert reader.get_by_text('本机保存的正文').count() == 0
+                reader.get_by_role('button', name='重 试').click()
+                reader.get_by_text('本机保存的正文').wait_for()
+                page.close()
+            finally:
+                browser.close()
+    finally:
+        server.shutdown(); server.server_close(); worker.join(timeout=2)
