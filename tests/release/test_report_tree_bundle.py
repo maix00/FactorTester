@@ -223,3 +223,44 @@ def test_job_artifact_restore_preserves_existing_files_and_cache_metadata(tmp_pa
     assert cached_job_artifact(job_id='job-1', name='fresh') is None
     assert cached_job_artifact(job_id='job-1', name='original')['raw'] == existing
     assert manifest.read_bytes() == before
+
+
+def test_job_cache_writers_wait_for_report_restore_lock(tmp_path, monkeypatch):
+    import threading
+    from tools.cli.release.job_cache import (
+        cache_job_artifact, cached_job_artifact, job_cache_write_lock,
+    )
+
+    monkeypatch.setenv('TRADERESEARCH_JOB_CACHE_ROOT', str(tmp_path / 'cache'))
+    started = threading.Event()
+    completed = threading.Event()
+    errors = []
+
+    def write():
+        try:
+            started.set()
+            cache_job_artifact(job_id='job-1', name='evidence', filename='evidence.txt',
+                               content_type='text/plain', raw=b'new', server_url='')
+        except Exception as error:
+            errors.append(error)
+        finally:
+            completed.set()
+
+    with job_cache_write_lock('job-1'):
+        worker = threading.Thread(target=write)
+        worker.start()
+        assert started.wait(2)
+        assert not completed.wait(.1)
+        assert cached_job_artifact(job_id='job-1', name='evidence') is None
+    worker.join(timeout=2)
+    assert completed.is_set() and not errors
+    assert cached_job_artifact(job_id='job-1', name='evidence')['raw'] == b'new'
+
+
+def test_job_cache_rejects_dot_directories(tmp_path, monkeypatch):
+    from tools.cli.release.job_cache import job_cache_write_lock
+    monkeypatch.setenv('TRADERESEARCH_JOB_CACHE_ROOT', str(tmp_path / 'cache'))
+    for job_id in ('.', '..'):
+        with pytest.raises(ValueError, match='job_id'):
+            with job_cache_write_lock(job_id):
+                pass

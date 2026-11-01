@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import time
-from typing import Any
+from typing import Any, Iterator
 from tools.cli.local_paths import documents_root
 
 
@@ -28,11 +29,40 @@ def default_job_cache_root() -> Path:
     return root.resolve()
 
 
+@contextmanager
+def job_cache_write_lock(job_id: str) -> Iterator[None]:
+    """Serialize artifact publication for one Job across client processes."""
+    from tools.cli.release.research_reporting.generation import _lock, _unlock
+
+    directory = _job_directory(job_id)
+    lock_path = directory / ".artifacts.lock"
+    if directory.is_symlink() or lock_path.is_symlink():
+        raise ValueError("Job cache lock cannot be a symlink")
+    with lock_path.open("a+b") as handle:
+        _lock(handle)
+        try:
+            yield
+        finally:
+            _unlock(handle)
+
+
 def cache_job_artifact(
     *, job_id: str, name: str, filename: str, content_type: str,
     raw: bytes, server_url: str,
 ) -> dict[str, Any]:
     """Atomically persist one remote artifact under ``jobs/<job_id>``."""
+    with job_cache_write_lock(job_id):
+        return _cache_job_artifact_locked(
+            job_id=job_id, name=name, filename=filename, content_type=content_type,
+            raw=raw, server_url=server_url,
+        )
+
+
+def _cache_job_artifact_locked(
+    *, job_id: str, name: str, filename: str, content_type: str,
+    raw: bytes, server_url: str,
+) -> dict[str, Any]:
+    """Write while the caller holds this Job's cache lock."""
     directory = _job_directory(job_id)
     safe_name = _filename(filename)
     digest = hashlib.sha256(raw).hexdigest()
@@ -81,7 +111,7 @@ def job_cache_directory(job_id: str) -> Path:
 
 
 def _job_directory(job_id: str, *, create: bool = True) -> Path:
-    if not _JOB_ID.fullmatch(str(job_id)):
+    if str(job_id) in {".", ".."} or not _JOB_ID.fullmatch(str(job_id)):
         raise ValueError("job_id is invalid for the local artifact cache")
     directory = default_job_cache_root() / str(job_id)
     if create:

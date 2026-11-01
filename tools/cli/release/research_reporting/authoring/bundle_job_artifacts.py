@@ -1,11 +1,15 @@
 """Freeze full Job artifacts, including data omitted from table previews."""
 from __future__ import annotations
 
+from contextlib import ExitStack
 import hashlib
 from pathlib import Path
 import re
 
-from tools.cli.release.job_cache import cached_job_artifact, cache_job_artifact, default_job_cache_root
+from tools.cli.release.job_cache import (
+    _cache_job_artifact_locked, cached_job_artifact, default_job_cache_root,
+    job_cache_write_lock,
+)
 
 _URI = re.compile(r'factortester-artifact://jobs/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)')
 _REF = re.compile(r'job-artifact:([A-Za-z0-9._-]+):([A-Za-z0-9._-]+)')
@@ -52,6 +56,17 @@ def export_job_artifacts(snapshot, capture):
 
 
 def restore_job_artifacts(items, files):
+    # Acquire all affected Job locks in deterministic order before checking any
+    # destination. Downloads use the same locks, so a successful preflight
+    # cannot be invalidated by another client process before publication.
+    jobs = sorted({item['job_id'] for item in items})
+    with ExitStack() as locks:
+        for job in jobs:
+            locks.enter_context(job_cache_write_lock(job))
+        _restore_job_artifacts_locked(items, files)
+
+
+def _restore_job_artifacts_locked(items, files):
     # Check every collision first. A fork must not replace another local Job
     # version merely because it uses the same display name.
     destinations = {}
@@ -82,5 +97,5 @@ def restore_job_artifacts(items, files):
     for item in items:
         if (item['job_id'], item['name']) in already_present:
             continue
-        cache_job_artifact(job_id=item['job_id'], name=item['name'], filename=item['filename'],
+        _cache_job_artifact_locked(job_id=item['job_id'], name=item['name'], filename=item['filename'],
                            content_type=item['content_type'], raw=files[item['sha256']], server_url='')
