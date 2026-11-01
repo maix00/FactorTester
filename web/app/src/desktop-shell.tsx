@@ -117,7 +117,7 @@ function WorkspaceWatermark({ containerApi }: IWatermarkPanelProps): React.React
     <p>{t("workspace.emptyHint")}</p>
     <div className="tr-workspace-empty-actions">
       <button type="button" onClick={() => openRootPage(containerApi, "research", t("nav.research"))}>{t("workspace.openResearch")}</button>
-      <button type="button" onClick={() => openRootPage(containerApi, "test-bench", t("nav.testBench"))}>{t("workspace.openTestBench")}</button>
+      <button type="button" onClick={() => openRootPage(containerApi, "test-bench", t("nav.test-bench"))}>{t("workspace.openTestBench")}</button>
     </div>
   </div>;
 }

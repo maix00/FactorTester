@@ -37,9 +37,9 @@ export function TestBenchPage(): React.ReactElement {
   const configurationInstance = { ...instance, active: instance.active !== false && tab === "configuration" };
   const jobsInstance = { ...instance, active: instance.active !== false && tab === "jobs" };
 
-  return <section className="tr-test-bench-page" aria-label={t("nav.testBench", { defaultValue: "Test bench" })}>
+  return <section className="tr-test-bench-page" aria-label={t("nav.test-bench", { defaultValue: "Test bench" })}>
     <div className="tr-test-bench">
-      {!instance.mobile || hasDesktopClientBridge(window) ? <header className="tr-function-header tr-test-bench-header"><h1>{t("nav.testBench")}</h1><div className="tr-function-actions">{hasDesktopClientBridge(window) ? <LocalNodeAccess /> : null}</div></header> : null}
+      {!instance.mobile || hasDesktopClientBridge(window) ? <header className="tr-function-header tr-test-bench-header"><h1>{t("nav.test-bench")}</h1><div className="tr-function-actions">{hasDesktopClientBridge(window) ? <LocalNodeAccess /> : null}</div></header> : null}
       <Tabs activeKey={tab} onChange={selectTab} items={[
         { key: "configuration", label: t("nav.configuration", { defaultValue: "Test" }), children: <PageInstanceProvider value={configurationInstance}><TestConfigurationPage embedded /></PageInstanceProvider> },
         { key: "jobs", label: t("nav.jobs", { defaultValue: "Task queue" }), children: <PageInstanceProvider value={jobsInstance}><JobsPage embedded /></PageInstanceProvider> },
