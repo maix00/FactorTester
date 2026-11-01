@@ -21,6 +21,10 @@ export function managerURL(value:unknown):string {
     return url.href.replace(/\/+$/,"");
   }catch{throw new ManagerBridgeError("manager_invalid_url");}
 }
+/** Compare normalized endpoints without treating an incomplete form as equal. */
+export function sameManagerURL(left:unknown,right:unknown):boolean {
+  try{return managerURL(left)===managerURL(right);}catch{return false;}
+}
 function connection(value:Record<string,unknown>):ManagerConnection {
   let url:string;
   try{url=managerURL(value.url);}catch{throw new ManagerBridgeError("manager_invalid_response");}

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {MANAGER_BRIDGE_SCHEMA,ManagerBridgeError,ManagerClient,managerBridge,managerURL} from "./manager-bridge.ts";
+import {MANAGER_BRIDGE_SCHEMA,ManagerBridgeError,ManagerClient,managerBridge,managerURL,sameManagerURL} from "./manager-bridge.ts";
 
 const schema=MANAGER_BRIDGE_SCHEMA;
 const response=(extra:Record<string,unknown>={})=>({success:true,schema,...extra});
@@ -16,6 +16,13 @@ test("url validation rejects credentials, queries, fragments and invalid protoco
   assert.equal(managerURL("https://example.test:443/"),"https://example.test");
   assert.equal(managerURL("http://127.0.0.1:7998/"),"http://127.0.0.1:7998");
   for(const bad of [" https://example.test","ftp://example.test","https://u:p@example.test","https://example.test/?secret=x","https://example.test/#x","https://example.test/path","not-a-url"])assert.throws(()=>managerURL(bad),reason("manager_invalid_url"));
+});
+test("same Manager compares canonical URLs and never accepts an invalid entry",()=>{
+  assert.equal(sameManagerURL("https://EXAMPLE.test:443/","https://example.test"),true);
+  assert.equal(sameManagerURL("http://127.0.0.1:7998/","http://127.0.0.1:7998"),true);
+  assert.equal(sameManagerURL("http://127.0.0.1:7998","http://127.0.0.1:8998"),false);
+  assert.equal(sameManagerURL("https://example.test/path","https://example.test"),false);
+  assert.equal(sameManagerURL(undefined,"https://example.test"),false);
 });
 test("capabilities and a validated current response precede changes",async()=>{
   const calls:Record<string,unknown>[]=[];

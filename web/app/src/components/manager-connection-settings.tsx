@@ -2,7 +2,7 @@ import React, {useEffect,useRef,useState} from "react";
 import {Alert,Button,Form,Input,Spin} from "antd";
 import {useTranslation} from "react-i18next";
 import {useAuth} from "../auth.tsx";
-import {ManagerBridgeError,managerBridge,managerURL,type ManagerClient,type ManagerConnection} from "../manager-bridge.ts";
+import {ManagerBridgeError,managerBridge,managerURL,sameManagerURL,type ManagerClient,type ManagerConnection} from "../manager-bridge.ts";
 
 type Phase="checking"|"browser"|"unsupported"|"ready"|"switching"|"handoff"|"uncertain";
 export function nativeManagerSettingsAvailable(host:unknown):boolean {
@@ -19,6 +19,7 @@ export function ManagerConnectionSettings():React.ReactElement {
   const [phase,setPhase]=useState<Phase>("checking"),[connection,setConnection]=useState<ManagerConnection|null>(null),[message,setMessage]=useState("");
   const [confirmedKey,setConfirmedKey]=useState("");
   const [revision,setRevision]=useState(0),[form]=Form.useForm<{url:string}>();
+  const targetURL=Form.useWatch("url",form);
   const bridge=useRef<ManagerClient|null>(null),generation=useRef(0);
   const currentIdentity=useRef(identityKey);currentIdentity.current=identityKey;
   useEffect(()=>{
@@ -35,6 +36,7 @@ export function ManagerConnectionSettings():React.ReactElement {
   },[identityKey,revision,form]);
   const switchManager=async({url}: {url:string}):Promise<void>=>{
     const client=bridge.current;if(!client || phase!=="ready" || confirmedKey!==identityKey)return;
+    if(connection?.auth_state==="authorized" && sameManagerURL(url,connection.url))return;
     const active=++generation.current;
     setPhase("switching");setConnection(null);setMessage("");
     const timer=window.setTimeout(()=>{
@@ -65,7 +67,7 @@ export function ManagerConnectionSettings():React.ReactElement {
         <Form.Item name="url" label={t("managerConnection.address")} rules={[{required:true,message:t("managerConnection.required")},{validator:async(_,value)=>{try{managerURL(value);}catch{return Promise.reject(new Error(t("managerConnection.invalid")));}}}]}>
           <Input type="url" autoComplete="url" aria-label={t("managerConnection.address")} />
         </Form.Item>
-        <Button type="primary" htmlType="submit">{t("managerConnection.switch")}</Button>
+        <Button type="primary" htmlType="submit" disabled={connection.auth_state==="authorized" && sameManagerURL(targetURL,connection.url)}>{t("managerConnection.switch")}</Button>
       </Form>
     </>:null}
     {visiblePhase==="switching"?<Spin tip={t("managerConnection.switching")} />:null}
