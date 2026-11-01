@@ -292,7 +292,17 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert transport['downloads'] == downloads_before  # rejected before downloading again
         with rpc.store._connect() as db:
             assert db.execute('SELECT count(*) FROM report_pull_recovery').fetchone()[0] == 0
-        assert rpc.request(pull)['status'] == 'up_to_date'
+        value = rpc.request(pull)
+        assert value['success'] is True and value['status'] == 'up_to_date' and value['local_modified'] is False
+        # An external draft is user data even if the immutable report tree
+        # and server revision have not changed.
+        (local_root / 'user-note.txt').write_text('unsynchronized')
+        downloads_before = transport['downloads']
+        value = rpc.request(pull)
+        assert value['success'] is True and value['status'] == 'up_to_date' and value['local_modified'] is True
+        assert transport['downloads'] == downloads_before
+        assert (local_root / 'user-note.txt').read_text() == 'unsynchronized'
+        (local_root / 'user-note.txt').unlink()
         index = rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})
         assert [chapter['title'] for chapter in index['index']['chapters']] == ['First', 'Second']
         rpc.request({**edit, **index['version'], 'component_id': 'chapter-3', 'title': 'Third'})

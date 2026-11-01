@@ -23,9 +23,13 @@ class LocalReportSyncConflict(ValueError):
     """Local and remote report histories cannot safely be advanced automatically."""
 
 
-def _require_clean_workspace(root: Path) -> None:
+def _workspace_is_clean(root: Path) -> bool:
     status = subprocess.run(['git', '-C', str(root), 'status', '--porcelain'], capture_output=True, text=True, check=True)
-    if status.stdout.strip():
+    return not status.stdout.strip()
+
+
+def _require_clean_workspace(root: Path) -> None:
+    if not _workspace_is_clean(root):
         raise LocalReportSyncConflict('local report workspace has uncommitted files')
 
 
@@ -143,7 +147,9 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             if has_recovery and _recover_pull(store, root, paths, manager_hash, report_id, remote, base, local):
                 return {'status': 'updated', 'local_modified': False}
             if base and base['revision'] == record['revision']:
-                return {'status': 'up_to_date', 'local_modified': (local['generation'] != base['generation'] or local['root_ref'] != base['local_root_ref'])}
+                return {'status': 'up_to_date', 'local_modified': (
+                    local['generation'] != base['generation'] or local['root_ref'] != base['local_root_ref']
+                    or not _workspace_is_clean(root))}
             baseline_ok = bool(base and base['local_root_ref'] and local['generation'] == base['generation'] and local['root_ref'] == base['local_root_ref'])
             identical = local['generation'] == bundle['generation'] and local['root_ref'] == bundle['root_ref']
             if has_recovery and not baseline_ok:
