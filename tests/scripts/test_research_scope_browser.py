@@ -70,7 +70,8 @@ createRoot(document.getElementById('root')!).render(
                         if (url.pathname !== '/api/research' && !report) throw Error('unexpected path: ' + url.pathname);
                         const scope = url.searchParams.get('scope');
                         const row = report
-                          ? {report_id:'report-1',title:'报告甲：较长的研究标题在移动端应该完整地换行显示以避免内容被裁切',research_id:'r1',research_title:'研究甲',profile_ref:'self',profile_key:'local::alice::self',owner_ref:'alice',visibility:'private',updated_at:1700000000}
+                          ? {report_id:'report-1',title:'报告甲：较长的研究标题在移动端应该完整地换行显示以避免内容被裁切',research_id:'r1',research_title:'研究甲',profile_ref:'self',profile_key:'local::alice::self',owner_ref:'alice',visibility:'private',updated_at:1700000000,
+                             branches:[{publication_id:'branch-1',source_kind:'workspace',title:'高频时间维度因子复现与筛选报告（国债期货 T/TL）及多阶段研究成果',profile_ref:'researcher-with-long-name'}]}
                           : {research_id:scope === 'shared' ? 'shared-r' : 'r1',title:scope === 'shared' ? '共享研究' : '研究甲',owner_ref:'alice'};
                         const payload = report ? {reports:[row]} : {researches:[row]};
                         if (scope === 'mine') return new Promise(resolve => { fixture.releaseMine = () => resolve(response(payload)); });
@@ -95,6 +96,17 @@ createRoot(document.getElementById('root')!).render(
                     assert opened[0]["kind"] == "profile" and opened[0]["ref"] == "self"
                     assert opened[0]["profileKey"] == "local::alice::self" and opened[0]["owner"] == "alice"
                     assert opened[1]["kind"] == "user" and opened[1]["ref"] == "alice"
+                    page.get_by_role("button", name="报告甲：较长的研究标题在移动端应该完整地换行显示以避免内容被裁切", exact=True).click()
+                    dialog = page.get_by_role("dialog")
+                    dialog.get_by_role("combobox", name="报告版本").wait_for()
+                    assert dialog.locator('.tr-report-source-picker').evaluate(
+                        'node => node.scrollWidth <= node.clientWidth + 1')
+                    assert dialog.locator('.ant-modal-body').evaluate(
+                        'node => node.scrollWidth <= node.clientWidth + 1')
+                    if viewport["width"] <= 760:
+                        dialog.get_by_role("button",name="返回").click()
+                    else:
+                        page.locator(".ant-modal-close").click()
                     page.evaluate("window.fixture.authority='keycloak'; window.fixture.setLanguage('en')")
                     assert page.get_by_role("tab", name="Reports").is_visible()
                     page.wait_for_function("window.fixture.requests.filter(r => r==='/api/research/capabilities/keycloak-sharing').length>=2")
