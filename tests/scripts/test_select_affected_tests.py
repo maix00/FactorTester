@@ -487,6 +487,8 @@ def test_report_sync_helpers_select_only_relevant_contracts():
 
 def test_manager_token_migration_avoids_unrelated_test_directories():
     for path in ("apple/Sources/Networking/ManagerSessionTokenStore.swift",
-                 "apple/Tests/ManagerSessionTokenMigrationTests.swift"):
+                 "apple/Tests/ManagerSessionTokenMigrationTests.swift",
+                 "apple/Sources/Services/ManagerDeviceKeyStore.swift",
+                 "apple/Tests/ManagerDeviceKeyMigrationTests.swift"):
         mode, targets = selector.select({path})
         assert mode == "SCOPED" and targets == ["tests/scripts/test_native_session_restore.py"]

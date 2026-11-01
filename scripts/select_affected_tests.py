@@ -656,6 +656,8 @@ for _path in (
 for _path in (
     "apple/Sources/Networking/ManagerSessionTokenStore.swift",
     "apple/Tests/ManagerSessionTokenMigrationTests.swift",
+    "apple/Sources/Services/ManagerDeviceKeyStore.swift",
+    "apple/Tests/ManagerDeviceKeyMigrationTests.swift",
 ):
     EXACT_PATH_TESTS[_path] = ("tests/scripts/test_native_session_restore.py",)
 EXACT_PATH_TESTS["tools/factors/alpha_plan.py"] = (*FACTOR_PLAN_TESTS,"tests/server/test_nautilus_strategy_runspec.py")
