@@ -136,3 +136,5 @@ XCTest 启动器等待测试 worker 而未产生结果，不能计为测试通�
 核查发现：目标端点通过独立 bearer 验证后，之前只在拒绝或设备登录跳转时清理按主机共享的会话 Cookie；如果目标已授权，旧端口的 Cookie 仍可能留在 WebKit 和原生 Cookie 存储中。切换时现在无论目标是否已授权，都先清理目标主机的 `ft-manager-session` Cookie，再由新 WebView 使用目标端点 Keychain 凭据。仅拒绝或设备登录跳转会删除目标 Keychain 凭据。清理 WebKit Cookie 使用真正等待完成的 `deleteCookie` 异步接口。
 
 macOS 应用和测试目标完成构建，iOS Simulator 应用构建成功。XCTest 测试宿主启动后未执行测试，已停止此次测试进程；独立程序直接编译并调用实际 `WebSessionCookieSynchronizer`，在非持久 WebKit 容器与原生 Cookie 存储中核对会话 Cookie 清除和其他 Cookie 保留，结果通过。新增的完整 WebKit 切换用例已编译但尚未由 XCTest 执行，实际授权切换端到端仍需验收。
+
+另以独立 WebKit 程序编译并执行实际 `ManagerConnectionBridge` 和 Cookie 同步代码，在隔离的非持久 Cookie 容器中模拟已授权目标，验证桥返回 authorized、应用目标且两处旧会话 Cookie 均已清除。该实验使用替身 SessionStore 与授权探测，不是实际两个 Manager 的授权端到端验收。
