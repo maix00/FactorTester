@@ -23,6 +23,12 @@ class LocalReportSyncConflict(ValueError):
     """Local and remote report histories cannot safely be advanced automatically."""
 
 
+def _require_clean_workspace(root: Path) -> None:
+    status = subprocess.run(['git', '-C', str(root), 'status', '--porcelain'], capture_output=True, text=True, check=True)
+    if status.stdout.strip():
+        raise LocalReportSyncConflict('local report workspace has uncommitted files')
+
+
 def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False, requires_edit: bool = False, source_kind: str = 'local') -> dict:
     from .public_research.object_uploads import projection_hash
     value = session.get(publication_endpoint(source_kind, research_id, report_id), query={
@@ -147,6 +153,9 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             if not baseline_ok and not identical:
                 raise LocalReportSyncConflict('local report changed since the last confirmed synchronization')
             require_no_pending(paths, local)
+            # Files outside the immutable tree can contain unsaved work. Check
+            # before fetching an authoring bundle as well as after it arrives.
+            _require_clean_workspace(root)
             expected = (local['generation'], local['root_ref'])
         publication_id, digest = record['publication_id'], bundle['sha256']
         query = urlencode(publication_query(source_kind, research_id, report_id))
@@ -177,9 +186,7 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                 if (current['generation'], current['root_ref']) != expected:
                     raise LocalReportSyncConflict('local report changed during download')
                 require_no_pending(paths, current)
-                status = subprocess.run(['git', '-C', str(root), 'status', '--porcelain'], capture_output=True, text=True, check=True)
-                if status.stdout.strip():
-                    raise LocalReportSyncConflict('local report workspace has uncommitted files')
+                _require_clean_workspace(root)
                 prior_commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
                 # A staged bundle must not modify the shared Job cache before
                 # content, authorization and local-version checks all pass.

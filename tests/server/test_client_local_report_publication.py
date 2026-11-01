@@ -21,7 +21,7 @@ from tools.cli.release.research_reporting.public_research.projection import buil
 
 def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_access(tmp_path, monkeypatch):
     service, _manager, store, auth = harness(tmp_path / 'manager')
-    transport = {'tamper': False, 'omit_edit': False, 'omit_publish': False, 'metadata': 0, 'downloads': 0, 'posts': 0}
+    transport = {'tamper': False, 'omit_edit': False, 'omit_publish': False, 'metadata': 0, 'downloads': 0, 'posts': 0, 'on_download': None}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args): pass
@@ -49,6 +49,8 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
                     return self.reply(200, {'success': True, **value})
                 if len(parts) == 7 and parts[4] == 'attachments':
                     transport['downloads'] += 1
+                    if transport['on_download']:
+                        transport['on_download']()
                     value = service.read(**args, publication_ref=parts[3], attachment=parts[5] + '/' + parts[6])
                     raw = value['content']
                     if transport['tamper']: raw = raw[:-1] + bytes([raw[-1] ^ 1])
@@ -237,6 +239,22 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert rpc.request(pull) == {'success': False, 'code': 'local_report_publication_denied'}
         assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
         auth['write'] = True
+        # A local change outside the immutable report tree is still user data.
+        # Reject it before downloading the remote bundle, then retain the
+        # second check after the download for edits made while it is in flight.
+        dirty = local_root / 'user-note.txt'
+        dirty.write_text('keep local work')
+        downloads_before = transport['downloads']
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        assert transport['downloads'] == downloads_before
+        assert dirty.read_text() == 'keep local work'
+        dirty.unlink()
+        transport['on_download'] = lambda: dirty.write_text('changed during download')
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        transport['on_download'] = None
+        assert transport['downloads'] == downloads_before + 1
+        assert dirty.read_text() == 'changed during download'
+        dirty.unlink()
         transport['tamper'] = True
         with pytest.raises(ValueError, match='checksum'): rpc.request(pull)
         assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
