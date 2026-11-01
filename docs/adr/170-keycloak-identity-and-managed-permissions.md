@@ -128,3 +128,17 @@ authorization are still required before Keycloak can be called the sole
 authorization authority end to end. The historical identity database is also
 still used for non-authoritative profile/display metadata; it is not the
 permission authority in Keycloak mode.
+
+## 2026-11-02 设备与身份只读盘点
+
+02:50（Asia/Taipei）检查本机暂存 Manager 与公网 Manager 的运行环境。两侧
+Keycloak 中 MaxJJW、testA、testB 均启用，三个账户的稳定身份及旧限定身份
+摘要逐一相同。本机暂存 Manager 未配置 PostgreSQL 控制库，且其 JSON 设备
+登记文件不存在；这不代表其他内网实例没有旧设备。
+
+公网 `remote-main` 的 PostgreSQL 只读事务中，按上述三个账户的精确旧身份
+过滤，设备记录分别为 8、4、2 条，共 14 条；均启用且来源为 `remote-main`。
+当前表不存在旧的 `public_access` 和 `quota_exempt` 列。这个汇总不核验设备
+公钥与 Keycloak 资源/策略的逐条对应，也不验证当前的有效登录授权；不得把
+计数或身份摘要相同当作迁移完成。公网运行版本尚未包含当前设备授权模块，
+需要在切换前完成逐对象权限对账及真实撤销/登录验收。盘点未修改两端数据。
