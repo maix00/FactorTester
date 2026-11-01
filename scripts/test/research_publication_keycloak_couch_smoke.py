@@ -276,6 +276,16 @@ def exercise(*, couch, **case):
             assert fresh.request(local_sync)['reports'][0]['status'] == 'published'
             assert source.request(local_sync)['reports'][0]['status'] == 'updated'
             assert source.request({'action':'get_report', **local_ids})['index']['chapters'][0]['title'] == 'Fresh device edit'
+            # Simulate a crash after identical report content was committed but
+            # before its local receipt advanced. The recovery must compare the
+            # full authoring bundle under real Manager and Keycloak sessions.
+            with source.store._connect() as db:
+                updated = db.execute('''UPDATE report_publications SET revision=?,generation=?,local_root_ref=?
+                    WHERE report_id=?''', ('fixture-old-revision', 999, 'fixture-old-root', shared['report_id']))
+                assert updated.rowcount == 1
+            recovered = source.request(local_sync)
+            assert any(item['report_id'] == shared['report_id'] and item['status'] == 'unchanged'
+                       for item in recovered['reports']), recovered
             # Model an old report resource without the Research binding. Real
             # Keycloak decisions for every fixture user and scope must remain
             # unchanged when the binding is recovered from its real receipt.
@@ -472,6 +482,7 @@ def main():
         'catalog_editable_source_roundtrip': True, 'mismatched_authoring_rejected': True, 'catalog_desktop_import': True, 'catalog_two_client_sync': True, 'catalog_automatic_discovery': True,
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
         'local_fresh_device_discovery_and_bidirectional_sync': True,
+        'real_authoring_convergence_recovery': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
         'shared_realm_two_manager_client_mediated_sync': True, 'legacy_binding_permissions_preserved': True,
         'independent_realms_tested': False}, sort_keys=True))

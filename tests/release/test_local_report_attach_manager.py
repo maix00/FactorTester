@@ -140,3 +140,75 @@ def test_discovery_queue_attaches_existing_report_to_second_manager(report, monk
         assert db.execute('SELECT count(*) FROM server_report_pending').fetchone()[0] == 0
         receipt = db.execute('SELECT * FROM report_publications WHERE manager_hash=?', (manager_hash,)).fetchone()
     assert receipt['revision'] == 'revision'
+
+
+def _prepare_concurrent_convergence(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    endpoint = 'https://manager-b.test'
+    manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
+    manager = {'endpoint': endpoint, 'subject': 'subject', 'token': '', 'certificate_pem': '', 'cookies': []}
+    binding = {'issuer': 'https://id.test/realm', 'identity_id': 'stable'}
+    with report['store']._connect() as db:
+        db.execute('''INSERT INTO report_publications
+            (report_id,manager_hash,publication_id,revision,generation,projection_hash,local_root_ref,source_kind)
+            VALUES (?,?,?,?,?,?,?,?)''', (report['report_id'], manager_hash,
+            report['metadata']['publication']['publication_id'], 'previous', 999, 'f' * 64, 'old-root', 'local'))
+    def get(path, *, query=None):
+        if path == '/api/session':
+            return report['identity']
+        assert path == '/api/research/owned-local-report-sync'
+        return {'success': True, 'reports': [], 'next_cursor': None}
+    report['session'].get = get
+    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (endpoint, report['session']))
+    monkeypatch.setattr(local_auto_sync, '_remote', lambda *_args, **kwargs:
+        report['metadata'] if kwargs.get('metadata_only') else report['remote'])
+    return lambda: local_auto_sync.sync_published_reports(report['store'], binding=binding, manager=manager,
+        profile_id='self', after_report_id='', limit=4)
+
+
+def test_convergence_verifies_complete_authoring_before_advancing_receipt(report, monkeypatch):
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    result = sync()
+    assert result['reports'][0]['status'] == 'unchanged'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'revision'
+
+
+def test_convergence_rejects_different_authoring_even_when_projection_and_root_match(report, monkeypatch):
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    bundle = {**report['metadata']['authoring'], 'sha256': 'f' * 64}
+    report['metadata']['authoring'] = bundle
+    report['remote']['authoring'] = bundle
+    result = sync()
+    assert result['reports'][0]['status'] == 'conflict'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'
+
+
+def test_convergence_does_not_advance_after_edit_authorization_is_revoked(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    def remote(*_args, **kwargs):
+        if kwargs.get('requires_edit'):
+            raise PermissionError('edit revoked')
+        return report['metadata'] if kwargs.get('metadata_only') else report['remote']
+    monkeypatch.setattr(local_auto_sync, '_remote', remote)
+    assert sync()['reports'][0]['status'] == 'denied'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'
+
+
+def test_convergence_does_not_advance_after_local_edit(report, monkeypatch):
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    original = local_catalog_import.verify_equivalent_authoring
+    def verify_and_edit(*args, **kwargs):
+        digest = original(*args, **kwargs)
+        version = report['metadata']['authoring']
+        report['store'].add_report_component(profile_id='self', research_id=report['research_id'],
+            report_id=report['report_id'], component_id='concurrent', kind='chapter', parent_id='',
+            title='Concurrent edit', body='', generation=version['generation'], root_ref=version['root_ref'])
+        return digest
+    monkeypatch.setattr(local_catalog_import, 'verify_equivalent_authoring', verify_and_edit)
+    assert sync()['reports'][0]['status'] == 'conflict'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'

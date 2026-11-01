@@ -77,19 +77,48 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                 if not same_root or not same_projection:
                     status = 'conflict'
                 else:
-                    # A publish/pull may commit its report before the local receipt
-                    # is saved. Identical immutable roots prove convergence; advance
-                    # the receipt without writing either report again. A concurrent
-                    # synchronizer must not have its newer receipt overwritten.
-                    with store._connect() as db:
-                        result = db.execute('''UPDATE report_publications
-                            SET revision=?, generation=?, projection_hash=?, local_root_ref=?
-                            WHERE report_id=? AND manager_hash=? AND publication_id=? AND revision=?
-                              AND generation=? AND local_root_ref=?''',
-                            (remote['revision'], head['generation'], remote['projection_hash'], head['root_ref'],
-                             report_id, manager_hash, row['publication_id'], row['revision'],
-                             row['generation'], row['local_root_ref']))
-                    status = 'unchanged' if result.rowcount == 1 else 'conflict'
+                    # A root and the published projection do not cover every
+                    # editable attachment or private link in the authoring
+                    # bundle. Validate that content before advancing a receipt.
+                    from .authoring.tree_bundle import bundle_from_snapshot
+                    from .authoring.tree_projection import project_snapshot
+                    from .local_catalog_import import verify_equivalent_authoring
+                    identity = session.get('/api/session')
+                    complete = _remote(session, research_id, report_id, source_kind=row['source_kind'])
+                    if (complete['publication'], complete['authoring']) != (remote, authoring):
+                        raise LocalReportSyncConflict('remote report changed during comparison')
+                    local_sha = verify_equivalent_authoring(store, root=root, head=head, remote=complete,
+                        session=session, research_id=research_id, report_id=report_id, source_kind=row['source_kind'])
+                    confirmed = _remote(session, research_id, report_id, metadata_only=True,
+                                        requires_edit=True, source_kind=row['source_kind'])
+                    current_identity = session.get('/api/session')
+                    if (confirmed != snapshot or not isinstance(identity, dict) or not isinstance(current_identity, dict)
+                            or str(identity.get('keycloak_issuer') or '').rstrip('/') != binding['issuer']
+                            or identity.get('tr_identity_id') != binding['identity_id']
+                            or identity.get('keycloak_subject') != manager['subject']
+                            or identity.get('visitor_login') is True or identity.get('role') == 'visitor'
+                            or identity.get('authentication') == 'agent'
+                            or not isinstance(identity.get('username'), str) or not identity['username'].strip()
+                            or any(current_identity.get(key) != identity.get(key) for key in
+                                   ('username', 'keycloak_issuer', 'keycloak_subject', 'tr_identity_id',
+                                    'visitor_login', 'role', 'authentication'))):
+                        raise PermissionError('report authorization or identity changed during comparison')
+                    with tree_lock(paths):
+                        current = load_head(paths)
+                        if (current['generation'], current['root_ref']) != (head['generation'], head['root_ref']):
+                            raise LocalReportSyncConflict('local report changed during comparison')
+                        data = bundle_from_snapshot(project_snapshot(paths, current), package_root=root, branch_id='main')
+                        if hashlib.sha256(data).hexdigest() != local_sha:
+                            raise LocalReportSyncConflict('local report resources changed during comparison')
+                        with store._connect() as db:
+                            result = db.execute('''UPDATE report_publications
+                                SET revision=?, generation=?, projection_hash=?, local_root_ref=?
+                                WHERE report_id=? AND manager_hash=? AND publication_id=? AND revision=?
+                                  AND generation=? AND local_root_ref=?''',
+                                (remote['revision'], head['generation'], remote['projection_hash'], head['root_ref'],
+                                 report_id, manager_hash, row['publication_id'], row['revision'],
+                                 row['generation'], row['local_root_ref']))
+                        status = 'unchanged' if result.rowcount == 1 else 'conflict'
             elif local_changed:
                 publish_local_report(store, binding=binding, manager=manager, profile_id=profile,
                                      research_id=research_id, report_id=report_id)

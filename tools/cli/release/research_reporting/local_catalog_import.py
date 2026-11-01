@@ -65,21 +65,19 @@ def _owner_metadata(session, research_id, report_id, metadata):
     return owner
 
 
-def _attach_identical_shared_report(store, *, root, existing, metadata, remote, owner_metadata,
-                                    session, identity, research_id, report_id, manager_hash):
-    """Attach a second Manager only when the editable report content agrees."""
+def verify_equivalent_authoring(store, *, root, head, remote, session, research_id, report_id, source_kind):
+    """Compare complete bounded editable content, including assets and private links."""
     from .authoring.tree_bundle import bundle_from_snapshot, validate_report_bundle
     from .authoring.tree_paths import report_tree_paths
     from .authoring.tree_projection import project_snapshot
     from .authoring.tree_store import load_head, tree_lock
 
     record, bundle = remote['publication'], remote['authoring']
-    if root.is_symlink() or not root.is_dir():
-        raise LocalReportSyncConflict('local report workspace is unavailable')
-    _tree(root)
     paths = report_tree_paths(root, 'main')
     with tree_lock(paths):
-        head = load_head(paths)
+        current = load_head(paths)
+        if (current['report_id'], current['generation'], current['root_ref']) != (report_id, head['generation'], head['root_ref']):
+            raise LocalReportSyncConflict('local report changed during comparison')
         if (head['report_id'], head['generation']) != (report_id, bundle['generation']):
             raise LocalReportSyncConflict('local and Manager report versions differ')
         data = bundle_from_snapshot(project_snapshot(paths, head), package_root=root, branch_id='main')
@@ -97,9 +95,9 @@ def _attach_identical_shared_report(store, *, root, existing, metadata, remote, 
         # Validate the remote bundle and both source-free projections before
         # accepting that equivalence. Keep all temporary bytes bounded.
         del data
-        attachment = publication_endpoint('local', research_id, report_id) + '/' + record['publication_id'] + '/attachments/report_authoring/' + bundle['sha256']
-        query = publication_query('local', research_id, report_id)
-        response = session.download(attachment + '?' + urlencode(query), maximum_bytes=8 * 1024 * 1024)
+        attachment = publication_endpoint(source_kind, research_id, report_id) + '/' + record['publication_id'] + '/attachments/report_authoring/' + bundle['sha256']
+        query = urlencode(publication_query(source_kind, research_id, report_id))
+        response = session.download(attachment + ('?' + query if query else ''), maximum_bytes=8 * 1024 * 1024)
         if len(response.content) != bundle['size_bytes'] or hashlib.sha256(response.content).hexdigest() != bundle['sha256']:
             raise LocalReportSyncConflict('Manager report source bytes differ')
         with tempfile.TemporaryDirectory(prefix='report-attach-', dir=store.workspace_root) as temporary:
@@ -134,6 +132,26 @@ def _attach_identical_shared_report(store, *, root, existing, metadata, remote, 
     if not bundle_matches_projection(package_root=root, source_manifest=manifest,
                                      remote_projection=remote['projection'], expected_hash=record['projection_hash']):
         raise LocalReportSyncConflict('local report and Manager projection differ')
+    return local_sha
+
+
+def _attach_identical_shared_report(store, *, root, existing, metadata, remote, owner_metadata,
+                                    session, identity, research_id, report_id, manager_hash):
+    """Attach a second Manager only when the editable report content agrees."""
+    from .authoring.tree_bundle import bundle_from_snapshot
+    from .authoring.tree_paths import report_tree_paths
+    from .authoring.tree_projection import project_snapshot
+    from .authoring.tree_store import load_head, tree_lock
+
+    record = remote['publication']
+    if root.is_symlink() or not root.is_dir():
+        raise LocalReportSyncConflict('local report workspace is unavailable')
+    _tree(root)
+    paths = report_tree_paths(root, 'main')
+    with tree_lock(paths):
+        head = load_head(paths)
+    local_sha = verify_equivalent_authoring(store, root=root, head=head, remote=remote, session=session,
+        research_id=research_id, report_id=report_id, source_kind='local')
     confirmed = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind='local')
     current = session.get('/api/session')
     if (confirmed != metadata or _owner_metadata(session, research_id, report_id, confirmed) != owner_metadata

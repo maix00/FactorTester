@@ -256,6 +256,8 @@ def test_sync_receipt_recovery_does_not_overwrite_concurrent_receipt(tmp_path, m
     from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
     from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
     from tools.cli.release.research_reporting.local_publication import ensure_publication_table
+    from tools.cli.release.research_reporting import local_catalog_import
+    from tools.cli.release.research_reporting.authoring.tree_bundle import bundle_from_snapshot
 
     manager = {'endpoint': 'https://manager.test', 'subject': 'subject', 'token': '', 'certificate_pem': '', 'cookies': []}
     rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
@@ -272,7 +274,13 @@ def test_sync_receipt_recovery_does_not_overwrite_concurrent_receipt(tmp_path, m
         db.execute('INSERT INTO report_publications (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref) VALUES (?, ?, ?, ?, ?, ?, ?)',
                    (report['report_id'], hashlib.sha256(manager['endpoint'].encode()).hexdigest(),
                     'p-'+'a'*64, 'old', 999, 'f'*64, 'old-root'))
-    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], EmptyOwnedReportDirectory()))
+    class Session(EmptyOwnedReportDirectory):
+        def get(self, path, *, query=None):
+            if path == '/api/session':
+                return {'username': 'alice', 'keycloak_issuer': 'https://id.test/realm',
+                        'keycloak_subject': 'subject', 'tr_identity_id': 'stable'}
+            return super().get(path, query=query)
+    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (manager['endpoint'], Session()))
     monkeypatch.setattr(local_auto_sync, '_remote', lambda *_args, **_kwargs: {
         'publication': {'revision':'remote', 'publication_id':'p-'+'a'*64, 'projection_hash':'e'*64},
         'authoring': version})
@@ -284,6 +292,9 @@ def test_sync_receipt_recovery_does_not_overwrite_concurrent_receipt(tmp_path, m
         return {'publication': {'revision':'remote', 'publication_id':'p-'+'a'*64, 'projection_hash':digest},
                 'authoring': version}
     monkeypatch.setattr(local_auto_sync, '_remote', concurrent_update)
+    monkeypatch.setattr(local_catalog_import, 'verify_equivalent_authoring', lambda *_args, **_kwargs:
+        hashlib.sha256(bundle_from_snapshot(load_snapshot(package_root=root, branch_id='main'),
+            package_root=root, branch_id='main')).hexdigest())
     result = rpc.request(request)
     assert result['reports'][0]['status'] == 'conflict'
     with rpc.store._connect() as db:
