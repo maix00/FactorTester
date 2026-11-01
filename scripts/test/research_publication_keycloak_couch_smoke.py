@@ -6,6 +6,7 @@ users, server data, credentials and client installations are never touched.
 from __future__ import annotations
 
 import json
+import copy
 import os
 import secrets
 import sqlite3
@@ -275,6 +276,82 @@ def exercise(*, couch, **case):
             assert fresh.request(local_sync)['reports'][0]['status'] == 'published'
             assert source.request(local_sync)['reports'][0]['status'] == 'updated'
             assert source.request({'action':'get_report', **local_ids})['index']['chapters'][0]['title'] == 'Fresh device edit'
+            # Model an old report resource without the Research binding. Real
+            # Keycloak decisions for every fixture user and scope must remain
+            # unchanged when the binding is recovered from its real receipt.
+            from scripts.migrations.keycloak_local_report_binding import BindingBackend, _SCOPES
+            from scripts.migrations import keycloak_local_report_binding_cli
+            from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
+            from server.identity.federation_identity_sync import manager_keycloak_admin_adapter
+            origin_resource = manager._resource(settings, pat, 'research_report', shared['report_id'])
+            origin_id = str(origin_resource.get('_id') or origin_resource.get('id'))
+            origin_policy = next(row for row in manager._resource_policies(settings, pat, origin_id)
+                                 if str(row.get('name') or '').endswith(':owner'))
+            restored_policy = {'name': origin_policy['name'], 'description': origin_policy['description'],
+                'users': [users['owner']['id']], 'scopes': origin_policy['scopes'], 'logic': 'POSITIVE'}
+            manager.request(settings, pat, 'PUT', 'uma-policy/' + origin_policy['id'],
+                {**restored_policy, 'scopes': [scope for scope in restored_policy['scopes'] if scope != 'share']})
+            legacy_resource = copy.deepcopy(origin_resource)
+            legacy_resource['attributes'].pop('traderesearch_research_binding')
+            manager.request(settings, pat, 'PUT', 'resource_set/' + origin_id, legacy_resource)
+            identities = {'stable-' + name: user['id'] for name, user in users.items()}
+            evaluator = KeycloakPolicyEvaluator(allowed_kinds=('research_report',),
+                allowed_scopes=_SCOPES, adapter=manager_keycloak_admin_adapter(),
+                settings=settings, request=lambda _adapter, client_uuid, body: sandbox.api('POST', realm,
+                    f'clients/{client_uuid}/authz/resource-server/policy/evaluate', body))
+            # This fixture knows its three human users; production enumerates
+            # and validates the complete Keycloak group directory instead.
+            with patch('server.identity.keycloak_research_cutover._active_human_subjects', lambda _adapter: identities), \
+                 patch.object(manager, 'settings_provider', lambda: kc_settings):
+                backend = BindingBackend(state=state, store=store, manager=manager,
+                    adapter=manager_keycloak_admin_adapter(), research_id=research['research_id'],
+                    report_id=shared['report_id'], owner_id=verified['tr_identity_id'], evaluator=evaluator)
+                before = backend.read_evidence()
+                decision_snapshot = backend.read_decisions(identities, shared['report_id'])
+                assert decision_snapshot[(verified['tr_identity_id'], 'share')] is False
+                # Restore the two origin documents with original CouchDB
+                # revisions in a separate test database. Keycloak backup is a
+                # checksum fixture only, not a realm restore rehearsal.
+                import base64
+                import hashlib
+                import io
+                from contextlib import redirect_stdout
+                restored_name = 'binding_restore'
+                header = 'Basic ' + base64.b64encode((couch['username'] + ':' + couch['password']).encode()).decode()
+                with urllib.request.urlopen(urllib.request.Request(couch['url'] + '/' + restored_name,
+                        method='PUT', headers={'Authorization': header}), timeout=10): pass
+                restored_store = CouchDBObjectStore(couch['url'], restored_name,
+                    username=couch['username'], password=couch['password'])
+                documents = []
+                for key in ('receipt', 'publication'):
+                    status, raw = store._request('GET', before[key]['_id'] + '?attachments=true&revs=true')
+                    assert status == 200
+                    documents.append(json.loads(raw))
+                backup_file, kc_fixture = root / 'couch-fixture.json', root / 'kc-fixture'
+                backup_file.write_text(json.dumps({'docs': documents, 'new_edits': False}), encoding='utf-8')
+                backup_file.chmod(0o600)
+                status, response = restored_store._request('POST', '_bulk_docs', backup_file.read_bytes())
+                assert status in (201, 202) and all(not item.get('error') for item in json.loads(response))
+                kc_fixture.write_bytes(b'disposable checksum fixture, not a realm backup'); kc_fixture.chmod(0o600)
+                plan_file, journal_file = root / 'binding-plan.json', root / 'binding-journal.jsonl'
+                common = ['binding', '--manager-id', 'publication-smoke', '--owner-id', verified['tr_identity_id'],
+                    '--research-id', research['research_id'], '--report-id', shared['report_id'], '--plan', str(plan_file)]
+                restored_env = {'TR_REPORT_RESTORED_COUCHDB_URL': couch['url'], 'TR_REPORT_RESTORED_COUCHDB_DB': restored_name,
+                    'TR_REPORT_RESTORED_COUCHDB_USER': couch['username'], 'TR_REPORT_RESTORED_COUCHDB_PASSWORD': couch['password']}
+                with patch.dict(os.environ, restored_env), \
+                     patch('server.identity.keycloak_research.KeycloakResearchGrantManager', lambda: manager), \
+                     patch('server.identity.keycloak_policy_evaluation.KeycloakPolicyEvaluator', lambda **_kwargs: evaluator), \
+                     redirect_stdout(io.StringIO()):
+                    with patch.object(sys, 'argv', [common[0], 'review', *common[1:]]):
+                        keycloak_local_report_binding_cli.main()
+                    with patch.object(sys, 'argv', [common[0], 'stage', *common[1:], '--journal', str(journal_file),
+                        '--keycloak-backup', str(kc_fixture), '--keycloak-backup-sha256', hashlib.sha256(kc_fixture.read_bytes()).hexdigest(),
+                        '--couch-backup', str(backup_file), '--couch-backup-sha256', hashlib.sha256(backup_file.read_bytes()).hexdigest(),
+                        '--authorization-writes-quiesced', '--keycloak-restore-verified']):
+                        keycloak_local_report_binding_cli.main()
+                assert [json.loads(row)['event'] for row in journal_file.read_text().splitlines()] == ['binding_intent', 'binding_verified']
+                assert backend.read_decisions(identities, shared['report_id']) == decision_snapshot
+            manager.request(settings, pat, 'PUT', 'uma-policy/' + origin_policy['id'], restored_policy)
             # A second Manager in this shared realm can adopt only the same
             # research-bound resource with the owner's current authorization.
             # Both instances share the temporary object store in this fixture.
@@ -396,7 +473,8 @@ def main():
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
         'local_fresh_device_discovery_and_bidirectional_sync': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
-        'shared_realm_two_manager_client_mediated_sync': True, 'independent_realms_tested': False}, sort_keys=True))
+        'shared_realm_two_manager_client_mediated_sync': True, 'legacy_binding_permissions_preserved': True,
+        'independent_realms_tested': False}, sort_keys=True))
 
 
 if __name__ == '__main__':

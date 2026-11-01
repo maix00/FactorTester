@@ -34,9 +34,9 @@ def _read_private_json(path: str) -> dict:
     return value
 
 
-def _check_keycloak_backup(path: str, expected: str) -> None:
+def _check_private_backup(path: str, expected: str, *, label: str) -> None:
     if not re.fullmatch(r'[0-9a-f]{64}', expected):
-        raise ValueError('Keycloak backup SHA-256 is invalid')
+        raise ValueError(f'{label} backup SHA-256 is invalid')
     flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
     fd = os.open(Path(path).expanduser(), flags)
     digest = hashlib.sha256()
@@ -44,11 +44,15 @@ def _check_keycloak_backup(path: str, expected: str) -> None:
         info = os.fstat(source.fileno())
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
                 or info.st_mode & 0o077 or info.st_size <= 0):
-            raise PermissionError('Keycloak backup must be an owner-only regular file')
+            raise PermissionError(f'{label} backup must be an owner-only regular file')
         for chunk in iter(lambda: source.read(1024 * 1024), b''):
             digest.update(chunk)
     if digest.hexdigest() != expected:
-        raise ValueError('Keycloak backup checksum mismatch')
+        raise ValueError(f'{label} backup checksum mismatch')
+
+
+def _check_keycloak_backup(path: str, expected: str) -> None:
+    _check_private_backup(path, expected, label='Keycloak')
 
 
 def _snapshot(config, *, manager_id: str, principal: str) -> dict:
