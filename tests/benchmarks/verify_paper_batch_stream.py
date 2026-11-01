@@ -30,6 +30,8 @@ def main():
     parser.add_argument('--product', required=True)
     parser.add_argument('--formal-start', required=True)
     parser.add_argument('--suffix-start', help='compare a second replay starting at this warmup timestamp')
+    parser.add_argument('--suffix-use-source-ordinal', action='store_true',
+                        help='diagnostically bind the suffix to its ordinal in this single-product source')
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
 
@@ -131,7 +133,13 @@ def main():
         if suffix_start.tzinfo is None or suffix_start >= formal_start:
             raise ValueError('suffix start must be timezone-aware and precede formal start')
         first = int(np.searchsorted(times, suffix_start.value))
-        state = FactorPlanState(json.dumps({key: value for key, value in spec.items() if key != 'key_tuples'}), 1)
+        suffix_spec = {key: value for key, value in spec.items() if key != 'key_tuples'}
+        if args.suffix_use_source_ordinal:
+            suffix_spec = {**suffix_spec, 'nodes': [
+                {**node, 'source_ordinal': first} if node.get('observed_period') else node
+                for node in suffix_spec['nodes']
+            ]}
+        state = FactorPlanState(json.dumps(suffix_spec), 1)
         suffix = np.empty(len(times) - first)
         started = time.perf_counter()
         for i in range(first, len(times)):
@@ -145,6 +153,7 @@ def main():
         suffix_mismatch = bool(suffix_different.any())
         result['suffix_comparison'] = {
             'requested_start': args.suffix_start, 'source_ordinal': first,
+            'source_ordinal_bound': args.suffix_use_source_ordinal,
             'formal_bar_rows_compared': len(formal_positions),
             'mismatches': int(suffix_different.sum()),
             'diagnostic_seconds': time.perf_counter() - started,
