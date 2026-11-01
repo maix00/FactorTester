@@ -168,6 +168,49 @@ def exercise(*, couch, **case):
             status, body = read(read_target + '/attachments/report_authoring/' + digest)
             assert status == 200 and body == source, f'authoring download status={status}, bytes={len(body)}, expected={len(source)}'
 
+            # Verify the desktop client can import a server-owned editable
+            # report through the same actual Manager / Keycloak / Couch path.
+            catalog_report = 'report:v1:' + 'C' * 24
+            with identity_request():
+                bind_verified_identity(token, verified)
+                catalog.register_report(ref, actor='owner', report_id=catalog_report, title='desktop import')
+            catalog_workspace = initialize_report_workspace(workspace_root=root / 'catalog-authoring', report_workspace_id='smoke',
+                branch_id='main', report_id=catalog_report, workspace_id=ref, title='Desktop import', branch_ref='report-branch:main')
+            catalog_root = catalog_workspace['package_root']
+            catalog_snapshot = load_snapshot(package_root=catalog_root, branch_id='main')
+            catalog_source = bundle_from_snapshot(catalog_snapshot, package_root=catalog_root, branch_id='main')
+            catalog_target = target.replace('/reports/report-1/', '/reports/' + quote(catalog_report, safe='') + '/')
+            status, catalog_receipt = publish({'branch_ref': 'main', 'projection': build_upload_projection(catalog_snapshot),
+                'expected_revision': None, 'authoring': {'sha256': hashlib.sha256(catalog_source).hexdigest(),
+                    'root_ref': catalog_snapshot['head']['root_ref'], 'content_base64': base64.b64encode(catalog_source).decode('ascii')}}, catalog_target)
+            assert status == 201, (status, catalog_receipt)
+            from tools.cli.release.research_reporting.local_rpc import LocalResearchRPC
+            endpoint = 'http://127.0.0.1:' + str(http.server_address[1])
+            client = LocalResearchRPC(root / 'desktop', issuer=verified['keycloak_issuer'], identity_id=verified['tr_identity_id'],
+                profiles=[{'profile_id': 'self', 'display_name': 'Owner'}], manager={'endpoint': endpoint,
+                    'subject': verified['keycloak_subject'], 'token': token, 'certificate_pem': '', 'cookies': []})
+            imported_research = client.request({'action': 'import_research', 'profile_id': 'self', 'research_id': ref})
+            assert imported_research['status'] == 'imported'
+            imported_report = client.request({'action': 'import_catalog_report', 'profile_id': 'self',
+                'research_id': ref, 'report_id': catalog_report})
+            assert imported_report['status'] == 'imported'
+            imported_version = client.request({'action': 'get_report', 'profile_id': 'self', 'research_id': ref,
+                'report_id': catalog_report})['version']
+            assert imported_version['generation'] == catalog_snapshot['head']['generation']
+            peer = LocalResearchRPC(root / 'desktop-peer', issuer=verified['keycloak_issuer'], identity_id=verified['tr_identity_id'],
+                profiles=[{'profile_id': 'self', 'display_name': 'Owner'}], manager={'endpoint': endpoint,
+                    'subject': verified['keycloak_subject'], 'token': token, 'certificate_pem': '', 'cookies': []})
+            peer.request({'action': 'import_research', 'profile_id': 'self', 'research_id': ref})
+            peer.request({'action': 'import_catalog_report', 'profile_id': 'self', 'research_id': ref, 'report_id': catalog_report})
+            client.request({'action': 'add_report_component', 'profile_id': 'self', 'research_id': ref,
+                'report_id': catalog_report, 'component_id': 'chapter-client', 'kind': 'chapter',
+                'parent_id': '', 'title': 'Desktop edit', 'body': '', **imported_version})
+            sync = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
+            assert client.request(sync)['reports'][0]['status'] == 'published'
+            assert peer.request(sync)['reports'][0]['status'] == 'updated'
+            peer_index = peer.request({'action': 'get_report', 'profile_id': 'self', 'research_id': ref, 'report_id': catalog_report})
+            assert peer_index['index']['chapters'][0]['title'] == 'Desktop edit'
+
             # A client-local report has no server-side Research or Profile.
             # Its first explicit publication registers exactly one report
             # resource and atomically writes its selected CouchDB projection.
@@ -242,7 +285,7 @@ def main():
         run(sandbox, on_ready=lambda **case: exercise(couch=couch, **case))
     print(json.dumps({'real_manager_http': True, 'real_keycloak': True, 'real_couchdb': True,
         'single_report_and_attachment': True, 'same_token_role_revocation': True,
-        'catalog_editable_source_roundtrip': True,
+        'catalog_editable_source_roundtrip': True, 'catalog_desktop_import': True, 'catalog_two_client_sync': True,
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
         'cross_manager_tested': False}, sort_keys=True))

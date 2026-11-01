@@ -588,6 +588,7 @@ EXACT_PATH_TESTS["tools/cli/release/research_reporting/local_publication.py"] = 
 for _path in (
     "tools/cli/release/research_reporting/local_auto_sync.py",
     "tools/cli/release/research_reporting/local_pull.py",
+    "tools/cli/release/research_reporting/local_catalog_import.py",
 ):
     EXACT_PATH_TESTS[_path] = (
         "tests/release/test_local_research_rpc.py",

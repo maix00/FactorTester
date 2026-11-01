@@ -472,7 +472,8 @@ def test_shared_factor_benchmarks_and_planning_remain_scoped():
 
 def test_report_sync_helpers_select_only_relevant_contracts():
     for path in ("tools/cli/release/research_reporting/local_auto_sync.py",
-                 "tools/cli/release/research_reporting/local_pull.py"):
+                 "tools/cli/release/research_reporting/local_pull.py",
+                 "tools/cli/release/research_reporting/local_catalog_import.py"):
         mode, targets = selector.select({path})
         assert mode == "SCOPED"
         assert set(targets) == {"tests/release/test_local_research_rpc.py",

@@ -239,3 +239,16 @@ test("refreshing capabilities invalidates an in-flight list", async () => {
   resolveList(ok({researches:[record]}));
   await assert.rejects(pending,code("local_research_capabilities_superseded"));
 });
+
+test("catalog report import checks returned identity and session scope", async () => {
+  const item={report_id:"report:v1:"+"R".repeat(24),research_id:record.research_id,profile_id:"self",title:"Report",created_at:1};
+  let response=ok({report:item,status:"imported"});
+  const client=localResearchBridge(host(message=>message.action==="capabilities" ?
+    ok({actions:["import_catalog_report"],profiles:[{profile_id:"self",display_name:"Self"}]}) : response))!;
+  await client.capabilities(currentBinding);
+  assert.equal((await client.importCatalogReport("self",record.research_id,item.report_id)).status,"imported");
+  response=ok({report:{...item,report_id:"other"},status:"imported"});
+  await assert.rejects(client.importCatalogReport("self",record.research_id,item.report_id),code("local_research_invalid_response"));
+  response=ok({report:item,status:"unexpected"});
+  await assert.rejects(client.importCatalogReport("self",record.research_id,item.report_id),code("local_research_invalid_response"));
+});

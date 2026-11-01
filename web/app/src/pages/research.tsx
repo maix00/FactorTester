@@ -44,6 +44,7 @@ function ResearchPageForSession(): React.ReactElement {
   const queuedServerResearch=useRef(new Set<string>());
   const [localRevision,setLocalRevision]=useState(0);
   const [creatingLocal,setCreatingLocal]=useState(false);
+  const [importingReport,setImportingReport]=useState(false);
   const [localProfile,setLocalProfile]=useState<string | null>(null);
   const lastLocalError=useRef("");
   const missingReportDirectory=useRef(false);
@@ -214,6 +215,17 @@ function ResearchPageForSession(): React.ReactElement {
     {selected && !selected.__local ? <DetailsPanel title={selected.title || rowID(selected)} onClose={() => { setSelected(null); setSelectedPublicationID(""); }}>
       {tab === "reports" ? <>
         {linkedResearch ? <Button type="link" onClick={() => openResearch(linkedResearch,selected.research?.title || selected.research_title || linkedResearch)}>{t("research.openLinkedResearch")}</Button> : null}
+        {linkedResearch && selected.report_id && selected.owner_ref===principal && !selected.__hasLocal &&
+         local.phase==="ready" && local.client && local.capabilities?.actions.includes("import_catalog_report") &&
+         local.capabilities.profiles.some(item=>item.profile_id==="self") ? <Button loading={importingReport} onClick={()=>{
+          const client=local.client!,profile=local.capabilities!.profiles.find(item=>item.profile_id==="self")!,snapshot=client.snapshot();
+          setImportingReport(true);
+          void client.importResearch(profile.profile_id,linkedResearch)
+            .then(()=>client.importCatalogReport(profile.profile_id,linkedResearch,String(selected.report_id)))
+            .then(()=>{if(client.isCurrent(snapshot)){notify({code:"research.report.imported",type:"success",message:t("localResearch.importReportDone")});setLocalRevision(value=>value+1);syncLocalReports();}})
+            .catch(()=>{if(client.isCurrent(snapshot))notify({code:"research.report.import.failed",type:"error",message:t("localResearch.importReportFailed")});})
+            .finally(()=>{if(client.isCurrent(snapshot))setImportingReport(false);});
+        }}>{t("localResearch.importReport")}</Button> : null}
         {linkedResearch && selected.report_id ? <Collapse className="tr-report-sharing" ghost items={[{key:"sharing",label:t("researchSharing.title"),children:<ResearchSharing key={`${linkedResearch}:${selected.report_id}`} target={{researchId:linkedResearch,reportId:String(selected.report_id)}} />}]} /> : null}
         {availableReportBranches.length ? <div className="tr-report-source-picker">
           <span>{t("research.reportVersion")}</span>

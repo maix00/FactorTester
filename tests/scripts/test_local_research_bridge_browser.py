@@ -46,9 +46,11 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                       const row=(id,title,profile='p1')=>({research_id:id,profile_id:profile,title,description:'fixture',created_at:1720000000,updated_at:1720000000});
                       const ok=x=>({success:true,schema:'tr-local-research-bridge:v1',...x});
                       const bridge={postMessage(m){f.nativeCalls.push(m);
-                        if(m.action==='capabilities')return Promise.resolve(ok({binding:{issuer:'https://identity.test/realm',identity_id:'identity-1'},actions:['list','get','create','import_research','queue_researches'],profiles:[{profile_id:'p1',display_name:'自有身份'},{profile_id:'p2',display_name:'第二身份'},{profile_id:'self',display_name:'本人'}]}));
+                        if(m.action==='capabilities')return Promise.resolve(ok({binding:{issuer:'https://identity.test/realm',identity_id:'identity-1'},actions:['list','get','create','import_research','import_catalog_report','list_profile_reports','queue_researches'],profiles:[{profile_id:'p1',display_name:'自有身份'},{profile_id:'p2',display_name:'第二身份'},{profile_id:'self',display_name:'本人'}]}));
                         if(m.action==='list'){const rows=m.profile_id==='p1'?[row('r1','本机样本'),row('synced','同步样本'),...(f.created?[f.created]:[])]:m.profile_id==='self'&&f.serverNew?[row(f.serverNew.research_id,f.serverNew.title,'self')]:[...(f.created?[f.created]:[])].filter(x=>x.profile_id===m.profile_id);return Promise.resolve(ok({researches:rows.slice(m.offset,m.offset+m.limit),next_offset:null}));}
                         if(m.action==='import_research')return Promise.resolve(ok({research:row(m.research_id,f.serverNew.title,'self'),status:'imported'}));
+                        if(m.action==='list_profile_reports')return Promise.resolve(ok({reports:[],revision:1,next_offset:null}));
+                        if(m.action==='import_catalog_report')return Promise.resolve(ok({report:{report_id:m.report_id,research_id:m.research_id,profile_id:m.profile_id,title:'服务器报告',created_at:1720000000},status:'imported'}));
                         if(m.action==='queue_researches')return Promise.resolve(ok({queued:m.research_ids.length}));
                         if(m.action==='get')return Promise.resolve(ok({research:row(m.research_id,'本机样本',m.profile_id)}));
                         if(m.action==='create'){if(!f.created)f.created={...row('new-local',m.title,m.profile_id),description:m.description}; if(f.first){f.first=false;return Promise.reject(Error('fixture lost acknowledgement'));} return Promise.resolve(ok({research:f.created}));}
@@ -63,6 +65,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                         if(u.pathname==='/api/client/profiles')return res({profiles:[]});
                         if(u.pathname==='/api/research/capabilities/keycloak-sharing')return res({capabilities:{schema:'tr-research-keycloak-sharing-v1',authority:'keycloak',create_research:true}});
                         if(u.pathname==='/api/research')return res({researches:[{research_id:'server-r',title:'服务器样本',owner_ref:'alice'},{research_id:'synced',title:'同步样本',owner_ref:'alice'},{research_id:'research:v1:SSSSSSSSSSSSSSSSSSSSSSSS',title:'已有服务器研究',owner_ref:'alice',is_owned:true,access:{can_view:true}},...(f.serverNew?[f.serverNew]:[])]});
+                        if(u.pathname==='/api/research/reports')return res({reports:[{report_id:'report:v1:RRRRRRRRRRRRRRRRRRRRRRRR',research_id:'research:v1:RRRRRRRRRRRRRRRRRRRRRRRR',title:'服务器报告',owner_ref:'alice',research_title:'新服务器研究'}]});
                         if(u.pathname==='/api/research/keycloak-create'){f.serverNew={research_id:'research:v1:RRRRRRRRRRRRRRRRRRRRRRRR',title:'新服务器研究',owner_ref:'alice',access:{can_view:true}};return res({research:f.serverNew});}
                         if(u.pathname.startsWith('/api/research/research%3Av1%3A'))return res({research:f.serverNew});
                         throw Error('unexpected request '+u.pathname);};
@@ -113,8 +116,13 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     assert page.locator(".tr-function-header h1").evaluate("e => e.getBoundingClientRect().width >= e.scrollWidth")
                     if viewport["width"] < 600:
                         assert page.locator(".tr-function-header h1").evaluate("e => {const a=e.getBoundingClientRect(),b=document.querySelector('.tr-function-actions').getBoundingClientRect();return a.right<=b.left || a.bottom<=b.top;}")
+                    page.get_by_role("tab", name="研究报告").click()
+                    page.get_by_role("button", name="服务器报告").click()
+                    page.get_by_role("button", name="同步主分支到本机").click()
+                    page.wait_for_function("window.fixture.nativeCalls.some(x=>x.action==='import_catalog_report')")
+                    page.wait_for_function("!document.querySelector('.ant-btn-loading')")
                     page.screenshot(path=str(Path('/tmp') / f'tr-local-research-fixture-{viewport["width"]}.png'))
-                    assert page.get_by_text("服务器样本",exact=True).is_visible()
+                    assert page.get_by_text("服务器报告",exact=True).first.is_visible()
                     assert not page_errors
                     page.close()
                 for mode in ["wrong-issuer","wrong-identity","missing-identity"]:

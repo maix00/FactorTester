@@ -306,6 +306,18 @@ export class LocalResearchClient {
     return {research:value,status:String(reply.status)};
   }
 
+  async importCatalogReport(profileId:string,researchId:string,reportId:string):Promise<{report:LocalReport;status:"imported"|"already_imported"}> {
+    this.requireAction("import_catalog_report");
+    const profile_id=inputText(profileId,512),research_id=inputText(researchId,512),report_id=inputText(reportId,512);
+    this.requireProfile(profile_id);const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"import_catalog_report",profile_id,research_id,report_id});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    const value=report(reply.report);
+    if(value.profile_id!==profile_id||value.research_id!==research_id||value.report_id!==report_id||
+       (reply.status!=="imported"&&reply.status!=="already_imported"))throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {report:value,status:reply.status};
+  }
+
   async queueResearches(profileId:string,researchIds:string[]):Promise<number> {
     this.requireAction("queue_researches");
     const profile_id=inputText(profileId,512);this.requireProfile(profile_id);

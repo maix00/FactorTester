@@ -30,7 +30,7 @@ Profile 盘点可显式增加 `--include-postgres --postgres-settings <Manager �
 
 单报告的 Keycloak/CouchDB 发布入口为 `POST /api/research/{research_id}/reports/{report_id}/couchdb-publication`。请求包含 `branch_ref`、所选报告的完整 `projection` 和 `expected_revision`；首次发布为 `null`，更新时必须提供上次返回的 CouchDB revision。对应读取入口在该地址后加 `/{publication_id}`，也可使用 `GET` 并指定 `branch_ref` 找到同一发布；附件读取在 `/{publication_id}` 后再加 `/attachments/{object_kind}/{object_id}`。两者都实时校验目标服务器准入及精确报告的 Keycloak scope，发布需要 `write` 和 `share`，读取需要 `read`。无权限、离线、版本冲突或内容哈希不一致均不能写入或返回内容。
 
-此入口只提交显式选择的单个报告及随投影提供的资源，报告与附件在同一 CouchDB 文档中按版本原子提交；每次请求最多 32 MiB，单个资源最多 8 MiB、资源总量最多 20 MiB。客户端本地报告可通过独立的 Keycloak 注册入口首次发布；同一客户端的已发布报告可分批同步。服务器报告在新客户端的自动发现、跨 Manager 自动发布与 7997 分片上传仍未接通。旧 Research 整图的自动出站已停用，旧待发记录留待核对；这不代表旧入站镜像、整个研究的批量共享或历史授权迁移已经完成。
+此入口只提交显式选择的单个报告及随投影提供的资源，报告与附件在同一 CouchDB 文档中按版本原子提交；每次请求最多 32 MiB，单个资源最多 8 MiB、资源总量最多 20 MiB。客户端本地报告可通过独立的 Keycloak 注册入口首次发布；同一客户端的已发布报告可分批同步。服务器所有者可在电脑客户端显式导入已发布的主分支可编辑源码；导入前后重新核验授权及版本，并比对源码与公开投影，本地已有修改不会被覆盖。导入后的同 Manager 报告可按已保存的来源双向同步。服务器报告在新客户端的自动发现、其他分支导入、跨 Manager 自动发布与 7997 分片上传仍未接通。旧 Research 整图的自动出站已停用，旧待发记录留待核对；这不代表旧入站镜像、整个研究的批量共享或历史授权迁移已经完成。
 
 ## 隔离演练与分批准备
 

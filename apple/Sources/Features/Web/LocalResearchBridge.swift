@@ -96,7 +96,7 @@ final class LocalResearchBridge: NSObject, WKScriptMessageHandlerWithReply {
             var manager: [String: Any] = ["endpoint": self.endpoint.absoluteString,
                                            "subject": identity.subject,
                                            "token": "", "certificate_pem": "", "cookies": []]
-            if ["import_research", "discover_researches", "publish_report", "pull_report", "sync_reports"].contains(request["action"] as? String ?? "") {
+            if ["import_research", "import_catalog_report", "discover_researches", "publish_report", "pull_report", "sync_reports"].contains(request["action"] as? String ?? "") {
                 let cookies = (HTTPCookieStorage.shared.cookies(for: self.endpoint) ?? [])
                     .filter { $0.name == "ft-manager-session" }.map { cookie -> [String: Any] in
                         var value: [String: Any] = ["name": cookie.name, "value": cookie.value,

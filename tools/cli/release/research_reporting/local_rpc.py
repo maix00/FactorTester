@@ -40,6 +40,7 @@ class LocalResearchRPC:
             'get': {'action', 'profile_id', 'research_id'},
             'create': {'action', 'profile_id', 'title', 'description', 'operation_id'},
             'import_research': {'action', 'profile_id', 'research_id'},
+            'import_catalog_report': {'action', 'profile_id', 'research_id', 'report_id'},
             'queue_researches': {'action', 'profile_id', 'research_ids'},
             'discover_researches': {'action', 'profile_id', 'cursor', 'limit'},
             'list_reports': {'action', 'profile_id', 'research_id', 'limit', 'offset'},
@@ -55,6 +56,7 @@ class LocalResearchRPC:
         }
         if self.manager is None:
             keys.pop('import_research')
+            keys.pop('import_catalog_report')
             keys.pop('queue_researches')
             keys.pop('discover_researches')
             keys.pop('publish_report')
@@ -104,6 +106,19 @@ class LocalResearchRPC:
             try:
                 value = import_server_research(self.store, binding=self.binding, manager=self.manager,
                     profile_id=message['profile_id'], research_id=message['research_id'])
+            except HttpClientError as exc:
+                if exc.status in {401, 403}:
+                    return {'success': False, 'code': 'local_report_publication_denied'}
+                raise
+        elif action == 'import_catalog_report':
+            from tools.cli.http import HttpClientError
+            from .local_pull import LocalReportSyncConflict
+            from .local_catalog_import import import_catalog_report
+            try:
+                value = import_catalog_report(self.store, binding=self.binding, manager=self.manager,
+                    profile_id=message['profile_id'], research_id=message['research_id'], report_id=message['report_id'])
+            except LocalReportSyncConflict:
+                return {'success': False, 'code': 'local_report_sync_conflict'}
             except HttpClientError as exc:
                 if exc.status in {401, 403}:
                     return {'success': False, 'code': 'local_report_publication_denied'}
