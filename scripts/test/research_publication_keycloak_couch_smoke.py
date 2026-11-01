@@ -275,6 +275,38 @@ def exercise(*, couch, **case):
             assert fresh.request(local_sync)['reports'][0]['status'] == 'published'
             assert source.request(local_sync)['reports'][0]['status'] == 'updated'
             assert source.request({'action':'get_report', **local_ids})['index']['chapters'][0]['title'] == 'Fresh device edit'
+            # A second Manager cannot yet adopt a resource registered by the
+            # first, even with the same owner and shared realm. Keep the
+            # failure explicit; do not recreate a potentially revoked policy.
+            peer_state = manager_runtime.ManagerState(Path(__file__).resolve().parents[2], sys.executable,
+                server_role='main', server_id='publication-peer', state_root=root / 'peer-state', data_root=root / 'peer-data')
+            peer_state.research_catalog = catalog
+            class PeerHandler(manager_runtime.Handler):
+                def log_message(self, *_args): pass
+            PeerHandler.state = peer_state
+            peer_http = manager_runtime.ThreadingHTTPServer(('127.0.0.1', 0), PeerHandler)
+            peer_thread = threading.Thread(target=peer_http.serve_forever, daemon=True)
+            peer_thread.start()
+            try:
+                peer_endpoint = 'http://127.0.0.1:' + str(peer_http.server_address[1])
+                source_on_peer = LocalResearchRPC(root / 'local-source', issuer=verified['keycloak_issuer'],
+                    identity_id=verified['tr_identity_id'], profiles=[{'profile_id':'self', 'display_name':'Owner'}],
+                    manager={**native_manager, 'endpoint': peer_endpoint})
+                # Both in-process states otherwise share one process-wide
+                # deployment environment, which deliberately rejects two
+                # distinct server IDs. Isolate just that deployment lookup;
+                # token, role, object policy and CouchDB remain real.
+                with patch.object(server_admission, '_context',
+                                  lambda state=None: (True, state.server_id, ())):
+                    from tools.cli.http import HttpClientError
+                    try:
+                        source_on_peer.request({'action':'publish_report', **local_ids})
+                    except HttpClientError as error:
+                        assert error.status == 503
+                    else:
+                        raise AssertionError('cross-Manager resource adoption requires explicit authorization proof')
+            finally:
+                peer_http.shutdown(); peer_http.server_close(); peer_thread.join(timeout=5)
             with sqlite3.connect('file:' + str(catalog.db_path) + '?mode=ro', uri=True) as conn:
                 assert conn.execute('SELECT count(*) FROM research_catalog_researches WHERE research_id=?', (research['research_id'],)).fetchone()[0] == 0
             local_published = get_research_report(store, local_publication['publication_id'])
@@ -337,7 +369,7 @@ def main():
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
         'local_fresh_device_discovery_and_bidirectional_sync': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
-        'cross_manager_tested': False}, sort_keys=True))
+        'cross_manager_adoption_blocked': True, 'cross_manager_tested': False}, sort_keys=True))
 
 
 if __name__ == '__main__':

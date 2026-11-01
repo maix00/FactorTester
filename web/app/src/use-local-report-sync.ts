@@ -64,7 +64,7 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
           }
         }
         for(const item of page.report_imports){
-          if(item.status==="imported")changed=true;
+          if(item.status==="imported"||item.status==="attached")changed=true;
           if(["conflict","denied","unavailable"].includes(item.status)){
             const key=`report-import-${item.status}`;seen.add(key);
             if(!warned.has(key)){warned.add(key);notify({code:`research.report.import.${item.status}`,type:"warning",message:item.status==="conflict"?t("localResearch.syncConflict"):t("localResearch.importReportFailed")});}

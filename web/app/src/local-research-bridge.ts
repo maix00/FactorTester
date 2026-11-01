@@ -369,7 +369,7 @@ export class LocalResearchClient {
     const rawImports=reply.report_imports??[];
     if(!Array.isArray(rawImports)||rawImports.length>limit)throw new LocalResearchBridgeError("local_research_invalid_response");
     const report_imports=rawImports.map(value=>{
-      if(!isRecord(value)||!["imported","already_imported","conflict","denied","unavailable"].includes(String(value.status)))throw new LocalResearchBridgeError("local_research_invalid_response");
+      if(!isRecord(value)||!["imported","already_imported","attached","conflict","denied","unavailable"].includes(String(value.status)))throw new LocalResearchBridgeError("local_research_invalid_response");
       return {report_id:identifier(value.report_id),research_id:identifier(value.research_id),status:String(value.status)};
     });
     if(new Set(report_imports.map(value=>value.report_id)).size!==report_imports.length ||

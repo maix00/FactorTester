@@ -65,6 +65,63 @@ def _owner_metadata(session, research_id, report_id, metadata):
     return owner
 
 
+def _attach_identical_shared_report(store, *, root, existing, metadata, remote, owner_metadata,
+                                    session, identity, research_id, report_id, manager_hash):
+    """Attach a second Manager only when the existing local version is identical."""
+    from .authoring.tree_bundle import bundle_from_snapshot, validate_report_bundle
+    from .authoring.tree_paths import report_tree_paths
+    from .authoring.tree_projection import project_snapshot
+    from .authoring.tree_store import load_head, tree_lock
+
+    record, bundle = remote['publication'], remote['authoring']
+    if root.is_symlink() or not root.is_dir():
+        raise LocalReportSyncConflict('local report workspace is unavailable')
+    _tree(root)
+    paths = report_tree_paths(root, 'main')
+    with tree_lock(paths):
+        head = load_head(paths)
+        if (head['report_id'], head['generation'], head['root_ref']) != (
+                report_id, bundle['generation'], bundle['root_ref']):
+            raise LocalReportSyncConflict('local and Manager report versions differ')
+        data = bundle_from_snapshot(project_snapshot(paths, head), package_root=root, branch_id='main')
+    if len(data) != bundle['size_bytes'] or hashlib.sha256(data).hexdigest() != bundle['sha256']:
+        raise LocalReportSyncConflict('local and Manager report source bytes differ')
+    manifest, _files = validate_report_bundle(payload=data, expected_sha256=bundle['sha256'], report_id=report_id,
+        source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
+    del data, _files  # Release bundle bytes before revalidating current assets.
+    if not bundle_matches_projection(package_root=root, source_manifest=manifest,
+                                     remote_projection=remote['projection'], expected_hash=record['projection_hash']):
+        raise LocalReportSyncConflict('local report and Manager projection differ')
+    confirmed = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind='local')
+    current = session.get('/api/session')
+    if (confirmed != metadata or _owner_metadata(session, research_id, report_id, confirmed) != owner_metadata
+            or any(current.get(key) != identity.get(key) for key in
+                   ('username', 'keycloak_issuer', 'keycloak_subject', 'tr_identity_id'))):
+        raise PermissionError('report authorization or version changed during attachment')
+    with tree_lock(paths):
+        current_head = load_head(paths)
+        if (current_head['generation'], current_head['root_ref']) != (head['generation'], head['root_ref']):
+            raise LocalReportSyncConflict('local report changed during attachment')
+        # Assets are outside the immutable tree and can change independently.
+        current_data = bundle_from_snapshot(project_snapshot(paths, current_head), package_root=root, branch_id='main')
+        if hashlib.sha256(current_data).hexdigest() != bundle['sha256']:
+            raise LocalReportSyncConflict('local report assets changed during attachment')
+        with store._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM reports WHERE report_id=?', (report_id,)).fetchone()
+            if (row is None or row['ready'] != 1 or row['research_id'] != existing['research_id']
+                    or row['profile_id'] != existing['profile_id']):
+                raise LocalReportSyncConflict('local report identity changed during attachment')
+            if db.execute('SELECT 1 FROM report_publications WHERE report_id=? AND manager_hash=?',
+                          (report_id, manager_hash)).fetchone():
+                raise LocalReportSyncConflict('Manager receipt changed during attachment')
+            db.execute('''INSERT INTO report_publications (report_id,manager_hash,publication_id,revision,generation,
+                projection_hash,local_root_ref,source_kind) VALUES (?,?,?,?,?,?,?,?)''',
+                (report_id, manager_hash, record['publication_id'], record['revision'], record['generation'],
+                 record['projection_hash'], head['root_ref'], 'local'))
+    return {'status': 'attached', 'report': store._report_public(existing)}
+
+
 def _import_report(store, *, binding, manager, profile_id, research_id, report_id, source_kind):
     profile = store._profile(profile_id)
     root_id = report_workspace_id_for(report_id)
@@ -106,8 +163,14 @@ def _import_report(store, *, binding, manager, profile_id, research_id, report_i
         if source_kind == 'local' and parent is not None and parent['profile_id'] != profile:
             raise LocalReportSyncConflict('local Research belongs to another profile')
         if existing and existing['ready']:
-            if (existing['profile_id'] != profile or existing['research_id'] != research_id or not receipt
-                    or receipt['source_kind'] != source_kind or receipt['publication_id'] != record['publication_id']):
+            if existing['profile_id'] != profile or existing['research_id'] != research_id:
+                raise LocalReportSyncConflict('local report already has another origin')
+            if not receipt and source_kind == 'local':
+                return _attach_identical_shared_report(store, root=target, existing=existing, metadata=metadata,
+                    remote=remote, owner_metadata=owner_metadata, session=session, identity=identity,
+                    research_id=research_id, report_id=report_id, manager_hash=manager_hash)
+            if (not receipt or receipt['source_kind'] != source_kind
+                    or receipt['publication_id'] != record['publication_id']):
                 raise LocalReportSyncConflict('local report already has another origin')
             return {'status': 'already_imported', 'report': store._report_public(existing)}
         if existing:

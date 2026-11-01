@@ -43,3 +43,24 @@ def test_expired_cursor_restarts_without_discarding_pending_reports(tmp_path):
     assert discover_local_reports(store, **kwargs) == (False, [])
     with store._connect() as db:
         assert db.execute('SELECT source_kind FROM server_report_pending').fetchone()['source_kind'] == 'local'
+
+
+def test_existing_local_report_from_another_manager_is_queued_for_exact_validation(tmp_path):
+    store = LocalResearchCatalog(tmp_path, issuer='https://issuer.test/realm', identity_id='stable', profiles={'self'})
+    ensure_publication_table(store)
+    item = _item('A')
+    with store._connect() as db:
+        db.execute('INSERT INTO researches VALUES (?,?,?,?,?,?,?)',
+                   (item['research_id'], 'self', 'Research', '', 'create-research', 1, 1))
+        db.execute('INSERT INTO reports VALUES (?,?,?,?,?,?,?)',
+                   (item['report_id'], item['research_id'], 'self', 'Report', 'create-report', 1, 1))
+        db.execute('''INSERT INTO report_publications
+            (report_id,manager_hash,publication_id,revision,generation,projection_hash,local_root_ref)
+            VALUES (?,?,?,?,?,?,?)''', (item['report_id'], 'manager-a', 'p', 'r', 1, 'hash', 'root'))
+    class Session:
+        def get(self, _path, *, query):
+            return {'success': True, 'reports': [item], 'next_cursor': None}
+    assert discover_local_reports(store, session=Session(), manager_hash='manager-b', profile_id='self', limit=1) == (False, [])
+    with store._connect() as db:
+        row = db.execute('SELECT report_id,manager_hash,source_kind FROM server_report_pending').fetchone()
+    assert (row['report_id'], row['manager_hash'], row['source_kind']) == (item['report_id'], 'manager-b', 'local')

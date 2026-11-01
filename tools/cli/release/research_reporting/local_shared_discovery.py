@@ -64,10 +64,16 @@ def discover_local_reports(store, *, session, manager_hash: str, profile_id: str
                   ON publication.report_id=report.report_id AND publication.manager_hash=?
                 WHERE report.report_id=?''', (manager_hash, report_id)).fetchone()
             if existing is not None:
-                if (existing['research_id'], existing['profile_id'], existing['ready'], existing['source_kind']) != (
-                        research_id, profile, 1, 'local'):
+                if (existing['research_id'], existing['profile_id'], existing['ready']) != (research_id, profile, 1):
                     errors.append({'research_id': research_id, 'status': 'conflict'})
-                continue
+                    continue
+                if existing['source_kind'] == 'local':
+                    continue
+                if existing['source_kind'] is not None:
+                    errors.append({'research_id': research_id, 'status': 'conflict'})
+                    continue
+                # A workspace already known from another Manager is not yet
+                # trusted here. Queue it for an authorized, byte-exact check.
             pending = db.execute('''SELECT research_id,source_kind FROM server_report_pending
                 WHERE report_id=? AND manager_hash=? AND profile_id=?''', (report_id, manager_hash, profile)).fetchone()
             if pending:

@@ -262,6 +262,8 @@ test("background report discovery validates import and scan outcomes", async () 
   const result=await client.syncReports("self","",4);
   assert.deepEqual(result.report_imports,[item]);
   assert.equal(result.report_imports_pending_more,true);
+  response=ok({reports:[],researches:[],next_report_id:null,report_imports:[{...item,status:"attached"}]});
+  assert.equal((await client.syncReports("self","",4)).report_imports[0].status,"attached");
   response=ok({reports:[],researches:[],next_report_id:null,report_scans:[
     {research_id:"",status:"unavailable"},{research_id:record.research_id,status:"conflict"}]});
   assert.deepEqual((await client.syncReports("self","",4)).report_scans,[
