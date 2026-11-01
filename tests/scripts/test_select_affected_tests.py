@@ -483,3 +483,10 @@ def test_report_sync_helpers_select_only_relevant_contracts():
                                 "tests/server/test_client_local_report_publication.py",
                                 "tests/release/test_local_server_reports.py",
                                 "tests/release/test_local_research_catalog.py"}
+
+
+def test_manager_token_migration_avoids_unrelated_test_directories():
+    for path in ("apple/Sources/Networking/ManagerSessionTokenStore.swift",
+                 "apple/Tests/ManagerSessionTokenMigrationTests.swift"):
+        mode, targets = selector.select({path})
+        assert mode == "SCOPED" and targets == ["tests/scripts/test_native_session_restore.py"]

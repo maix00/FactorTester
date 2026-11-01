@@ -653,6 +653,11 @@ for _path in (
         "tests/server/test_client_server_research_import.py",
         "tests/server/test_client_local_report_publication.py",
     )
+for _path in (
+    "apple/Sources/Networking/ManagerSessionTokenStore.swift",
+    "apple/Tests/ManagerSessionTokenMigrationTests.swift",
+):
+    EXACT_PATH_TESTS[_path] = ("tests/scripts/test_native_session_restore.py",)
 EXACT_PATH_TESTS["tools/factors/alpha_plan.py"] = (*FACTOR_PLAN_TESTS,"tests/server/test_nautilus_strategy_runspec.py")
 EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)
