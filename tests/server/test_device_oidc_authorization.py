@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 from server.manager.domain.devices import DeviceChallengeStore, device_public_key_digest
 from server.manager.http.auth_routes import AuthenticationRoutesMixin
+from server.manager.http import device_routes
 
 
 KEY = {"kty": "EC", "crv": "P-256", "x": "A" * 43, "y": "A" * 43}
@@ -21,6 +22,28 @@ def test_ticket_binds_key_origin_and_is_one_use():
     import pytest
     with pytest.raises(PermissionError):
         tickets.consume_device_login_ticket(ticket, origin="https://manager")
+
+
+def test_device_proof_returns_oidc_handoff_not_a_manager_session(monkeypatch):
+    responses = []
+    monkeypatch.setattr(device_routes, 'json_response',
+                        lambda _handler, payload, status=200, **_kw: responses.append((status, payload)))
+    tickets = DeviceChallengeStore()
+    challenge_id, _challenge = tickets.issue()
+    handler = device_routes.DeviceNetworkRoutesMixin()
+    handler.state = SimpleNamespace(device_challenges=tickets, device_registry=SimpleNamespace(
+        verify=lambda **_kwargs: {'username': 'alice', 'device_id': DEVICE, 'public_key': KEY}))
+    handler._has_secure_ui_transport = lambda: True
+    handler._json_body = lambda _limit: {'challenge_id': challenge_id, 'device_id': DEVICE,
+                                         'public_key': KEY, 'signature': 'verified-by-registry'}
+    handler._request_origin = lambda: 'https://manager'
+    handler._client_ip = lambda: '192.0.2.1'
+    handler._device_verify()
+    status, response = responses[-1]
+    assert status == 200 and response['requires_keycloak'] is True
+    assert response['login_url'].startswith('/auth/oidc/start?')
+    assert 'device_ticket=' in response['login_url']
+    assert 'token' not in response and 'username' not in response
 
 
 def test_oidc_device_login_rechecks_keycloak_and_device_key(monkeypatch):

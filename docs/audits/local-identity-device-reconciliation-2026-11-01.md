@@ -45,3 +45,13 @@
 协调停写并升级：旧版本的 `ON CONFLICT(device_id)` 不兼容新主键。若新主键下
 已出现跨 Manager 同 ID 记录，不能直接回退旧主键或丢弃记录，必须先单独审核
 映射或回退完整数据库与应用。隔离 PostgreSQL 验证不等同真实服务迁移验收。
+
+## 桌面设备认证的接口缺口
+
+当前 Manager 的 `/api/device/verify` 在验签成功后返回 `requires_keycloak` 和
+`login_url`，浏览器还须完成 Keycloak 登录、回调与设备授权检查，才会建立
+Manager 会话。桌面 `ManagerDeviceAuthenticationService` 仍按旧合同解码
+`username` 和 `token`；因此不能用已通过设备登记或数据库测试证明桌面自动登录
+已经接通。桌面启动和切换 Manager 时还需要把一次性登录入口安全交给 WebView，
+仅在回调成功并重新验证 Manager 身份后导入会话；失败或目标身份不匹配时继续
+拒绝访问。当前实现尚未完成这一端到端链路，内网与公网均需实测。
