@@ -55,6 +55,26 @@ def test_strategy_replay_uses_frozen_catalog_frequency_before_compilation(monkey
         )
 
 
+def test_frozen_node_bar_budget_is_total_across_products(monkeypatch, tmp_path):
+    from nautilus_trader import _libnautilus
+    from server.services.nautilus_bridge.strategy_families import ThresholdState
+
+    monkeypatch.setattr(_libnautilus, "attach_factor_family", lambda **kwargs: None, raising=False)
+    monkeypatch.setattr(strategy_backtest, "_load_input", lambda _: (
+        None, None, {"selected_count": 6, "first_available_ns": 1, "last_available_ns": 2}, None,
+    ))
+    monkeypatch.setattr(strategy_backtest, "_compile_frozen_roots",
+                        lambda *args, **kwargs: pytest.fail("budget must be checked before compilation"))
+    strategies = [{"strategy_id": "s", "factor_bindings": {"signal": CLOSE},
+                   "factor_refs": {"signal": "factor:v2:" + "a" * 43},
+                   "family": ThresholdState(1, 0)}]
+    with pytest.raises(ValueError, match="exceed the explicit replay bar cap"):
+        strategy_backtest.run_strategy_families_replay(
+            inputs={"T": object(), "TL": object()}, strategies=strategies,
+            output_dir=tmp_path, max_bars=10, max_total_bars=10,
+        )
+
+
 def test_strategy_family_resolves_multiple_factor_roles(monkeypatch, tmp_path):
     class Resolver:
         def __init__(self, **kwargs):
@@ -98,6 +118,7 @@ def test_strategy_family_resolves_multiple_factor_roles(monkeypatch, tmp_path):
     assert captured["factor_refs"] == {"signal": "factor:v2:" + "a" * 43, "confirm": "factor:v2:" + "b" * 43}
     assert captured["family"].split_count == 2
     assert captured["family"].group_index == 1
+    assert captured["max_total_bars"] == 8
 
 
 def test_strategy_family_compiles_run_spec_execution_plan(monkeypatch, tmp_path):

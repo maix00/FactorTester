@@ -104,7 +104,7 @@ class VersionProbe(FactorFamily):
     families.append(dict(strategy_id='Threshold-1',kind='threshold',parameters={'entry_threshold':1 if args.frozen_factors_file else 2 if args.complex_match else 100,'exit_threshold':0 if args.frozen_factors_file else 1 if args.complex_match else 99},factor_roles={'signal':{'ref':frozen['ref']}}))
     families=[family for family in families if family['strategy_id'] in ids]
     plan={'plan_version':1,'kind':'nautilus_strategy_family','strategy_families':families,
-          'catalog_inputs':catalogs,'max_input_bars':manifest['expected_slices']}
+          'catalog_inputs':catalogs,'max_input_bars':sum(int(receipt['selected_count']) for receipt in receipts)}
     job_spec={'_owner':'alice','run_spec':run_spec}
     from server.jobs.models import JobRecord
     from server.jobs.states import JobStatus

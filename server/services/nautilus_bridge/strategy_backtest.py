@@ -91,13 +91,13 @@ def _build_strategy_family_engine(execution_plan, instruments, *, by_strategy=No
 
 
 def run_strategy_family_replay(*,inputs,factor_bindings,factor_refs,family,output_dir,
-    max_bars=8,execution_plan=None,session_calendar=None,batch_minutes=20,trace_path=None):
+    max_bars=8,max_total_bars=None,execution_plan=None,session_calendar=None,batch_minutes=20,trace_path=None):
     """Single-family compatibility view over the one shared runtime."""
     strategy_id=(str(execution_plan.strategy_venue_bindings[0]['strategy_id'])
                  if execution_plan is not None else 'FactorFamily-000')
     result=run_strategy_families_replay(inputs=inputs,strategies=[dict(strategy_id=strategy_id,
         factor_bindings=factor_bindings,factor_refs=factor_refs,family=family)],output_dir=output_dir,
-        max_bars=max_bars,execution_plan=execution_plan,session_calendar=session_calendar,
+        max_bars=max_bars,max_total_bars=max_total_bars,execution_plan=execution_plan,session_calendar=session_calendar,
         batch_minutes=batch_minutes,trace_path=trace_path)
     slots=result['strategy_output_slots'][strategy_id]
     return {**result,'factor_roles':sorted(factor_bindings),
@@ -106,7 +106,7 @@ def run_strategy_family_replay(*,inputs,factor_bindings,factor_refs,family,outpu
 
 
 def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execution_plan=None,
-    session_calendar=None,batch_minutes=20,trace_path=None,inspect_outputs=False):
+    max_total_bars=None,session_calendar=None,batch_minutes=20,trace_path=None,inspect_outputs=False):
     """One Catalog replay and CSE Actor for every compatible native consumer."""
     from nautilus_trader import _libnautilus as native
     attach_factor_family = native.attach_factor_family
@@ -140,7 +140,10 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
         consumers.append(dict(strategy_id=native_id,
             rule=_family_rule(strategy['family']),product_indices=[products.index(p) for p in chosen]))
     opened={product:_load_input(item) for product,item in inputs.items()}
-    preflight_catalogs(opened.values(),max_input_bars=max_bars*len(opened))
+    # The node's frozen budget is for the complete input, not per product.
+    # Direct test/helper calls without a total retain their per-product cap.
+    input_cap=max_bars*len(opened) if max_total_bars is None else max_total_bars
+    preflight_catalogs(opened.values(),max_input_bars=input_cap)
     spec,slots=_compile_frozen_roots(roots,products,session_calendar,
         source_freq=_source_frequency(opened))
     from alpha.factor.spec import scope_plan_outputs
@@ -182,7 +185,7 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
             calendar_json=json.dumps([(x.start_ns,x.end_ns) for x in session_calendar.sessions] if session_calendar else []),
             trace_path=None if trace_path is None else str(trace_path))
         try:
-            replay=replay_catalog_batches(engine,opened.values(),max_input_bars=max_bars*len(opened),batch_minutes=batch_minutes)
+            replay=replay_catalog_batches(engine,opened.values(),max_input_bars=input_cap,batch_minutes=batch_minutes)
         except Exception:
             runtime.raise_if_failed();raise
         runtime.ensure_success()
@@ -330,7 +333,10 @@ def run_strategy_family_run_spec(
             unknown=set(selected)-set(aliases)
             if unknown:raise ValueError(f'strategy scope has no frozen catalog: {sorted(unknown)}')
             consumer['products']=list(dict.fromkeys(aliases[x] for x in selected))
-    common=dict(inputs=inputs,output_dir=Path(output_dir),max_bars=int(plan.get('max_input_bars') or 8),
+    # A portable plan's node budget bounds the sum across all catalogs.
+    # Do not multiply it by the number of selected products.
+    common=dict(inputs=inputs,output_dir=Path(output_dir),max_bars=8,
+                max_total_bars=plan.get('max_input_bars'),
                 execution_plan=execution_plan,session_calendar=plan.get('session_calendar'))
     if len(consumers)==1 and 'strategy_families' not in plan:
         consumer=consumers[0]
