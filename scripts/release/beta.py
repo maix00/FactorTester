@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from uuid import uuid4
 
-from scripts.release.assets import build_installer_dmg, embed_client_runtime
+from scripts.release.assets import build_installer_dmg, default_runtime_cache, embed_client_runtime
 from scripts.release.build import (
     REPO, _sign_embedded_app, _validate_source_checkout,
     discard_xcode_app, prepare_xcode_build_root, xcodebuild_environment,
@@ -147,9 +147,7 @@ def main() -> None:
     parser.add_argument("--private-key", required=True, type=Path)
     parser.add_argument("--public-key", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--cache-dir", type=Path, default=(
-        Path.home() / "Library/Caches/FactorTester/release-runtime"
-    ))
+    parser.add_argument("--cache-dir", type=Path, default=default_runtime_cache())
     parser.add_argument("--signing-identity", default=DEFAULT_IDENTITY)
     parser.add_argument("--minimum-client", default="0.1.0")
     parser.add_argument("--mandatory", action="store_true")

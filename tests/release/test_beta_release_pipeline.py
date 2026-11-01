@@ -10,6 +10,18 @@ from scripts.release import assets, beta
 from scripts.release.beta import DEFAULT_IDENTITY, publish_beta_files
 
 
+def test_default_runtime_cache_reuses_legacy_cache_without_creating_one(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    canonical = tmp_path / 'Library/Caches/TradeResearch/release-runtime'
+    legacy = tmp_path / 'Library/Caches/FactorTester/release-runtime'
+    assert assets.default_runtime_cache() == canonical
+    assert not legacy.exists()
+    legacy.mkdir(parents=True)
+    assert assets.default_runtime_cache() == legacy
+    canonical.mkdir(parents=True)
+    assert assets.default_runtime_cache() == canonical
+
+
 def _runtime_repo(root: Path) -> Path:
     for relative in (
         "tools/cli/pyproject.toml",
@@ -110,7 +122,10 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
 ) -> None:
     repo = _runtime_repo(tmp_path / "repo")
     sources, adapters = _external_client_assets(tmp_path / "external")
-    cache = tmp_path / "cache"
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    cache = tmp_path / 'Library/Caches/FactorTester/release-runtime'
+    canonical_cache = tmp_path / 'Library/Caches/TradeResearch/release-runtime'
+    canonical_cache.mkdir(parents=True)
     key = assets.runtime_input_digest(
         repo, client_sources_root=sources, client_adapters_root=adapters,
     )
@@ -135,6 +150,9 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     cached_source.write_text('{"source_id":"tiger-test"}\n', encoding="utf-8")
     assets._write_cache_descriptor(cache / key, key)
     app = tmp_path / "FTClient.app"
+    legacy = app / 'Contents/Resources/FactorTester'
+    legacy.mkdir(parents=True)
+    (legacy / 'old-runtime').write_text('old')
 
     monkeypatch.setattr(
         assets.subprocess, "run",
@@ -142,15 +160,16 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     )
     receipt = assets.embed_client_runtime(
         repo, app, version="bundle-b2-r" + "a" * 40,
-        source_revision="a" * 40, cache_dir=cache,
+        source_revision="a" * 40, cache_dir=canonical_cache,
         client_sources_root=sources, client_adapters_root=adapters,
     )
 
     value = json.loads(receipt.read_text())
     assert value["runtime_input_sha256"] == key
     assert value["source_revision"] == "a" * 40
+    assert not legacy.exists()
     assert (
-        app / "Contents/Resources/FactorTester/bin/traderesearch"
+        app / "Contents/Resources/TradeResearch/bin/traderesearch"
     ).read_bytes() == b"cached executable"
 
 

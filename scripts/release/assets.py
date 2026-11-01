@@ -45,6 +45,31 @@ _MACHO_PREFIXES = {
 }
 
 
+def client_runtime_resources(app: Path) -> Path:
+    """Canonical bundled runtime location shared by packaging and signing."""
+    return app / "Contents" / "Resources" / "TradeResearch"
+
+
+def default_runtime_cache() -> Path:
+    """Reuse an existing cache when upgrading; never create the old location."""
+    cache_root = Path.home() / "Library" / "Caches"
+    canonical = cache_root / "TradeResearch" / "release-runtime"
+    legacy = cache_root / "FactorTester" / "release-runtime"
+    return legacy if not canonical.exists() and legacy.is_dir() else canonical
+
+
+def _finish_embedded_runtime(app: Path, resources: Path, *, version: str,
+                             source_revision: str, cache_key: str) -> Path:
+    receipt = _write_runtime_receipt(resources, version=version,
+                                     source_revision=source_revision, cache_key=cache_key)
+    legacy = app / "Contents" / "Resources" / "FactorTester"
+    if legacy.is_symlink():
+        raise ValueError("legacy bundled runtime must not be a symlink")
+    if legacy.is_dir():
+        shutil.rmtree(legacy)
+    return receipt
+
+
 def _create_runtime_environment(environment: Path) -> None:
     """Create the build venv from source Python or a real host interpreter."""
     if not getattr(sys, "frozen", False):
@@ -210,7 +235,7 @@ def embed_client_runtime(
     if not _SOURCE_REVISION.fullmatch(source_revision):
         raise ValueError("runtime source revision must be a full 40-character Git revision")
     validate_client_package_layout(repo)
-    resources = app / "Contents" / "Resources" / "FactorTester"
+    resources = client_runtime_resources(app)
     if resources.exists():
         shutil.rmtree(resources)
     cache_key = runtime_input_digest(
@@ -219,18 +244,20 @@ def embed_client_runtime(
         client_adapters_root=client_adapters_root,
     )
     cached = cache_dir / cache_key if cache_dir is not None else None
-    if cached is not None and _valid_runtime_cache(
-        cached,
-        cache_key,
-        expect_sources=client_sources_root is not None,
-        expect_adapters=client_adapters_root is not None,
-    ):
-        shutil.copytree(cached, resources)
-        (resources / ".runtime-cache.json").unlink()
-        return _write_runtime_receipt(
-            resources, version=version, source_revision=source_revision,
-            cache_key=cache_key,
-        )
+    candidates = [cached] if cached is not None else []
+    canonical_cache = Path.home() / "Library/Caches/TradeResearch/release-runtime"
+    if cache_dir == canonical_cache:
+        candidates.append(Path.home() / "Library/Caches/FactorTester/release-runtime" / cache_key)
+    for candidate in candidates:
+        if _valid_runtime_cache(candidate, cache_key,
+                                expect_sources=client_sources_root is not None,
+                                expect_adapters=client_adapters_root is not None):
+            shutil.copytree(candidate, resources)
+            (resources / ".runtime-cache.json").unlink()
+            return _finish_embedded_runtime(
+                app, resources, version=version, source_revision=source_revision,
+                cache_key=cache_key,
+            )
     if cached is not None and cached.exists():
         quarantine = cached.with_name(f".{cached.name}.corrupt-{uuid4().hex}")
         try:
@@ -385,8 +412,8 @@ def embed_client_runtime(
             staging.rename(cached)
         except FileExistsError:
             shutil.rmtree(staging)
-    return _write_runtime_receipt(
-        resources, version=version, source_revision=source_revision,
+    return _finish_embedded_runtime(
+        app, resources, version=version, source_revision=source_revision,
         cache_key=cache_key,
     )
 

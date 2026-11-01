@@ -155,6 +155,8 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     ).read_text(encoding="utf-8")
     assert 'APP_NAME="TradeResearch"' in source
     assert 'APP_NAME="FactorTester-Client"' not in source
+    assert 'Contents/Resources/TradeResearch/bin/traderesearch' in source
+    assert 'Contents/Resources/FactorTester/' not in source
     assert "cleanup_stale_debug_artifacts" in source
     assert "FactorTester-Client-*" in source
     assert "FTCLIENT_SKIP_DEBUG_CLEANUP" in source
@@ -182,7 +184,7 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
     monkeypatch,
 ) -> None:
     app = tmp_path / "FTClient.app"
-    resources = app / "Contents/Resources/FactorTester"
+    resources = app / "Contents/Resources/TradeResearch"
     cli = resources / "bin/traderesearch"
     cli.parent.mkdir(parents=True)
     cli.write_bytes(b"old")
@@ -323,7 +325,7 @@ def test_release_builder_exposes_only_one_dmg(
 
     def fake_embed(repo, app, *, version, source_revision):
         assert version == "bundle-b4-r" + "a" * 40
-        receipt = app / "Contents/Resources/FactorTester/bundle-receipt.json"
+        receipt = app / "Contents/Resources/TradeResearch/bundle-receipt.json"
         receipt.parent.mkdir(parents=True)
         receipt.write_text("{}")
         return receipt
@@ -339,7 +341,7 @@ def test_release_builder_exposes_only_one_dmg(
         assert signed is True
         assert (
             app
-            / "Contents/Resources/FactorTester/bundle-receipt.json"
+            / "Contents/Resources/TradeResearch/bundle-receipt.json"
         ).is_file()
         output.write_bytes(b"dmg")
         return output
@@ -406,6 +408,27 @@ def test_embedded_app_is_resigned_and_verified_before_packaging(
         ["codesign", "-d", "--entitlements", ":-", str(app)],
         ["codesign", "-d", "-r-", str(app)],
     ]
+
+
+def test_new_runtime_binary_is_signed_with_client_entitlements(tmp_path, monkeypatch):
+    app = tmp_path / 'TradeResearch.app'
+    binary = app / 'Contents/Resources/TradeResearch/bin/traderesearch'
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b'binary')
+    calls = []
+
+    def record(command, **_kwargs):
+        calls.append(command)
+        if command[1:4] == ['-d', '--entitlements', ':-']:
+            return subprocess.CompletedProcess(command, 0, b'com.apple.security.cs.disable-library-validation', b'')
+        return subprocess.CompletedProcess(command, 0, '', '')
+
+    monkeypatch.setattr(release_build, '_is_mach_o', lambda path: path == binary)
+    monkeypatch.setattr(release_build.subprocess, 'run', record)
+    release_build._sign_embedded_app(app, 'FTClient Beta Release')
+    signing = next(command for command in calls if command[-1] == str(binary))
+    assert '--entitlements' in signing
+    assert signing[signing.index('--entitlements') + 1].endswith('FactorTester-Client.entitlements')
 
 
 def test_release_builder_rejects_ephemeral_adhoc_signature(
@@ -614,7 +637,7 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     assert '"bin/traderesearch-manager"' in body
     assert '"bin/traderesearch-report-renderer"' in body
     assert '"adapters/vibe-trading-adapter.zip"' in body
-    resources = app / "Contents/Resources/FactorTester"
+    resources = app / "Contents/Resources/TradeResearch"
     assert not (resources / "sources/Tiger/__pycache__").exists()
     assert not any(path.suffix == ".pyc" for path in resources.rglob("*"))
 

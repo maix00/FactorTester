@@ -14,6 +14,7 @@ from scripts.release.assets import (
     embed_client_runtime,
     build_installer_dmg,
     refresh_runtime_receipt,
+    client_runtime_resources,
 )
 
 
@@ -194,7 +195,8 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
         ):
             signables.append(path)
     signables.sort(key=lambda path: len(path.parts), reverse=True)
-    runtime_bin = app / "Contents/Resources/FactorTester/bin"
+    runtime_resources = client_runtime_resources(app)
+    runtime_bin = runtime_resources / "bin"
     entitlements = str(
         REPO / "apple/Resources/macOS/FactorTester-Client.entitlements"
     )
@@ -211,7 +213,6 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
             check=True,
             capture_output=True,
         )
-    runtime_resources = app / "Contents/Resources/FactorTester"
     if (runtime_resources / "bundle-receipt.json").is_file():
         refresh_runtime_receipt(runtime_resources)
     subprocess.run(

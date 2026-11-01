@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 
-from scripts.release.assets import embed_client_runtime
+from scripts.release.assets import client_runtime_resources, default_runtime_cache, embed_client_runtime
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -23,7 +23,7 @@ def ensure_client_runtime(
     # error after packaging has already completed.
     if not _REVISION.fullmatch(source_revision):
         raise ValueError("runtime source revision must be a full 40-character Git revision")
-    resources = app / "Contents" / "Resources" / "FactorTester"
+    resources = client_runtime_resources(app)
     receipt_path = resources / "bundle-receipt.json"
     cli_path = resources / "bin" / "traderesearch"
     manager_cli_path = resources / "bin" / "traderesearch-manager"
@@ -47,7 +47,7 @@ def ensure_client_runtime(
         app,
         version=version,
         source_revision=source_revision,
-        cache_dir=cache_dir or (Path.home() / "Library/Caches/FactorTester/release-runtime"),
+        cache_dir=cache_dir or default_runtime_cache(),
     )
     return True
 
