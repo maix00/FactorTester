@@ -41,7 +41,7 @@ class _Route(device_admin_routes.DeviceAdministrationRoutesMixin):
                 rows if username == "alice" and include_disabled else []
             ),
             public_device_total_count=lambda *, username: 1 if username == "alice" else 0,
-            revoke=lambda device_id: self.revoked.append(device_id) or rows[0],
+            revoke=lambda device_id, **_kw: self.revoked.append(device_id) or rows[0],
             key_binding=lambda **kw: {'public_key': 'key'},
             backend_status=lambda: {"backend": "control-db"},
         ))
@@ -80,6 +80,26 @@ def test_admin_revoke_keeps_record_if_keycloak_unavailable(monkeypatch, response
     admin._admin_device_revoke()
     assert responses[-1][0] == 503
     assert admin.revoked == []
+
+
+def test_admin_cannot_revoke_another_managers_device(monkeypatch, responses, tmp_path):
+    from server.manager.domain.devices import DeviceRegistry
+
+    admin = _Route({'username': 'root'}, {'alice': []})
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='manager')
+    registry.apply_snapshot(source_server_id='remote', generation=1, devices=[{
+        'device_id': 'device-1234567890', 'username': 'alice', 'enabled': True,
+        'public_key': {'kty': 'EC', 'crv': 'P-256', 'x': 'A' * 43, 'y': 'A' * 43},
+    }])
+    admin.state.device_registry = registry
+    monkeypatch.setattr(device_admin_routes, 'current_manager_role', lambda *_: True)
+    monkeypatch.setattr(device_admin_routes, 'current_administrative_groups', lambda *_: ())
+    called = []
+    monkeypatch.setattr('server.identity.keycloak_device.revoke_device_for_owner',
+                        lambda **kw: called.append(kw))
+    admin._admin_device_revoke()
+    assert responses[-1][0] == 403
+    assert not called and registry.list(username='alice')[0]['enabled'] is True
 
 
 def test_organization_admin_can_read_and_revoke_only_in_scope_user_devices(

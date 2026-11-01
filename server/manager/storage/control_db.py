@@ -681,24 +681,33 @@ class PostgresControlStore(AccountDomainControlMixin):
             ).fetchone()
         return None if row is None else self._device_value(row)
 
-    def revoke_device(self, device_id: str) -> dict[str, Any] | None:
+    def revoke_device(self, device_id: str, *, source_server_id: str,
+                      username: str | None = None, public_key: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+        """Revoke only the source Manager's exact binding, including under races."""
+        if not source_server_id or (username is None) != (public_key is None):
+            raise ValueError("device revoke requires a source and complete binding")
         self.ensure_schema()
+        conditions = "device_id=%s AND source_server_id=%s"
+        params: list[Any] = [str(device_id), str(source_server_id)]
+        if username is not None and public_key is not None:
+            conditions += " AND username=%s AND public_key=%s::jsonb"
+            params.extend((str(username), json.dumps(dict(public_key), ensure_ascii=False)))
         with self._connection() as connection:
             row = connection.execute(
-                """
+                f"""
                 UPDATE control_devices
                 SET enabled=FALSE, updated_at=CURRENT_TIMESTAMP
-                WHERE device_id=%s
+                WHERE {conditions}
                 RETURNING device_id, public_key, username, device_name,
                           client_type, client_name, enrollment_ip, last_seen_ip,
                           enabled, source_server_id,
                           created_at, updated_at, last_seen_at
                 """,
-                (str(device_id),),
+                tuple(params),
             ).fetchone()
         return None if row is None else self._device_value(row)
 
-    def touch_device(self, device_id: str, *, last_seen_ip: str = "") -> None:
+    def touch_device(self, device_id: str, *, source_server_id: str, last_seen_ip: str = "") -> None:
         self.ensure_schema()
         with self._connection() as connection:
             connection.execute(
@@ -707,12 +716,13 @@ class PostgresControlStore(AccountDomainControlMixin):
                 SET last_seen_at=CURRENT_TIMESTAMP,
                     last_seen_ip=CASE WHEN %s='' THEN last_seen_ip ELSE %s END,
                     updated_at=CURRENT_TIMESTAMP
-                WHERE device_id=%s AND enabled=TRUE
+                WHERE device_id=%s AND source_server_id=%s AND enabled=TRUE
                 """,
                 (
                     str(last_seen_ip or "")[:45],
                     str(last_seen_ip or "")[:45],
                     str(device_id),
+                    str(source_server_id),
                 ),
             )
 

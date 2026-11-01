@@ -174,7 +174,8 @@ class DeviceAdministrationRoutesMixin:
             revoke_device_for_owner(owner_subject=owner["subject"], identity_id=owner["identity_id"],
                                     server_id=self.state.server_id, device_id=device_id,
                                     public_key=binding.get("public_key"))
-            device = self.state.device_registry.revoke(device_id)
+            device = self.state.device_registry.revoke(device_id, username=username,
+                                                       public_key=binding.get("public_key"))
         except LookupError:
             json_response(self, {
                 "success": False,

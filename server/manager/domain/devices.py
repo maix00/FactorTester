@@ -464,18 +464,27 @@ class DeviceRegistry:
                 and bool(item.get("enabled"))
             )
 
-    def revoke(self, device_id: str) -> dict[str, object]:
+    def revoke(self, device_id: str, *, username: str | None = None,
+               public_key: object | None = None) -> dict[str, object]:
         identifier = normalise_device_id(device_id)
+        if (username is None) != (public_key is None):
+            raise DeviceRegistryError("device revoke requires a complete owner and key binding")
+        owner = str(username).strip() if username is not None else None
+        key = normalise_public_key(public_key) if public_key is not None else None
+        if owner is not None and not owner:
+            raise DeviceRegistryError("device owner is required")
         if self.control_store is not None:
-            record = self.control_store.revoke_device(identifier)
+            record = self.control_store.revoke_device(identifier, source_server_id=self.server_id,
+                                                      username=owner, public_key=key)
             if record is None:
-                raise DeviceRegistryError("device was not found")
+                raise DeviceRegistryError("device binding was not found on this server")
             return _public_record(record)
         with self._lock:
             self._require_writable()
             record = self._local.get(identifier)
-            if record is None:
-                raise DeviceRegistryError("device was not found on this server")
+            if (record is None or record.get("source_server_id") != self.server_id
+                    or (owner is not None and (record.get("username") != owner or record.get("public_key") != key))):
+                raise DeviceRegistryError("device binding was not found on this server")
             record = {**record, "enabled": False, "updated_at": time.time()}
             self._local[identifier] = record
             self._generation += 1
@@ -616,13 +625,15 @@ class DeviceRegistry:
         key = normalise_public_key(public_key)
         if self.control_store is not None:
             record = self.control_store.device(identifier)
-            if record is None or not bool(record.get("enabled")) or record.get("public_key") != key:
+            if (record is None or record.get("source_server_id") != self.server_id
+                    or not bool(record.get("enabled")) or record.get("public_key") != key):
                 raise PermissionError("device is not approved")
             _verify_public_key_signature(
                 key, challenge=bytes(challenge), signature=signature,
             )
             self.control_store.touch_device(
                 identifier,
+                source_server_id=self.server_id,
                 last_seen_ip=last_seen_ip,
             )
             observed = normalise_client_metadata({
@@ -636,6 +647,7 @@ class DeviceRegistry:
             matches = [
                 item for item in self._all_locked()
                 if item.get("device_id") == identifier
+                and item.get("source_server_id") == self.server_id
                 and item.get("enabled")
                 and item.get("public_key") == key
             ]
@@ -670,10 +682,11 @@ class DeviceRegistry:
             return None
         if self.control_store is not None:
             row = self.control_store.device(identifier)
-            return dict(row) if row and row.get("username") == owner else None
+            return dict(row) if row and row.get("username") == owner and row.get("source_server_id") == self.server_id else None
         with self._lock:
             matches = [row for row in self._all_locked()
-                       if row.get("device_id") == identifier and row.get("username") == owner]
+                       if row.get("device_id") == identifier and row.get("username") == owner
+                       and row.get("source_server_id") == self.server_id]
         return dict(matches[0]) if len(matches) == 1 else None
 
 

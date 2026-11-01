@@ -197,7 +197,7 @@ class DeviceNetworkRoutesMixin:
                                 device_id=str(payload.get("device_id") or ""),
                                 public_key=payload.get("public_key"))
             except Exception:
-                self.state.device_registry.revoke(str(payload.get("device_id") or ""))
+                self.state.device_registry.revoke(device_id, username=username, public_key=public_key)
                 raise
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device enrollment failed: {exc}\n")
@@ -252,7 +252,8 @@ class DeviceNetworkRoutesMixin:
             from server.identity.keycloak_device import revoke_device
             revoke_device(session=session, server_id=self.state.server_id, device_id=device_id,
                           public_key=binding.get("public_key"))
-            device = self.state.device_registry.revoke(device_id)
+            device = self.state.device_registry.revoke(device_id, username=str(session["username"]),
+                                                       public_key=binding.get("public_key"))
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return

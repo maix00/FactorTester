@@ -57,7 +57,7 @@ def test_personal_devices_and_revoke_always_use_current_owner(role, monkeypatch)
         key_binding=lambda **kw: {'public_key': 'key'},
         public_device_total_count=lambda **kw: len(listing(include_disabled=False, **kw)),
         backend_status=lambda: {'backend': 'postgresql'},
-        revoke=lambda device_id: revoked.append(device_id) or records[0],
+        revoke=lambda device_id, **_kw: revoked.append(device_id) or records[0],
     )
     route = device_routes.DeviceNetworkRoutesMixin()
     route.state = SimpleNamespace(device_registry=registry, server_id='public')
@@ -140,7 +140,7 @@ def test_enrollment_disables_record_if_keycloak_grant_fails(monkeypatch):
     monkeypatch.setattr('server.identity.keycloak_device.register_device', fail)
     route = device_routes.DeviceNetworkRoutesMixin()
     route.state = SimpleNamespace(server_id='public', public_server=False, device_registry=SimpleNamespace(
-        enroll=lambda **_kw: {'device_id': 'mine'}, revoke=lambda key: revoked.append(key),
+        enroll=lambda **_kw: {'device_id': 'mine'}, revoke=lambda key, **_kw: revoked.append(key),
         key_binding=lambda **_kw: None,
     ))
     route._session = lambda: {'username': 'alice'}

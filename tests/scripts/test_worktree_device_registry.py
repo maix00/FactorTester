@@ -212,6 +212,34 @@ def test_new_mirror_preserves_legacy_fields_for_migration(tmp_path) -> None:
     assert stored['sources']['peer']['devices'][0]['public_access'] is False
 
 
+def test_mirrored_device_cannot_be_revoked_or_used_as_local_binding(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='local')
+    device = {'device_id': 'device-peer-123456', 'username': 'alice',
+              'public_key': public_key, 'enabled': True}
+    assert registry.apply_snapshot(source_server_id='peer', generation=1, devices=[device])
+    assert registry.key_binding(username='alice', device_id=device['device_id']) is None
+    with pytest.raises(PermissionError, match='not approved'):
+        registry.verify(device_id=device['device_id'], public_key=public_key,
+                        challenge=b'challenge', signature=_signature(private_key, b'challenge'))
+    with pytest.raises(ValueError, match='not found on this server'):
+        registry.revoke(device['device_id'], username='alice', public_key=public_key)
+    assert registry.list(username='alice')[0]['enabled'] is True
+
+
+def test_revoke_requires_unchanged_owner_and_key(tmp_path) -> None:
+    key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    other = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='local')
+    registry.enroll(username='alice', device_id='device-local-123456', public_key=key)
+    for owner, candidate in [('bob', key), ('alice', other)]:
+        with pytest.raises(ValueError, match='binding was not found'):
+            registry.revoke('device-local-123456', username=owner, public_key=candidate)
+    assert registry.list(username='alice')[0]['enabled'] is True
+    assert registry.revoke('device-local-123456', username='alice', public_key=key)['enabled'] is False
+
+
 def test_public_server_accepts_all_allowlisted_devices(tmp_path) -> None:
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_key = _jwk(private_key.public_key())
