@@ -107,3 +107,7 @@ iPhone 17 Pro / iOS 26.5 模拟器从本机测试 Manager 的已登录会话切�
 
 macOS 和 iOS 当前源码构建成功，新增的请求与 Cookie 配置测试已编译；本机
 XCTest 启动器等待测试 worker 而未产生结果，不能计为测试通过。测试服务已停止。
+
+另以当前源码中的请求构造和会话配置编译独立 Swift 测试程序：空目标凭据、目标
+专属 Bearer、Cookie 头及禁用 Cookie 存储等 5 项检查通过。该程序不替代未能
+启动的 XCTest，也没有覆盖联网的 Keycloak 或真实目标服务器。
