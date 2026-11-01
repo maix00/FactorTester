@@ -1,5 +1,6 @@
 """Real client HTTP transport to the single-report Keycloak/Couch service seam."""
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -179,9 +180,29 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         with pytest.raises(ValueError):
             service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
                 branch_ref='another', projection=remote, expected_revision=None, authoring=authoring)
+        pull = {'action': 'pull_report', 'profile_id': 'self', 'research_id': research['research_id'], 'report_id': selected['report_id']}
+        # A server can receive separately valid projection and authoring
+        # payloads that describe different content. Do not advance the local
+        # report or its receipt until both representations agree.
+        from tools.cli.release.research_reporting.public_research.object_uploads import projection_hash
+        inconsistent = copy.deepcopy(remote)
+        inconsistent['title'] = 'Different projection title'
+        inconsistent['projection_hash'] = projection_hash(inconsistent)
+        previous_documents = copy.deepcopy(store.docs)
+        service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
+            branch_ref='main', projection=inconsistent, expected_revision=second['revision'], authoring=authoring)
+        with rpc.store._connect() as db:
+            before = dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone())
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        with rpc.store._connect() as db:
+            assert dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone()) == before
+            assert db.execute('SELECT count(*) FROM report_pull_recovery').fetchone()[0] == 0
+        assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
+        # Restore the isolated fake store so the remaining recovery scenarios
+        # can continue with a valid publication at this generation.
+        store.docs = previous_documents
         service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
             branch_ref='main', projection=remote, expected_revision=second['revision'], authoring=authoring)
-        pull = {'action': 'pull_report', 'profile_id': 'self', 'research_id': research['research_id'], 'report_id': selected['report_id']}
         auth['write'] = False
         assert rpc.request(pull) == {'success': False, 'code': 'local_report_publication_denied'}
         assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']

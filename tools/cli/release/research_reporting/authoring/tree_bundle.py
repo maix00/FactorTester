@@ -191,7 +191,8 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
     with tree_lock(paths):
         if paths['head'].exists():
             if receipt.is_file() and json.loads(receipt.read_text()).get('bundle_sha256') == expected_sha256:
-                return {'paths': paths, 'head': load_head(paths), 'inherited': False}
+                return {'paths': paths, 'head': load_head(paths), 'inherited': False,
+                        'source_manifest': manifest}
             raise ValueError('target branch already exists with another origin')
         ensure_report_workspace_identity(Path(package_root), report_workspace_id=Path(package_root).name, report_id=report_id)
         restore_job_artifacts(manifest['job_artifacts'], files)
@@ -232,4 +233,5 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
         atomic_write(receipt, canonical_bytes({'bundle_sha256': expected_sha256,
                      'source_branch_id': manifest['source_branch_id'], 'source_head': head}))
         write_head(paths, target_head)
-        return {'paths': paths, 'head': target_head, 'inherited': True}
+        return {'paths': paths, 'head': target_head, 'inherited': True,
+                'source_manifest': manifest}

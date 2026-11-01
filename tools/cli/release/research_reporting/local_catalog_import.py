@@ -10,13 +10,11 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .authoring.tree_bundle import import_report_bundle
-from .authoring.tree_projection import load_snapshot
 from .generation import report_workspace_lock
 from .git import commit_report_workspace
 from .local_publication import ensure_publication_table, manager_session, publication_endpoint
 from .local_pull import LocalReportSyncConflict, _remote
-from .public_research.object_uploads import detach_object_bytes, projection_hash
-from .public_research.projection import build_upload_projection
+from .local_projection_validation import bundle_matches_projection
 from .report_workspace_identity import report_workspace_id_for
 
 
@@ -91,9 +89,9 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
                 branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
             # The projection and authoring bundle are separately validated by the
             # server. Compare their content before accepting either as the baseline.
-            projection, _uploads = detach_object_bytes(build_upload_projection(load_snapshot(package_root=staged, branch_id='main')))
-            projection['updated_at'] = remote['projection']['updated_at']
-            if projection_hash(projection) != record['projection_hash']:
+            if not bundle_matches_projection(package_root=staged,
+                    source_manifest=imported['source_manifest'],
+                    remote_projection=remote['projection'], expected_hash=record['projection_hash']):
                 raise LocalReportSyncConflict('report source and published projection differ')
             commit_report_workspace(staged, message='Import report from Manager')
             staged_tree = _tree(staged)

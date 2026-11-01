@@ -160,6 +160,14 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             imported = import_report_bundle(payload=response.content, expected_sha256=digest, package_root=staged_root,
                 branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'])
             staged_head = imported['head']
+            # The Manager validates the projection and authoring bundle
+            # separately. Both must describe the same report before the local
+            # HEAD or its recovery journal can be changed.
+            from .local_projection_validation import bundle_matches_projection
+            if not bundle_matches_projection(package_root=staged_root,
+                    source_manifest=imported['source_manifest'],
+                    remote_projection=remote['projection'], expected_hash=record['projection_hash']):
+                raise LocalReportSyncConflict('report source and published projection differ')
             if _remote(session, research_id, report_id, source_kind=source_kind) != remote:
                 raise LocalReportSyncConflict('remote report changed during download')
             target_lock = store.workspace_root / '.locks' / report_workspace_id_for(report_id)

@@ -54,6 +54,30 @@ def test_bundle_preserves_editable_tree_resources_and_retry(tmp_path):
     assert load_snapshot(package_root=source, branch_id='main')['head'] == head
 
 
+def test_imported_bundle_projection_matches_original_with_assets_and_local_links(tmp_path):
+    from tools.cli.release.research_reporting.local_projection_validation import bundle_matches_projection
+    from tools.cli.release.research_reporting.public_research.object_uploads import detach_object_bytes, projection_hash
+    from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+
+    source, head = _source(tmp_path)
+    assets = source / 'branches/main/assets'
+    assets.mkdir()
+    (assets / 'plot.png').write_bytes((source / 'assets/plot.png').read_bytes())
+    projection, _ = detach_object_bytes(build_upload_projection(load_snapshot(package_root=source, branch_id='main')))
+    assert projection['local_resources'][0]['available'] is True
+    payload = export_report_bundle(package_root=source, branch_id='main',
+        expected_generation=head['generation'], expected_root_ref=head['root_ref'])
+    target = tmp_path / 'target'
+    imported = import_report_bundle(payload=payload, expected_sha256=hashlib.sha256(payload).hexdigest(),
+        package_root=target, branch_id='main', report_id='same-report',
+        source_generation=head['generation'], source_root_ref=head['root_ref'])
+    assert bundle_matches_projection(package_root=target, source_manifest=imported['source_manifest'],
+        remote_projection=projection, expected_hash=projection['projection_hash'])
+    altered = {**projection, 'title': 'Another title'}
+    assert not bundle_matches_projection(package_root=target, source_manifest=imported['source_manifest'],
+        remote_projection=altered, expected_hash=projection_hash(altered))
+
+
 def test_bundle_rejects_tampered_resource_before_publishing_head(tmp_path):
     source, head = _source(tmp_path)
     payload = export_report_bundle(package_root=source, branch_id='main', expected_generation=head['generation'], expected_root_ref=head['root_ref'])
