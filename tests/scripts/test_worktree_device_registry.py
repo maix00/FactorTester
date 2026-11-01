@@ -194,8 +194,7 @@ def test_mirror_update_cannot_discard_unmigrated_device_fields(tmp_path) -> None
     assert json.loads(path.read_text())['sources']['peer']['devices'][0]['public_access'] is False
     with pytest.raises(ValueError, match='duplicate device IDs'):
         registry.apply_snapshot(source_server_id='peer', generation=3, devices=[device, device])
-    with pytest.raises(ValueError, match='another device source'):
-        registry.apply_snapshot(source_server_id='other', generation=1, devices=[device])
+    assert registry.apply_snapshot(source_server_id='other', generation=1, devices=[device])
     changed = {**device, 'public_access': True}
     with pytest.raises(ValueError, match='legacy device fields'):
         registry.apply_snapshot(source_server_id='peer', generation=3, devices=[changed])
@@ -226,6 +225,26 @@ def test_mirrored_device_cannot_be_revoked_or_used_as_local_binding(tmp_path) ->
     with pytest.raises(ValueError, match='not found on this server'):
         registry.revoke(device['device_id'], username='alice', public_key=public_key)
     assert registry.list(username='alice')[0]['enabled'] is True
+
+
+def test_same_device_can_be_registered_independently_per_manager(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    path = tmp_path / 'devices.json'
+    registry = DeviceRegistry(path, server_id='local')
+    device = {'device_id': 'device-shared-123456', 'username': 'alice',
+              'public_key': public_key, 'enabled': True}
+    registry.apply_snapshot(source_server_id='peer', generation=1, devices=[device])
+    registry.enroll(username='alice', device_id=device['device_id'], public_key=public_key)
+    registry = DeviceRegistry(path, server_id='local')
+    assert registry.backend_status()['migration_repair_count'] == 0
+    assert len(registry.list(username='alice')) == 2
+    assert len(registry.authorization_records(username='alice')) == 1
+    assert registry.authorization_records(username='alice')[0]['source_server_id'] == 'local'
+    assert registry.public_device_total_count(username='alice') == 1
+    registry.revoke(device['device_id'], username='alice', public_key=public_key)
+    by_source = {row['source_server_id']: row for row in registry.list(username='alice')}
+    assert not by_source['local']['enabled'] and by_source['peer']['enabled']
 
 
 def test_revoke_requires_unchanged_owner_and_key(tmp_path) -> None:

@@ -34,7 +34,8 @@ class _Route(device_admin_routes.DeviceAdministrationRoutesMixin):
         self.response = None
         self.session = session
         self.path = "/api/admin/devices?username=alice"
-        rows = [{"device_id": "device-1234567890", "username": "alice", "enabled": True}]
+        rows = [{"device_id": "device-1234567890", "username": "alice", "enabled": True,
+                 "source_server_id": "manager"}]
         self.revoked = []
         self.state = SimpleNamespace(server_id='manager', device_registry=SimpleNamespace(
             list=lambda *, username, include_disabled: (
@@ -100,6 +101,28 @@ def test_admin_cannot_revoke_another_managers_device(monkeypatch, responses, tmp
     admin._admin_device_revoke()
     assert responses[-1][0] == 403
     assert not called and registry.list(username='alice')[0]['enabled'] is True
+
+
+def test_admin_lists_and_revokes_only_current_manager_for_shared_id(monkeypatch, responses, tmp_path):
+    from server.manager.domain.devices import DeviceRegistry
+
+    admin = _Route({'username': 'root'}, {'alice': []})
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='manager')
+    key = {'kty': 'EC', 'crv': 'P-256', 'x': 'A' * 43, 'y': 'A' * 43}
+    registry.apply_snapshot(source_server_id='remote', generation=1, devices=[{
+        'device_id': 'device-1234567890', 'username': 'alice', 'enabled': True, 'public_key': key,
+    }])
+    registry.enroll(username='alice', device_id='device-1234567890', public_key=key)
+    admin.state.device_registry = registry
+    monkeypatch.setattr(device_admin_routes, 'current_manager_role', lambda *_: True)
+    monkeypatch.setattr(device_admin_routes, 'current_administrative_groups', lambda *_: ())
+    admin._admin_device_list()
+    assert len(responses[-1][1]['devices']) == 1
+    assert responses[-1][1]['devices'][0]['source_server_id'] == 'manager'
+    admin._admin_device_revoke()
+    assert responses[-1][0] == 200
+    records = {row['source_server_id']: row for row in registry.list(username='alice')}
+    assert not records['manager']['enabled'] and records['remote']['enabled']
 
 
 def test_organization_admin_can_read_and_revoke_only_in_scope_user_devices(

@@ -74,11 +74,13 @@ def test_batch_device_check_is_owner_scoped_and_never_uses_cached_grants(monkeyp
         calls.append((token, kwargs))
         return {kwargs['refs'][0][1]}
     monkeypatch.setattr(keycloak_device, 'keycloak_authorized_objects', authorized)
-    rows = [{'device_id': DEVICE, 'username': 'alice', 'public_key': KEY, 'enabled': True},
-            {'device_id': 'device-1234567890123457', 'username': 'alice', 'public_key': OTHER_KEY, 'enabled': False}]
+    rows = [{'device_id': DEVICE, 'username': 'alice', 'public_key': KEY, 'enabled': True, 'source_server_id': 'manager-1'},
+            {'device_id': 'device-1234567890123457', 'username': 'alice', 'public_key': OTHER_KEY, 'enabled': False, 'source_server_id': 'manager-1'}]
     assert keycloak_device.may_use_devices(token='verified', session=SESSION, server_id='manager-1', records=rows) == {DEVICE}
     assert len(calls) == 1 and len(calls[0][1]['refs']) == 1 and calls[0][1]['use_cache'] is False
     with pytest.raises(ValueError):
         keycloak_device.may_use_devices(token='verified', session=SESSION, server_id='manager-1', records=[{**rows[0], 'username': 'bob'}])
     with pytest.raises(ValueError):
         keycloak_device.may_use_devices(token='verified', session=SESSION, server_id='manager-1', records=[rows[0], rows[0]])
+    with pytest.raises(ValueError):
+        keycloak_device.may_use_devices(token='verified', session=SESSION, server_id='manager-1', records=[{**rows[0], 'source_server_id': 'manager-2'}])

@@ -119,9 +119,9 @@ class DeviceAdministrationRoutesMixin:
             devices = self.state.device_registry.list(
                 username=username, include_disabled=True,
             )
-            total = self.state.device_registry.public_device_total_count(
-                username=username,
-            )
+            devices = [item for item in devices
+                       if item.get("source_server_id") == self.state.server_id]
+            total = sum(item.get("enabled") is True for item in devices)
         except ControlDatabaseError:
             json_response(self, {
                 "success": False,
@@ -160,7 +160,8 @@ class DeviceAdministrationRoutesMixin:
                 username=username, include_disabled=True,
             )
             record = next(
-                (item for item in records if item.get("device_id") == device_id),
+                (item for item in records if item.get("device_id") == device_id
+                 and item.get("source_server_id") == self.state.server_id),
                 None,
             )
             if record is None:

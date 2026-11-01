@@ -241,7 +241,8 @@ class DeviceNetworkRoutesMixin:
                 include_disabled=True,
             )
             record = next(
-                (item for item in records if item.get("device_id") == device_id),
+                (item for item in records if item.get("device_id") == device_id
+                 and item.get("source_server_id") == self.state.server_id),
                 None,
             )
             if record is None:

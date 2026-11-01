@@ -68,7 +68,9 @@ def may_use_devices(*, token: str, session: dict, server_id: str, records: list[
         raise ValueError("device authorization inventory is invalid or too large")
     refs, seen = [], set()
     for record in records:
-        if not isinstance(record, dict) or record.get("username") != owner or type(record.get("enabled")) is not bool:
+        if (not isinstance(record, dict) or record.get("username") != owner
+                or record.get("source_server_id") != server_id
+                or type(record.get("enabled")) is not bool):
             raise ValueError("device authorization owner or state is invalid")
         identifier = normalise_device_id(record.get("device_id"))
         if identifier in seen:

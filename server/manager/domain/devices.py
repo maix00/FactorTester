@@ -306,9 +306,9 @@ class DeviceRegistry:
                 "generation": generation,
                 "devices": records,
             }
-        seen: set[str] = set()
+        seen: set[tuple[str, str]] = set()
         for item in self._all_locked():
-            identifier = str(item["device_id"])
+            identifier = (str(item["source_server_id"]), str(item["device_id"]))
             if identifier in seen:
                 self._repair_count += 1
             seen.add(identifier)
@@ -394,10 +394,7 @@ class DeviceRegistry:
             return _public_record(record)
         with self._lock:
             self._require_writable()
-            if any(
-                item.get("device_id") == candidate["device_id"]
-                for item in self._all_locked()
-            ):
+            if candidate["device_id"] in self._local:
                 raise DeviceRegistryError("device_id is already registered")
             self._local[candidate["device_id"]] = candidate
             self._generation += 1
@@ -430,22 +427,22 @@ class DeviceRegistry:
     def public_device_count(self, *, username: str = "") -> int:
         owner = str(username or "").strip()
         if self.control_store is not None:
-            return int(self.control_store.public_device_count(username=owner))
+            return int(self.control_store.public_device_count(username=owner, source_server_id=self.server_id))
         with self._lock:
             return sum(
                 1
-                for item in self._all_locked()
+                for item in self._local.values()
                 if (not owner or item.get("username") == owner)
                 and bool(item.get("enabled"))
             )
 
     def public_user_count(self) -> int:
         if self.control_store is not None:
-            return int(self.control_store.public_device_user_count())
+            return int(self.control_store.public_device_user_count(source_server_id=self.server_id))
         with self._lock:
             return len({
                 str(item.get("username") or "")
-                for item in self._all_locked()
+                for item in self._local.values()
                 if bool(item.get("enabled"))
             } - {""})
 
@@ -455,11 +452,11 @@ class DeviceRegistry:
         if self.control_store is not None:
             reader = getattr(self.control_store, "public_device_total_count", None)
             if callable(reader):
-                return int(reader(username=owner))
+                return int(reader(username=owner, source_server_id=self.server_id))
         with self._lock:
             return sum(
                 1
-                for item in self._all_locked()
+                for item in self._local.values()
                 if (not owner or item.get("username") == owner)
                 and bool(item.get("enabled"))
             )
@@ -531,9 +528,10 @@ class DeviceRegistry:
         if not owner:
             raise DeviceRegistryError("a device owner is required")
         if self.control_store is not None:
-            return self.control_store.list_devices(username=owner, include_disabled=True)
+            return self.control_store.list_devices(username=owner, include_disabled=True,
+                                                   source_server_id=self.server_id)
         with self._lock:
-            return [item for item in self._all_locked() if item.get("username") == owner]
+            return [dict(item) for item in self._local.values() if item.get("username") == owner]
 
     def snapshot(self) -> dict[str, object]:
         if self.control_store is not None:
@@ -587,12 +585,6 @@ class DeviceRegistry:
             previous = self._sources.get(source)
             if previous is not None and revision < int(previous["generation"]):
                 return False
-            other_ids = set(self._local)
-            for other_source, value in self._sources.items():
-                if other_source != source:
-                    other_ids.update(value["devices"])
-            if other_ids.intersection(records):
-                raise DeviceRegistryError("snapshot conflicts with another device source")
             # Never erase pre-cutover fields by accepting a later mirror that
             # omitted or replaced the corresponding device identity.
             for identifier, fields in self._legacy_sources.get(source, {}).items():
@@ -624,7 +616,7 @@ class DeviceRegistry:
         identifier = normalise_device_id(device_id)
         key = normalise_public_key(public_key)
         if self.control_store is not None:
-            record = self.control_store.device(identifier)
+            record = self.control_store.device(identifier, source_server_id=self.server_id)
             if (record is None or record.get("source_server_id") != self.server_id
                     or not bool(record.get("enabled")) or record.get("public_key") != key):
                 raise PermissionError("device is not approved")
@@ -681,7 +673,7 @@ class DeviceRegistry:
         if not owner:
             return None
         if self.control_store is not None:
-            row = self.control_store.device(identifier)
+            row = self.control_store.device(identifier, source_server_id=self.server_id)
             return dict(row) if row and row.get("username") == owner and row.get("source_server_id") == self.server_id else None
         with self._lock:
             matches = [row for row in self._all_locked()

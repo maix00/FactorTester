@@ -89,7 +89,7 @@ def test_revoke_does_not_report_success_if_keycloak_fails(monkeypatch):
     monkeypatch.setattr('server.identity.keycloak_device.revoke_device', fail)
     route = device_routes.DeviceNetworkRoutesMixin()
     route.state = SimpleNamespace(server_id='public', device_registry=SimpleNamespace(
-        list=lambda **_kw: [{'device_id': 'mine'}],
+        list=lambda **_kw: [{'device_id': 'mine', 'source_server_id': 'public'}],
         key_binding=lambda **_kw: {'public_key': 'key'},
         revoke=lambda key: revoked.append(key),
     ))
