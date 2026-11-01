@@ -114,7 +114,7 @@ private struct SessionPanel: View {
                 AccountCredentialAuthorizationView(
                     fixedUsername: nil,
                     submitTitle: L10n.text("登录"),
-                    reason: L10n.text("使用 Touch ID 登录 FTClient"),
+                    reason: L10n.text("使用 Touch ID 登录 TradeResearch"),
                     isWorking: session.isWorking,
                     submit: { username, password in
                         await session.login(

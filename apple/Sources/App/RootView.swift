@@ -16,7 +16,7 @@ struct RootView: View {
             switch state {
             case .checking:
                 ProgressView {
-                    Text(L10n.text("正在寻找 FactorTester 服务器…"))
+                    Text(L10n.text("正在寻找 TradeResearch 服务器…"))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .ready:
