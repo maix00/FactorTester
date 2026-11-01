@@ -197,6 +197,12 @@ def test_chunked_source_tracks_rolls_and_rejects_nonmonotonic_rows(tmp_path):
     assert [type(event) for event in events] == [MarketBar, MarketBar, RollMarker, MarketBar]
     assert events[2].from_contract_uid == "CFFEX|F|T|2403"
     assert events[2].to_contract_uid == "CFFEX|F|T|2406"
+    assert events[2].effective_at_ns == events[3].clock.interval_open_ns
+    assert events[2].observed_at_ns == events[3].clock.available_at_ns
+    assert events[2].observed_at_ns > events[2].effective_at_ns
+    selected = list(iter_minute_bars(path, batch_size=1, continuous_product="T.CFE",
+                                    start_ns=events[3].clock.interval_end_ns))
+    assert selected == events[2:]
     assert events[0].clock.raw_unit == "ms"
     # The ordinal counts all preceding rows; a different contract in that
     # prefix would make the selected contract's sampling phase incorrect.

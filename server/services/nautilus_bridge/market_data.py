@@ -150,10 +150,22 @@ class MarketBar:
 
 @dataclass(frozen=True)
 class RollMarker:
+    """An observed change in a source's continuous-contract mapping.
+
+    ``effective_at_ns`` describes the first mapped interval, while
+    ``observed_at_ns`` is when that completed bar made the mapping observable.
+    Neither establishes when the underlying selection was announced; a
+    strategy must not execute based on this observation before it is available.
+    """
     continuous_product: str
     from_contract_uid: str
     to_contract_uid: str
     effective_at_ns: int
+    observed_at_ns: int
+
+    def __post_init__(self) -> None:
+        if self.observed_at_ns < self.effective_at_ns:
+            raise ValueError("roll observation precedes its effective interval")
 
 
 def _decimal(value: object, column: str, *, optional: bool = False) -> Decimal | None:
@@ -214,9 +226,13 @@ def iter_minute_bars(
             if expected_contract_uid is not None and uid != expected_contract_uid:
                 raise ValueError(f"source row {row_number} has a different contract identity")
             if start_ns is not None and clock.interval_end_ns < start_ns:
+                # Retain only the previous mapping so a change on the first
+                # selected bar is not silently lost. No pre-window bar is emitted.
+                previous_uid = uid
                 continue
             if continuous_product and previous_uid and uid != previous_uid:
-                yield RollMarker(continuous_product, previous_uid, uid, clock.interval_open_ns)
+                yield RollMarker(continuous_product, previous_uid, uid,
+                                 clock.interval_open_ns, clock.available_at_ns)
             previous_uid = uid
             yield MarketBar(
                 contract_uid=uid, instrument_code=str(row["instrument_id"] or ""),
