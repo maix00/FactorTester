@@ -198,6 +198,12 @@ def test_chunked_source_tracks_rolls_and_rejects_nonmonotonic_rows(tmp_path):
     assert events[2].from_contract_uid == "CFFEX|F|T|2403"
     assert events[2].to_contract_uid == "CFFEX|F|T|2406"
     assert events[0].clock.raw_unit == "ms"
+    # The ordinal counts all preceding rows; a different contract in that
+    # prefix would make the selected contract's sampling phase incorrect.
+    with pytest.raises(ValueError, match="different contract identity"):
+        list(iter_minute_bars(path, batch_size=1,
+            start_ns=events[3].clock.interval_end_ns,
+            expected_contract_uid="CFFEX|F|T|2406"))
     rows[2]["trade_time"] = rows[1]["trade_time"]
     rows[2]["trade_timestamp"] = rows[1]["trade_timestamp"]
     pq.write_table(pa.Table.from_pylist(rows), path)

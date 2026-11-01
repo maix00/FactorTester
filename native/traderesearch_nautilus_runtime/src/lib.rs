@@ -88,6 +88,9 @@ fn attach_factor_family(
 #[pymodule]
 fn _libnautilus(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     nautilus_pyo3::_libnautilus(py, module)?;
+    // This composition includes the factor kernel's observed-bar source
+    // ordinal contract. Python checks it before submitting an anchored plan.
+    module.add("FACTOR_OBSERVED_SOURCE_ORDINAL_VERSION", 1u8)?;
     module.add_function(wrap_pyfunction!(attach_factor_family, module)?)?;
     module.add_function(wrap_pyfunction!(shared_input::replay_shared_inputs, module)?)?;
     module.add_class::<FactorRuntimeHandle>()?;

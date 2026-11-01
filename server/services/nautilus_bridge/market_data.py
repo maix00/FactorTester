@@ -172,6 +172,7 @@ def iter_minute_bars(
     path: str | Path, *, raw_unit: SourceTimeUnit = "validated",
     batch_size: int = 2048, start_ns: int | None = None, end_ns: int | None = None,
     continuous_product: str | None = None,
+    expected_contract_uid: str | None = None,
 ) -> Iterator[MarketBar | RollMarker]:
     """Read small Arrow batches; emit exact unadjusted bars and roll boundaries.
 
@@ -203,15 +204,17 @@ def iter_minute_bars(
     ):
         for row in batch.to_pylist():
             row_number += 1
+            uid = str(row["contract_uid"] or "")
             clock = minute_clock(row["trade_time"], int(row["trade_timestamp"]), raw_unit=raw_unit)
             if previous_time is not None and clock.interval_end_ns <= previous_time:
                 raise ValueError(f"out-of-order or duplicate bar at source row {row_number}")
             previous_time = clock.interval_end_ns
-            if start_ns is not None and clock.interval_end_ns < start_ns:
-                continue
             if end_ns is not None and clock.interval_end_ns > end_ns:
                 return
-            uid = str(row["contract_uid"] or "")
+            if expected_contract_uid is not None and uid != expected_contract_uid:
+                raise ValueError(f"source row {row_number} has a different contract identity")
+            if start_ns is not None and clock.interval_end_ns < start_ns:
+                continue
             if continuous_product and previous_uid and uid != previous_uid:
                 yield RollMarker(continuous_product, previous_uid, uid, clock.interval_open_ns)
             previous_uid = uid

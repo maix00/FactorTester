@@ -108,7 +108,8 @@ def run_strategy_family_replay(*,inputs,factor_bindings,factor_refs,family,outpu
 def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execution_plan=None,
     session_calendar=None,batch_minutes=20,trace_path=None,inspect_outputs=False):
     """One Catalog replay and CSE Actor for every compatible native consumer."""
-    from nautilus_trader._libnautilus import attach_factor_family
+    from nautilus_trader import _libnautilus as native
+    attach_factor_family = native.attach_factor_family
     from nautilus_trader.backtest import BacktestEngine
     from nautilus_trader.config import BacktestEngineConfig
     from nautilus_trader.execution import MakerTakerFeeModel
@@ -149,6 +150,9 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
             requests.append((slots[ref],consumer['product_indices']))
             requested_roles.append((strategy['strategy_id'],role))
     spec,scoped_slots=scope_plan_outputs(spec,requests,len(products))
+    from .warmup import bind_observed_source_clock, require_observed_clock_runtime
+    spec = bind_observed_source_clock(spec, {str(p): row[2] for p, row in opened.items()})
+    require_observed_clock_runtime(spec, native)
     strategy_slots={identity:{} for identity in role_refs}
     for (identity,role),slot in zip(requested_roles,scoped_slots,strict=True):strategy_slots[identity][role]=slot
     for consumer,strategy in zip(consumers,strategies,strict=True):

@@ -28,3 +28,18 @@ def test_batch_and_incremental_use_same_bar_ordinal_across_missing_bars():
     np.testing.assert_equal(incremental, [np.nan, 2., 2., 4.])
     positions = index.get_indexer(finest_index(batch.index))
     np.testing.assert_equal(np.asarray(incremental)[positions], batch['A'].to_numpy())
+
+
+def test_catalog_ordinal_keeps_suffix_replay_on_the_same_sampling_phase():
+    from server.services.nautilus_bridge.warmup import bind_observed_source_clock
+
+    expr = SignalAlign(ColumnRef(DataColumn.CLOSE), '2m')
+    spec = alpha_plan_spec(expr, source_freq=DataFreq.MIN1, products=('A',))
+    spec = {key: value for key, value in spec.items() if key != 'key_tuples'}
+    receipt = {'source_ordinal_start': 3, 'selected_count': 5, 'selected_clock_sha256': 'a' * 64}
+    bound = bind_observed_source_clock(spec, {'A': receipt})
+    full, suffix = FactorPlanState(json.dumps(spec), 1), FactorPlanState(json.dumps(bound), 1)
+    times = pd.date_range('2026-01-01 09:01', periods=8, freq='min').as_unit('ns').asi8
+    expected = [full.update_at(int(stamp), np.array([float(i)]))[0] for i, stamp in enumerate(times)]
+    actual = [suffix.update_at(int(stamp), np.array([float(i)]))[0] for i, stamp in enumerate(times) if i >= 3]
+    np.testing.assert_equal(actual, expected[3:])
