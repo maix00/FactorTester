@@ -29,7 +29,7 @@ def sample_signal(times, values, signal_clock):
     out=np.full(len(times),np.nan);out[valid]=values[positions[valid]];return out
 
 
-def oracle(times,days,price,adjusted,window_days, *, signal_clock='wall_clock'):
+def oracle(times,days,price,adjusted,window_days, *, signal_clock='wall_clock', return_intermediates=False):
     starts=np.r_[0,np.flatnonzero(days[1:]!=days[:-1])+1]
     ordinals=np.searchsorted(starts,np.arange(len(times)),side='right')-1
     def rolling(values,count,q):
@@ -50,6 +50,7 @@ def oracle(times,days,price,adjusted,window_days, *, signal_clock='wall_clock'):
         start=starts[ordinals[i]]
         hits=np.flatnonzero(np.abs(adjusted[i]-adjusted[start:i])>=threshold[i])
         duration[i]=i-(start+hits[-1]) if len(hits) else i-start
+    raw_duration=duration.copy() if return_intermediates else None
     duration=signal(duration)
     series=pd.Series(duration)
     quantile=series.groupby(ordinals).expanding(min_periods=1).quantile(.9875).droplevel(0).sort_index().to_numpy(copy=True)
@@ -59,7 +60,11 @@ def oracle(times,days,price,adjusted,window_days, *, signal_clock='wall_clock'):
     fair=pd.Series(price*top).groupby(ordinals).cumsum().to_numpy()/(pd.Series(top).groupby(ordinals).cumsum().to_numpy()+1e-10)
     deviation=signal(fair-price)
     high=rolling(deviation,window_days,.8);low=rolling(deviation,window_days,.2)
-    return signal(np.where(deviation>=high,1.,np.where(deviation<=low,-1.,0.))),threshold
+    result=signal(np.where(deviation>=high,1.,np.where(deviation<=low,-1.,0.)))
+    if return_intermediates:
+        return result,threshold,{'raw_duration':raw_duration,'duration':duration,'duration_quantile':quantile,
+            'top':top,'fair':fair,'deviation':deviation,'high':high,'low':low}
+    return result,threshold
 
 
 

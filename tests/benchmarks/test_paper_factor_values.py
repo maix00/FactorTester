@@ -69,3 +69,14 @@ def test_observed_clock_selection_matches_legacy_signal_align_with_a_gap():
     np.testing.assert_array_equal(legacy['T'].to_numpy(), values[[29, 59]])
     sampled = sample_signal(index.as_unit('ns').asi8, values, 'observed_bars')
     np.testing.assert_array_equal(sampled[[29, 59]], legacy['T'].to_numpy())
+
+
+def test_intermediate_diagnostics_do_not_change_the_oracle_output():
+    times = np.arange(90, dtype=np.int64) * 60_000_000_000
+    days = np.repeat(np.arange(3), 30)
+    price = 100. + np.arange(len(times), dtype=float) / 100.
+    regular = oracle(times, days, price, price, 2, signal_clock='observed_bars')
+    traced = oracle(times, days, price, price, 2, signal_clock='observed_bars', return_intermediates=True)
+    np.testing.assert_equal(regular[0], traced[0])
+    np.testing.assert_equal(regular[1], traced[1])
+    assert set(traced[2]) == {'raw_duration', 'duration', 'duration_quantile', 'top', 'fair', 'deviation', 'high', 'low'}
