@@ -110,6 +110,42 @@ def test_owned_sync_cursor_is_opaque_and_bound_to_verified_identity(monkeypatch)
     assert responses[-1][1] == 400 and len(calls) == 2
 
 
+def test_local_report_discovery_cursor_is_bound_to_identity_and_manager(monkeypatch):
+    from urllib.parse import urlencode
+    responses, calls = [], []
+    session = {'username': 'alice', 'tr_identity_id': 'alice-stable'}
+    report = 'report:v1:' + 'Q' * 24
+
+    class Service:
+        def owned_page(self, **kwargs):
+            calls.append(kwargs)
+            return {'reports': [], 'next_cursor': report}
+
+    class Handler(research_catalog_routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(server_id='manager-one')
+        def _session(self): return session
+        def _research_couch_service(self, *, local=False):
+            assert local
+            return Service()
+
+    monkeypatch.setattr(research_catalog_routes, 'json_response',
+                        lambda _handler, body, status=200: responses.append((body, status)))
+    handler = Handler()
+    path = '/api/research/owned-local-report-sync'
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query='limit=2'))
+    token = responses[-1][0]['next_cursor']
+    assert report not in token
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query=urlencode({'cursor': token})))
+    assert calls[-1]['after'] == report
+    session['tr_identity_id'] = 'other-identity'
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query=urlencode({'cursor': token})))
+    assert responses[-1][1] == 400 and len(calls) == 2
+    session['tr_identity_id'] = 'alice-stable'
+    handler.state.server_id = 'manager-two'
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query=urlencode({'cursor': token})))
+    assert responses[-1][1] == 400 and len(calls) == 2
+
+
 @pytest.mark.parametrize("path", ["/api/research", "/api/research/reports"])
 @pytest.mark.parametrize("scope", ["mine", "all", "subordinates"])
 def test_research_lists_use_verified_session_for_directory(monkeypatch, path, scope):

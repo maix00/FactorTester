@@ -102,6 +102,51 @@ def test_initial_publication_registers_only_report_and_reuses_it_for_branches(tm
                         branch_ref='main')['projection']['report_id'] == REPORT
 
 
+def test_shared_research_title_receipt_recovers_without_republishing_other_data(tmp_path, monkeypatch):
+    service, _manager, store, _auth = harness(tmp_path)
+    original = service._put_receipt
+    failed = False
+
+    def interrupt(receipt):
+        nonlocal failed
+        if 'research_title' in receipt and not failed:
+            failed = True
+            raise RuntimeError('temporary receipt failure')
+        return original(receipt)
+
+    monkeypatch.setattr(service, '_put_receipt', interrupt)
+    request = dict(session=SESSION, research_id=RESEARCH, report_id=REPORT,
+                   branch_ref='main', projection=payload(), expected_revision=None, research_title='Shared research')
+    with pytest.raises(RuntimeError, match='temporary receipt failure'):
+        service.publish_local(**request)
+    assert len([value for value in store.docs.values() if value['kind'] == 'research_report']) == 1
+    result = service.publish_local(**request)
+    assert result['idempotent'] is True
+    receipt = next(value for value in store.docs.values() if value['kind'] == 'research_report_registration')
+    assert receipt['research_title'] == 'Shared research'
+    assert 'description' not in receipt
+
+
+def test_owned_directory_requires_current_keycloak_report_access(tmp_path, monkeypatch):
+    service, _manager, store, auth = harness(tmp_path)
+    service.publish_local(session=SESSION, research_id=RESEARCH, report_id=REPORT, branch_ref='main',
+                          projection=payload(), expected_revision=None, research_title='Shared research')
+    receipt = next(value for value in store.docs.values() if value['kind'] == 'research_report_registration')
+    from server.jobs.storage import couchdb_local_report_directory
+    monkeypatch.setattr(couchdb_local_report_directory, 'owned_registration_page',
+                        lambda *_args, **_kwargs: ([receipt], None))
+    page = service.owned_page(session=SESSION)
+    assert [(item['research_id'], item['report_id'], item['research_title']) for item in page['reports']] == [
+        (RESEARCH, REPORT, 'Shared research')]
+    auth['write'] = False
+    assert service.owned_page(session=SESSION)['reports'][0]['editable'] is False
+    auth['read'] = False
+    assert service.owned_page(session=SESSION)['reports'] == []
+    auth['admit'] = False
+    with pytest.raises(PermissionError):
+        service.owned_page(session=SESSION)
+
+
 def test_metadata_read_does_not_read_report_bodies_and_honors_revocation(tmp_path, monkeypatch):
     service, _manager, store, auth = harness(tmp_path)
     publish(service)

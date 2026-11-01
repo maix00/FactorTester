@@ -91,6 +91,9 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
     endpoint, session = manager_session(binding, manager)
 
     _report, root = store._report_root(profile_id, research_id, report_id)
+    research = store.get(profile_id=profile_id, research_id=research_id)
+    if not isinstance(research, dict) or not isinstance(research.get('title'), str) or not research['title'].strip():
+        raise ValueError('local Research title is unavailable')
     manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
     lock = store.workspace_root / '.locks' / ('publication-' + report_workspace_id_for(report_id) + '-' + manager_hash[:16])
     with report_workspace_lock(lock):
@@ -126,6 +129,7 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
         if encoded_size > 30 * 1024 * 1024:
             raise ValueError('report publication exceeds Manager request limit')
         response = session.post(endpoint_path, {**publication_query(source_kind, research_id, report_id),
+            **({'research_title': research['title']} if source_kind == 'local' else {}),
             'branch_ref': 'main', 'projection': projection, 'authoring': authoring,
             'expected_revision': expected_revision})
         value = response.get('publication') if response.get('success') is True else None

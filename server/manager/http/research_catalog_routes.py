@@ -93,11 +93,41 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             parsed.path,
         )
         local_grants = parsed.path == '/api/research/local-report-publication/grants'
-        if publication is None and local_publication is None and not local_grants and parsed.path not in {'/api/research/owned-sync', '/api/research/owned-report-sync'}:
+        local_discovery = parsed.path == '/api/research/owned-local-report-sync'
+        if publication is None and local_publication is None and not local_grants and not local_discovery and parsed.path not in {'/api/research/owned-sync', '/api/research/owned-report-sync'}:
             self._refresh_research_catalog(viewer)
-        service = None if local_publication or local_grants else self._research_catalog_service()
+        service = None if local_publication or local_grants or local_discovery else self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
+            if local_discovery:
+                if set(query) - {'cursor', 'limit'} or any(len(query.get(key, [])) > 1 for key in ('cursor', 'limit')):
+                    raise ValueError('invalid local Report synchronization query')
+                stable_id = str(session.get('tr_identity_id') or '')
+                if not stable_id:
+                    raise PermissionError('verified stable identity is required')
+                token = query.get('cursor', [''])[0]
+                if len(token) > 2048:
+                    raise ValueError('invalid local Report synchronization cursor')
+                after = ''
+                if token:
+                    try:
+                        cursor = json.loads(_OWNED_SYNC_CURSOR.decrypt(token.encode('ascii'), ttl=3600))
+                        if (not isinstance(cursor, dict) or set(cursor) != {'kind', 'identity_id', 'manager_id', 'report_id'}
+                                or cursor['kind'] != 'owned-local-report' or cursor['identity_id'] != stable_id
+                                or cursor['manager_id'] != self.state.server_id
+                                or not re.fullmatch(r'report:v1:[A-Za-z0-9_-]{24,128}', cursor['report_id'])):
+                            raise ValueError('invalid cursor identity')
+                        after = cursor['report_id']
+                    except (InvalidToken, UnicodeError, ValueError, KeyError, TypeError):
+                        raise ValueError('invalid local Report synchronization cursor') from None
+                payload = self._research_couch_service(local=True).owned_page(session=session, after=after,
+                    limit=int(query.get('limit', ['50'])[0]))
+                cursor = payload.pop('next_cursor')
+                payload['next_cursor'] = (_OWNED_SYNC_CURSOR.encrypt(json.dumps({'kind': 'owned-local-report',
+                    'identity_id': stable_id, 'manager_id': self.state.server_id, 'report_id': cursor},
+                    separators=(',', ':')).encode()).decode('ascii') if cursor else None)
+                json_response(self, {'success': True, **payload})
+                return True
             if local_grants:
                 if len(query.get('research_id', [])) != 1 or len(query.get('report_id', [])) != 1:
                     raise ValueError('Research and Report references are required')
@@ -488,12 +518,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {'success': True, 'changed': changed})
                 return True
             if local_publication:
-                if set(data) - {'research_id', 'report_id', 'branch_ref', 'projection', 'expected_revision', 'authoring'}:
+                if set(data) - {'research_id', 'report_id', 'branch_ref', 'projection', 'expected_revision', 'authoring', 'research_title'}:
                     raise ValueError('unsupported report publication fields')
                 value = self._research_couch_service(local=True).publish_local(session=session,
                     research_id=data.get('research_id'), report_id=data.get('report_id'),
                     branch_ref=str(data.get('branch_ref') or ''), projection=data.get('projection'),
-                    expected_revision=data.get('expected_revision'), authoring=data.get('authoring'))
+                    expected_revision=data.get('expected_revision'), authoring=data.get('authoring'),
+                    research_title=data.get('research_title'))
                 json_response(self, {'success': True, 'publication': value}, 201)
                 return True
             if publication:

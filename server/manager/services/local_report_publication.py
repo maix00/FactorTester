@@ -85,6 +85,9 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
                 or receipt.get('state') not in {'pending', 'creating', 'registered'}
                 or not isinstance(receipt.get('creation_intent'), str)
                 or not re.fullmatch(r'[0-9a-f]{64}', receipt['creation_intent'])
+                or ('research_title' in receipt and (not isinstance(receipt['research_title'], str)
+                    or not receipt['research_title'].strip() or len(receipt['research_title']) > 256
+                    or '\x00' in receipt['research_title']))
                 or not isinstance(receipt.get('_rev'), str)):
             raise AuthorizationUnavailable('report registration identity requires repair')
         return receipt
@@ -101,9 +104,60 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
                 or (resource.get('attributes') or {}).get('traderesearch_creation_intent') != [receipt['creation_intent']]):
             raise AuthorizationUnavailable('report registration requires repair')
 
+    def owned_page(self, *, session: dict, after: str = '', limit: int = 50) -> dict:
+        """List only this identity's currently authorized shared report metadata."""
+        from server.jobs.storage.couchdb_local_report_directory import owned_registration_page
+
+        manager = self._manager()
+        _actor, identity = self._verified_identity(session, manager)
+        if not self.admission(session, state=self.state, use_cache=False)[0]:
+            raise PermissionError('current Manager access is not authorized')
+        receipts, next_cursor = owned_registration_page(self.store, manager_id=str(self.state.server_id),
+            owner_id=identity.identity_id, after=after, limit=limit)
+        items = []
+        for receipt in receipts:
+            research_id, report_id = receipt.get('research_id'), receipt.get('report_id')
+            _validate_refs(research_id, report_id)
+            self._validate_receipt(receipt, research_id=research_id, report_id=report_id,
+                owner_id=identity.identity_id, subject=identity.subject, issuer=identity.issuer.rstrip('/'))
+            if receipt['state'] != 'registered':
+                raise AuthorizationUnavailable('report registration requires repair')
+            try:
+                value = self.read(session=session, research_id=research_id, report_id=report_id,
+                                  branch_ref='main', metadata_only=True)
+            except PermissionError:
+                continue
+            except HTTPError as exc:
+                if exc.code == 404:
+                    continue  # registration can precede its first completed publication
+                raise
+            editable = False
+            authoring = None
+            if value.get('authoring') is not None:
+                try:
+                    edit_value = self.read(session=session, research_id=research_id, report_id=report_id,
+                                           branch_ref='main', metadata_only=True, requires_edit=True)
+                except PermissionError:
+                    pass
+                else:
+                    if edit_value.get('publication') != value['publication'] or edit_value.get('authoring') != value['authoring']:
+                        raise AuthorizationUnavailable('report changed during discovery')
+                    editable, authoring = True, edit_value['authoring']
+            items.append({'research_id': research_id, 'report_id': report_id,
+                'research_title': receipt.get('research_title'),
+                'metadata_status': 'ready' if receipt.get('research_title') else 'needs_repair',
+                'publication': value['publication'], 'editable': editable, 'authoring': authoring})
+        if not self.admission(session, state=self.state, use_cache=False)[0]:
+            raise PermissionError('current Manager access is not authorized')
+        return {'reports': items, 'next_cursor': next_cursor}
+
     def publish_local(self, *, session: dict, research_id: str, report_id: str, branch_ref: str,
-                      projection: dict, expected_revision: str | None, authoring: dict | None = None) -> dict:
+                      projection: dict, expected_revision: str | None, authoring: dict | None = None,
+                      research_title: str | None = None) -> dict:
         self._validate_target(research_id, report_id)
+        if research_title is not None and (not isinstance(research_title, str) or not research_title.strip()
+                                           or len(research_title) > 256 or '\x00' in research_title):
+            raise ValueError('shared Research title is invalid')
         manager = self._manager()
         actor, identity = self._verified_identity(session, manager)
         if not self.admission(session, state=self.state, use_cache=False)[0]:
@@ -162,9 +216,26 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
                 receipt = self._put_receipt({**receipt, 'state': 'registered'})
         # Existing resources are only evaluated, never re-ensured: a revoked
         # Keycloak owner policy cannot be recreated by a publication retry.
-        return super().publish(session=session, research_id=research_id, report_id=report_id,
-                               branch_ref=branch_ref, projection=projection,
-                               expected_revision=expected_revision, _prepared=prepared, _authoring=prepared_authoring)
+        result = super().publish(session=session, research_id=research_id, report_id=report_id,
+                                 branch_ref=branch_ref, projection=projection,
+                                 expected_revision=expected_revision, _prepared=prepared, _authoring=prepared_authoring)
+        if research_title is not None:
+            # Metadata is a recoverable projection of this explicitly shared
+            # report, never a Research grant or a copy of sibling reports.
+            # Publish first: a retry can repair a failed receipt update without
+            # publishing or granting access to anything else.
+            with report_workspace_lock(lock_root):
+                _resource, owner_id, _ref, authorize_now = self._context(
+                    session=session, research_id=research_id, report_id=report_id, scopes=('write', 'share'))
+                if owner_id != identity.identity_id:
+                    raise PermissionError('report owner changed during publication')
+                receipt = self._read_receipt(marker_id)
+                self._validate_receipt(receipt, research_id=research_id, report_id=report_id,
+                    owner_id=owner_id, subject=identity.subject, issuer=identity.issuer.rstrip('/'))
+                if receipt.get('research_title') != research_title:
+                    authorize_now()
+                    self._put_receipt({**receipt, 'research_title': research_title})
+        return result
 
     def list_grants(self, *, session: dict, research_id: str, report_id: str) -> list[dict]:
         manager = self._manager()

@@ -125,6 +125,9 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         auth['write'] = True
         documents = [doc for doc in store.docs.values() if doc['kind'] == 'research_report']
         assert len(documents) == 1 and documents[0]['report_id'] == selected['report_id']
+        registrations = [doc for doc in store.docs.values() if doc['kind'] == 'research_report_registration']
+        assert len(registrations) == 1 and registrations[0]['research_title'] == 'R'
+        assert 'description' not in registrations[0]
         assert private['report_id'] not in json.dumps(store.docs)
         head = rpc.request({'action': 'get_report', 'profile_id': 'self', 'research_id': research['research_id'], 'report_id': selected['report_id']})['version']
         edit = {'action': 'add_report_component', 'profile_id': 'self', 'research_id': research['research_id'],
