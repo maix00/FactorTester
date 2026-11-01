@@ -191,6 +191,10 @@ def iter_minute_bars(
     This avoids a second full pandas/NumPy market matrix.  Its caller must
     likewise use a bounded catalog/write pipeline; ``BacktestEngine.add_data``
     may retain a full list and is not a memory-bounded consumer.
+
+    Do not infer the availability of daily settlement from a minute row: some
+    historical sources backfill a day's final settlement into every minute.
+    Settlement needs a separately timed, authoritative event.
     """
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
