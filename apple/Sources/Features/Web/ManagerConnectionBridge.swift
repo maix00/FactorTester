@@ -190,9 +190,15 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             case .authorized(let user): candidate = user
             case .unauthorized, .handoff:
                 candidate = nil
-                await self.clearTargetSession(target, webView: webView)
+                ManagerSessionTokenStore.remove(for: target)
             case .unavailable: return
             }
+            // WebKit and URLSession cookies are shared by host, not port. Even
+            // a successfully verified target must not receive the source
+            // Manager's cookie when the two endpoints share a host. The target
+            // token remains in its endpoint-scoped Keychain entry and is
+            // injected by the new WebView after the switch.
+            await WebSessionCookieSynchronizer.clearManagerSession(for: target, webView: webView)
             guard ManagerConfig.shared.baseURL == self.endpoint,
                   self.verifiedIdentity == expected, self.verificationGeneration == generation,
                   session.adoptManagerSession(expected: expected, candidate: candidate) else {
@@ -240,20 +246,6 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
                   expected.matchesVerifiedSameRealmIdentity(actual) else { return .unauthorized }
             return .authorized(user)
         } catch { return .unavailable }
-    }
-
-    private func clearTargetSession(_ target: URL, webView: WKWebView?) async {
-        ManagerSessionTokenStore.remove(for: target)
-        guard let host = target.host?.lowercased() else { return }
-        func belongs(_ cookie: HTTPCookie) -> Bool {
-            let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
-            return cookie.name == "ft-manager-session" && (domain == host || host.hasSuffix("." + domain))
-        }
-        for cookie in HTTPCookieStorage.shared.cookies ?? [] where belongs(cookie) { HTTPCookieStorage.shared.deleteCookie(cookie) }
-        if let store = webView?.configuration.websiteDataStore.httpCookieStore {
-            let cookies = await withCheckedContinuation { continuation in store.getAllCookies { continuation.resume(returning: $0) } }
-            for cookie in cookies where belongs(cookie) { await store.delete(cookie) }
-        }
     }
 
     private func reply(_ values: [String: Any]) -> [String: Any] {

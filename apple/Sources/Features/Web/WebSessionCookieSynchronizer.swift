@@ -33,6 +33,26 @@ enum WebSessionCookieSynchronizer {
         }
     }
 
+    /// Cookie domains do not include ports. Remove the target host's old
+    /// session before loading a different endpoint on that host; the target's
+    /// endpoint-scoped Keychain token is kept separately.
+    @MainActor
+    static func clearManagerSession(for endpoint: URL, webView: WKWebView?) async {
+        guard let host = endpoint.host?.lowercased() else { return }
+        func belongs(_ cookie: HTTPCookie) -> Bool {
+            cookie.name == "ft-manager-session" && cookieBelongsToHost(cookie, host: host)
+        }
+        for cookie in HTTPCookieStorage.shared.cookies ?? [] where belongs(cookie) {
+            HTTPCookieStorage.shared.deleteCookie(cookie)
+        }
+        if let store = webView?.configuration.websiteDataStore.httpCookieStore {
+            let cookies = await withCheckedContinuation { continuation in
+                store.getAllCookies { continuation.resume(returning: $0) }
+            }
+            for cookie in cookies where belongs(cookie) { await store.deleteCookie(cookie) }
+        }
+    }
+
     private static func cookieBelongsToHost(
         _ cookie: HTTPCookie,
         host: String

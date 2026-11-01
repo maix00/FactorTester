@@ -112,6 +112,40 @@ server.serve_forever()
         content.removeScriptMessageHandler(forName: ManagerConnectionBridgeContract.messageName)
     }
 
+    func testAuthorizedSwitchClearsHostScopedCookiesBeforeApplyingTarget() async throws {
+        let value: [String: Any] = ["username": "alice", "keep_login": true,
+                                    "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
+        let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
+        let session = SessionStore(api: ManagerBridgeTestAPI(user: user), managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
+        let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
+        let target = try XCTUnwrap(URL(string: "https://test-manager.invalid:54321"))
+        let cookie = try XCTUnwrap(HTTPCookie(properties: [.domain: "test-manager.invalid", .path: "/",
+            .name: "ft-manager-session", .value: "source-cookie", .secure: "TRUE"]))
+        HTTPCookieStorage.shared.setCookie(cookie)
+        defer { HTTPCookieStorage.shared.deleteCookie(cookie) }
+        var applied: URL?
+        let content = WKUserContentController()
+        content.addScriptMessageHandler(ManagerConnectionBridge(session: session, endpoint: endpoint,
+            probe: { _, _, _ in .authorized(user) }, apply: { applied = $0 }),
+            contentWorld: .page, name: ManagerConnectionBridgeContract.messageName)
+        let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent(); config.userContentController = content
+        let view = WKWebView(frame: .zero, configuration: config); view.navigationDelegate = self
+        await config.websiteDataStore.httpCookieStore.setCookie(cookie)
+        loaded = expectation(description: "Manager test page")
+        view.loadHTMLString("<html><body>Manager</body></html>", baseURL: endpoint)
+        await fulfillment(of: [try XCTUnwrap(loaded)], timeout: 10)
+        _ = try await message(view, ["action": "capabilities"])
+        let result = try await message(view, ["action": "switch", "url": target.absoluteString])
+        XCTAssertEqual(result["auth_state"] as? String, "authorized")
+        XCTAssertEqual(applied, target)
+        XCTAssertFalse((HTTPCookieStorage.shared.cookies(for: target) ?? []).contains { $0.name == cookie.name })
+        let remaining = await withCheckedContinuation { continuation in
+            config.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+        XCTAssertFalse(remaining.contains { $0.name == cookie.name && $0.domain == cookie.domain })
+        content.removeScriptMessageHandler(forName: ManagerConnectionBridgeContract.messageName)
+    }
+
     func testSwitchIsCancelledIfSessionIsReverifiedDuringProbe() async throws {
         let value: [String: Any] = ["username": "alice", "keycloak_issuer": "https://identity.test/realm",
                                     "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
