@@ -143,6 +143,17 @@ macOS 应用和测试目标完成构建，iOS Simulator 应用构建成功。XCT
 
 WebView 向原生 Cookie 存储导入时也已限定为 Manager 会话 Cookie；此前实现会导入同域的其他 Cookie。独立 WebKit 程序验证只导入会话、切换清除会话并保留其他 Cookie；macOS 测试目标与 iOS 模拟器应用重新编译通过，新增 XCTest 用例尚未由卡住的测试宿主执行。
 
+## 2026-11-02：本机测试与公网检查补记
+
+使用签名的 macOS 测试方案重新运行 `LocalResearchBridgeWebKitTests` 的单个
+真实 WebKit/RPC 用例。Xcode 测试调度未启动 worker；中断时诊断为
+`waiting for workers to materialize`。该测试没有执行，不能计为通过。测试以
+GTHT 环境中的 CLI 为运行时、身份为替身，即使通过也不代表打包运行时或真实
+Keycloak 验收。
+
+已有 Manager CLI 会话的服务器检查返回 401，提示需要设备认证；该检查未核对
+公网 Keycloak 设备授权。前述 14 条跨 Manager 来源记录仍需在权威来源核对。
+
 对上述独立桥实验又设置了相同主机、不同端口的源与目标，授权切换前两处旧会话 Cookie 的清除同样通过；依旧使用替身身份与授权探测。
 
 ### 2026-11-02：报告发布的真实服务核验
