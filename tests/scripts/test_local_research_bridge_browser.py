@@ -121,6 +121,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     page.get_by_role("button", name="同步主分支到本机").click()
                     page.wait_for_function("window.fixture.nativeCalls.some(x=>x.action==='import_catalog_report')")
                     page.wait_for_function("!document.querySelector('.ant-btn-loading')")
+                    page.wait_for_timeout(500)  # Allow the overlay transition to finish before visual evidence.
                     page.screenshot(path=str(Path('/tmp') / f'tr-local-research-fixture-{viewport["width"]}.png'))
                     assert page.get_by_text("服务器报告",exact=True).first.is_visible()
                     assert not page_errors
