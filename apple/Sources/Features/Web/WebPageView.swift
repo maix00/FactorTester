@@ -1,6 +1,17 @@
 import SwiftUI
 import WebKit
 
+enum WebNavigationFailure {
+    /// WebKit reports an interrupted load when a navigation is deliberately
+    /// cancelled or replaced by a policy decision. Do not overwrite a real
+    /// HTTP access error or cover a succeeding authentication redirect.
+    static func isExpectedInterruption(_ error: Error) -> Bool {
+        let value = error as NSError
+        return (value.domain == NSURLErrorDomain && value.code == NSURLErrorCancelled)
+            || (value.domain == "WebKitErrorDomain" && value.code == 102)
+    }
+}
+
 /// A tab may retain a WebView while it is in the small session cache.  The
 /// cache is bounded by `ClientTabSessionStore`; evicted tabs keep their route
 /// and lightweight Swift state but release the WebContent process.
@@ -784,6 +795,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             didFail navigation: WKNavigation!,
             withError error: Error
         ) {
+            guard !WebNavigationFailure.isExpectedInterruption(error) else { return }
             loadError = error.localizedDescription
         }
 
@@ -792,6 +804,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: Error
         ) {
+            guard !WebNavigationFailure.isExpectedInterruption(error) else { return }
             loadError = error.localizedDescription
         }
 

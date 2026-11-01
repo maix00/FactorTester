@@ -2,6 +2,21 @@ import XCTest
 @testable import TradeResearch
 
 final class ClientWebAuthenticationMessageTests: XCTestCase {
+    func testNavigationPolicyInterruptionsDoNotMaskAccessOrNetworkErrors() {
+        XCTAssertTrue(WebNavigationFailure.isExpectedInterruption(
+            NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        ))
+        XCTAssertTrue(WebNavigationFailure.isExpectedInterruption(
+            NSError(domain: "WebKitErrorDomain", code: 102)
+        ))
+        XCTAssertFalse(WebNavigationFailure.isExpectedInterruption(
+            NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+        ))
+        XCTAssertFalse(WebNavigationFailure.isExpectedInterruption(
+            NSError(domain: "WebKitErrorDomain", code: 101)
+        ))
+    }
+
     func testAuthenticationMessagesRequireCurrentManagerMainFrame() throws {
         let endpoint = try XCTUnwrap(URL(string: "https://manager.example:7998"))
         let body: [String: String] = ["action": "logout"]
