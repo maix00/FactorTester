@@ -73,7 +73,10 @@ def migrate(connection, *, apply: bool = False, reviewed_plan_sha256: str = '') 
     from psycopg import sql
 
     if apply:
+        connection.execute("SET LOCAL lock_timeout = '5s'")
         connection.execute('LOCK TABLE control_devices IN ACCESS EXCLUSIVE MODE')
+    else:
+        connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
     before = inspect(connection)
     if not apply:
         return {'mode': 'dry-run', **before}
