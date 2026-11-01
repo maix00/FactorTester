@@ -185,6 +185,33 @@ def test_convergence_rejects_different_authoring_even_when_projection_and_root_m
         assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'
 
 
+def test_convergence_rejects_valid_hidden_authoring_asset_not_in_projection(report, monkeypatch):
+    from tools.cli.release.research_reporting.authoring.tree_schema import canonical_bytes
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    original = report['session'].download('', maximum_bytes=8 * 1024 * 1024).content
+    with zipfile.ZipFile(io.BytesIO(original)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        objects = [(name, archive.read(name)) for name in archive.namelist() if name != 'manifest.json']
+    raw = b'private editable source'
+    digest = hashlib.sha256(raw).hexdigest()
+    manifest['head']['assets'].append({'asset_ref': 'asset:private', 'media_type': 'application/octet-stream',
+        'filename': 'private.bin', 'caption': '', 'alt_text': '', 'content_hash': digest})
+    manifest['assets'].append({'asset_ref': 'asset:private', 'sha256': digest,
+                               'size_bytes': len(raw), 'filename': 'private.bin'})
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as archive:
+        for name, content in [('manifest.json', canonical_bytes(manifest)), *objects, (f'objects/{digest}', raw)]:
+            archive.writestr(zipfile.ZipInfo(name), content)
+    data = output.getvalue()
+    bundle = {**report['metadata']['authoring'], 'sha256': hashlib.sha256(data).hexdigest(), 'size_bytes': len(data)}
+    report['metadata']['authoring'] = bundle
+    report['remote']['authoring'] = bundle
+    report['session'].download = lambda _path, maximum_bytes: SimpleNamespace(content=data)
+    assert sync()['reports'][0]['status'] == 'conflict'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'
+
+
 def test_convergence_does_not_advance_after_edit_authorization_is_revoked(report, monkeypatch):
     from tools.cli.release.research_reporting import local_auto_sync
     sync = _prepare_concurrent_convergence(report, monkeypatch)
