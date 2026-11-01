@@ -260,7 +260,29 @@ def exercise(*, couch, **case):
             shared = source.request({**create_local, 'title':'Selected local report', 'operation_id':'local-shared'})['report']
             private = source.request({**create_local, 'title':'Unshared sibling', 'operation_id':'local-private'})['report']
             local_ids = {'profile_id':'self', 'research_id':research['research_id'], 'report_id':shared['report_id']}
+            # Exercise the content baseline through the real authorization and
+            # persistence path, including an external edit committed to Git.
+            from tools.cli.release.research_reporting.authoring.tree_model import add_asset
+            from tools.cli.release.research_reporting.git import commit_report_workspace
+            _, source_root = source.store._report_root('self', research['research_id'], shared['report_id'])
+            figure = source_root / 'branches' / 'main' / 'assets' / 'figure.png'
+            figure.parent.mkdir(exist_ok=True)
+            original_figure = b'real-manager-linked-asset'
+            figure.write_bytes(original_figure)
+            figure_hash = hashlib.sha256(original_figure).hexdigest()
+            add_asset(package_root=source_root, branch_id='main', asset={
+                'asset_ref': 'report-asset:sha256:' + figure_hash, 'media_type': 'image/png',
+                'filename': 'figure.png', 'caption': 'Figure', 'alt_text': '',
+                'content_hash': figure_hash, 'local_ref': 'branches/main/assets/figure.png'})
+            commit_report_workspace(source_root, message='Add report figure')
             local_publication = source.request({'action':'publish_report', **local_ids})['publication']
+            figure.write_bytes(b'committed external modification')
+            commit_report_workspace(source_root, message='Modify report figure externally')
+            edited_pull = source.request({'action': 'pull_report', **local_ids})
+            assert edited_pull['status'] == 'up_to_date' and edited_pull['local_modified'] is True, edited_pull
+            assert figure.read_bytes() == b'committed external modification'
+            figure.write_bytes(original_figure)
+            commit_report_workspace(source_root, message='Restore report figure')
             local_sync = {'action':'sync_reports', 'profile_id':'self', 'after_report_id':'', 'limit':4}
             restored = fresh.request(local_sync)
             assert any(item['report_id'] == shared['report_id'] and item['status'] == 'imported'
@@ -481,6 +503,7 @@ def main():
         'single_report_and_attachment': True, 'same_token_role_revocation': True,
         'catalog_editable_source_roundtrip': True, 'mismatched_authoring_rejected': True, 'catalog_desktop_import': True, 'catalog_two_client_sync': True, 'catalog_automatic_discovery': True,
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
+        'committed_asset_edit_preserved': True,
         'local_fresh_device_discovery_and_bidirectional_sync': True,
         'real_authoring_convergence_recovery': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
