@@ -257,15 +257,35 @@ export class LocalResearchClient {
     return {report:value,chapters,version:reportVersion(reply.version)};
   }
 
-  async getReportChapter(profileId:string,researchId:string,reportId:string,chapterId:string):Promise<{chapter_id:string;components:Record<string,unknown>[],bindings:Record<string,unknown>[],version:LocalReportVersion}> {
+  async getReportChapter(profileId:string,researchId:string,reportId:string,chapterId:string):Promise<{chapter_id:string;components:Record<string,unknown>[],bindings:Record<string,unknown>[],assets:Record<string,unknown>[],local_resources:Record<string,unknown>[],version:LocalReportVersion}> {
     this.requireAction("get_report_chapter");
     const profile_id=inputText(profileId,512),research_id=inputText(researchId,512),report_id=inputText(reportId,512),chapter_id=inputText(chapterId,512);
     this.requireProfile(profile_id);const generation=this.generation,sequence=this.capabilitySequence;
     const reply=await this.call({action:"get_report_chapter",profile_id,research_id,report_id,chapter_id});
     this.requireAuthorizedSnapshot(generation,sequence);
-    if(!isRecord(reply.chapter)||reply.chapter.chapter_id!==chapter_id||!Array.isArray(reply.chapter.components)||reply.chapter.components.some(item=>!isRecord(item))||
-      (reply.chapter.bindings!==undefined&&(!Array.isArray(reply.chapter.bindings)||reply.chapter.bindings.some(item=>!isRecord(item))))) throw new LocalResearchBridgeError("local_research_invalid_response");
-    return {chapter_id,components:reply.chapter.components as Record<string,unknown>[],bindings:(reply.chapter.bindings||[]) as Record<string,unknown>[],version:reportVersion(reply.version)};
+    const chapter=reply.chapter;
+    if(!isRecord(chapter)||chapter.chapter_id!==chapter_id||!Array.isArray(chapter.components)||chapter.components.some(item=>!isRecord(item))||
+      ["bindings","assets","local_resources"].some(key=>chapter[key]!==undefined&&(!Array.isArray(chapter[key])||(chapter[key] as unknown[]).some(item=>!isRecord(item))))) throw new LocalResearchBridgeError("local_research_invalid_response");
+    return {chapter_id,components:chapter.components as Record<string,unknown>[],bindings:(chapter.bindings||[]) as Record<string,unknown>[],assets:(chapter.assets||[]) as Record<string,unknown>[],local_resources:(chapter.local_resources||[]) as Record<string,unknown>[],version:reportVersion(reply.version)};
+  }
+
+  async getReportResource(profileId:string,researchId:string,reportId:string,chapterId:string,kind:"asset"|"local_resource",resourceId:string,version:LocalReportVersion):Promise<{blob:Blob;filename:string;sha256:string}> {
+    this.requireAction("get_report_resource");
+    const profile_id=inputText(profileId,512),research_id=inputText(researchId,512),report_id=inputText(reportId,512),chapter_id=inputText(chapterId,512);
+    this.requireProfile(profile_id);
+    if(!["asset","local_resource"].includes(kind)||!/^[a-f0-9]{24}$/.test(resourceId))throw new LocalResearchBridgeError("local_research_invalid_input");
+    const generation=this.generation,sequence=this.capabilitySequence;
+    const reply=await this.call({action:"get_report_resource",profile_id,research_id,report_id,chapter_id,resource_kind:kind,resource_id:resourceId,...reportVersion(version)});
+    this.requireAuthorizedSnapshot(generation,sequence);
+    const value=reply.resource;
+    if(!isRecord(value)||value.kind!==kind||value.resource_id!==resourceId||!Number.isSafeInteger(value.size)||(value.size as number)<1||(value.size as number)>8*1024*1024||
+      typeof value.content_base64!=="string"||value.content_base64.length>Math.ceil(8*1024*1024/3)*4||!/^[A-Za-z0-9+/]*={0,2}$/.test(value.content_base64)||
+      typeof value.sha256!=="string"||!/^[a-f0-9]{64}$/.test(value.sha256))throw new LocalResearchBridgeError("local_research_invalid_response");
+    const media=text(value.media_type,128),filename=text(value.filename,255);
+    let decoded:string;try {decoded=atob(value.content_base64);}catch {throw new LocalResearchBridgeError("local_research_invalid_response");}
+    if(decoded.length!==value.size)throw new LocalResearchBridgeError("local_research_invalid_response");
+    const bytes=new Uint8Array(decoded.length);for(let i=0;i<decoded.length;i++)bytes[i]=decoded.charCodeAt(i);
+    return {blob:new Blob([bytes],{type:media}),filename,sha256:value.sha256};
   }
 
   async addReportComponent(input:{profileId:string;researchId:string;reportId:string;componentId:string;kind:"chapter"|"entry";parentId:string;title:string;body:string;version:LocalReportVersion}):Promise<LocalReportVersion> {

@@ -25,6 +25,20 @@ test("local chapter retains validated reference bindings and accepts older clien
   await assert.rejects(client.getReportChapter("self","research","report","chapter-1"),code("local_research_invalid_response"));
 });
 
+test("local report resources are bounded and tied to the requested identity and version", async () => {
+  const id="a".repeat(24),version={generation:1,root_ref:`nodes/aa/${"a".repeat(64)}.json`};
+  let resource:Record<string,unknown>={kind:"local_resource",resource_id:id,media_type:"image/png",filename:"figure.png",size:3,sha256:"b".repeat(64),content_base64:"YWJj"};
+  const client=localResearchBridge(host(message=>message.action==="capabilities" ?
+    ok({actions:["get_report_resource"],profiles:[{profile_id:"self",display_name:"Self"}]}) : ok({resource})))!;
+  await client.capabilities(currentBinding);
+  const result=await client.getReportResource("self","research","report","chapter","local_resource",id,version);
+  assert.equal(await result.blob.text(),"abc");
+  resource={...resource,resource_id:"b".repeat(24)};
+  await assert.rejects(client.getReportResource("self","research","report","chapter","local_resource",id,version),code("local_research_invalid_response"));
+  resource={...resource,resource_id:id,size:8*1024*1024+1};
+  await assert.rejects(client.getReportResource("self","research","report","chapter","local_resource",id,version),code("local_research_invalid_response"));
+});
+
 test("research directory validates revision and profile across pages", async () => {
   let response=ok({researches:[record],revision:2,next_offset:1});
   const client=localResearchBridge(host(message=>message.action==="capabilities" ?

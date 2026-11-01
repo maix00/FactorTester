@@ -26,6 +26,7 @@ type ImageResolver = (href:string) => {url:string | null} | null;
 export type ReportReaderSource = {
   index: () => Promise<Row>;
   chapter: (chapterID:string) => Promise<Row>;
+  resource?: (chapterID:string, kind:"asset"|"local_resource", id:string) => Promise<{blob:Blob;filename:string;sha256:string}>;
 };
 
 function Markdown({ value, onOpen, resolveImage }: { value: string; onOpen: (reference:ReportReference,label:string) => void; resolveImage:ImageResolver }): React.ReactElement {
@@ -40,6 +41,7 @@ function Markdown({ value, onOpen, resolveImage }: { value: string; onOpen: (ref
   const prepared = useMemo(() => {
     const formulas = new Map<string,{latex:string; options:Record<string,unknown>}>();
     const links = new Map<string,{reference:ReportReference; label:string}>();
+    const images = new Map<string,string>();
     const nonce = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     const placeholder: FormulaRenderer | null = engine ? {renderToString:(latex,options) => {
       const id = `${nonce}-${formulas.size}`; formulas.set(id,{latex,options});
@@ -49,16 +51,25 @@ function Markdown({ value, onOpen, resolveImage }: { value: string; onOpen: (ref
       const reference = reportReference(href);
       if (!reference) return null;
       const id = `${nonce}-${links.size}`; links.set(id,{reference,label}); return id;
-    },resolveImage), {
+    },href => {
+      const resolved=resolveImage(href);
+      if(!resolved?.url?.startsWith("blob:"))return resolved;
+      const id=`${nonce}-${images.size}`;images.set(id,resolved.url);
+      return {url:null,placeholder:id};
+    }), {
       FORBID_TAGS:["style","iframe","object","embed","form"], FORBID_ATTR:["style"],
     });
-    return {html,formulas,links};
+    return {html,formulas,links,images};
   }, [value,engine,resolveImage]);
   useLayoutEffect(() => {
-    if (!engine || !root.current) return;
-    for (const node of root.current.querySelectorAll<HTMLElement>("[data-tr-formula]")) {
+    if (!root.current) return;
+    if(engine)for (const node of root.current.querySelectorAll<HTMLElement>("[data-tr-formula]")) {
       const formula = prepared.formulas.get(node.dataset.trFormula || "");
       if (formula && !node.hasChildNodes()) node.innerHTML = engine.renderToString(formula.latex, formula.options);
+    }
+    for(const node of root.current.querySelectorAll<HTMLImageElement>("[data-tr-report-image]")){
+      const url=prepared.images.get(node.dataset.trReportImage || "");
+      if(url)node.src=url;
     }
     // React can restore the sanitized placeholders after a surrounding panel
     // changes; fill only empty placeholders before each paint.
@@ -104,7 +115,7 @@ function ReportTable({ value, onOpen, resolveImage }: { value: unknown; onOpen:(
   }))} />;
 }
 
-function ReportBlock({ component, assets, bindings, resources, target, hideTitle = false }: { component: Row; assets: Row[]; bindings: Row[]; resources: Row[]; target: ReportExportTarget; hideTitle?:boolean }): React.ReactElement {
+function ReportBlock({ component, assets, bindings, resources, target, source, chapterID, resourceURLs, hideTitle = false }: { component: Row; assets: Row[]; bindings: Row[]; resources: Row[]; target: ReportExportTarget; source?:ReportReaderSource; chapterID:string; resourceURLs:Record<string,string>; hideTitle?:boolean }): React.ReactElement {
   const { t } = useTranslation();
   const openObject = useContext(ObjectReferenceContext), [referenceDetail,setReferenceDetail] = useState<Row | null>(null);
   const pending = useRef(false);
@@ -112,23 +123,23 @@ function ReportBlock({ component, assets, bindings, resources, target, hideTitle
   const assetRef = content && typeof content === "object" ? String(content.asset_id || content.asset_ref || "") : "";
   const asset = assets.find(item => [item.asset_id,item.asset_ref,item.external_ref,item.filename].some(value => value === assetRef));
   const assetID = String(asset?.asset_id || asset?.asset_ref || "");
-  const assetURL = assetID ? reportResourceURL(target,["assets",assetID]) : null;
+  const assetURL = assetID ? source ? resourceURLs[`asset:${assetID}`] || null : reportResourceURL(target,["assets",assetID]) : null;
   const entries: any[] = Array.isArray(content) ? content : Array.isArray(content?.items) ? content.items : Array.isArray(content?.rows) ? content.rows : [];
   const title = String(component.title || "");
   const resolveImage = useCallback<ImageResolver>((href) => {
     const reference = reportReference(href);
     if (reference?.kind === "local_resource") {
       const resource = resources.find(item => item.resource_id === reference.ref);
-      return {url:resource ? reportResourceURL(target,["local-resources",reference.ref],{inline:"1"}) : null};
+      return {url:resource ? source ? resourceURLs[`local_resource:${reference.ref}`] || null : reportResourceURL(target,["local-resources",reference.ref],{inline:"1"}) : null};
     }
-    const source = assets.find(item => [item.asset_id,item.asset_ref,item.external_ref,item.filename].some(value => value === href));
-    if (source) {
-      const id = String(source.asset_id || source.asset_ref || "");
-      return {url:id ? reportResourceURL(target,["assets",id]) : null};
+    const assetItem = assets.find(item => [item.asset_id,item.asset_ref,item.external_ref,item.filename].some(value => value === href));
+    if (assetItem) {
+      const id = String(assetItem.asset_id || assetItem.asset_ref || "");
+      return {url:id ? source ? resourceURLs[`asset:${id}`] || null : reportResourceURL(target,["assets",id]) : null};
     }
     if (/^(?:https?:|data:|blob:)/i.test(href)) return null;
     return {url:null};
-  },[assets,resources,target.publication_id,target.source_ref,target.source_kind,target.owner_ref,target.profile_ref,target.profile_id,target.report_workspace_id,target.branch_id]);
+  },[assets,resources,source,resourceURLs,target.publication_id,target.source_ref,target.source_kind,target.owner_ref,target.profile_ref,target.profile_id,target.report_workspace_id,target.branch_id]);
   const openReference = (reference:ReportReference,label:string): void => {
     if (pending.current) return;
     const binding = bindings.find(item => String(item.kind || "").replaceAll("-","_") === reference.kind && String(item.target_ref || "") === reference.ref);
@@ -137,6 +148,12 @@ function ReportBlock({ component, assets, bindings, resources, target, hideTitle
       try {
         if (reference.kind === "local_resource") {
           const resource = resources.find(item => item.resource_id === reference.ref);
+          if (resource && source?.resource) {
+            const value=await source.resource(chapterID,"local_resource",reference.ref);
+            if (resource.content_hash && value.sha256!==resource.content_hash) throw new Error(t("report.revisionConflict"));
+            downloadBlob(value.blob,value.filename || label || reference.ref);
+            return;
+          }
           const url = resource && reportResourceURL(target,["local-resources",reference.ref],{inline:"1"});
           if (!resource || !url) throw new Error(t("report.imageUnavailable"));
           const response = await fetch(url,{credentials:"same-origin",redirect:"error"});
@@ -180,14 +197,14 @@ function ReportBlock({ component, assets, bindings, resources, target, hideTitle
   </section>;
 }
 
-function ReportTreeNode({ node, assets, resources, bindings, target }: { node:ReportNode; assets:Row[]; resources:Row[]; bindings:Map<string,Row[]>; target:ReportExportTarget }): React.ReactElement {
+function ReportTreeNode({ node, assets, resources, bindings, target, source, chapterID, resourceURLs }: { node:ReportNode; assets:Row[]; resources:Row[]; bindings:Map<string,Row[]>; target:ReportExportTarget; source?:ReportReaderSource; chapterID:string; resourceURLs:Record<string,string> }): React.ReactElement {
   const { t } = useTranslation(), component = node.component, kind = String(component.kind || "");
   const [expanded,setExpanded] = useState(kind !== "special");
   const associated = bindings.get(String(component.component_id || "")) || [];
   const isResult = kind === "special" && component.display_kind === "test_result";
   const job = isResult ? reportJobReference(component,associated) : null;
-  const descendants = node.children.map(child => <ReportTreeNode key={String(child.component.component_id)} node={child} assets={assets} resources={resources} bindings={bindings} target={target} />);
-  const content = <ReportBlock component={component} assets={assets} bindings={associated} resources={resources} target={target} hideTitle={kind === "special" || kind === "section" || kind === "subsection"} />;
+  const descendants = node.children.map(child => <ReportTreeNode key={String(child.component.component_id)} node={child} assets={assets} resources={resources} bindings={bindings} target={target} source={source} chapterID={chapterID} resourceURLs={resourceURLs} />);
+  const content = <ReportBlock component={component} assets={assets} bindings={associated} resources={resources} target={target} source={source} chapterID={chapterID} resourceURLs={resourceURLs} hideTitle={kind === "special" || kind === "section" || kind === "subsection"} />;
   if (kind === "chapter") return <>{content}{descendants}</>;
   if (["special","section","subsection"].includes(kind)) return <details className="tr-report-reading-section" open={expanded} onToggle={event => {if (event.target === event.currentTarget) setExpanded(event.currentTarget.open);}}>
     <summary>{String(component.title || component.display_kind || kind)}</summary>
@@ -205,6 +222,7 @@ export function ReportBranchReader({ target, source, initialChapterID = "", onCh
   const indexURL = reportResourceURL(target,["index"]);
   const [index,setIndex] = useState<Row | null>(null), [chapterID,setChapterID] = useState(""), [chapter,setChapter] = useState<Row | null>(null);
   const [error,setError] = useState(""), [loading,setLoading] = useState(false), [indexRevision,setIndexRevision] = useState(0), [chapterRevision,setChapterRevision] = useState(0);
+  const [resourceURLs,setResourceURLs]=useState<Record<string,string>>({});
   useEffect(() => {
     const controller = new AbortController(); setIndex(null); setChapter(null); setChapterID(""); setError("");
     if (!source && !indexURL) {setError(t("report.exportMissingSource"));return () => controller.abort();}
@@ -230,6 +248,37 @@ export function ReportBranchReader({ target, source, initialChapterID = "", onCh
       .finally(() => {if (!controller.signal.aborted) setLoading(false);});
     return () => controller.abort();
   }, [index,chapterID,chapterURL,chapterRevision,source,t]);
+  useEffect(()=>{
+    setResourceURLs({});
+    if(!chapter||!source)return;
+    if(!source.resource){
+      if((chapter.assets?.length || chapter.local_resources?.length))notify({code:"report.resources.unsupported",type:"warning",message:t("report.imageUnavailable")});
+      return;
+    }
+    let active=true,total=0,warned=false;
+    const urls:string[]=[];
+    const entries:["asset"|"local_resource",Row][]=[
+      ...(Array.isArray(chapter.assets)?chapter.assets.map((item:Row)=>["asset",item] as ["asset",Row]):[]),
+      ...(Array.isArray(chapter.local_resources)?chapter.local_resources.map((item:Row)=>["local_resource",item] as ["local_resource",Row]):[]),
+    ];
+    void (async()=>{
+      for(const [kind,item] of entries){
+        const id=String(kind==="asset"?item.asset_id:item.resource_id);
+        if(!active)break;
+        if(!/^[a-f0-9]{24}$/.test(id)||!String(item.media_type||"").startsWith("image/")||item.available===false)continue;
+        try{
+          const value=await source.resource!(chapterID,kind,id);
+          if(!active)break;
+          if(item.content_hash && value.sha256!==item.content_hash)throw new Error("resource changed");
+          if(total+value.blob.size>20*1024*1024){notify({code:"report.resources.limit",type:"warning",message:t("report.imageUnavailable")});break;}
+          total+=value.blob.size;
+          const url=URL.createObjectURL(value.blob);urls.push(url);
+          setResourceURLs(previous=>({...previous,[`${kind}:${id}`]:url}));
+        }catch { if(active&&!warned){warned=true;notify({code:"report.resources.unavailable",type:"warning",message:t("report.imageUnavailable")});} }
+      }
+    })();
+    return()=>{active=false;for(const url of urls)URL.revokeObjectURL(url);};
+  },[chapter,chapterID,source,t]);
   const bindingsByComponent = useMemo(() => {
     const result = new Map<string, Row[]>();
     for (const binding of Array.isArray(chapter?.bindings) ? chapter.bindings : []) {
@@ -242,6 +291,6 @@ export function ReportBranchReader({ target, source, initialChapterID = "", onCh
   const tree = useMemo(() => reportTree(Array.isArray(chapter?.components) ? chapter.components : []),[chapter]);
   return <section className="tr-report-reading" aria-label={t("report.read")} style={{"--tr-report-font-size":`${fontSize}px`} as React.CSSProperties}>
     {index?.chapters?.length ? <div className="tr-report-reading-toolbar"><label className="tr-report-reading-choice"><span>{t("report.chapter")}</span><Select aria-label={t("report.chapter")} value={chapterID || undefined} onChange={value => {setChapterID(value);onChapterChange?.(value);}} options={index.chapters.map((item:Row) => ({value:String(item.component_id || ""),label:String(item.title || item.component_id || "")})).filter((item:Row) => item.value)} /></label><Popover trigger="click" title={t("report.readingSettings")} content={<label className="tr-report-reading-font"><span>{t("report.fontSize")}</span><Select aria-label={t("report.fontSize")} value={fontSize} options={REPORT_FONT_SIZES.map(size => ({value:size,label:`${size} px`}))} onChange={setFontSize} /></label>}><Button type="text" icon={<FontSizeOutlined />} aria-label={t("report.readingSettings")} /></Popover></div> : null}
-    {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} action={<Button onClick={() => index && !source ? setChapterRevision(value => value + 1) : setIndexRevision(value => value + 1)}>{t("retry")}</Button>} /> : chapter ? <article>{tree.map(node => <ReportTreeNode key={String(node.component.component_id)} node={node} assets={chapter.assets || []} resources={chapter.local_resources || []} bindings={bindingsByComponent} target={target} />)}</article> : index ? <Empty description={t("empty")} /> : null}
+    {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("loadFailed")} description={error} action={<Button onClick={() => index && !source ? setChapterRevision(value => value + 1) : setIndexRevision(value => value + 1)}>{t("retry")}</Button>} /> : chapter ? <article>{tree.map(node => <ReportTreeNode key={String(node.component.component_id)} node={node} assets={chapter.assets || []} resources={chapter.local_resources || []} bindings={bindingsByComponent} target={target} source={source} chapterID={chapterID} resourceURLs={resourceURLs} />)}</article> : index ? <Empty description={t("empty")} /> : null}
   </section>;
 }

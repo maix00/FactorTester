@@ -3,7 +3,7 @@ import type { FormulaRenderer } from "./components/formula.tsx";
 
 type MathToken = { type:string; raw:string; latex:string; display:boolean };
 type LinkRenderer = (href: string, label: string) => string | null;
-type ImageResolver = (href: string) => {url:string | null} | null;
+type ImageResolver = (href: string) => {url:string | null; placeholder?:string} | null;
 const isFactorAlias = (value: string): boolean => /^\$(?:F|Rev|RF|COMMON)(?::|=|_|\b)/i.test(value);
 const escapeHTML = (value: string): string => value.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
@@ -30,6 +30,7 @@ function parser(engine: FormulaRenderer | null, link?: LinkRenderer, image?: Ima
     const resolved = image(token.href);
     if (!resolved) return false;
     const alt = escapeHTML(token.text).replace(/"/g,"&quot;");
+    if (resolved.placeholder) return `<img data-tr-report-image="${escapeHTML(resolved.placeholder).replace(/"/g,"&quot;")}" alt="${alt}" loading="lazy">`;
     return resolved.url ? `<img src="${escapeHTML(resolved.url).replace(/"/g,"&quot;")}" alt="${alt}" loading="lazy">` : `<span>${alt}</span>`;
   }}});
   result.use({extensions:[

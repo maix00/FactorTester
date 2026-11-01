@@ -232,8 +232,18 @@ def test_local_report_reader_with_real_local_rpc(tmp_path):
     version = rpc.request({'action': 'get_report', **base})['version']
     version = rpc.request({'action': 'add_report_component', **base, 'component_id': 'chapter-1',
                            'kind': 'chapter', 'parent_id': '', 'title': '第一章', 'body': '', **version})['version']
+    _report, root = rpc.store._report_root('self', research['research_id'], report['report_id'])
+    image = root / 'figure.png'
+    image.write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aR0AAAAASUVORK5CYII='))
     rpc.request({'action': 'add_report_component', **base, 'component_id': 'entry-1',
-                 'kind': 'entry', 'parent_id': 'chapter-1', 'title': '原段落', 'body': '真实本机正文', **version})
+                 'kind': 'entry', 'parent_id': 'chapter-1', 'title': '原段落',
+                 'body': f'真实本机正文\n\n![图表]({image.as_uri()})\n\n[下载附件]({image.as_uri()})', **version})
+    from tools.cli.release.research_reporting.assets import stage_branch_image
+    from tools.cli.release.research_reporting.authoring.tree_model import add_asset, add_component
+    asset = stage_branch_image(package_root=root, branch_id='main', source_path=image)
+    add_asset(package_root=root, branch_id='main', asset=asset)
+    add_component(package_root=root, branch_id='main', component_id='figure', kind='image',
+                  title='结构图', parent_id='chapter-1', body='', content={'asset_ref': asset['asset_ref']}, display_kind='')
 
     harness = tmp_path / 'rpc.tsx'; bundle = tmp_path / 'rpc.js'
     harness.write_text(f'''
@@ -278,6 +288,15 @@ void client.capabilities({{issuer:'https://id.test/realm',identity_id:'stable'}}
                 page = browser.new_page(viewport={'width': 1440, 'height': 900}, locale='zh-CN')
                 page.set_default_timeout(5000); page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
                 reader = page.locator('.tr-report-reading'); reader.get_by_text('真实本机正文').wait_for()
+                chart = reader.locator('img[alt="图表"]'); chart.wait_for()
+                assert (chart.get_attribute('src') or '').startswith('blob:'), chart.evaluate('node => node.outerHTML')
+                assert chart.evaluate('node => node.decode().then(() => node.naturalWidth)') == 1
+                structured = reader.locator('img[alt="结构图"]'); structured.wait_for()
+                assert structured.evaluate('node => node.decode().then(() => node.naturalWidth)') == 1
+                page.screenshot(path=str(tmp_path / 'local-report.png'))
+                with page.expect_download() as download:
+                    reader.get_by_role('button', name='下载附件').click()
+                assert Path(download.value.path()).read_bytes() == image.read_bytes()
                 page.get_by_role('button', name='编辑报告内容').click()
                 page.get_by_label('段落标题').fill('新增段落'); page.get_by_label('段落正文').fill('真实写入正文')
                 page.get_by_role('button', name='添加段落').click()

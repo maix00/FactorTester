@@ -5,6 +5,77 @@ import pytest
 from tools.cli.release.research_reporting.local_rpc import SCHEMA, LocalResearchRPC
 
 
+def test_local_resource_is_scoped_to_report_chapter_and_version(tmp_path):
+    import base64
+    import json
+    rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'}])
+    research = rpc.request({'action': 'create', 'profile_id': 'self', 'title': 'Research',
+                            'description': '', 'operation_id': 'create-research'})['research']
+    report = rpc.request({'action': 'create_report', 'profile_id': 'self', 'research_id': research['research_id'],
+                          'title': 'Report', 'operation_id': 'create-report'})['report']
+    base = {'profile_id': 'self', 'research_id': research['research_id'], 'report_id': report['report_id']}
+    version = rpc.request({'action': 'get_report', **base})['version']
+    version = rpc.request({'action': 'add_report_component', **base, 'component_id': 'chapter-1',
+                           'kind': 'chapter', 'parent_id': '', 'title': 'Chapter', 'body': '', **version})['version']
+    _row, root = rpc.store._report_root('self', research['research_id'], report['report_id'])
+    image = root / 'figure.png'; image.write_bytes(b'png-test-bytes')
+    version = rpc.request({'action': 'add_report_component', **base, 'component_id': 'entry-1',
+                           'kind': 'entry', 'parent_id': 'chapter-1', 'title': '',
+                           'body': f'![Chart]({image.as_uri()})', **version})['version']
+    chapter = rpc.request({'action': 'get_report_chapter', **base, 'chapter_id': 'chapter-1'})['chapter']
+    assert len(chapter['local_resources']) == 1
+    resource_id = chapter['local_resources'][0]['resource_id']
+    request = {'action': 'get_report_resource', **base, 'chapter_id': 'chapter-1',
+               'resource_kind': 'local_resource', 'resource_id': resource_id, **version}
+    result = rpc.request(request)['resource']
+    assert base64.b64decode(result['content_base64']) == b'png-test-bytes'
+    assert result['media_type'] == 'image/png' and result['size'] == 14
+    assert str(root) not in json.dumps(result)
+    with pytest.raises(ValueError, match='unavailable'):
+        rpc.request({**request, 'resource_id': '0' * 24})
+    with pytest.raises(ValueError, match='version changed'):
+        rpc.request({**request, 'generation': version['generation'] - 1})
+    other = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='other',
+                             profiles=[{'profile_id': 'self', 'display_name': 'Other'}])
+    with pytest.raises(ValueError, match='report is unavailable'):
+        other.request(request)
+    with image.open('wb') as file:
+        file.truncate(8 * 1024 * 1024 + 1)
+    with pytest.raises(ValueError, match='unavailable'):
+        rpc.request(request)
+
+
+def test_local_asset_must_be_referenced_in_selected_chapter(tmp_path):
+    import base64
+    from tools.cli.release.research_reporting.assets import stage_branch_image
+    from tools.cli.release.research_reporting.authoring.tree_model import add_asset, add_component
+    from tools.cli.release.research_reporting.public_research.projection import asset_id_for
+
+    rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'}])
+    research = rpc.request({'action': 'create', 'profile_id': 'self', 'title': 'Research',
+                            'description': '', 'operation_id': 'create-research'})['research']
+    report = rpc.request({'action': 'create_report', 'profile_id': 'self', 'research_id': research['research_id'],
+                          'title': 'Report', 'operation_id': 'create-report'})['report']
+    base = {'profile_id': 'self', 'research_id': research['research_id'], 'report_id': report['report_id']}
+    _row, root = rpc.store._report_root('self', research['research_id'], report['report_id'])
+    for chapter in ('chapter-a', 'chapter-b'):
+        add_component(package_root=root, branch_id='main', component_id=chapter, kind='chapter',
+                      title=chapter, parent_id=None, body='', content=None, display_kind='')
+    image = tmp_path / 'image.png'; image.write_bytes(b'image bytes')
+    asset = stage_branch_image(package_root=root, branch_id='main', source_path=image)
+    add_asset(package_root=root, branch_id='main', asset=asset)
+    add_component(package_root=root, branch_id='main', component_id='figure', kind='image',
+                  title='Figure', parent_id='chapter-a', body='', content={'asset_ref': asset['asset_ref']}, display_kind='')
+    version = rpc.request({'action': 'get_report', **base})['version']
+    request = {'action': 'get_report_resource', **base, 'chapter_id': 'chapter-a',
+               'resource_kind': 'asset', 'resource_id': asset_id_for(asset['asset_ref']), **version}
+    assert base64.b64decode(rpc.request(request)['resource']['content_base64']) == b'image bytes'
+    with pytest.raises(ValueError, match='unavailable'):
+        rpc.request({**request, 'chapter_id': 'chapter-b'})
+
+
 class EmptyOwnedReportDirectory:
     def get(self, path, *, query):
         assert path == '/api/research/owned-local-report-sync'

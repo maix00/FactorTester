@@ -26,10 +26,10 @@ export function LocalResearchDetail({client,capabilities,item,initialReport,onCl
   return <DetailsPanel title={initialReport?.title || item.title} onClose={onClose} width={680}>{error?<Alert type="error" showIcon message={error}/>:value?<><PropertyGroups groups={[{key:"research",title:t("details"),items:[
     {key:"title",label:t("editor.name"),value:value.title},...(value.description ? [{key:"description",label:t("library.description"),value:value.description,wide:true}] : []),
     {key:"id",label:t("objectReference.reference"),value:value.research_id,wide:true},{key:"updated",label:t("jobs.updated"),value:value.updated_at,render:amount=>formatDate(amount as number,{dateStyle:"medium",timeStyle:"short"})},
-  ]}]} />{capabilities.actions.includes("list_reports")?<LocalReports client={client} item={value} initialReport={initialReport} canCreate={capabilities.actions.includes("create_report")} canOpen={capabilities.actions.includes("get_report")} canRead={capabilities.actions.includes("get_report_chapter")} canEdit={capabilities.actions.includes("get_report_chapter")&&capabilities.actions.includes("add_report_component")} canPublish={capabilities.actions.includes("publish_report")} canPull={capabilities.actions.includes("pull_report")} onSaved={onSaved}/>:null}</>:<Spin tip={t("loading")} />}</DetailsPanel>;
+  ]}]} />{capabilities.actions.includes("list_reports")?<LocalReports client={client} item={value} initialReport={initialReport} canCreate={capabilities.actions.includes("create_report")} canOpen={capabilities.actions.includes("get_report")} canRead={capabilities.actions.includes("get_report_chapter")} canReadResource={capabilities.actions.includes("get_report_resource")} canEdit={capabilities.actions.includes("get_report_chapter")&&capabilities.actions.includes("add_report_component")} canPublish={capabilities.actions.includes("publish_report")} canPull={capabilities.actions.includes("pull_report")} onSaved={onSaved}/>:null}</>:<Spin tip={t("loading")} />}</DetailsPanel>;
 }
 
-function LocalReports({client,item,initialReport,canCreate,canOpen,canRead,canEdit,canPublish,canPull,onSaved}:{client:LocalResearchClient;item:LocalResearch;initialReport?:LocalReport;canCreate:boolean;canOpen:boolean;canRead:boolean;canEdit:boolean;canPublish:boolean;canPull:boolean;onSaved?:()=>void}):React.ReactElement {
+function LocalReports({client,item,initialReport,canCreate,canOpen,canRead,canReadResource,canEdit,canPublish,canPull,onSaved}:{client:LocalResearchClient;item:LocalResearch;initialReport?:LocalReport;canCreate:boolean;canOpen:boolean;canRead:boolean;canReadResource:boolean;canEdit:boolean;canPublish:boolean;canPull:boolean;onSaved?:()=>void}):React.ReactElement {
   const {t}=useTranslation();
   const [rows,setRows]=useState<LocalReport[]>([]),[page,setPage]=useState(1),[pageSize,setPageSize]=useState(20),[hasMore,setHasMore]=useState(false),[loading,setLoading]=useState(true),[revision,setRevision]=useState(0),[creating,setCreating]=useState(false),[busy,setBusy]=useState(false);
   const [selected,setSelected]=useState<LocalReport|null>(initialReport||null);
@@ -57,8 +57,12 @@ function LocalReports({client,item,initialReport,canCreate,canOpen,canRead,canEd
         if(!version||result.version.generation!==version.generation||result.version.root_ref!==version.root_ref)throw new Error(t("report.revisionConflict"));
         return result;
       },
+      ...(canReadResource ? {resource:async(chapterID:string,kind:"asset"|"local_resource",id:string)=>{
+        if(!version||!chapterID)throw new Error(t("report.revisionConflict"));
+        return client.getReportResource(item.profile_id,item.research_id,selected.report_id,chapterID,kind,id,version);
+      }} : {}),
     };
-  },[client,item.profile_id,item.research_id,selected,canOpen,canRead,t]);
+  },[client,item.profile_id,item.research_id,selected,canOpen,canRead,canReadResource,t]);
   const requester=useMemo(()=>{
     if(!selected)return undefined;
     const base=`/api/research-reports/${encodeURIComponent(selected.report_id)}`;

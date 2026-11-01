@@ -48,6 +48,8 @@ class LocalResearchRPC:
             'create_report': {'action', 'profile_id', 'research_id', 'title', 'operation_id'},
             'get_report': {'action', 'profile_id', 'research_id', 'report_id'},
             'get_report_chapter': {'action', 'profile_id', 'research_id', 'report_id', 'chapter_id'},
+            'get_report_resource': {'action', 'profile_id', 'research_id', 'report_id', 'chapter_id',
+                                    'resource_kind', 'resource_id', 'generation', 'root_ref'},
             'add_report_component': {'action', 'profile_id', 'research_id', 'report_id', 'component_id', 'kind',
                                      'parent_id', 'title', 'body', 'generation', 'root_ref'},
             'publish_report': {'action', 'profile_id', 'research_id', 'report_id'},
@@ -150,6 +152,8 @@ class LocalResearchRPC:
         elif action == 'get_report_chapter':
             value = self.store.get_report_chapter(profile_id=message['profile_id'], research_id=message['research_id'],
                      report_id=message['report_id'], chapter_id=message['chapter_id'])
+        elif action == 'get_report_resource':
+            value = self.store.get_report_resource(**{key: message[key] for key in keys[action] - {'action'}})
         elif action == 'add_report_component':
             from .authoring.tree_transactions import ReportVersionConflict
             try:

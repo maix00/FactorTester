@@ -285,16 +285,58 @@ class LocalResearchCatalog:
     def get_report_chapter(self, *, profile_id: str, research_id: str, report_id: str, chapter_id: str) -> dict:
         from .authoring.tree_projection import load_chapter_snapshot
         from .authoring.tree_schema import identifier
-        from .public_research.projection import build_upload_projection
+        from .public_research.projection import build_upload_projection, component_asset_references
 
         _report, root = self._report_root(profile_id, research_id, report_id)
         snapshot = load_chapter_snapshot(package_root=root, branch_id='main', chapter_id=identifier(chapter_id, 'chapter_id'))
         if snapshot['head']['report_id'] != report_id:
             raise ValueError('local report identity is invalid')
-        projection = build_upload_projection(snapshot, include_asset_bytes=False, include_local_resource_bytes=False)
+        projection = build_upload_projection(snapshot, asset_refs=component_asset_references(snapshot['components']),
+                                             include_asset_bytes=False, include_local_resource_bytes=False)
         return {'chapter': {'chapter_id': chapter_id, 'components': projection['components'],
-                            'bindings': projection['bindings']},
+                            'bindings': projection['bindings'], 'assets': projection['assets'],
+                            'local_resources': projection['local_resources']},
                 'version': {'generation': snapshot['head']['generation'], 'root_ref': snapshot['head']['root_ref']}}
+
+    def get_report_resource(self, *, profile_id: str, research_id: str, report_id: str,
+                            chapter_id: str, resource_kind: str, resource_id: str,
+                            generation: int, root_ref: str) -> dict:
+        """Read a single report-owned resource; callers cannot supply a path."""
+        import base64
+        import hashlib
+        from .authoring.tree_projection import load_chapter_snapshot, load_report_index
+        from .authoring.tree_schema import identifier, node_reference
+        from .public_research.projection import (
+            asset_id_for, component_asset_references, read_local_asset, read_local_resource,
+        )
+
+        _report, root = self._report_root(profile_id, research_id, report_id)
+        if resource_kind not in {'asset', 'local_resource'} or type(generation) is not int or generation < 0:
+            raise ValueError('invalid report resource request')
+        identifier(chapter_id, 'chapter_id')
+        node_reference(root_ref)
+        snapshot = load_chapter_snapshot(package_root=root, branch_id='main', chapter_id=chapter_id)
+        head = snapshot['head']
+        if (head['report_id'], head['generation'], head['root_ref']) != (report_id, generation, root_ref):
+            raise ValueError('report resource version changed')
+        if resource_kind == 'asset':
+            references = component_asset_references(snapshot['components'])
+            allowed = {asset_id_for(str(asset.get('asset_ref') or '')) for asset in head.get('assets') or []
+                       if str(asset.get('asset_ref') or '') in references
+                       or asset_id_for(str(asset.get('asset_ref') or '')) in references}
+            if resource_id not in allowed:
+                raise ValueError('report resource is unavailable')
+        read = read_local_asset if resource_kind == 'asset' else read_local_resource
+        resource = read(snapshot, resource_id)
+        if resource is None:
+            raise ValueError('report resource is unavailable')
+        raw, media_type, filename = resource
+        current = load_report_index(package_root=root, branch_id='main')['head']
+        if (current['report_id'], current['generation'], current['root_ref']) != (report_id, generation, root_ref):
+            raise ValueError('report resource version changed')
+        return {'resource': {'kind': resource_kind, 'resource_id': resource_id, 'media_type': media_type,
+                             'filename': filename, 'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
+                             'content_base64': base64.b64encode(raw).decode('ascii')}}
 
     def add_report_component(self, *, profile_id: str, research_id: str, report_id: str,
                              component_id: str, kind: str, parent_id: str, title: str, body: str,
