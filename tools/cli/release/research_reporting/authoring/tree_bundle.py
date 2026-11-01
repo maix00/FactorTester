@@ -32,6 +32,24 @@ from ..public_research.projection import (
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 
 
+def read_bundle_asset(snapshot: dict, asset: dict, *, package_root: Path, branch_id: str) -> tuple[bytes, str, str]:
+    """Resolve an asset using the same precedence as an exported report bundle."""
+    asset_id = hashlib.sha256(asset['asset_ref'].encode()).hexdigest()[:24]
+    root = Path(package_root).resolve()
+    candidates = ([root / asset['local_ref']] if asset.get('local_ref') else []) + [
+        root / 'branches' / branch_id / 'assets' / asset['filename'],
+        root / 'assets' / asset['filename'],
+    ]
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate.is_relative_to(root) and candidate.is_file():
+            return read_bounded_file(candidate, MAX_BUNDLE_BYTES), asset['media_type'], candidate.name
+    resolved = read_local_asset(snapshot, asset_id)
+    if resolved is None:
+        raise ValueError(f"report bundle asset is unavailable: {asset['asset_ref']}")
+    return resolved
+
+
 def export_report_bundle(*, package_root: Path, branch_id: str,
                          expected_generation: int, expected_root_ref: str) -> bytes:
     paths = report_tree_paths(package_root, branch_id)
@@ -68,23 +86,7 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
             files[key] = raw
         return {'sha256': key, 'size_bytes': len(raw), 'filename': Path(filename).name}
     for asset in head['assets']:
-        asset_id = hashlib.sha256(asset['asset_ref'].encode()).hexdigest()[:24]
-        resolved = None
-        root = Path(package_root).resolve()
-        candidates = ([root / asset['local_ref']] if asset.get('local_ref') else []) + [
-            root / 'branches' / branch_id / 'assets' / asset['filename'],
-            root / 'assets' / asset['filename'],
-        ]
-        for candidate in candidates:
-            candidate = candidate.resolve()
-            if candidate.is_relative_to(root) and candidate.is_file():
-                resolved = (read_bounded_file(candidate, MAX_BUNDLE_BYTES), asset['media_type'], candidate.name)
-                break
-        if resolved is None:
-            resolved = read_local_asset(snapshot, asset_id)
-        if resolved is None:
-            raise ValueError(f"report bundle asset is unavailable: {asset['asset_ref']}")
-        raw, _, filename = resolved
+        raw, _, filename = read_bundle_asset(snapshot, asset, package_root=package_root, branch_id=branch_id)
         descriptor = capture(raw, filename)
         if asset.get('content_hash') and asset['content_hash'] != descriptor['sha256']:
             raise ValueError('report bundle asset hash mismatch')

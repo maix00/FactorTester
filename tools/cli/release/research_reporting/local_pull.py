@@ -33,6 +33,24 @@ def _require_clean_workspace(root: Path) -> None:
         raise LocalReportSyncConflict('local report workspace has uncommitted files')
 
 
+def _require_unchanged_assets(root: Path, paths: dict, head: dict) -> None:
+    """Do not discard committed asset edits that did not update the tree."""
+    from .authoring.tree_bundle import read_bundle_asset
+    from .authoring.tree_projection import project_snapshot
+
+    assets = [asset for asset in head['assets'] if asset.get('content_hash')]
+    if not assets:
+        return
+    snapshot = project_snapshot(paths, head)
+    for asset in assets:
+        try:
+            raw, _, _ = read_bundle_asset(snapshot, asset, package_root=root, branch_id='main')
+        except (OSError, ValueError) as exc:
+            raise LocalReportSyncConflict('local report asset is unavailable') from exc
+        if hashlib.sha256(raw).hexdigest() != asset['content_hash']:
+            raise LocalReportSyncConflict('local report asset changed without updating the report')
+
+
 def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False, requires_edit: bool = False, source_kind: str = 'local') -> dict:
     from .public_research.object_uploads import projection_hash
     value = session.get(publication_endpoint(source_kind, research_id, report_id), query={
@@ -162,6 +180,7 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             # Files outside the immutable tree can contain unsaved work. Check
             # before fetching an authoring bundle as well as after it arrives.
             _require_clean_workspace(root)
+            _require_unchanged_assets(root, paths, local)
             expected = (local['generation'], local['root_ref'])
         publication_id, digest = record['publication_id'], bundle['sha256']
         query = urlencode(publication_query(source_kind, research_id, report_id))
@@ -193,6 +212,7 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                     raise LocalReportSyncConflict('local report changed during download')
                 require_no_pending(paths, current)
                 _require_clean_workspace(root)
+                _require_unchanged_assets(root, paths, current)
                 prior_commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
                 # A staged bundle must not modify the shared Job cache before
                 # content, authorization and local-version checks all pass.

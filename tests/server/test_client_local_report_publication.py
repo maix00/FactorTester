@@ -249,6 +249,27 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert transport['downloads'] == downloads_before
         assert dirty.read_text() == 'keep local work'
         dirty.unlink()
+        # A committed resource edit does not make Git dirty or change the
+        # immutable report HEAD. It must still block an incoming version.
+        figure = local_root / 'branches' / 'main' / 'assets' / 'figure.png'
+        figure.write_bytes(b'committed local figure edit')
+        commit_report_workspace(local_root, message='Edit figure outside report tree')
+        assert subprocess.check_output(['git', '-C', str(local_root), 'status', '--porcelain'], text=True).strip() == ''
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        assert transport['downloads'] == downloads_before
+        assert figure.read_bytes() == b'committed local figure edit'
+        figure.write_bytes(raw_asset)
+        commit_report_workspace(local_root, message='Restore figure')
+        def change_committed_figure():
+            figure.write_bytes(b'figure changed during download')
+            commit_report_workspace(local_root, message='Edit figure during download')
+        transport['on_download'] = change_committed_figure
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        transport['on_download'] = None
+        assert figure.read_bytes() == b'figure changed during download'
+        figure.write_bytes(raw_asset)
+        commit_report_workspace(local_root, message='Restore figure again')
+        downloads_before = transport['downloads']
         transport['on_download'] = lambda: dirty.write_text('changed during download')
         assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
         transport['on_download'] = None
