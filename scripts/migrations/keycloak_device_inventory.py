@@ -26,19 +26,20 @@ def read_postgres_snapshot(connection, *, manager_id: str, principal: str) -> di
     optional = [name for name in ('public_access', 'quota_exempt') if name in names]
     fields = ['device_id', 'username', 'public_key', 'enabled', 'source_server_id', *optional]
     records: list[dict] = []
-    after_device, after_source = '', ''
-    while True:
+    # A named cursor streams one snapshot without using an identity value as a
+    # sentinel. Old or malformed tables may contain empty/NULL keys or equal
+    # sort keys; keyset comparisons would silently omit some such records.
+    with connection.cursor(name='device_inventory') as cursor:
         # The interpolated identifiers are chosen only from the fixed list above.
-        rows = connection.execute(f'''SELECT {', '.join(fields)} FROM control_devices
-            WHERE username=%s AND (device_id, source_server_id)>(%s, %s)
-            ORDER BY device_id, source_server_id LIMIT %s''',
-            (principal, after_device, after_source, 501)).fetchall()
-        if len(records) + len(rows) > 100_000:
-            raise ValueError('device snapshot records exceed the inventory budget')
-        records.extend(dict(row) for row in rows)
-        if len(rows) < 501:
-            break
-        after_device, after_source = (str(rows[-1]['device_id']), str(rows[-1]['source_server_id']))
+        cursor.execute(f'''SELECT {', '.join(fields)} FROM control_devices
+            WHERE username=%s ORDER BY device_id, source_server_id''', (principal,))
+        while True:
+            rows = cursor.fetchmany(501)
+            if not rows:
+                break
+            if len(records) + len(rows) > 100_000:
+                raise ValueError('device snapshot records exceed the inventory budget')
+            records.extend(dict(row) for row in rows)
     return {'server_id': manager_id, 'devices': records, 'sources': {},
             'legacy_columns_present': optional}
 

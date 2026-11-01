@@ -78,18 +78,30 @@ def test_postgres_inventory_is_read_only_scoped_and_pages_without_loss():
             self.calls.append((query, parameters))
             if query.startswith('SET TRANSACTION'): return Result([])
             if 'information_schema.columns' in query: return Result([{'column_name': 'public_access'}])
-            principal, after, after_source, limit = parameters
-            assert principal == 'alice' and limit == 501 and 'quota_exempt' not in query
-            rows = [{'device_id': f'device-{n:07d}', 'username': principal, 'public_key': KEY,
-                     'enabled': True, 'source_server_id': 'lan', 'public_access': False} for n in range(1002)]
-            return Result([row for row in rows if (row['device_id'], row['source_server_id']) > (after, after_source)][:limit])
+            raise AssertionError('inventory must use a named cursor')
+        def cursor(self, *, name):
+            assert name == 'device_inventory'
+            outer = self
+            class Cursor:
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+                def execute(self, query, parameters):
+                    outer.calls.append((query, parameters))
+                    assert parameters == ('alice',) and 'quota_exempt' not in query
+                    self.rows = iter([{'device_id': f'device-{n:07d}', 'username': 'alice', 'public_key': KEY,
+                                       'enabled': True, 'source_server_id': 'lan', 'public_access': False} for n in range(1002)])
+                def fetchmany(self, size):
+                    from itertools import islice
+                    assert size == 501
+                    return list(islice(self.rows, size))
+            return Cursor()
     connection = Connection()
     snapshot = read_postgres_snapshot(connection, manager_id='lan', principal='alice')
     assert len(snapshot['devices']) == 1002
     assert snapshot['legacy_columns_present'] == ['public_access']
     assert len({row['device_id'] for row in snapshot['devices']}) == 1002
     assert connection.calls[0][0] == 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY'
-    assert len([call for call in connection.calls if 'FROM control_devices' in call[0]]) == 3
+    assert len([call for call in connection.calls if 'FROM control_devices' in call[0]]) == 1
 
 
 def test_postgres_inventory_keeps_same_device_across_source_page_boundary():
@@ -100,12 +112,22 @@ def test_postgres_inventory_keeps_same_device_across_source_page_boundary():
         def execute(self, query, parameters=()):
             if query.startswith('SET TRANSACTION'): return Result([])
             if 'information_schema.columns' in query: return Result([])
-            principal, device, source, limit = parameters
-            rows = [{'device_id': f'device-{n:07d}', 'username': principal, 'public_key': KEY,
-                     'enabled': True, 'source_server_id': 'lan'} for n in range(500)]
-            rows += [{'device_id': 'device-shared-12345', 'username': principal, 'public_key': KEY,
-                      'enabled': True, 'source_server_id': source_id} for source_id in ('lan', 'public')]
-            return Result([row for row in rows if (row['device_id'], row['source_server_id']) > (device, source)][:limit])
+            raise AssertionError('inventory must use a named cursor')
+        def cursor(self, *, name):
+            class Cursor:
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+                def execute(self, query, parameters):
+                    assert parameters == ('alice',)
+                    rows = [{'device_id': f'device-{n:07d}', 'username': 'alice', 'public_key': KEY,
+                             'enabled': True, 'source_server_id': 'lan'} for n in range(500)]
+                    rows += [{'device_id': 'device-shared-12345', 'username': 'alice', 'public_key': KEY,
+                              'enabled': True, 'source_server_id': source_id} for source_id in ('lan', 'public')]
+                    self.rows = iter(rows)
+                def fetchmany(self, size):
+                    from itertools import islice
+                    return list(islice(self.rows, size))
+            return Cursor()
     snapshot = read_postgres_snapshot(Connection(), manager_id='lan', principal='alice')
     assert len(snapshot['devices']) == 502
     assert [(row['device_id'], row['source_server_id']) for row in snapshot['devices'][-2:]] == [
