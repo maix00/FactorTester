@@ -151,6 +151,20 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
             raise PermissionError('current Manager access is not authorized')
         return {'reports': items, 'next_cursor': next_cursor}
 
+    def owner_metadata(self, *, session: dict, research_id: str, report_id: str) -> dict:
+        manager = self._manager()
+        _actor, identity = self._verified_identity(session, manager)
+        _resource, owner_id, _ref, authorize_now = self._context(
+            session=session, research_id=research_id, report_id=report_id, scopes=('read',))
+        if owner_id != identity.identity_id:
+            raise PermissionError('only the owner may restore local Research metadata')
+        authorize_now()
+        receipt = self._read_receipt(_receipt_id(str(self.state.server_id), owner_id, report_id))
+        self._validate_receipt(receipt, research_id=research_id, report_id=report_id,
+                               owner_id=owner_id, subject=identity.subject, issuer=identity.issuer.rstrip('/'))
+        authorize_now()
+        return {'research_title': receipt.get('research_title'), 'revision': receipt['_rev']}
+
     def publish_local(self, *, session: dict, research_id: str, report_id: str, branch_ref: str,
                       projection: dict, expected_revision: str | None, authoring: dict | None = None,
                       research_title: str | None = None) -> dict:

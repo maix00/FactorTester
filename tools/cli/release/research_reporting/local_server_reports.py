@@ -5,7 +5,7 @@ import hashlib
 import time
 
 from tools.cli.http import HttpClientError
-from .local_catalog_import import import_catalog_report
+from .local_catalog_import import import_catalog_report, import_shared_local_report
 from .local_pull import LocalReportSyncConflict
 from .report_workspace_identity import report_workspace_id_for
 
@@ -92,8 +92,11 @@ def sync_server_reports(store, *, binding: dict, manager: dict, profile_id: str,
     results = []
     for row in pending:
         try:
-            result = import_catalog_report(store, binding=binding, manager=manager, profile_id=profile,
-                                           research_id=row['research_id'], report_id=row['report_id'])
+            if row['source_kind'] not in {'catalog', 'local'}:
+                raise LocalReportSyncConflict('unsupported report origin')
+            importer = import_shared_local_report if row['source_kind'] == 'local' else import_catalog_report
+            result = importer(store, binding=binding, manager=manager, profile_id=profile,
+                              research_id=row['research_id'], report_id=row['report_id'])
             status = result['status']
             with store._connect() as db:
                 db.execute('DELETE FROM server_report_pending WHERE report_id=? AND manager_hash=? AND profile_id=?',

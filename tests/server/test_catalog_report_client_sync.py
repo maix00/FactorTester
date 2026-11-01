@@ -35,6 +35,8 @@ def test_catalog_report_uses_catalog_authority_for_sync_and_live_permissions(tmp
             if self.path == '/api/session': return self.reply(200, SESSION)
             parsed = urlsplit(self.path); parts = [unquote(item) for item in parsed.path.strip('/').split('/')]
             query = parse_qs(parsed.query)
+            if parsed.path == '/api/research/owned-local-report-sync':
+                return self.reply(200, {'success': True, 'reports': [], 'next_cursor': None})
             if parsed.path.startswith('/api/research/') and len(parts) == 3 and parsed.path != '/api/research/owned-report-sync':
                 if not auth['read']: return self.reply(403, {})
                 return self.reply(200, {'success': True, 'research': {'research_id': ids['research'], 'owner_ref': 'alice',

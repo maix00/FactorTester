@@ -154,6 +154,11 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 if query.get('requires_edit', ['0']) not in (['0'], ['1']):
                     raise ValueError('invalid report authorization option')
                 requires_edit = query.get('requires_edit') == ['1']
+                if query.get('owner_metadata', ['0']) not in (['0'], ['1']):
+                    raise ValueError('invalid owner metadata option')
+                owner_metadata = query.get('owner_metadata') == ['1']
+                if owner_metadata and (not local_publication or not metadata_only or attachment):
+                    raise ValueError('owner metadata requires local report metadata')
                 if metadata_only and attachment:
                     raise ValueError('metadata is not an attachment')
                 if (requires_publish or requires_edit) and not metadata_only:
@@ -161,6 +166,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 if len(query.get('server_id', [])) > 1:
                     raise ValueError('only one report server may be selected')
                 server_id = str(query.get('server_id', [''])[0] or '').strip()
+                if owner_metadata and server_id and server_id not in {'local', self.state.server_id}:
+                    raise ValueError('remote owner metadata is not available through this route')
                 branch_ref = '' if publication_ref else str(query.get('branch_ref', [''])[0])
                 if local_publication and server_id and server_id not in {'local', self.state.server_id}:
                     from server.identity.server_admission import server_admission
@@ -204,6 +211,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         **({'metadata_only': True} if metadata_only else {}),
                         **({'requires_publish': True} if requires_publish else {}),
                         **({'requires_edit': True} if requires_edit else {}))
+                    if owner_metadata:
+                        value['owner_metadata'] = self._research_couch_service(local=True).owner_metadata(
+                            session=session, research_id=research_id, report_id=report_id)
                 if attachment:
                     raw, content_type = value['content'], value['content_type']
                     self.send_response(200)

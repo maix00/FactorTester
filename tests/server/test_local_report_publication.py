@@ -138,10 +138,14 @@ def test_owned_directory_requires_current_keycloak_report_access(tmp_path, monke
     page = service.owned_page(session=SESSION)
     assert [(item['research_id'], item['report_id'], item['research_title']) for item in page['reports']] == [
         (RESEARCH, REPORT, 'Shared research')]
+    metadata = service.owner_metadata(session=SESSION, research_id=RESEARCH, report_id=REPORT)
+    assert metadata['research_title'] == 'Shared research' and metadata['revision'] == receipt['_rev']
     auth['write'] = False
     assert service.owned_page(session=SESSION)['reports'][0]['editable'] is False
     auth['read'] = False
     assert service.owned_page(session=SESSION)['reports'] == []
+    with pytest.raises(PermissionError):
+        service.owner_metadata(session=SESSION, research_id=RESEARCH, report_id=REPORT)
     auth['admit'] = False
     with pytest.raises(PermissionError):
         service.owned_page(session=SESSION)

@@ -44,6 +44,7 @@ class LocalResearchCatalog:
         if self.path.is_symlink():
             raise ValueError('local research database cannot be a symlink')
         with self._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
             db.execute('''CREATE TABLE IF NOT EXISTS researches (
                 research_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, title TEXT NOT NULL,
                 description TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
@@ -68,6 +69,12 @@ class LocalResearchCatalog:
                 research_id TEXT NOT NULL, report_id TEXT NOT NULL, manager_hash TEXT NOT NULL,
                 profile_id TEXT NOT NULL, last_attempt REAL NOT NULL DEFAULT 0,
                 PRIMARY KEY(report_id, manager_hash, profile_id))''')
+            pending_columns = {row['name'] for row in db.execute('PRAGMA table_info(server_report_pending)')}
+            if 'source_kind' not in pending_columns:
+                db.execute("ALTER TABLE server_report_pending ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'catalog'")
+            db.execute('''CREATE TABLE IF NOT EXISTS local_report_discovery (
+                manager_hash TEXT NOT NULL, profile_id TEXT NOT NULL, cursor TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(manager_hash, profile_id))''')
             db.execute('''CREATE INDEX IF NOT EXISTS server_report_pending_page
                 ON server_report_pending(manager_hash, profile_id, last_attempt, report_id)''')
             db.execute('''CREATE TABLE IF NOT EXISTS server_research_pending (

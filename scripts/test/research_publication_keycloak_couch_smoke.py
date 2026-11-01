@@ -244,6 +244,41 @@ def exercise(*, couch, **case):
             local_query = urlencode({'research_id': research_id, 'report_id': report_id, 'branch_ref': 'main'})
             local_read_status, local_read_body = read(local_target + '?' + local_query)
             assert local_read_status == 200 and json.loads(local_read_body)['projection']['report_id'] == report_id
+
+            # A genuinely fresh native store discovers an explicitly shared
+            # client-local report without any server Research/Profile row.
+            native_manager = {'endpoint': endpoint, 'subject': verified['keycloak_subject'], 'token': token,
+                              'certificate_pem': '', 'cookies': []}
+            def native_client(name):
+                return LocalResearchRPC(root / name, issuer=verified['keycloak_issuer'], identity_id=verified['tr_identity_id'],
+                    profiles=[{'profile_id': 'self', 'display_name': 'Owner'}], manager=native_manager)
+            source, fresh = native_client('local-source'), native_client('local-fresh')
+            research = source.request({'action':'create', 'profile_id':'self', 'title':'Local shared research',
+                                       'description':'private local notes', 'operation_id':'local-research'})['research']
+            create_local = {'action':'create_report', 'profile_id':'self', 'research_id':research['research_id']}
+            shared = source.request({**create_local, 'title':'Selected local report', 'operation_id':'local-shared'})['report']
+            private = source.request({**create_local, 'title':'Unshared sibling', 'operation_id':'local-private'})['report']
+            local_ids = {'profile_id':'self', 'research_id':research['research_id'], 'report_id':shared['report_id']}
+            local_publication = source.request({'action':'publish_report', **local_ids})['publication']
+            local_sync = {'action':'sync_reports', 'profile_id':'self', 'after_report_id':'', 'limit':4}
+            restored = fresh.request(local_sync)
+            assert any(item['report_id'] == shared['report_id'] and item['status'] == 'imported'
+                       for item in restored['report_imports']), restored
+            restored_research = fresh.request({'action':'get', 'profile_id':'self', 'research_id':research['research_id']})['research']
+            assert restored_research['title'] == 'Local shared research' and restored_research['description'] == ''
+            restored_reports = fresh.request({'action':'list_reports', 'profile_id':'self',
+                'research_id':research['research_id'], 'limit':10, 'offset':0})['reports']
+            assert [row['report_id'] for row in restored_reports] == [shared['report_id']]
+            version = fresh.request({'action':'get_report', **local_ids})['version']
+            fresh.request({'action':'add_report_component', **local_ids, 'component_id':'fresh-section', 'kind':'chapter',
+                           'parent_id':'', 'title':'Fresh device edit', 'body':'', **version})
+            assert fresh.request(local_sync)['reports'][0]['status'] == 'published'
+            assert source.request(local_sync)['reports'][0]['status'] == 'updated'
+            assert source.request({'action':'get_report', **local_ids})['index']['chapters'][0]['title'] == 'Fresh device edit'
+            with sqlite3.connect('file:' + str(catalog.db_path) + '?mode=ro', uri=True) as conn:
+                assert conn.execute('SELECT count(*) FROM research_catalog_researches WHERE research_id=?', (research['research_id'],)).fetchone()[0] == 0
+            local_published = get_research_report(store, local_publication['publication_id'])
+            assert private['report_id'] not in json.dumps(local_published) and 'private local notes' not in json.dumps(local_published)
             with sqlite3.connect('file:' + str(catalog.db_path) + '?mode=ro', uri=True) as conn:
                 assert conn.execute('SELECT count(*) FROM research_catalog_researches WHERE research_id=?',
                                     (research_id,)).fetchone()[0] == 0
@@ -300,6 +335,7 @@ def main():
         'single_report_and_attachment': True, 'same_token_role_revocation': True,
         'catalog_editable_source_roundtrip': True, 'mismatched_authoring_rejected': True, 'catalog_desktop_import': True, 'catalog_two_client_sync': True, 'catalog_automatic_discovery': True,
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
+        'local_fresh_device_discovery_and_bidirectional_sync': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
         'cross_manager_tested': False}, sort_keys=True))
 

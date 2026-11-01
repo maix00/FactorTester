@@ -33,9 +33,9 @@ let now=100000; Date.now=()=>now;
 bindNotificationSink((notice,done)=>{{state.notices.push(notice.code);done();}});
 const client={{snapshot:()=>1,isCurrent:()=>true,syncReports:async (_profile:string,cursor:string) => {{
   state.calls.push(cursor);
-  if(!cursor)return {{reports:[],next_report_id:'report-1'}};
+  if(!cursor)return {{reports:[],researches:[],report_imports:[],report_scans:[],next_report_id:'report-1'}};
   if(state.fail)throw Error('offline');
-  return {{reports:[],next_report_id:null}};
+  return {{reports:[],researches:[],report_imports:[],report_scans:[],next_report_id:null}};
 }}}};
 const caps={{actions:['sync_reports'],profiles:[{{profile_id:'self',display_name:'Self'}}]}};
 function App() {{useLocalReportSync(client as any,caps as any,true,()=>{{}});return <div>sync</div>;}}
@@ -80,7 +80,7 @@ window.setTimeout=((fn:any,delay?:number)=>{{state.timers.push({{fn,delay}});ret
 window.clearTimeout=(()=>{{}}) as typeof clearTimeout;
 const client={{snapshot:()=>1,isCurrent:()=>true,
   discoverResearches:async (_profile:string,cursor:string)=>{{state.discover.push(cursor);return {{queued:cursor?1:0,next_cursor:cursor?null:'next'}};}},
-  syncReports:async()=>{{state.sync++;return {{reports:[],researches:state.sync===2?[{{research_id:'r',status:'imported'}}]:[],researches_pending_more:false,next_report_id:null}};}}
+  syncReports:async()=>{{state.sync++;return {{reports:[],researches:state.sync===2?[{{research_id:'r',status:'imported'}}]:[],report_imports:[],report_scans:[],researches_pending_more:false,next_report_id:null}};}}
 }};
 const caps={{actions:['sync_reports','discover_researches'],profiles:[{{profile_id:'self',display_name:'Self'}}]}};
 function App(){{useLocalReportSync(client as any,caps as any,true,()=>{{state.changed++;}});return <div>sync</div>;}}

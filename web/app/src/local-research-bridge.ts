@@ -375,10 +375,10 @@ export class LocalResearchClient {
     if(new Set(report_imports.map(value=>value.report_id)).size!==report_imports.length ||
        (reply.report_imports_pending_more!==undefined&&typeof reply.report_imports_pending_more!=="boolean"))throw new LocalResearchBridgeError("local_research_invalid_response");
     const rawScans=reply.report_scans??[];
-    if(!Array.isArray(rawScans)||rawScans.length>1)throw new LocalResearchBridgeError("local_research_invalid_response");
+    if(!Array.isArray(rawScans)||rawScans.length>limit+1)throw new LocalResearchBridgeError("local_research_invalid_response");
     const report_scans=rawScans.map(value=>{
-      if(!isRecord(value)||!["denied","unavailable"].includes(String(value.status)))throw new LocalResearchBridgeError("local_research_invalid_response");
-      return {research_id:identifier(value.research_id),status:String(value.status)};
+      if(!isRecord(value)||!["conflict","denied","unavailable"].includes(String(value.status)))throw new LocalResearchBridgeError("local_research_invalid_response");
+      return {research_id:text(value.research_id,512,true),status:String(value.status)};
     });
     return {reports,researches,report_imports,report_scans,report_imports_pending_more:reply.report_imports_pending_more===true,researches_pending_more:reply.researches_pending_more===true,next_report_id:next as string|null};
   }

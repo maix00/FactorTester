@@ -7,12 +7,12 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .authoring.tree_bundle import import_report_bundle
 from .generation import report_workspace_lock
 from .git import commit_report_workspace
-from .local_publication import ensure_publication_table, manager_session, publication_endpoint
+from .local_publication import ensure_publication_table, manager_session, publication_endpoint, publication_query
 from .local_pull import LocalReportSyncConflict, _remote
 from .local_projection_validation import bundle_matches_projection
 from .report_workspace_identity import report_workspace_id_for
@@ -38,19 +38,49 @@ def _require_owned_research(session, research_id: str, owner: str) -> None:
 def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: str,
                           research_id: str, report_id: str) -> dict:
     """Import an owned catalog report; never replace an existing local workspace."""
+    return _import_report(store, binding=binding, manager=manager, profile_id=profile_id,
+                          research_id=research_id, report_id=report_id, source_kind='catalog')
+
+
+def import_shared_local_report(store, *, binding: dict, manager: dict, profile_id: str,
+                               research_id: str, report_id: str) -> dict:
+    """Restore an explicitly shared local report owned by this identity."""
+    return _import_report(store, binding=binding, manager=manager, profile_id=profile_id,
+                          research_id=research_id, report_id=report_id, source_kind='local')
+
+
+def _owner_metadata(session, research_id, report_id, metadata):
+    value = session.get(publication_endpoint('local', research_id, report_id), query={
+        **publication_query('local', research_id, report_id), 'branch_ref': 'main',
+        'metadata_only': '1', 'requires_edit': '1', 'owner_metadata': '1'})
+    owner = value.get('owner_metadata')
+    if (value.get('success') is not True or value.get('edit_authorized') is not True
+            or value.get('publication') != metadata['publication'] or value.get('authoring') != metadata['authoring']
+            or not isinstance(owner, dict) or set(owner) != {'research_title', 'revision'}
+            or not isinstance(owner['revision'], str) or not owner['revision']):
+        raise PermissionError('shared report owner metadata cannot be verified')
+    title = owner['research_title']
+    if not isinstance(title, str) or not title.strip() or len(title) > 256 or '\x00' in title:
+        raise LocalReportSyncConflict('shared Research metadata requires repair')
+    return owner
+
+
+def _import_report(store, *, binding, manager, profile_id, research_id, report_id, source_kind):
     profile = store._profile(profile_id)
     root_id = report_workspace_id_for(report_id)
     endpoint, session = manager_session(binding, manager)
     identity = session.get('/api/session')
     manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
-    with store._connect() as db:
-        origin = db.execute('SELECT * FROM server_research_origins WHERE research_id=?', (research_id,)).fetchone()
-    if not origin or origin['manager_hash'] != manager_hash or origin['profile_id'] != profile:
-        raise PermissionError('owned Manager Research must be imported first')
-    _require_owned_research(session, research_id, identity.get('username'))
+    if source_kind == 'catalog':
+        with store._connect() as db:
+            origin = db.execute('SELECT * FROM server_research_origins WHERE research_id=?', (research_id,)).fetchone()
+        if not origin or origin['manager_hash'] != manager_hash or origin['profile_id'] != profile:
+            raise PermissionError('owned Manager Research must be imported first')
+        _require_owned_research(session, research_id, identity.get('username'))
     ensure_publication_table(store)
-    metadata = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind='catalog')
-    remote = _remote(session, research_id, report_id, source_kind='catalog')
+    metadata = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind=source_kind)
+    owner_metadata = _owner_metadata(session, research_id, report_id, metadata) if source_kind == 'local' else None
+    remote = _remote(session, research_id, report_id, source_kind=source_kind)
     record, bundle = remote['publication'], remote['authoring']
     if (metadata != {'publication': record, 'authoring': bundle}
             or record.get('owner_ref') != identity.get('username')):
@@ -72,15 +102,19 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
             existing = db.execute('SELECT * FROM reports WHERE report_id=?', (report_id,)).fetchone()
             receipt = db.execute('SELECT * FROM report_publications WHERE report_id=? AND manager_hash=?',
                                  (report_id, manager_hash)).fetchone()
+            parent = db.execute('SELECT profile_id FROM researches WHERE research_id=?', (research_id,)).fetchone()
+        if source_kind == 'local' and parent is not None and parent['profile_id'] != profile:
+            raise LocalReportSyncConflict('local Research belongs to another profile')
         if existing and existing['ready']:
             if (existing['profile_id'] != profile or existing['research_id'] != research_id or not receipt
-                    or receipt['source_kind'] != 'catalog' or receipt['publication_id'] != record['publication_id']):
+                    or receipt['source_kind'] != source_kind or receipt['publication_id'] != record['publication_id']):
                 raise LocalReportSyncConflict('local report already has another origin')
             return {'status': 'already_imported', 'report': store._report_public(existing)}
         if existing:
             raise LocalReportSyncConflict('local report reservation belongs to another operation')
-        response = session.download(publication_endpoint('catalog', research_id, report_id)
-            + '/' + record['publication_id'] + '/attachments/report_authoring/' + bundle['sha256'], maximum_bytes=8 * 1024 * 1024)
+        attachment = publication_endpoint(source_kind, research_id, report_id) + '/' + record['publication_id'] + '/attachments/report_authoring/' + bundle['sha256']
+        query = publication_query(source_kind, research_id, report_id)
+        response = session.download(attachment + ('?' + urlencode(query) if query else ''), maximum_bytes=8 * 1024 * 1024)
         if len(response.content) != bundle['size_bytes'] or hashlib.sha256(response.content).hexdigest() != bundle['sha256']:
             raise ValueError('remote report bundle checksum or size mismatch')
         with tempfile.TemporaryDirectory(prefix='catalog-import-', dir=store.workspace_root) as temporary:
@@ -96,9 +130,12 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
                 raise LocalReportSyncConflict('report source and published projection differ')
             commit_report_workspace(staged, message='Import report from Manager')
             staged_tree = _tree(staged)
-            confirmed = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind='catalog')
+            confirmed = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind=source_kind)
             current = session.get('/api/session')
-            _require_owned_research(session, research_id, identity.get('username'))
+            if source_kind == 'catalog':
+                _require_owned_research(session, research_id, identity.get('username'))
+            elif _owner_metadata(session, research_id, report_id, confirmed) != owner_metadata:
+                raise PermissionError('shared Research metadata changed during import')
             if (confirmed != metadata or any(current.get(key) != identity.get(key) for key in
                     ('username', 'keycloak_issuer', 'keycloak_subject', 'tr_identity_id'))):
                 raise PermissionError('report authorization or version changed during import')
@@ -114,6 +151,15 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
             operation = 'server-report-' + hashlib.sha256((manager_hash + '\0' + report_id).encode()).hexdigest()
             with store._connect() as db:
                 db.execute('BEGIN IMMEDIATE')
+                if source_kind == 'local':
+                    parent = db.execute('SELECT profile_id FROM researches WHERE research_id=?', (research_id,)).fetchone()
+                    if parent is not None and parent['profile_id'] != profile:
+                        raise LocalReportSyncConflict('local Research belongs to another profile')
+                    if parent is None:
+                        now = time.time()
+                        parent_operation = 'shared-research-' + hashlib.sha256(research_id.encode()).hexdigest()
+                        db.execute('INSERT INTO researches VALUES (?, ?, ?, ?, ?, ?, ?)',
+                                   (research_id, profile, owner_metadata['research_title'], '', parent_operation, now, now))
                 if db.execute('SELECT 1 FROM reports WHERE report_id=? OR operation_id=?', (report_id, operation)).fetchone():
                     raise LocalReportSyncConflict('local report changed during import')
                 db.execute('INSERT INTO reports VALUES (?, ?, ?, ?, ?, ?, 1)',
@@ -121,6 +167,6 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
                 db.execute('''INSERT INTO report_publications (report_id,manager_hash,publication_id,revision,generation,
                     projection_hash,local_root_ref,source_kind) VALUES (?,?,?,?,?,?,?,?)''',
                     (report_id, manager_hash, record['publication_id'], record['revision'], record['generation'],
-                     record['projection_hash'], imported['head']['root_ref'], 'catalog'))
+                     record['projection_hash'], imported['head']['root_ref'], source_kind))
                 row = db.execute('SELECT * FROM reports WHERE report_id=?', (report_id,)).fetchone()
             return {'status': 'imported', 'report': store._report_public(row)}

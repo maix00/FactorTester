@@ -72,7 +72,7 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
         }
         for(const item of page.report_scans){
           const key=`report-scan-${item.status}`;seen.add(key);
-          if(!warned.has(key)){warned.add(key);notify({code:`research.report.scan.${item.status}`,type:"warning",message:t("localResearch.importReportFailed")});}
+          if(!warned.has(key)){warned.add(key);notify({code:`research.report.scan.${item.status}`,type:"warning",message:item.status==="conflict"?t("localResearch.syncConflict"):t("localResearch.importReportFailed")});}
         }
         if(changed)callback.current();
         const discoveryMore=!discoveryDone.has(profile);

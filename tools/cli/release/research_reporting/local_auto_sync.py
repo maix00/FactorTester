@@ -113,8 +113,15 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
     researches, pending_more = retry_pending_server_research(store, binding=binding, manager=manager,
                                                              profile_id=profile, limit=limit)
     from .local_server_reports import sync_server_reports
+    from .local_shared_discovery import discover_local_reports
+    try:
+        local_more, local_scan_errors = discover_local_reports(store, session=session, manager_hash=manager_hash,
+                                                               profile_id=profile, limit=limit)
+    except ValueError:
+        local_more, local_scan_errors = False, [{'research_id': '', 'status': 'unavailable'}]
     imports, imports_more, scan_errors = sync_server_reports(store, binding=binding, manager=manager, profile_id=profile,
                                                 limit=limit, endpoint=endpoint, session=session)
     return {'reports': results, 'researches': researches, 'report_imports': imports,
-            'researches_pending_more': pending_more, 'report_imports_pending_more': imports_more, 'report_scans': scan_errors,
+            'researches_pending_more': pending_more, 'report_imports_pending_more': imports_more or local_more,
+            'report_scans': scan_errors + local_scan_errors,
             'next_report_id': rows[limit - 1]['report_id'] if len(rows) > limit else None}
