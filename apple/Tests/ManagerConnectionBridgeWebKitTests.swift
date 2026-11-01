@@ -25,8 +25,10 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
         var applied: URL?
         var targetUnavailable = true
+        var probeCount = 0
         let content = WKUserContentController()
         content.addScriptMessageHandler(ManagerConnectionBridge(session: session, endpoint: endpoint, probe: { _, identity, username in
+            probeCount += 1
             XCTAssertEqual(identity?.stableID, "alice-id")
             XCTAssertEqual(username, "alice")
             return targetUnavailable ? .unavailable : .unauthorized
@@ -36,6 +38,10 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         loaded = expectation(description: "Manager test page")
         view.loadHTMLString("<html><body>Manager</body></html>", baseURL: endpoint)
         await fulfillment(of: [try XCTUnwrap(loaded)], timeout: 10)
+        let beforeHandshake = try await message(view, ["action": "switch", "url": "https://test-manager.invalid:54321"])
+        XCTAssertEqual(beforeHandshake["code"] as? String, "manager_session_changed")
+        XCTAssertNil(applied)
+        XCTAssertEqual(probeCount, 0)
         let capabilities = try await message(view, ["action": "capabilities"])
         XCTAssertEqual(capabilities["success"] as? Bool, true)
         XCTAssertEqual(session.user?.stableIdentityID, "alice-id")
@@ -45,6 +51,7 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         XCTAssertEqual(stale["auth_state"] as? String, "unavailable")
         let blocked = try await message(view, ["action": "switch", "url": "https://test-manager.invalid:54321"])
         XCTAssertEqual(blocked["code"] as? String, "manager_session_changed")
+        XCTAssertEqual(probeCount, 0)
         api.user = user
         _ = try await message(view, ["action": "capabilities"])
         let target = "https://test-manager.invalid:54321"

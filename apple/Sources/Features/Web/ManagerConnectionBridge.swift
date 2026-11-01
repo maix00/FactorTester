@@ -154,7 +154,8 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             replyHandler(["success": false, "code": "manager_invalid_url"], nil)
             return
         }
-        guard session.user?.localResearchIdentity == verifiedIdentity else {
+        guard let expected = verifiedIdentity,
+              session.user?.localResearchIdentity == expected else {
             replyHandler(["success": false, "code": "manager_session_changed"], nil)
             return
         }
@@ -163,7 +164,6 @@ final class ManagerConnectionBridge: NSObject, WKScriptMessageHandlerWithReply {
             return
         }
         switching = true
-        let expected = verifiedIdentity
         let generation = verificationGeneration
         let username = session.user?.username
         let webView = message.webView
