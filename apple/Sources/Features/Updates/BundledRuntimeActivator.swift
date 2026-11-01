@@ -26,11 +26,11 @@ enum BundledRuntimeActivator {
     #endif
 
     private static func performActivation() async throws {
-        guard let resources = Bundle.main.resourceURL?
-            .appendingPathComponent("FactorTester"),
-              let executable = Bundle.main.resourceURL?
-                .appendingPathComponent("FactorTester/bin/factortester"),
-              FileManager.default.isExecutableFile(atPath: executable.path)
+        guard let bundled = ClientCLIResolution.bundledExecutable(
+            resourceURL: Bundle.main.resourceURL,
+            names: ["traderesearch", "factortester"],
+            isExecutable: FileManager.default.isExecutableFile(atPath:)
+        )
         else {
             throw BundledRuntimeActivationError.runtimeMissing
         }
@@ -39,10 +39,10 @@ enum BundledRuntimeActivator {
                 "client",
                 "activate-bundle",
                 "--bundle-resources",
-                resources.path,
+                bundled.resources.path,
                 "--json",
             ],
-            executable: executable.path
+            executable: bundled.executable.path
         )
     }
 }
