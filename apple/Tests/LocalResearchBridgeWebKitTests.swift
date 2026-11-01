@@ -51,6 +51,7 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
         }
         XCTAssertTrue((capability["actions"] as? [String])?.contains("publish_report") == true)
         XCTAssertTrue((capability["actions"] as? [String])?.contains("import_research") == true)
+        XCTAssertTrue((capability["actions"] as? [String])?.contains("import_catalog_report") == true)
         XCTAssertTrue((capability["actions"] as? [String])?.contains("queue_researches") == true)
         XCTAssertTrue((capability["actions"] as? [String])?.contains("discover_researches") == true)
         XCTAssertNil(capability["manager"])
