@@ -41,6 +41,8 @@ def test_local_research_publication_selects_focused_client_and_server_contracts(
     mode, targets = selector.select({"tools/cli/release/research_reporting/local_publication.py"})
     assert mode == "SCOPED"
     assert set(targets) == {
+        "tests/release/test_local_sync_baseline.py",
+        "tests/release/test_local_report_attach_manager.py",
         "tests/server/test_catalog_report_client_sync.py",
         "tests/release/test_local_research_rpc.py",
         "tests/server/test_client_local_report_publication.py",
@@ -475,10 +477,13 @@ def test_report_sync_helpers_select_only_relevant_contracts():
                  "tools/cli/release/research_reporting/local_pull.py",
                  "tools/cli/release/research_reporting/local_catalog_import.py",
                  "tools/cli/release/research_reporting/local_server_reports.py",
-                 "tools/cli/release/research_reporting/local_catalog.py"):
+                 "tools/cli/release/research_reporting/local_catalog.py",
+                 "tools/cli/release/research_reporting/local_sync_baseline.py"):
         mode, targets = selector.select({path})
         assert mode == "SCOPED"
-        assert set(targets) == {"tests/release/test_local_research_rpc.py",
+        assert set(targets) == {"tests/release/test_local_sync_baseline.py",
+                                "tests/release/test_local_report_attach_manager.py",
+                                "tests/release/test_local_research_rpc.py",
                                 "tests/server/test_catalog_report_client_sync.py",
                                 "tests/server/test_client_local_report_publication.py",
                                 "tests/release/test_local_server_reports.py",
@@ -488,6 +493,11 @@ def test_report_sync_helpers_select_only_relevant_contracts():
 def test_manager_token_migration_avoids_unrelated_test_directories():
     for path in ("apple/Sources/Networking/ManagerSessionTokenStore.swift",
                  "apple/Tests/ManagerSessionTokenMigrationTests.swift",
+                 "tests/fixtures/manager_session_token_isolation.swift"):
+        mode, targets = selector.select({path})
+        assert mode == "SCOPED" and set(targets) == {"tests/scripts/test_native_session_restore.py",
+                                                      "tests/release/test_manager_session_token_isolation.py"}
+    for path in (
                  "apple/Sources/Services/ManagerDeviceKeyStore.swift",
                  "apple/Tests/ManagerDeviceKeyMigrationTests.swift"):
         mode, targets = selector.select({path})

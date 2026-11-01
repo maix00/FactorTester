@@ -9,13 +9,55 @@ from .authoring.tree_store import load_head, tree_lock
 from .local_publication import ensure_publication_table, manager_session, publish_local_report
 from .local_pull import LocalReportSyncConflict, _remote, pull_local_report
 
-_PUBLICATION_PAGE = '''SELECT report.report_id, report.research_id, publication.publication_id, publication.revision,
+_PUBLICATION_PAGE = '''SELECT report.report_id, report.research_id, publication.manager_hash, publication.publication_id, publication.revision,
                    publication.generation, publication.local_root_ref, publication.source_kind,
                    EXISTS(SELECT 1 FROM report_pull_recovery AS recovery
                           WHERE recovery.report_id=publication.report_id AND recovery.manager_hash=publication.manager_hash) AS pending_pull
             FROM report_publications AS publication JOIN reports AS report ON report.report_id=publication.report_id
             WHERE publication.manager_hash=? AND report.profile_id=? AND report.ready=1 AND publication.report_id>?
             ORDER BY publication.report_id LIMIT ?'''
+
+
+def _restore_missing_baseline(store, *, root, paths, head, row, snapshot, session, binding, manager):
+    """Rebuild an old receipt's cache only against its still-current Manager source."""
+    from .local_catalog_import import verify_equivalent_authoring
+    from .local_pull import _require_clean_workspace
+    from .local_sync_baseline import content_digest, write_baseline
+
+    report_id, research_id = row['report_id'], row['research_id']
+    with tree_lock(paths):
+        _require_clean_workspace(root)
+    complete = _remote(session, research_id, report_id, source_kind=row['source_kind'])
+    if (complete['publication'], complete['authoring']) != (snapshot['publication'], snapshot['authoring']):
+        raise LocalReportSyncConflict('remote report changed during baseline recovery')
+    local_sha = verify_equivalent_authoring(store, root=root, head=head, remote=complete, session=session,
+        research_id=research_id, report_id=report_id, source_kind=row['source_kind'])
+    confirmed = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True,
+                        source_kind=row['source_kind'])
+    identity = session.get('/api/session')
+    if (confirmed != snapshot or not isinstance(identity, dict)
+            or str(identity.get('keycloak_issuer') or '').rstrip('/') != binding['issuer']
+            or identity.get('tr_identity_id') != binding['identity_id']
+            or identity.get('keycloak_subject') != manager['subject']
+            or identity.get('visitor_login') is True or identity.get('role') == 'visitor'
+            or identity.get('authentication') == 'agent'
+            or not isinstance(identity.get('username'), str) or not identity['username'].strip()):
+        raise PermissionError('report authorization or identity changed during baseline recovery')
+    with tree_lock(paths):
+        current = load_head(paths)
+        if (current['generation'], current['root_ref']) != (head['generation'], head['root_ref']):
+            raise LocalReportSyncConflict('local report changed during baseline recovery')
+        _require_clean_workspace(root)
+        if content_digest(root, paths, current) != local_sha:
+            raise LocalReportSyncConflict('local report resources changed during baseline recovery')
+        with store._connect() as db:
+            receipt = db.execute('SELECT * FROM report_publications WHERE report_id=? AND manager_hash=?',
+                                 (report_id, row['manager_hash'])).fetchone()
+        if (not receipt or any(receipt[key] != row[key] for key in
+                ('publication_id', 'revision', 'generation', 'local_root_ref', 'source_kind'))):
+            raise LocalReportSyncConflict('report receipt changed during baseline recovery')
+        write_baseline(store, report_id=report_id, manager_hash=row['manager_hash'],
+                       receipt=receipt, content_sha256=local_sha)
 
 
 def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: str,
@@ -118,6 +160,10 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                                 (remote['revision'], head['generation'], remote['projection_hash'], head['root_ref'],
                                  report_id, manager_hash, row['publication_id'], row['revision'],
                                  row['generation'], row['local_root_ref']))
+                        if result.rowcount == 1:
+                            from .local_sync_baseline import write_baseline
+                            write_baseline(store, report_id=report_id, manager_hash=manager_hash,
+                                receipt={**remote, 'local_root_ref': head['root_ref']}, content_sha256=local_sha)
                         status = 'unchanged' if result.rowcount == 1 else 'conflict'
             elif local_changed:
                 publish_local_report(store, binding=binding, manager=manager, profile_id=profile,
@@ -128,6 +174,10 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                                            research_id=research_id, report_id=report_id)
                 status = 'updated' if pulled['status'] == 'updated' else 'unchanged'
             else:
+                from .local_sync_baseline import read_baseline
+                if read_baseline(store, report_id=report_id, manager_hash=manager_hash, receipt=row) is None:
+                    _restore_missing_baseline(store, root=root, paths=paths, head=head, row=row,
+                        snapshot=snapshot, session=session, binding=binding, manager=manager)
                 status = 'unchanged'
         except LocalReportSyncConflict:
             status = 'conflict'

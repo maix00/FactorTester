@@ -59,6 +59,19 @@ def _assets_changed(root: Path, paths: dict, head: dict) -> bool:
     return False
 
 
+def _content_changed(store, root: Path, paths: dict, head: dict, *, report_id: str,
+                     manager_hash: str, receipt) -> bool:
+    from .local_sync_baseline import content_digest, needs_baseline, read_baseline
+
+    baseline = read_baseline(store, report_id=report_id, manager_hash=manager_hash, receipt=receipt) if receipt else None
+    if baseline is None:
+        return needs_baseline(paths, head)
+    try:
+        return content_digest(root, paths, head) != baseline
+    except (OSError, ValueError):
+        return True
+
+
 def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False, requires_edit: bool = False, source_kind: str = 'local') -> dict:
     from .public_research.object_uploads import projection_hash
     value = session.get(publication_endpoint(source_kind, research_id, report_id), query={
@@ -129,6 +142,10 @@ def _recover_pull(store, root: Path, paths: dict, manager_hash: str, report_id: 
     message = subprocess.run(['git', '-C', str(root), 'log', '-1', '--format=%s'], capture_output=True, text=True, check=True)
     if status.stdout.strip() or parent.returncode or parent.stdout.strip() != pending['prior_commit'] or message.stdout.strip() != 'Sync report from Manager':
         return False
+    if (_assets_changed(root, paths, local)
+            or _content_changed(store, root, paths, local, report_id=report_id,
+                                manager_hash=manager_hash, receipt=pending)):
+        return False
     with store._connect() as db:
         changed = db.execute('''UPDATE report_publications SET revision=?, generation=?, projection_hash=?, local_root_ref=?
             WHERE report_id=? AND manager_hash=? AND publication_id=? AND revision=? AND generation=? AND local_root_ref=?''',
@@ -175,7 +192,9 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             if base and base['revision'] == record['revision']:
                 return {'status': 'up_to_date', 'local_modified': (
                     local['generation'] != base['generation'] or local['root_ref'] != base['local_root_ref']
-                    or not _workspace_is_clean(root) or _assets_changed(root, paths, local))}
+                    or not _workspace_is_clean(root) or _assets_changed(root, paths, local)
+                    or _content_changed(store, root, paths, local, report_id=report_id,
+                                        manager_hash=manager_hash, receipt=base))}
             baseline_ok = bool(base and base['local_root_ref'] and local['generation'] == base['generation'] and local['root_ref'] == base['local_root_ref'])
             identical = local['generation'] == bundle['generation'] and local['root_ref'] == bundle['root_ref']
             if has_recovery and not baseline_ok:
@@ -189,6 +208,9 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
             # before fetching an authoring bundle as well as after it arrives.
             _require_clean_workspace(root)
             _require_unchanged_assets(root, paths, local)
+            if _content_changed(store, root, paths, local, report_id=report_id,
+                                manager_hash=manager_hash, receipt=base):
+                raise LocalReportSyncConflict('local report resources differ from the confirmed baseline')
             expected = (local['generation'], local['root_ref'])
         publication_id, digest = record['publication_id'], bundle['sha256']
         query = urlencode(publication_query(source_kind, research_id, report_id))
@@ -221,7 +243,13 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                 require_no_pending(paths, current)
                 _require_clean_workspace(root)
                 _require_unchanged_assets(root, paths, current)
+                if _content_changed(store, root, paths, current, report_id=report_id,
+                                    manager_hash=manager_hash, receipt=base):
+                    raise LocalReportSyncConflict('local report resources changed during download')
                 prior_commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+                from .local_sync_baseline import read_baseline
+                previous_baseline = (read_baseline(store, report_id=report_id, manager_hash=manager_hash,
+                                                   receipt=base) if base else None)
                 # A staged bundle must not modify the shared Job cache before
                 # content, authorization and local-version checks all pass.
                 from .authoring.bundle_job_artifacts import restore_job_artifacts
@@ -250,6 +278,18 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                     except (OSError, ValueError):
                         # HEAD remains authoritative; indexes are rebuildable.
                         pass
+                    # Verify the copied local content against the independently
+                    # staged, authorized source before recording its baseline.
+                    from .local_sync_baseline import content_digest, write_baseline
+                    final_head = load_head(paths)
+                    staged_paths = report_tree_paths(staged_root, 'main')
+                    expected_content = content_digest(staged_root, staged_paths, final_head)
+                    actual_content = content_digest(root, paths, final_head)
+                    if expected_content != actual_content:
+                        raise LocalReportSyncConflict('local report resources changed while applying the update')
+                    write_baseline(store, report_id=report_id, manager_hash=manager_hash,
+                        receipt={**record, 'generation': final_head['generation'], 'local_root_ref': final_head['root_ref']},
+                        content_sha256=expected_content)
                     commit_report_workspace(root, message='Sync report from Manager')
                 except Exception:
                     after = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
@@ -272,6 +312,12 @@ def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
                             publish_sqlite_index(paths, load_node(paths, current['root_ref']), current['generation'])
                         for path in reversed(created):
                             path.unlink(missing_ok=True)
+                        from .local_sync_baseline import remove_baseline, write_baseline
+                        if previous_baseline is None:
+                            remove_baseline(store, report_id=report_id, manager_hash=manager_hash)
+                        else:
+                            write_baseline(store, report_id=report_id, manager_hash=manager_hash,
+                                           receipt=base, content_sha256=previous_baseline)
                         with store._connect() as db:
                             db.execute('DELETE FROM report_pull_recovery WHERE report_id=? AND manager_hash=?', (report_id, manager_hash))
                     raise

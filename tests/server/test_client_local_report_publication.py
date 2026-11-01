@@ -126,7 +126,10 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert rpc.request(request)['publication'] == published
         auto = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
         metadata_before = transport['metadata']
-        auto_result = rpc.request(auto)
+        with monkeypatch.context() as unchanged:
+            unchanged.setattr('tools.cli.release.research_reporting.local_sync_baseline.content_digest',
+                              lambda *_args, **_kwargs: pytest.fail('unchanged polling reread the report bundle'))
+            auto_result = rpc.request(auto)
         assert auto_result['reports'] == [{'research_id': research['research_id'], 'report_id': selected['report_id'], 'status': 'unchanged'}]
         assert auto_result['next_report_id'] is None and transport['metadata'] == metadata_before + 1 and transport['downloads'] == 0
         published_view = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main')
@@ -144,10 +147,14 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert 'description' not in registrations[0]
         assert private['report_id'] not in json.dumps(store.docs)
         head = rpc.request({'action': 'get_report', 'profile_id': 'self', 'research_id': research['research_id'], 'report_id': selected['report_id']})['version']
+        local_link = selected_root / 'evidence.txt'
+        local_link.write_text('original local evidence')
         edit = {'action': 'add_report_component', 'profile_id': 'self', 'research_id': research['research_id'],
                 'report_id': selected['report_id'], 'component_id': 'chapter-1', 'kind': 'chapter', 'parent_id': '',
                 'title': 'First', 'body': '', **head}
         next_head = rpc.request(edit)['version']
+        next_head = rpc.request({**edit, **next_head, 'component_id': 'entry-1', 'kind': 'entry',
+                                 'parent_id': 'chapter-1', 'title': '', 'body': '[Evidence](evidence.txt)'})['version']
         with rpc.store._connect() as db:
             previous_receipt = dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone())
         auth['share'] = False
@@ -157,7 +164,35 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         auth['share'] = True
         assert rpc.request(auto)['reports'][0]['status'] == 'published'
         second = service.read(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'], branch_ref='main', metadata_only=True)['publication']
-        assert second['generation'] == head['generation'] + 1 and second['revision'] != published['revision']
+        assert second['generation'] == head['generation'] + 2 and second['revision'] != published['revision']
+        # Old clients may have a receipt but no content baseline. Rebuild it
+        # only after checking the still-authorized complete Manager snapshot.
+        from tools.cli.release.research_reporting.local_sync_baseline import read_baseline, remove_baseline
+        with rpc.store._connect() as db:
+            second_receipt = db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone()
+        second_manager = second_receipt['manager_hash']
+        remove_baseline(rpc.store, report_id=selected['report_id'], manager_hash=second_manager)
+        assert rpc.request(auto)['reports'][0]['status'] == 'unchanged'
+        assert read_baseline(rpc.store, report_id=selected['report_id'], manager_hash=second_manager, receipt=second_receipt)
+        remove_baseline(rpc.store, report_id=selected['report_id'], manager_hash=second_manager)
+        local_link.write_text('changed before legacy baseline recovery')
+        commit_report_workspace(selected_root, message='Edit before baseline recovery')
+        assert rpc.request(auto)['reports'][0]['status'] == 'conflict'
+        assert read_baseline(rpc.store, report_id=selected['report_id'], manager_hash=second_manager, receipt=second_receipt) is None
+        local_link.write_text('original local evidence')
+        commit_report_workspace(selected_root, message='Restore for baseline recovery')
+        assert rpc.request(auto)['reports'][0]['status'] == 'unchanged'
+        assert read_baseline(rpc.store, report_id=selected['report_id'], manager_hash=second_manager, receipt=second_receipt)
+        local_link.write_text('changed while Manager remains unchanged')
+        commit_report_workspace(selected_root, message='Edit linked evidence')
+        assert rpc.request(unchanged_pull)['local_modified'] is True
+        local_link.write_text('original local evidence')
+        commit_report_workspace(selected_root, message='Restore linked evidence')
+        assert rpc.request(unchanged_pull)['local_modified'] is False
+        with monkeypatch.context() as unchanged:
+            unchanged.setattr('tools.cli.release.research_reporting.local_sync_baseline.content_digest',
+                              lambda *_args, **_kwargs: pytest.fail('unchanged polling reread linked resources'))
+            assert rpc.request(auto)['reports'][0]['status'] == 'unchanged'
         # Simulate a process exit after the server accepted the new report but
         # before the local publication receipt was persisted.
         with rpc.store._connect() as db:
@@ -251,6 +286,38 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert rpc.request(pull) == {'success': False, 'code': 'local_report_publication_denied'}
         assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']
         auth['write'] = True
+        from tools.cli.release.research_reporting.local_sync_baseline import read_baseline, remove_baseline, write_baseline
+        with rpc.store._connect() as db:
+            baseline_receipt = db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone()
+        manager_hash = baseline_receipt['manager_hash']
+        baseline_digest = read_baseline(rpc.store, report_id=selected['report_id'], manager_hash=manager_hash,
+                                        receipt=baseline_receipt)
+        assert baseline_digest
+        remove_baseline(rpc.store, report_id=selected['report_id'], manager_hash=manager_hash)
+        downloads_before = transport['downloads']
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        assert transport['downloads'] == downloads_before
+        write_baseline(rpc.store, report_id=selected['report_id'], manager_hash=manager_hash,
+                       receipt=baseline_receipt, content_sha256=baseline_digest)
+        # Relative Markdown resources are outside the report tree hash. Even a
+        # committed change must not be silently discarded by an incoming pull.
+        local_link.write_text('committed local evidence')
+        commit_report_workspace(local_root, message='Edit linked evidence externally')
+        downloads_before = transport['downloads']
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        assert transport['downloads'] == downloads_before
+        assert local_link.read_text() == 'committed local evidence'
+        local_link.write_text('original local evidence')
+        commit_report_workspace(local_root, message='Restore linked evidence')
+        def change_committed_link():
+            local_link.write_text('evidence changed during download')
+            commit_report_workspace(local_root, message='Edit evidence during download')
+        transport['on_download'] = change_committed_link
+        assert rpc.request(pull) == {'success': False, 'code': 'local_report_sync_conflict'}
+        transport['on_download'] = None
+        assert local_link.read_text() == 'evidence changed during download'
+        local_link.write_text('original local evidence')
+        commit_report_workspace(local_root, message='Restore linked evidence again')
         # A local change outside the immutable report tree is still user data.
         # Reject it before downloading the remote bundle, then retain the
         # second check after the download for edits made while it is in flight.

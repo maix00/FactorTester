@@ -56,7 +56,7 @@ def report(tmp_path, monkeypatch):
     return dict(store=store, root=root, existing=existing, metadata=metadata,
                 remote={**metadata, 'projection': projection}, owner_metadata=owner_metadata,
                 session=Session(), identity=identity, research_id=research['research_id'],
-                report_id=row['report_id'], manager_hash='manager-b')
+                report_id=row['report_id'], manager_hash=hashlib.sha256(b'https://manager-b.test').hexdigest())
 
 
 def test_attaches_identical_second_manager_without_rewriting_report(report):
@@ -64,7 +64,7 @@ def test_attaches_identical_second_manager_without_rewriting_report(report):
     assert result['status'] == 'attached'
     with report['store']._connect() as db:
         receipt = db.execute('SELECT * FROM report_publications WHERE report_id=? AND manager_hash=?',
-                             (report['report_id'], 'manager-b')).fetchone()
+                             (report['report_id'], report['manager_hash'])).fetchone()
     assert receipt['revision'] == 'revision' and receipt['source_kind'] == 'local'
     assert receipt['local_root_ref'] == report['metadata']['authoring']['root_ref']
 
@@ -118,6 +118,62 @@ def test_local_edit_during_authorization_recheck_cannot_create_stale_receipt(rep
         local_catalog_import._attach_identical_shared_report(**report)
     with report['store']._connect() as db:
         assert db.execute('SELECT count(*) FROM report_publications').fetchone()[0] == 0
+
+
+def _prepare_baseline_recovery(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    from tools.cli.release.research_reporting.local_sync_baseline import read_baseline
+    record = report['metadata']['publication']
+    with report['store']._connect() as db:
+        db.execute('''INSERT INTO report_publications (report_id,manager_hash,publication_id,revision,
+            generation,projection_hash,local_root_ref,source_kind) VALUES (?,?,?,?,?,?,?,?)''',
+            (report['report_id'], report['manager_hash'], record['publication_id'], record['revision'],
+             record['generation'], record['projection_hash'], report['metadata']['authoring']['root_ref'], 'local'))
+        row = dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (report['report_id'],)).fetchone())
+    row['research_id'] = report['research_id']
+    paths = report_tree_paths(report['root'], 'main')
+    with tree_lock(paths):
+        head = load_head(paths)
+    monkeypatch.setattr(local_auto_sync, '_remote', lambda *_args, **kwargs:
+                        report['metadata'] if kwargs.get('metadata_only') else report['remote'])
+    def recover():
+        return local_auto_sync._restore_missing_baseline(report['store'], root=report['root'], paths=paths,
+            head=head, row=row, snapshot=report['metadata'], session=report['session'],
+            binding={'issuer': 'https://id.test/realm', 'identity_id': 'stable'}, manager={'subject': 'subject'})
+    def current_baseline():
+        return read_baseline(report['store'], report_id=report['report_id'],
+                             manager_hash=report['manager_hash'], receipt=row)
+    return recover, current_baseline
+
+
+def test_legacy_baseline_recovery_rechecks_edit_permission(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    recover, current_baseline = _prepare_baseline_recovery(report, monkeypatch)
+    def remote(*_args, **kwargs):
+        if kwargs.get('requires_edit'):
+            raise PermissionError('edit revoked')
+        return report['remote']
+    monkeypatch.setattr(local_auto_sync, '_remote', remote)
+    with pytest.raises(PermissionError, match='edit revoked'):
+        recover()
+    assert current_baseline() is None
+
+
+def test_legacy_baseline_recovery_rejects_concurrent_local_edit(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    recover, current_baseline = _prepare_baseline_recovery(report, monkeypatch)
+    def remote(*_args, **kwargs):
+        if kwargs.get('requires_edit'):
+            version = report['metadata']['authoring']
+            report['store'].add_report_component(profile_id='self', research_id=report['research_id'],
+                report_id=report['report_id'], component_id='concurrent', kind='chapter', parent_id='',
+                title='Concurrent', body='', generation=version['generation'], root_ref=version['root_ref'])
+            return report['metadata']
+        return report['remote']
+    monkeypatch.setattr(local_auto_sync, '_remote', remote)
+    with pytest.raises(LocalReportSyncConflict, match='changed during baseline recovery'):
+        recover()
+    assert current_baseline() is None
 
 
 def test_discovery_queue_attaches_existing_report_to_second_manager(report, monkeypatch):

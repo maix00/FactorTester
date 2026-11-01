@@ -179,6 +179,9 @@ def _attach_identical_shared_report(store, *, root, existing, metadata, remote, 
                 projection_hash,local_root_ref,source_kind) VALUES (?,?,?,?,?,?,?,?)''',
                 (report_id, manager_hash, record['publication_id'], record['revision'], record['generation'],
                  record['projection_hash'], head['root_ref'], 'local'))
+        from .local_sync_baseline import write_baseline
+        write_baseline(store, report_id=report_id, manager_hash=manager_hash,
+            receipt={**record, 'local_root_ref': head['root_ref']}, content_sha256=local_sha)
     return {'status': 'attached', 'report': store._report_public(existing)}
 
 
@@ -269,8 +272,14 @@ def _import_report(store, *, binding, manager, profile_id, research_id, report_i
                     raise LocalReportSyncConflict('existing report workspace differs from Manager source')
             from .authoring.bundle_job_artifacts import restore_job_artifacts
             restore_job_artifacts(*imported['deferred_job_artifacts'])
+            from .authoring.tree_paths import report_tree_paths
+            from .local_sync_baseline import content_digest, write_baseline
+            staged_digest = content_digest(staged, report_tree_paths(staged, 'main'), imported['head'])
             if not target.exists():
                 os.rename(staged, target)
+            target_digest = content_digest(target, report_tree_paths(target, 'main'), imported['head'])
+            if staged_digest != target_digest:
+                raise LocalReportSyncConflict('local report resources differ from imported source')
             operation = 'server-report-' + hashlib.sha256((manager_hash + '\0' + report_id).encode()).hexdigest()
             with store._connect() as db:
                 db.execute('BEGIN IMMEDIATE')
@@ -292,4 +301,6 @@ def _import_report(store, *, binding, manager, profile_id, research_id, report_i
                     (report_id, manager_hash, record['publication_id'], record['revision'], record['generation'],
                      record['projection_hash'], imported['head']['root_ref'], source_kind))
                 row = db.execute('SELECT * FROM reports WHERE report_id=?', (report_id,)).fetchone()
+            write_baseline(store, report_id=report_id, manager_hash=manager_hash,
+                receipt={**record, 'local_root_ref': imported['head']['root_ref']}, content_sha256=staged_digest)
             return {'status': 'imported', 'report': store._report_public(row)}

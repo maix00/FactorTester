@@ -147,4 +147,8 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
                 revision=excluded.revision, generation=excluded.generation, projection_hash=excluded.projection_hash,
                 local_root_ref=excluded.local_root_ref''',
                 (report_id, manager_hash, value['publication_id'], value['revision'], value['generation'], value['projection_hash'], head['root_ref']))
+        from .local_sync_baseline import write_baseline
+        write_baseline(store, report_id=report_id, manager_hash=manager_hash,
+            receipt={**value, 'local_root_ref': head['root_ref']},
+            content_sha256=authoring['sha256'])
         return {'publication': {key: value[key] for key in ('publication_id', 'revision', 'generation', 'projection_hash', 'report_id')}}

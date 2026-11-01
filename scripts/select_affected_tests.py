@@ -579,6 +579,8 @@ for _path in (
     EXACT_PATH_TESTS[_path] = CLI_NAMING_TESTS
 EXACT_PATH_TESTS["vendor/py-alpha-lib"] = ALPHA_RUNTIME_TESTS
 EXACT_PATH_TESTS["tools/cli/release/research_reporting/local_publication.py"] = (
+    "tests/release/test_local_sync_baseline.py",
+    "tests/release/test_local_report_attach_manager.py",
     "tests/server/test_catalog_report_client_sync.py",
     "tests/release/test_local_research_rpc.py",
     "tests/server/test_client_local_report_publication.py",
@@ -591,8 +593,11 @@ for _path in (
     "tools/cli/release/research_reporting/local_catalog_import.py",
     "tools/cli/release/research_reporting/local_server_reports.py",
     "tools/cli/release/research_reporting/local_catalog.py",
+    "tools/cli/release/research_reporting/local_sync_baseline.py",
 ):
     EXACT_PATH_TESTS[_path] = (
+        "tests/release/test_local_sync_baseline.py",
+        "tests/release/test_local_report_attach_manager.py",
         "tests/release/test_local_research_rpc.py",
         "tests/server/test_catalog_report_client_sync.py",
         "tests/server/test_client_local_report_publication.py",
@@ -660,6 +665,11 @@ for _path in (
     "apple/Tests/ManagerDeviceKeyMigrationTests.swift",
 ):
     EXACT_PATH_TESTS[_path] = ("tests/scripts/test_native_session_restore.py",)
+for _path in ("apple/Sources/Networking/ManagerSessionTokenStore.swift",
+              "apple/Tests/ManagerSessionTokenMigrationTests.swift",
+              "tests/fixtures/manager_session_token_isolation.swift"):
+    EXACT_PATH_TESTS[_path] = ("tests/scripts/test_native_session_restore.py",
+                               "tests/release/test_manager_session_token_isolation.py")
 EXACT_PATH_TESTS["tools/factors/alpha_plan.py"] = (*FACTOR_PLAN_TESTS,"tests/server/test_nautilus_strategy_runspec.py")
 EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)

@@ -283,6 +283,9 @@ def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_pat
     import hashlib
     from tools.cli.release.research_reporting import local_auto_sync
     from tools.cli.release.research_reporting.local_publication import ensure_publication_table
+    from tools.cli.release.research_reporting.local_sync_baseline import content_digest, write_baseline
+    from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
+    from tools.cli.release.research_reporting.authoring.tree_store import load_head, tree_lock
 
     manager = {'endpoint': 'https://manager.test', 'subject': 'subject', 'token': '', 'certificate_pem': '', 'cookies': []}
     rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
@@ -298,6 +301,13 @@ def test_automatic_sync_is_bounded_and_only_visits_explicit_publications(tmp_pat
             with rpc.store._connect() as db:
                 db.execute('INSERT INTO report_publications (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref) VALUES (?, ?, ?, ?, ?, ?, ?)',
                     (report['report_id'], hashlib.sha256(manager['endpoint'].encode()).hexdigest(), 'p-'+'a'*64, 'rev', version['generation'], 'f'*64, version['root_ref']))
+                receipt = db.execute('SELECT * FROM report_publications WHERE report_id=?', (report['report_id'],)).fetchone()
+            _row, root = rpc.store._report_root('self', research['research_id'], report['report_id'])
+            paths = report_tree_paths(root, 'main')
+            with tree_lock(paths):
+                digest = content_digest(root, paths, load_head(paths))
+            write_baseline(rpc.store, report_id=report['report_id'], manager_hash=receipt['manager_hash'],
+                           receipt=receipt, content_sha256=digest)
         else:
             # A receipt for another Manager does not authorize synchronization here.
             with rpc.store._connect() as db:
