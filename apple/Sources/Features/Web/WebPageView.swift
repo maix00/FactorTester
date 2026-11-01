@@ -626,14 +626,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         // or this scoped session cookie.
         if !sessionToken.isEmpty {
             let managerURL = serverOrigin ?? url
-            if let host = managerURL.host,
-               let cookie = HTTPCookie(properties: [
-                   .domain: host,
-                   .path: "/",
-                   .name: "ft-manager-session",
-                   .value: sessionToken,
-                   .secure: managerURL.scheme == "https" ? "TRUE" : "FALSE",
-               ]) {
+            if let cookie = WebSessionCookieSynchronizer.makeSessionCookie(
+                token: sessionToken, endpoint: managerURL
+            ) {
                 await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
             }
         }

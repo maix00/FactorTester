@@ -7,6 +7,18 @@ import WebKit
 /// server-issued session cookie crosses into URLSession; passwords and Web
 /// storage values never cross the JavaScript bridge.
 enum WebSessionCookieSynchronizer {
+    static func makeSessionCookie(token: String, endpoint: URL) -> HTTPCookie? {
+        guard !token.isEmpty, let host = endpoint.host,
+              let scheme = endpoint.scheme?.lowercased(), ["http", "https"].contains(scheme) else { return nil }
+        var properties: [HTTPCookiePropertyKey: Any] = [
+            .domain: host, .path: "/", .name: "ft-manager-session", .value: token,
+        ]
+        // Foundation interprets the *presence* of .secure as true, even if
+        // its value is the string "FALSE". Omit the key for an HTTP LAN.
+        if scheme == "https" { properties[.secure] = "TRUE" }
+        return HTTPCookie(properties: properties)
+    }
+
     @MainActor
     static func importManagerSession(
         from webView: WKWebView,

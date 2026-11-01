@@ -8,6 +8,14 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
     private var loaded: XCTestExpectation?
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded?.fulfill() }
 
+    func testProjectedSessionCookieUsesSecureOnlyForHTTPS() throws {
+        let http = try XCTUnwrap(URL(string: "http://127.0.0.1:7998"))
+        let https = try XCTUnwrap(URL(string: "https://manager.example:7998"))
+        XCTAssertFalse(try XCTUnwrap(WebSessionCookieSynchronizer.makeSessionCookie(token: "token", endpoint: http)).isSecure)
+        XCTAssertTrue(try XCTUnwrap(WebSessionCookieSynchronizer.makeSessionCookie(token: "token", endpoint: https)).isSecure)
+        XCTAssertNil(WebSessionCookieSynchronizer.makeSessionCookie(token: "", endpoint: http))
+    }
+
     func testDeniedTargetClearsNativeIdentityAndSelectsTarget() async throws {
         let value: [String: Any] = ["username": "alice", "keep_login": true,
                                     "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
