@@ -197,8 +197,8 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
     }))
     calls = []
 
-    def embed(repo, target, *, version, source_revision):
-        calls.append((repo, target, version, source_revision))
+    def embed(repo, target, *, version, source_revision, cache_dir):
+        calls.append((repo, target, version, source_revision, cache_dir))
         cli.write_bytes(b"new")
         manager_cli.write_bytes(b"new")
         report_renderer.write_bytes(b"new")
@@ -216,11 +216,13 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
         app=app,
         version="bundle-1-r" + "b" * 40,
         source_revision="b" * 40,
+        cache_dir=tmp_path / "cache",
     ) is True
     assert calls[0][1:] == (
         app,
         "bundle-1-r" + "b" * 40,
         "b" * 40,
+        tmp_path / "cache",
     )
 
 

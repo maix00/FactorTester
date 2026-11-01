@@ -15,7 +15,7 @@ _REVISION = re.compile(r"^[0-9a-f]{40}$")
 
 
 def ensure_client_runtime(
-    *, app: Path, version: str, source_revision: str,
+    *, app: Path, version: str, source_revision: str, cache_dir: Path | None = None,
 ) -> bool:
     # Validate before the fast path.  A malformed receipt must never be
     # accepted merely because it happens to carry the same malformed value;
@@ -47,6 +47,7 @@ def ensure_client_runtime(
         app,
         version=version,
         source_revision=source_revision,
+        cache_dir=cache_dir or (Path.home() / "Library/Caches/FactorTester/release-runtime"),
     )
     return True
 
@@ -56,6 +57,7 @@ def main() -> None:
     parser.add_argument("--app", required=True, type=Path)
     parser.add_argument("--version", required=True)
     parser.add_argument("--source-revision", required=True)
+    parser.add_argument("--cache-dir", type=Path)
     args = parser.parse_args()
     refreshed = ensure_client_runtime(**vars(args))
     print("refreshed" if refreshed else "reused")

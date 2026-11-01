@@ -77,6 +77,7 @@ def runtime_input_digest(
     digest = sha256()
     digest.update(f"schema={RUNTIME_CACHE_SCHEMA}\n".encode())
     digest.update(f"python={sys.version_info[:3]}\n".encode())
+    digest.update(f"platform={sys.platform}:{platform.machine()}\n".encode())
     digest.update(f"pyinstaller={PYINSTALLER_VERSION}\n".encode())
     digest.update(f"pyright={PYRIGHT_VERSION}\n".encode())
     digest.update(("\n".join(BUILD_DEPENDENCIES) + "\n").encode())
@@ -84,6 +85,8 @@ def runtime_input_digest(
     roots = (
         repo / "tools/cli/pyproject.toml",
         repo / "tools/cli",
+        repo / "skills/traderesearch-research-skill/SKILL.md",
+        repo / "scripts/release/assets.py",
     )
     labeled_roots = [(root, "repo") for root in roots]
     if client_sources_root is not None:

@@ -82,6 +82,19 @@ def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
     assert assets.runtime_input_digest(repo) != first
 
 
+def test_runtime_cache_key_includes_embedded_skill_and_build_recipe(tmp_path: Path) -> None:
+    repo = _runtime_repo(tmp_path / "repo")
+    recipe = repo / "scripts/release/assets.py"
+    recipe.parent.mkdir(parents=True)
+    recipe.write_text("build recipe")
+    first = assets.runtime_input_digest(repo)
+    (repo / "skills/traderesearch-research-skill/SKILL.md").write_text("updated skill")
+    second = assets.runtime_input_digest(repo)
+    assert second != first
+    recipe.write_text("updated recipe")
+    assert assets.runtime_input_digest(repo) != second
+
+
 def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     source = (Path(__file__).resolve().parents[2] / "scripts/release/assets.py").read_text()
     assert "RUNTIME_CACHE_SCHEMA = 9" in source
