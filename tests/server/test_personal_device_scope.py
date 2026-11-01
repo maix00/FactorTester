@@ -154,18 +154,45 @@ def test_enrollment_disables_record_if_keycloak_grant_fails(monkeypatch):
 
 def test_failed_enrollment_can_be_retried_explicitly(monkeypatch):
     responses, calls = [], []
+    key = {'kty':'EC','crv':'P-256','x':'A'*43,'y':'A'*43}
     monkeypatch.setattr(device_routes, 'json_response', lambda _h, payload, status=200, **_kw: responses.append(status))
     monkeypatch.setattr('server.identity.keycloak_device.register_device', lambda **kw: calls.append(kw))
     route = device_routes.DeviceNetworkRoutesMixin()
     route.state = SimpleNamespace(server_id='public', public_server=False, device_registry=SimpleNamespace(
-        key_binding=lambda **kw: {'enabled': False},
+        key_binding=lambda **kw: {'enabled': False, 'public_key': key},
         retry_enrollment=lambda **kw: {'device_id': kw['device_id']},
         backend_status=lambda: {},
     ))
     route._session = lambda: {'username': 'alice'}
     route._has_secure_ui_transport = lambda: True
     route._device_request_metadata = lambda: {}
-    route._json_body = lambda _limit: {'device_id': 'mine', 'public_key': 'key'}
+    route._json_body = lambda _limit: {'device_id': 'mine', 'public_key': key}
     route._device_enroll()
     assert responses[-1] == 201
     assert calls[0]['device_id'] == 'mine'
+
+
+def test_existing_device_can_retry_grant_without_disabling_existing_binding(monkeypatch):
+    responses, revoked, registered = [], [], []
+    key = {'kty':'EC','crv':'P-256','x':'A'*43,'y':'A'*43}
+    monkeypatch.setattr(device_routes, 'json_response', lambda _h, payload, status=200, **_kw: responses.append(status))
+    def grant(**kw):
+        registered.append(kw)
+        if len(registered) == 1: raise RuntimeError('unavailable')
+    monkeypatch.setattr('server.identity.keycloak_device.register_device', grant)
+    route = device_routes.DeviceNetworkRoutesMixin()
+    route.state = SimpleNamespace(server_id='public', public_server=False, device_registry=SimpleNamespace(
+        key_binding=lambda **kw: {'enabled': True, 'device_id': 'device-mine-123456',
+                                  'username': 'alice', 'source_server_id': 'public', 'public_key': key},
+        revoke=lambda *args, **kw: revoked.append(args), backend_status=lambda: {},
+    ))
+    route._session = lambda: {'username': 'alice'}
+    route._has_secure_ui_transport = lambda: True
+    route._json_body = lambda _limit: {'device_id': 'device-mine-123456', 'public_key': key}
+    route._device_enroll()
+    assert responses[-1] == 503 and revoked == []
+    route._device_enroll()
+    assert responses[-1] == 201 and revoked == []
+    route._json_body = lambda _limit: {'device_id': 'device-mine-123456', 'public_key': {**key, 'x': 'B'*43}}
+    route._device_enroll()
+    assert responses[-1] == 400 and len(registered) == 2

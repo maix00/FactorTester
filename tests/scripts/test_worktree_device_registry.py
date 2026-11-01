@@ -330,7 +330,10 @@ def test_device_client_description_discards_raw_user_agent() -> None:
     }
     assert native == {
         "client_type": "swift",
-        "client_name": "FactorTester Swift 1",
+        "client_name": "TradeResearch Swift 1",
+    }
+    assert describe_client(user_agent="TradeResearch-Swift/1", client_hint="mobile") == {
+        "client_type": "mobile", "client_name": "TradeResearch Mobile 1",
     }
     assert observed_ip("2001:db8::1") == "2001:db8::1"
     assert observed_ip("not-an-ip") == ""

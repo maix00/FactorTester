@@ -180,14 +180,23 @@ class DeviceNetworkRoutesMixin:
             device_id = str(payload.get("device_id") or "")
             public_key = payload.get("public_key")
             binding = self.state.device_registry.key_binding(username=username, device_id=device_id)
-            if binding is not None and not binding.get("enabled"):
-                device = self.state.device_registry.retry_enrollment(username=username, device_id=device_id, public_key=public_key)
+            changed = False
+            if binding is not None:
+                from server.manager.domain.devices import _public_record, normalise_public_key
+                if binding.get("public_key") != normalise_public_key(public_key):
+                    raise DeviceRegistryError("device cannot be re-enrolled with this identity or key")
+                if not binding.get("enabled"):
+                    device = self.state.device_registry.retry_enrollment(username=username, device_id=device_id, public_key=public_key)
+                    changed = True
+                else:
+                    device = _public_record(binding)
             else:
                 device = self.state.device_registry.enroll(
                     username=username, device_id=device_id, public_key=public_key,
                     device_name=str(payload.get("device_name") or ""),
                     **self._device_request_metadata(),
                 )
+                changed = True
             # Registration is explicit: a verified signature alone must never
             # create an authorization grant. A failed grant leaves the local
             # record disabled until the user deliberately registers again.
@@ -197,7 +206,8 @@ class DeviceNetworkRoutesMixin:
                                 device_id=str(payload.get("device_id") or ""),
                                 public_key=payload.get("public_key"))
             except Exception:
-                self.state.device_registry.revoke(device_id, username=username, public_key=public_key)
+                if changed:
+                    self.state.device_registry.revoke(device_id, username=username, public_key=public_key)
                 raise
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device enrollment failed: {exc}\n")
