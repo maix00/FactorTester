@@ -260,9 +260,13 @@ def run_strategy_family_run_spec(
             from server.services.nautilus_bridge.catalog_staging import _ns
 
             custom_start = execution_plan.factor_warmup.data_start_utc
-            if _ns(custom_start) > _ns(data_start):
+            if _ns(custom_start) > _ns(execution_plan.start_utc):
                 raise ValueError("custom warmup starts after the run window")
-            data_start = custom_start
+            # The portable plan can already require an earlier frozen tape.
+            # Keep it intact: trimming can change periodic scope anchors even
+            # when the remaining bars satisfy a window's nominal history.
+            if _ns(custom_start) < _ns(data_start):
+                data_start = custom_start
         catalogs = stage_run_spec_catalogs(
             staging_requests=staging_requests,
             source_key=str(source_adapter.get("member_key") or ""),

@@ -138,6 +138,40 @@ def test_frozen_warmup_controls_staging_window(monkeypatch, tmp_path, warmup, ex
     assert result["execution_plan"].start_utc == "2025-04-01T01:00:00+00:00"
 
 
+def test_custom_warmup_preserves_earlier_frozen_portable_tape(monkeypatch, tmp_path):
+    from tests.server.test_nautilus_bridge_config import _minimal_frozen
+
+    class Resolver:
+        def __init__(self, **kwargs): pass
+        def resolve(self, **kwargs): return SimpleNamespace(expr=CLOSE)
+
+    monkeypatch.setattr("server.modules.shared.run_spec_resolution.factors.RunFactorResolver", Resolver)
+    captured = {}
+    monkeypatch.setattr(
+        "server.services.nautilus_bridge.catalog_staging.stage_run_spec_catalogs",
+        lambda **kwargs: captured.update(kwargs) or {
+            "T": {"catalog_dir": str(tmp_path), "contract_uid": "CFFEX|F|T|2403"}
+        },
+    )
+    monkeypatch.setattr(strategy_backtest, "run_strategy_family_replay", lambda **kwargs: kwargs)
+    settings = _minimal_frozen(factor_warmup={"mode": "custom", "data_start_utc": "2024-01-02T01:30:00Z"})
+    job_spec = {"run_spec": {"configuration": {
+        "shared": {"factors": []},
+        "analyses": {"backtest": {"execution": {"nautilus_contract": {"settings": settings}}}},
+    }}}
+    plan = {
+        "strategy": {"kind": "threshold", "parameters": {},
+                     "factor_roles": {"signal": {"ref": "factor:v2:" + "a" * 43}}},
+        "source_adapter": {"member_key": "source", "frequency": "MIN1"},
+        "run_window": {"start": "2023-11-01T00:00:00Z", "end": settings["end_utc"]},
+        "catalog_staging": [{"paths": ["CFFEX|F|T|2403"]}],
+        "session_calendar": object(),
+    }
+    result = strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec, plan=plan, output_dir=tmp_path)
+    assert captured["start_utc"] == "2023-11-01T00:00:00Z"
+    assert result["execution_plan"].start_utc == "2025-04-01T01:00:00+00:00"
+
+
 def test_strategy_family_engine_uses_frozen_venue(monkeypatch):
     from types import SimpleNamespace
     from server.services.nautilus_bridge import strategy_backtest
