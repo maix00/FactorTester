@@ -190,7 +190,7 @@ def release_client(
             check=True,
         )
         build_root = REPO / "apple/build"
-        source = build_root / "Build/Products/Release/FTClient.app"
+        source = build_root / "Build/Products/Release/TradeResearch.app"
         prepare_xcode_build_root(build_root)
         try:
             subprocess.run(
@@ -209,7 +209,7 @@ def release_client(
                 env=build_environment,
                 check=True,
             )
-            app = staging / "FTClient.app"
+            app = staging / "TradeResearch.app"
             shutil.copytree(source, app, symlinks=True)
         finally:
             discard_xcode_app(source)
@@ -229,7 +229,7 @@ def release_client(
         _sign_embedded_app(app, signing_identity)
         if notary_profile:
             _notarize_app(app, notary_profile)
-        dmg = build_installer_dmg(app, output / "FactorTester-Client.dmg")
+        dmg = build_installer_dmg(app, output / "TradeResearch.dmg")
         if notary_profile:
             _notarize_dmg(dmg, notary_profile)
         digest = sha256(dmg.read_bytes()).hexdigest()
@@ -245,7 +245,7 @@ def release_client(
                 f"https://github.com/{github_repository}"
                 "/releases/latest/download"
             )
-            download_url = f"{base}/FactorTester-Client.dmg"
+            download_url = f"{base}/TradeResearch.dmg"
             appcast_url = f"{base}/appcast.xml"
             legacy_url = f"{base}/stable.json"
 
@@ -315,7 +315,7 @@ def release_client(
             publish_main_github(
                 repository=github_repository,
                 tag=f"client-v{version}-b{build}",
-                title=f"FTClient {version} ({build})",
+                title=f"TradeResearch {version} ({build})",
                 dmg=dmg,
                 appcast=appcast,
                 legacy_manifest_path=legacy_path,
@@ -425,6 +425,8 @@ def publish_release(**options: Any) -> PublishedRelease:
         if server_origin:
             sources.append(server_origin)
         installed_release = read_installed_beta_release(
+            Path("/Applications/TradeResearch.app/Contents/Info.plist"),
+        ) or read_installed_beta_release(
             Path("/Applications/FTClient.app/Contents/Info.plist"),
         )
         if installed_release is not None:

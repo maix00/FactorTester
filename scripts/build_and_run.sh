@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="FTClient"
+APP_NAME="TradeResearch"
 BUNDLE_ID="com.gtht.client"
 SIGNING_IDENTITY="${FTCLIENT_SIGNING_IDENTITY:-FTClient Beta Release}"
 
@@ -18,7 +18,7 @@ export DEVELOPER_DIR
 
 # Xcode gives every worktree/test invocation its own DerivedData directory.
 # Those Debug app bundles are discoverable by Spotlight and look like many
-# installed clients even though only /Applications/FTClient.app is released.
+# installed clients even though only /Applications/TradeResearch.app is released.
 # Keep the cleanup exact to this project's generated directories; never clean
 # arbitrary DerivedData or the release output owned by this script.
 cleanup_stale_debug_artifacts() {

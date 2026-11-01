@@ -181,7 +181,7 @@ def app_update() -> None:
 @click.option("--wait", type=click.FloatRange(min=0), default=0, show_default=True)
 @friendly_errors
 def app_update_check(as_json: bool, wait: float) -> None:
-    """Ask FTClient/Sparkle to check its selected channel."""
+    """Ask TradeResearch/Sparkle to check its selected channel."""
     _echo(dispatch_app_update("check", wait=wait), as_json)
 
 
@@ -190,7 +190,7 @@ def app_update_check(as_json: bool, wait: float) -> None:
 @click.option("--wait", type=click.FloatRange(min=0), default=0, show_default=True)
 @friendly_errors
 def app_update_download(as_json: bool, wait: float) -> None:
-    """Ask FTClient/Sparkle to download and prepare its available update."""
+    """Ask TradeResearch/Sparkle to download and prepare its available update."""
     _echo(dispatch_app_update("download", wait=wait), as_json)
 
 

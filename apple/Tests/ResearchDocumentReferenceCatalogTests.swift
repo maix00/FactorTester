@@ -1,5 +1,5 @@
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class ResearchDocumentReferenceCatalogTests: XCTestCase {
     func testSemanticKindsShareOneNativeAndWebCatalog() {

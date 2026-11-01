@@ -1,7 +1,7 @@
 #if os(macOS)
 import Foundation
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 @MainActor
 final class ManagerCLISelectionSynchronizerTests: XCTestCase {

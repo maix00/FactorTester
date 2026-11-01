@@ -2,7 +2,7 @@
 import Foundation
 import WebKit
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 @MainActor
 final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {

@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class ManagerObjectTransferServiceTests: XCTestCase {
     func testUploadIssuesMetadataOn7998ThenStreamsBytesTo7997() async throws {

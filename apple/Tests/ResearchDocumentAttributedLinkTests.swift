@@ -1,6 +1,6 @@
 #if os(macOS)
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class ResearchDocumentAttributedLinkTests: XCTestCase {
     func testReferenceAddsCompactNonClickableSpacingWhenTouchingText() throws {

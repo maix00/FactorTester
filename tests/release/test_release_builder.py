@@ -153,7 +153,7 @@ def test_local_build_script_uses_installed_app_identity() -> None:
         Path(__file__).resolve().parents[2]
         / "scripts/build_and_run.sh"
     ).read_text(encoding="utf-8")
-    assert 'APP_NAME="FTClient"' in source
+    assert 'APP_NAME="TradeResearch"' in source
     assert 'APP_NAME="FactorTester-Client"' not in source
     assert "cleanup_stale_debug_artifacts" in source
     assert "FactorTester-Client-*" in source
@@ -305,7 +305,7 @@ def test_release_builder_exposes_only_one_dmg(
     repo = tmp_path / "repo"
     app = (
         repo
-        / "apple/build/Build/Products/Release/FTClient.app"
+        / "apple/build/Build/Products/Release/TradeResearch.app"
     )
     (app / "Contents").mkdir(parents=True)
     with (app / "Contents/Info.plist").open("wb") as stream:
@@ -354,9 +354,9 @@ def test_release_builder_exposes_only_one_dmg(
         signing_identity="FTClient Beta Release",
     )
 
-    assert result == output / "FactorTester-Client.dmg"
+    assert result == output / "TradeResearch.dmg"
     assert [path.name for path in output.iterdir()] == [
-        "FactorTester-Client.dmg"
+        "TradeResearch.dmg"
     ]
 
 
@@ -443,7 +443,7 @@ def test_release_builder_rejects_app_version_or_revision_reuse_inputs(
     monkeypatch,
 ) -> None:
     repo = tmp_path / "repo"
-    app = repo / "apple/build/Build/Products/Release/FTClient.app"
+    app = repo / "apple/build/Build/Products/Release/TradeResearch.app"
     (app / "Contents").mkdir(parents=True)
     with (app / "Contents/Info.plist").open("wb") as stream:
         plistlib.dump({

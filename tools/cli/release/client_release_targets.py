@@ -31,7 +31,8 @@ def build_target_beta_package(
         raise ValueError("Beta release directory is unavailable")
     source_manifest_path = root / "beta.json"
     source_appcast_path = root / "appcast.xml"
-    dmg = root / "FactorTester-Client.dmg"
+    current = root / "TradeResearch.dmg"
+    dmg = current if current.is_file() else root / "FactorTester-Client.dmg"
     if (
         not source_manifest_path.is_file()
         or not source_appcast_path.is_file()

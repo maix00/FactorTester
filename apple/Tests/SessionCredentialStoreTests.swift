@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class SessionCredentialStoreTests: XCTestCase {
     func testCredentialsAreNeverReplayedToAnotherManager() throws {

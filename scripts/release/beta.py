@@ -83,7 +83,7 @@ def release_beta(
         check=True,
     )
     build_root = REPO / "apple/build"
-    source = build_root / "Build/Products/Release/FTClient.app"
+    source = build_root / "Build/Products/Release/TradeResearch.app"
     prepare_xcode_build_root(build_root)
     try:
         subprocess.run(
@@ -100,7 +100,7 @@ def release_beta(
             raise ValueError("release version does not match the macOS app")
         if str(info.get("CFBundleVersion")) != str(build):
             raise ValueError("release build does not match the macOS app")
-        staged = output / ".staging" / "FTClient.app"
+        staged = output / ".staging" / "TradeResearch.app"
         shutil.copytree(source, staged, symlinks=True)
     finally:
         discard_xcode_app(source)
@@ -109,7 +109,7 @@ def release_beta(
         source_revision=source_revision, cache_dir=cache_dir,
     )
     _sign_embedded_app(staged, signing_identity)
-    dmg = build_installer_dmg(staged, output / "FactorTester-Client.dmg")
+    dmg = build_installer_dmg(staged, output / "TradeResearch.dmg")
     digest = sha256(dmg.read_bytes()).hexdigest()
     url = (
         server_origin.rstrip("/")

@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class LocalDocumentsRootTests: XCTestCase {
     func testNewLegacyAliasedAndConflictingRoots() throws {

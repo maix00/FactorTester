@@ -119,7 +119,7 @@ def build_release(
         raise ValueError(f"release output already exists: {output}")
     source_app = (
         REPO
-        / "apple/build/Build/Products/Release/FTClient.app"
+        / "apple/build/Build/Products/Release/TradeResearch.app"
     )
     if not (source_app / "Contents" / "Info.plist").is_file():
         raise ValueError(f"macOS application is incomplete: {source_app}")
@@ -132,7 +132,7 @@ def build_release(
     if not build.isdigit() or int(build) < 1:
         raise ValueError("macOS app build must be a positive integer")
     output.mkdir(parents=True)
-    app = output / ".staging" / "FTClient.app"
+    app = output / ".staging" / "TradeResearch.app"
     shutil.copytree(source_app, app, symlinks=True)
     embed_client_runtime(
         REPO,
@@ -141,7 +141,7 @@ def build_release(
         source_revision=source_revision,
     )
     _sign_embedded_app(app, signing_identity)
-    dmg = build_installer_dmg(app, output / "FactorTester-Client.dmg")
+    dmg = build_installer_dmg(app, output / "TradeResearch.dmg")
     shutil.rmtree(output / ".staging")
     return dmg
 

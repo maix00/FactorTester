@@ -104,7 +104,7 @@ final class ClientReleaseController: ObservableObject {
     }
 
     func handleUpdateCommand(_ url: URL) {
-        guard url.scheme == "factortester",
+        guard ["traderesearch", "factortester"].contains(url.scheme?.lowercased() ?? ""),
               url.host == "app-update",
               let components = URLComponents(
                 url: url,

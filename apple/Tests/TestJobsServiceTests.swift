@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class TestJobsServiceTests: XCTestCase {
     func testVerifiedJobBackupIsScopedAndRejectsTampering() throws {

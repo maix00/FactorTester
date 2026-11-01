@@ -179,7 +179,7 @@ def build_installer_dmg(app: Path, output: Path) -> Path:
                 "hdiutil",
                 "create",
                 "-volname",
-                "FTClient",
+                "TradeResearch",
                 "-srcfolder",
                 str(root),
                 "-format",

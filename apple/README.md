@@ -80,6 +80,10 @@ xcodegen generate
 
 > `FactorTester-Client.xcodeproj` 是生成物（已 gitignore）。改了 `project.yml` 后重新 `xcodegen generate`。
 
+## 客户端名称迁移
+
+macOS 与 iOS 的应用名称和可执行文件为 TradeResearch；macOS 发布包使用 `TradeResearch.app` 与 `TradeResearch.dmg`。更新器仍识别旧安装包与旧更新链接，已安装的旧应用仅在新应用位于 `/Applications`、且全部候选的 bundle ID 均匹配后退役。Manager 会话的 Keychain 条目按服务器地址逐项从旧名称原位迁移；迁移失败保留旧条目，注销时清除两种名称。设备私钥的旧标识仍需单独迁移，不能通过重建设备密钥替代。现有签名证书保留其原名称，以维持 macOS 的身份与授权。
+
 ## macOS 测试与工作区授权
 
 macOS hosted tests 和 UI tests 会启动使用 `com.gtht.client` 的应用宿主。

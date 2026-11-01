@@ -1,6 +1,6 @@
 import XCTest
 import WebKit
-@testable import FTClient
+@testable import TradeResearch
 
 final class RenderedMathFormulaViewTests: XCTestCase {
     func testDisplayFormulaRoutesVerticalWheelToOuterReport() {

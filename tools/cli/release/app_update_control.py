@@ -46,6 +46,7 @@ def installed_client_app() -> Path | None:
     )
     candidates = (
         Path(configured).expanduser() if configured else None,
+        Path("/Applications/TradeResearch.app"),
         Path("/Applications/FTClient.app"),
     )
     for candidate in candidates:
@@ -72,12 +73,15 @@ def dispatch_app_update(action: str, *, wait: float = 0) -> dict:
         before.get("error"),
         before.get("updated_at"),
     )
-    url = "factortester://app-update?" + urlencode({"action": action})
-    subprocess.run(_update_open_command(url), check=True, capture_output=True)
+    app = installed_client_app()
+    scheme = "factortester" if app is not None and app.name in {"FTClient.app", "FactorTester-Client.app"} else "traderesearch"
+    url = scheme + "://app-update?" + urlencode({"action": action})
+    command = ["open", "-a", str(app), url] if app is not None else ["open", url]
+    subprocess.run(command, check=True, capture_output=True)
     result = {
         "schema_version": 1,
         "action": action,
-        "handler": "FTClient/Sparkle",
+        "handler": "TradeResearch/Sparkle",
         "dispatched": True,
     }
     if wait > 0 and action in EXPECTED_STATES:

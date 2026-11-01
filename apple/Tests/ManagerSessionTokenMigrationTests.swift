@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Security
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class ManagerSessionTokenMigrationTests: XCTestCase {
     private let current = "com.gtht.traderesearch.manager"

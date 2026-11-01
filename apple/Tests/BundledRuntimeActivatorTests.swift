@@ -1,5 +1,5 @@
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class BundledRuntimeActivatorTests: XCTestCase {
     func testConcurrentCallersShareOneActivation() async {

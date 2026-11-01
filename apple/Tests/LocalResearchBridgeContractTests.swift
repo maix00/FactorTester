@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class LocalResearchBridgeContractTests: XCTestCase {
     func testOnlyCurrentManagerOriginIsAllowed() throws {
