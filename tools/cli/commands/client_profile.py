@@ -57,7 +57,7 @@ def client_profile() -> None:
 def import_ui_session(server_url: str, principal_ref: str) -> None:
     """Import the native UI cookie bridge from JSON on stdin."""
     value = json.load(sys.stdin)
-    if not isinstance(value, dict) or not set(value) <= {"cookies", "token", "certificate_pem"}:
+    if not isinstance(value, dict) or not set(value) <= {"cookies", "token", "certificate_pem", "binding"}:
         raise ValueError("UI session bridge payload is invalid")
     cookies = value.get("cookies", [])
     if not isinstance(cookies, list):
@@ -76,6 +76,17 @@ def import_ui_session(server_url: str, principal_ref: str) -> None:
     observed = str(principal.get("username") or "")
     if observed != principal_ref:
         raise ValueError("imported UI principal does not match")
+    binding = value.get("binding")
+    if binding is not None:
+        if (not isinstance(binding, dict) or set(binding) != {"issuer", "subject", "identity_id"}
+                or any(not isinstance(binding[key], str) or not binding[key].strip() or len(binding[key]) > 2048
+                       for key in binding)
+                or str(principal.get("keycloak_issuer") or "").rstrip("/") != binding["issuer"].rstrip("/")
+                or principal.get("keycloak_subject") != binding["subject"]
+                or principal.get("tr_identity_id") != binding["identity_id"]
+                or principal.get("visitor_login") is True or principal.get("role") == "visitor"
+                or principal.get("authentication") == "agent"):
+            raise PermissionError("imported UI identity does not match")
     from tools.cli.native_session import save_session, clear_session
     if token or certificate_pem:
         save_session(server_url, observed, token, certificate_pem)

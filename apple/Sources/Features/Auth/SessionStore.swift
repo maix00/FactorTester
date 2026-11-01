@@ -266,16 +266,21 @@ final class SessionStore: ObservableObject {
             }
             return value
         }
+        var payload: [String: Any] = [
+            "cookies": cookies,
+            "token": ManagerSessionTokenStore.read(for: ManagerConfig.shared.baseURL),
+            "certificate_pem": SelfSignedTrustDelegate.certificatePEM(for: ManagerConfig.shared.baseURL)
+        ]
+        if let identity = user?.localResearchIdentity {
+            payload["binding"] = ["issuer": identity.issuer, "subject": identity.subject,
+                                  "identity_id": identity.stableID]
+        }
         do {
             _ = try await ReleaseCommand.runObject([
                 "client", "profile", "import-ui-session",
                 "--server-url", serverURL,
                 "--principal-ref", principalRef,
-            ], executable: ClientCLIResolution.executable(), stdinJSON: [
-                "cookies": cookies,
-                "token": ManagerSessionTokenStore.read(for: ManagerConfig.shared.baseURL),
-                "certificate_pem": SelfSignedTrustDelegate.certificatePEM(for: ManagerConfig.shared.baseURL)
-            ])
+            ], executable: ClientCLIResolution.executable(), stdinJSON: payload)
             return true
         } catch {
             if reportError { lastError = error.localizedDescription }

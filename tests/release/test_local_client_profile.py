@@ -878,3 +878,23 @@ def test_native_token_bridge_is_origin_scoped_and_mismatch_is_non_destructive(tm
     assert HttpSession('https://manager.example:9443').bearer_token == 'native-secret'
     HttpSession('https://manager.example:9443').clear_cookies()
     assert HttpSession('https://manager.example:9443').bearer_token == ''
+
+
+def test_ui_session_bridge_rejects_same_username_with_different_keycloak_identity(tmp_path, monkeypatch):
+    from tools.cli.http import HttpSession
+    monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path / 'home'))
+    monkeypatch.setenv('FACTORTESTER_CONFIG', str(tmp_path / 'config.json'))
+    principal = {'username': 'alice', 'keycloak_issuer': 'https://identity.test/realms/a',
+                 'keycloak_subject': 'subject-a', 'tr_identity_id': 'stable-a'}
+    monkeypatch.setattr(FactorTesterClient, 'current_principal', lambda self: principal)
+    args = ['client', 'profile', 'import-ui-session', '--server-url', 'https://manager.example:9443', '--principal-ref', 'alice']
+    binding = {'issuer': principal['keycloak_issuer'], 'subject': principal['keycloak_subject'], 'identity_id': principal['tr_identity_id']}
+    ok = CliRunner().invoke(cli, args, input=json.dumps({'token': 'first-token', 'binding': binding}))
+    assert ok.exit_code == 0 and 'first-token' not in ok.output
+    for change in ({'issuer': 'https://other.test/realms/a'}, {'subject': 'subject-b'}, {'identity_id': 'stable-b'}):
+        result = CliRunner().invoke(cli, args, input=json.dumps({'token': 'second-token', 'binding': {**binding, **change}}))
+        assert result.exit_code != 0 and 'second-token' not in result.output
+        assert HttpSession('https://manager.example:9443').bearer_token == 'first-token'
+    principal['visitor_login'] = True
+    result = CliRunner().invoke(cli, args, input=json.dumps({'token': 'second-token', 'binding': binding}))
+    assert result.exit_code != 0 and HttpSession('https://manager.example:9443').bearer_token == 'first-token'
