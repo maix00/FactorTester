@@ -15,7 +15,8 @@ def classify_devices(*, manager_id: str, records: list[dict], identities: dict[s
     target = str(manager_id or "").strip()
     if not target or len(target) > 256:
         raise ValueError("Manager identity is required")
-    counts = Counter(str(row.get("device_id") or "") for row in records)
+    counts = Counter((str(row.get("source_server_id") or "").strip(),
+                      str(row.get("device_id") or "")) for row in records)
     result = []
     for row in records:
         device_id = str(row.get("device_id") or "")
@@ -28,7 +29,7 @@ def classify_devices(*, manager_id: str, records: list[dict], identities: dict[s
         elif source != target:
             # Mirror records cannot be re-granted under this Manager's identity.
             item["status"] = "outside_manager"
-        elif counts[device_id] != 1:
+        elif counts[(source, device_id)] != 1:
             item["status"] = "conflict"
         elif len(matches) != 1:
             item["status"] = "invalid_identity"

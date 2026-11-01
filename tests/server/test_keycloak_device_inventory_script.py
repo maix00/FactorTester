@@ -65,11 +65,11 @@ def test_postgres_inventory_is_read_only_scoped_and_pages_without_loss():
             self.calls.append((query, parameters))
             if query.startswith('SET TRANSACTION'): return Result([])
             if 'information_schema.columns' in query: return Result([{'column_name': 'public_access'}])
-            principal, after, limit = parameters
+            principal, after, after_source, limit = parameters
             assert principal == 'alice' and limit == 501 and 'quota_exempt' not in query
             rows = [{'device_id': f'device-{n:07d}', 'username': principal, 'public_key': KEY,
                      'enabled': True, 'source_server_id': 'lan', 'public_access': False} for n in range(1002)]
-            return Result([row for row in rows if row['device_id'] > after][:limit])
+            return Result([row for row in rows if (row['device_id'], row['source_server_id']) > (after, after_source)][:limit])
     connection = Connection()
     snapshot = read_postgres_snapshot(connection, manager_id='lan', principal='alice')
     assert len(snapshot['devices']) == 1002
@@ -77,6 +77,26 @@ def test_postgres_inventory_is_read_only_scoped_and_pages_without_loss():
     assert len({row['device_id'] for row in snapshot['devices']}) == 1002
     assert connection.calls[0][0] == 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY'
     assert len([call for call in connection.calls if 'FROM control_devices' in call[0]]) == 3
+
+
+def test_postgres_inventory_keeps_same_device_across_source_page_boundary():
+    class Result:
+        def __init__(self, rows): self.rows = rows
+        def fetchall(self): return self.rows
+    class Connection:
+        def execute(self, query, parameters=()):
+            if query.startswith('SET TRANSACTION'): return Result([])
+            if 'information_schema.columns' in query: return Result([])
+            principal, device, source, limit = parameters
+            rows = [{'device_id': f'device-{n:07d}', 'username': principal, 'public_key': KEY,
+                     'enabled': True, 'source_server_id': 'lan'} for n in range(500)]
+            rows += [{'device_id': 'device-shared-12345', 'username': principal, 'public_key': KEY,
+                      'enabled': True, 'source_server_id': source_id} for source_id in ('lan', 'public')]
+            return Result([row for row in rows if (row['device_id'], row['source_server_id']) > (device, source)][:limit])
+    snapshot = read_postgres_snapshot(Connection(), manager_id='lan', principal='alice')
+    assert len(snapshot['devices']) == 502
+    assert [(row['device_id'], row['source_server_id']) for row in snapshot['devices'][-2:]] == [
+        ('device-shared-12345', 'lan'), ('device-shared-12345', 'public')]
 
 
 def test_live_keycloak_directory_rechecks_exact_subject_and_disabled_state(monkeypatch):

@@ -23,6 +23,14 @@ def test_inventory_refuses_duplicate_devices_and_ambiguous_users():
     assert rows[0]["status"] == "invalid_identity"
 
 
+def test_same_device_registered_by_two_managers_is_not_a_local_conflict():
+    record = {"device_id": "device-1234567890123456", "username": "alice",
+              "source_server_id": "manager", "public_key": KEY, "enabled": True}
+    rows = classify_devices(manager_id="manager", records=[record, {**record, "source_server_id": "other"}],
+                            identities={"alice": [IDENTITY]})
+    assert [row["status"] for row in rows] == ["grant", "outside_manager"]
+
+
 def test_inventory_refuses_missing_or_different_server_and_invalid_enabled():
     base = {"device_id": "device-1234567890123456", "username": "alice", "public_key": KEY, "enabled": True}
     for change, expected in [({}, "needs_repair"), ({"source_server_id": "elsewhere"}, "outside_manager"),
