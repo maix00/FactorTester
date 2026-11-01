@@ -58,7 +58,7 @@ def sync_server_reports(store, *, binding: dict, manager: dict, profile_id: str,
                     if db.execute('''SELECT 1 FROM reports report JOIN report_publications publication
                             ON publication.report_id=report.report_id
                             WHERE report.report_id=? AND report.research_id=? AND report.profile_id=? AND report.ready=1
-                              AND publication.manager_hash=? AND publication.source_kind='catalog' ''',
+                              AND publication.manager_hash=? ''',
                             (report_id, ref, profile, manager_hash)).fetchone():
                         continue
                     if db.execute('SELECT 1 FROM server_report_pending WHERE report_id=? AND manager_hash=? AND profile_id=?',
