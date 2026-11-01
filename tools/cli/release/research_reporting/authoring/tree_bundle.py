@@ -184,6 +184,14 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
     manifest, files = validate_report_bundle(payload=payload, expected_sha256=expected_sha256,
                                             report_id=report_id, source_generation=source_generation,
                                             source_root_ref=source_root_ref)
+    return _import_validated_report_bundle(manifest=manifest, files=files, expected_sha256=expected_sha256,
+        package_root=package_root, branch_id=branch_id, report_id=report_id, restore_artifacts=restore_artifacts)
+
+
+def _import_validated_report_bundle(*, manifest: dict, files: dict, expected_sha256: str,
+                                    package_root: Path, branch_id: str, report_id: str,
+                                    restore_artifacts: bool) -> dict:
+    """Materialize a bundle already checked by validate_report_bundle."""
     head, nodes = manifest['head'], manifest['nodes']
     asset_map = {item['asset_ref']: item for item in manifest['assets']}
     paths = report_tree_paths(package_root, branch_id)

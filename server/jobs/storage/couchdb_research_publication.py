@@ -117,32 +117,31 @@ def prepare_authoring(raw: object, *, report_id: str, generation: int, branch_re
     if not payload or len(payload) > _MAX_OBJECT or hashlib.sha256(payload).hexdigest() != digest:
         raise ValueError('report authoring bundle checksum or size mismatch')
     from tools.cli.release.research_reporting.authoring.tree_bundle import validate_report_bundle
-    manifest, _files = validate_report_bundle(payload=payload, expected_sha256=digest, report_id=report_id,
+    manifest, files = validate_report_bundle(payload=payload, expected_sha256=digest, report_id=report_id,
         source_generation=generation, source_root_ref=root_ref)
     if manifest.get('source_branch_id') != branch_ref:
         raise ValueError('report authoring bundle branch does not match')
-    _check_authoring_projection(payload, digest, root_ref, report_id, generation, projection)
+    _check_authoring_projection(manifest, files, digest, report_id, projection)
     return {'sha256': digest, 'root_ref': root_ref, 'generation': generation, 'size_bytes': len(payload)}, payload
 
 
-def _check_authoring_projection(payload: bytes, digest: str, root_ref: str,
-                                report_id: str, generation: int, projection: dict) -> None:
+def _check_authoring_projection(manifest: dict, files: dict, digest: str,
+                                report_id: str, projection: dict) -> None:
     """Reject a display projection that differs from its editable source.
 
     Materialize only into an ephemeral bounded workspace, and never restore
     referenced Job artifacts into the Manager's global cache. This reuses the
     same source-free comparison as client pull rather than a second renderer.
     """
-    from tools.cli.release.research_reporting.authoring.tree_bundle import import_report_bundle
+    from tools.cli.release.research_reporting.authoring.tree_bundle import _import_validated_report_bundle
     from tools.cli.release.research_reporting.local_projection_validation import bundle_matches_projection
 
     if not isinstance(projection, dict) or 'updated_at' not in projection:
         raise ValueError('report projection is missing its update time')
     with tempfile.TemporaryDirectory(prefix='tr-report-verify-') as temporary:
         root = Path(temporary) / 'report'
-        imported = import_report_bundle(payload=payload, expected_sha256=digest, package_root=root,
-            branch_id='main', report_id=report_id, source_generation=generation,
-            source_root_ref=root_ref, restore_artifacts=False)
+        imported = _import_validated_report_bundle(manifest=manifest, files=files, expected_sha256=digest,
+            package_root=root, branch_id='main', report_id=report_id, restore_artifacts=False)
         if not bundle_matches_projection(package_root=root, source_manifest=imported['source_manifest'],
                                          remote_projection=projection, expected_hash=projection['projection_hash']):
             raise ValueError('report projection and editable source differ')
