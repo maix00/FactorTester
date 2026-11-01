@@ -177,7 +177,52 @@ def test_manager_reuses_canonical_config_resolver_and_existing_credential_key(mo
     assert store.read()=='canonical-fixture'
     monkeypatch.delenv('TRADERESEARCH_MANAGER_TOKEN')
     assert store.read()=='legacy-fixture'
-    assert manager.KEYCHAIN_SERVICE=='com.gtht.factortester.manager'
+    assert manager.KEYCHAIN_SERVICE=='com.gtht.traderesearch.manager'
+    assert manager.LEGACY_KEYCHAIN_SERVICE=='com.gtht.factortester.manager'
+
+
+def test_manager_keychain_fallback_and_logout_preserve_service_boundaries(monkeypatch):
+    from types import SimpleNamespace
+    from tools.cli.manager import config as manager
+    monkeypatch.setattr(manager.platform, 'system', lambda: 'Darwin')
+    monkeypatch.setattr(manager, 'config_env', lambda name: None)
+    calls = []
+    responses = iter([SimpleNamespace(returncode=44, stdout=''),
+                      SimpleNamespace(returncode=0, stdout='legacy-fixture\n')])
+    def run(args, **kwargs):
+        calls.append(args)
+        return next(responses)
+    monkeypatch.setattr(manager.subprocess, 'run', run)
+    store = manager.ManagerCredentialStore(manager.ManagerConfig('https://manager.example:7998'))
+    assert store.read() == 'legacy-fixture'
+    assert [call[call.index('-s') + 1] for call in calls] == [manager.KEYCHAIN_SERVICE, manager.LEGACY_KEYCHAIN_SERVICE]
+    calls.clear()
+    responses = iter([SimpleNamespace(returncode=1, stdout='')])
+    assert store.read() == ''
+    assert len(calls) == 1
+    calls.clear()
+    monkeypatch.setattr(manager.subprocess, 'run', lambda args, **kwargs: calls.append(args))
+    store.clear()
+    assert [call[call.index('-s') + 1] for call in calls] == [manager.KEYCHAIN_SERVICE, manager.LEGACY_KEYCHAIN_SERVICE]
+
+
+def test_manager_keychain_write_deletes_legacy_only_after_success(monkeypatch):
+    import subprocess
+    from tools.cli.manager import config as manager
+    monkeypatch.setattr(manager.platform, 'system', lambda: 'Darwin')
+    calls = []
+    def failed(args, **kwargs):
+        calls.append(args)
+        raise subprocess.CalledProcessError(1, args)
+    monkeypatch.setattr(manager.subprocess, 'run', failed)
+    store = manager.ManagerCredentialStore(manager.ManagerConfig('https://manager.example:7998'))
+    with pytest.raises(subprocess.CalledProcessError):
+        store.write('fixture')
+    assert len(calls) == 1
+    calls.clear()
+    monkeypatch.setattr(manager.subprocess, 'run', lambda args, **kwargs: calls.append(args))
+    store.write('fixture')
+    assert [call[call.index('-s') + 1] for call in calls] == [manager.KEYCHAIN_SERVICE, manager.LEGACY_KEYCHAIN_SERVICE]
 
 
 def test_release_builder_requests_canonical_distribution(monkeypatch,tmp_path):
