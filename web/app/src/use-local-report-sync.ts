@@ -15,6 +15,7 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
     const warned=new Set<string>(),seen=new Set<string>();
     const discoveryCursors=new Map<string,string>(),discoveryDone=new Set<string>();
     let transportWarning=false,remoteUpdated=false;
+    const restartScan=()=>{cursor="";profileIndex=0;discoveryDone.clear();discoveryCursors.clear();seen.clear();};
     const schedule=(delay:number)=>{if(timer!==undefined)window.clearTimeout(timer);if(alive)timer=window.setTimeout(()=>void tick(),delay);};
     const tick=async()=>{
       if(!alive||running)return;
@@ -94,13 +95,13 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
         if(alive&&client.isCurrent(snapshot)&&!transportWarning){
           transportWarning=true;notify({code:"research.report.sync.unavailable",type:"warning",message:t("localResearch.syncUnavailable")});
         }
-        cursor="";profileIndex=0;discoveryDone.clear();discoveryCursors.clear();seen.clear();remoteUpdated=false;schedule(60000);
+        restartScan();remoteUpdated=false;schedule(60000);
       }finally{
         running=false;
-        if(alive&&requested){requested=false;cursor="";profileIndex=0;schedule(250);}
+        if(alive&&requested){requested=false;restartScan();schedule(250);}
       }
     };
-    wake.current=()=>{if(running)requested=true;else {cursor="";profileIndex=0;schedule(250);}};
+    wake.current=()=>{if(running)requested=true;else {restartScan();schedule(250);}};
     const resume=()=>{if(document.visibilityState==="visible" && navigator.onLine)wake.current?.();};
     window.addEventListener("online",resume);
     document.addEventListener("visibilitychange",resume);
