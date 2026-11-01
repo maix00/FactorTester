@@ -4,6 +4,29 @@ import XCTest
 @testable import TradeResearch
 
 final class ManagerDeviceKeyMigrationTests: XCTestCase {
+    func testDeviceSignaturePadsShortCanonicalIntegers() throws {
+        // DER INTEGERs may be shorter than the 32-byte P-256 output width.
+        let der = Data([0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x7f])
+        let signature = try ManagerDeviceKeyStore.p1363Signature(fromDER: der)
+        XCTAssertEqual(signature, Data(repeating: 0, count: 31) + Data([1])
+                       + Data(repeating: 0, count: 31) + Data([0x7f]))
+    }
+
+    func testDeviceSignatureAcceptsRequiredSignPaddingAndRejectsMalformedDER() throws {
+        let padded = Data([0x30, 0x07, 0x02, 0x02, 0x00, 0x80, 0x02, 0x01, 0x01])
+        let signature = try ManagerDeviceKeyStore.p1363Signature(fromDER: padded)
+        XCTAssertEqual(signature, Data(repeating: 0, count: 31) + Data([0x80])
+                       + Data(repeating: 0, count: 31) + Data([1]))
+        let malformed: [[UInt8]] = [
+            [0x30, 0x06, 0x02, 0x01, 0x80, 0x02, 0x01, 0x01], // negative integer
+            [0x30, 0x07, 0x02, 0x02, 0x00, 0x01, 0x02, 0x01, 0x01], // redundant zero
+            [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x00], // trailing byte
+        ]
+        for der in malformed {
+            XCTAssertThrowsError(try ManagerDeviceKeyStore.p1363Signature(fromDER: Data(der)))
+        }
+    }
+
     func testDeviceKeyRetagKeepsPublicIdentityAndSigning() throws {
         try exercise(secureEnclave: false)
     }

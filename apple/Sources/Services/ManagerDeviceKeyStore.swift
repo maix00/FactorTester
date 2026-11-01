@@ -278,9 +278,10 @@ enum ManagerDeviceKeyStore {
         ]
     }
 
-    private static func p1363Signature(fromDER der: Data) throws -> Data {
+    static func p1363Signature(fromDER der: Data) throws -> Data {
         let bytes = [UInt8](der)
-        guard bytes.count > 6, bytes[0] == 0x30 else {
+        guard bytes.count > 6, bytes[0] == 0x30,
+              Int(bytes[1]) == bytes.count - 2 else {
             throw ManagerDeviceKeyStoreError.signingFailed("invalid DER signature")
         }
         var index = 2
@@ -296,14 +297,16 @@ enum ManagerDeviceKeyStore {
             throw ManagerDeviceKeyStoreError.signingFailed("invalid DER signature")
         }
         let sLength = Int(bytes[index + 1]); index += 2
-        guard index + sLength <= bytes.count else {
+        guard index + sLength == bytes.count else {
             throw ManagerDeviceKeyStoreError.signingFailed("invalid DER signature")
         }
         let s = Array(bytes[index..<(index + sLength)])
-        guard r.count <= 33, s.count <= 33,
-              !r.isEmpty, !s.isEmpty,
-              (r.count == 32 || (r.count == 33 && r[0] == 0)),
-              (s.count == 32 || (s.count == 33 && s[0] == 0)) else {
+        func validInteger(_ value: [UInt8]) -> Bool {
+            guard !value.isEmpty, value.count <= 33, value[0] & 0x80 == 0 else { return false }
+            if value.count > 1 && value[0] == 0 && value[1] & 0x80 == 0 { return false }
+            return value.count <= 32 || (value[0] == 0 && value[1] & 0x80 != 0)
+        }
+        guard validInteger(r), validInteger(s) else {
             throw ManagerDeviceKeyStoreError.signingFailed("invalid DER signature")
         }
         return Data(integer: r, width: 32) + Data(integer: s, width: 32)
