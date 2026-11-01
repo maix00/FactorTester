@@ -17,6 +17,8 @@
 | 主体 | 旧设备记录数 | 说明 |
 | --- | ---: | --- |
 | `maxjjw`、`testa`、`testb` | 各 0 | 仅按这些新登录名查找，不能据此判定旧用户无设备 |
-| `GTHT@MaxJJW@392452984564` | 8 | 全部记录的来源为 `remote-main`，不属于本机测试 Manager |
+| MaxJJW 的 Keycloak 旧身份 | 8 | 全部来源为 `remote-main` |
+| testA 的 Keycloak 旧身份 | 4 | 全部来源为 `remote-main` |
+| testB 的 Keycloak 旧身份 | 2 | 全部来源为 `remote-main` |
 
-本机 Keycloak 能唯一解析这条历史用户身份。按本机 Manager 分类时 8 条均为 `outside_manager`，没有授予本机设备权限；盘点未核对公网 Keycloak 中的实际设备授权。下一步应在公网权威身份域核验同一稳定身份、来源、撤销状态和逐设备授权，比较完整引用集合并处理冲突，不能用新登录名下的零条记录代替迁移对账。
+本机 Keycloak 能唯一解析三条历史用户身份。按本机 Manager 分类时 14 条均为 `outside_manager`，没有授予本机设备权限；盘点未核对公网 Keycloak 中的实际设备授权。下一步应在公网权威身份域核验同一稳定身份、来源、撤销状态和逐设备授权，比较完整引用集合并处理冲突，不能用新登录名下的零条记录代替迁移对账。
