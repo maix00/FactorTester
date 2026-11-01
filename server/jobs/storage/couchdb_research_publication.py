@@ -9,6 +9,8 @@ import base64
 import hashlib
 import json
 import re
+import tempfile
+from pathlib import Path
 from urllib.error import HTTPError
 
 from server.jobs.storage.couchdb_research_reports import document_id
@@ -98,7 +100,7 @@ def prepare_projection(raw: object, *, report_id: str) -> tuple[dict, dict, dict
     return clean, attachments, inline
 
 
-def prepare_authoring(raw: object, *, report_id: str, generation: int, branch_ref: str):
+def prepare_authoring(raw: object, *, report_id: str, generation: int, branch_ref: str, projection: dict):
     """Validate a bounded editable branch separately from the read projection."""
     if raw is None:
         return None
@@ -119,7 +121,31 @@ def prepare_authoring(raw: object, *, report_id: str, generation: int, branch_re
         source_generation=generation, source_root_ref=root_ref)
     if manifest.get('source_branch_id') != branch_ref:
         raise ValueError('report authoring bundle branch does not match')
+    _check_authoring_projection(payload, digest, root_ref, report_id, generation, projection)
     return {'sha256': digest, 'root_ref': root_ref, 'generation': generation, 'size_bytes': len(payload)}, payload
+
+
+def _check_authoring_projection(payload: bytes, digest: str, root_ref: str,
+                                report_id: str, generation: int, projection: dict) -> None:
+    """Reject a display projection that differs from its editable source.
+
+    Materialize only into an ephemeral bounded workspace, and never restore
+    referenced Job artifacts into the Manager's global cache. This reuses the
+    same source-free comparison as client pull rather than a second renderer.
+    """
+    from tools.cli.release.research_reporting.authoring.tree_bundle import import_report_bundle
+    from tools.cli.release.research_reporting.local_projection_validation import bundle_matches_projection
+
+    if not isinstance(projection, dict) or 'updated_at' not in projection:
+        raise ValueError('report projection is missing its update time')
+    with tempfile.TemporaryDirectory(prefix='tr-report-verify-') as temporary:
+        root = Path(temporary) / 'report'
+        imported = import_report_bundle(payload=payload, expected_sha256=digest, package_root=root,
+            branch_id='main', report_id=report_id, source_generation=generation,
+            source_root_ref=root_ref, restore_artifacts=False)
+        if not bundle_matches_projection(package_root=root, source_manifest=imported['source_manifest'],
+                                         remote_projection=projection, expected_hash=projection['projection_hash']):
+            raise ValueError('report projection and editable source differ')
 
 
 def commit_shared_report(store, *, manager_id: str, owner_id: str, owner_ref: str,

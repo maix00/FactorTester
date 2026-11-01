@@ -117,7 +117,7 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
             raise ValueError('expected CouchDB revision is invalid')
         prepared = prepare_projection(projection, report_id=report_id)
         prepared_authoring = prepare_authoring(authoring, report_id=report_id,
-            generation=prepared[0]['generation'], branch_ref=branch_ref)
+            generation=prepared[0]['generation'], branch_ref=branch_ref, projection=prepared[0])
         marker_id = _receipt_id(str(self.state.server_id), identity.identity_id, report_id)
         lock_root = Path(self.state.state_root) / '.local-report-registration' / hashlib.sha256(report_id.encode()).hexdigest()[:2]
         with report_workspace_lock(lock_root):

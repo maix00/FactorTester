@@ -201,8 +201,20 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         inconsistent['title'] = 'Different projection title'
         inconsistent['projection_hash'] = projection_hash(inconsistent)
         previous_documents = copy.deepcopy(store.docs)
-        service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
-            branch_ref='main', projection=inconsistent, expected_revision=second['revision'], authoring=authoring)
+        # The Manager cannot depend on, or populate, the publishing client's
+        # Job cache while validating its self-contained authoring bundle.
+        monkeypatch.setenv('TRADERESEARCH_JOB_CACHE_ROOT', str(tmp_path / 'target-job-cache'))
+        assert cached_job_artifact(job_id='job-1', name='evidence') is None
+        with pytest.raises(ValueError, match='projection and editable source differ'):
+            service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
+                branch_ref='main', projection=inconsistent, expected_revision=second['revision'], authoring=authoring)
+        assert store.docs == previous_documents
+        # Simulate a document written before the server-side consistency check
+        # existed. The client must still refuse the inconsistent legacy data.
+        with monkeypatch.context() as old_server:
+            old_server.setattr('server.jobs.storage.couchdb_research_publication._check_authoring_projection', lambda *_args: None)
+            service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
+                branch_ref='main', projection=inconsistent, expected_revision=second['revision'], authoring=authoring)
         with rpc.store._connect() as db:
             before = dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone())
         monkeypatch.setenv('TRADERESEARCH_JOB_CACHE_ROOT', str(tmp_path / 'target-job-cache'))
@@ -217,6 +229,7 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         store.docs = previous_documents
         service.publish_local(session=SESSION, research_id=research['research_id'], report_id=selected['report_id'],
             branch_ref='main', projection=remote, expected_revision=second['revision'], authoring=authoring)
+        assert cached_job_artifact(job_id='job-1', name='evidence') is None
         auth['write'] = False
         assert rpc.request(pull) == {'success': False, 'code': 'local_report_publication_denied'}
         assert [chapter['title'] for chapter in rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})['index']['chapters']] == ['First']

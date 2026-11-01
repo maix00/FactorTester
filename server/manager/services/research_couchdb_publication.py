@@ -122,7 +122,7 @@ class ResearchCouchPublicationService:
             from server.jobs.storage.couchdb_research_publication import prepare_authoring, prepare_projection
             _prepared = prepare_projection(projection, report_id=report_id)
             _authoring = prepare_authoring(authoring, report_id=report_id,
-                generation=_prepared[0]['generation'], branch_ref=branch_ref)
+                generation=_prepared[0]['generation'], branch_ref=branch_ref, projection=_prepared[0])
         return commit_shared_report(self.store, manager_id=self.state.server_id, owner_id=owner_id,
             owner_ref=owner_ref, research_id=research_id, report_id=report_id, branch_ref=branch_ref,
             keycloak_resource_id=resource_id, projection=projection, expected_revision=expected_revision,
