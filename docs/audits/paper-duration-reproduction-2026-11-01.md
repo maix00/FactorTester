@@ -25,7 +25,7 @@ T 任务冻结 RunSpec 为 `c4a8d249ca514f11ff0018a13ac5143cf817f032e7ed361ef010
 - T：`9dc18db2f6fb8f36e9124fee9ffd61be83da6233ccfcf865512db18e1912469b`。
 - TL：`076a90caf014628f8d9fabc777644f2a735c044c0ef2d02aec3bb17abe6ac2e6`。
 
-诊断使用上面两份源码、从本机历史库读取的 `SgChgPct` 与 `SgChgDurDay`、10 日外层窗口和 250 交易日内层窗口，重新冻结为 `factor:v2:8I_tSL4BntCjsV0HYn7FKC2ijR5mA_DPZZ9_hOgXNDs`。该引用的 owner 和身份与历史 Job 不同，且两份内层源码尚未与旧 Job 的权威源码快照核对；不能据此宣称冻结身份或旧执行语义相同。诊断环境使用的 alpha 扩展 SHA-256 为 `76fc69a4e7c7fa60e3af0aabe3d317e8ee57f3b7527d332e180d611144735776`；alpha 子模块当时有未提交改动，不能把其工作区源码 SHA 当作二进制构建身份。
+诊断使用上面两份源码、从本机历史库读取的 `SgChgPct` 与 `SgChgDurDay`、10 日外层窗口和 250 交易日内层窗口，重新冻结为 `factor:v2:8I_tSL4BntCjsV0HYn7FKC2ijR5mA_DPZZ9_hOgXNDs`。随后核对公网 Job `b724988270f544a0865b07b2340410d7` 的冻结输入：其中 `SgChgPct` 的 SHA-256 为 `5723ad8721907007b9dae3554b8480528589fac915f11a765c87e3ecab2bf381`，`SgChgDurDay` 为 `fadff76b7343ccca69e5429db37ef7384d0974f34cc0d7489d48733c71b1fa52`，与本机两份源码一致。该任务是 **AL 产品、20 日窗口且失败**，只提供源码身份旁证，不是国债回测；T 旧 Job 的提交物没有冻结两份内层源码。重新冻结引用的 owner 和身份与历史 Job 不同，仍不能据此宣称旧执行语义相同。诊断环境使用的 alpha 扩展 SHA-256 为 `76fc69a4e7c7fa60e3af0aabe3d317e8ee57f3b7527d332e180d611144735776`；alpha 子模块当时有未提交改动，不能把其工作区源码 SHA 当作二进制构建身份。
 
 在 2025-07-01 起的样本外区间，T 和 TL 的 Rust 因子信号与独立诊断 oracle 逐点比较均为 0 处不一致；完整历史与保守预热后缀也一致。T 从 2025-02-11 起的同一对照亦无信号不一致，阈值最大绝对误差为 0。单次完整 Rust **逐 Bar 诊断绑定**约 2.15–2.30 秒；该时间不含行情读取、独立 oracle、撮合、报告、Celery、缓存冷热对照或峰值内存，不能称为回测时间或性能验收。
 
