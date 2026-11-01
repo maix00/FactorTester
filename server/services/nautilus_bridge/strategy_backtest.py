@@ -227,6 +227,24 @@ def run_strategy_family_run_spec(
             family=family,factor_bindings=bindings,factor_refs=factor_refs,products=template.get('products') or None))
     catalogs = plan.get("catalog_inputs")
     run_spec_value = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
+    execution_plan = None
+    if isinstance(run_spec_value, dict):
+        analyses = (run_spec_value.get("configuration") or {}).get("analyses") or {}
+        backtest = analyses.get("backtest") or {}
+        execution = backtest.get("execution") or {}
+        contract = execution.get("nautilus_contract") or {}
+        settings = contract.get("settings") if isinstance(contract, dict) else None
+        if isinstance(settings, dict):
+            from server.services.nautilus_bridge.config import compile_frozen_execution_plan
+
+            execution_plan = compile_frozen_execution_plan(
+                settings, feed_kind="bar",
+                adapter_capabilities=frozenset({
+                    "native_bar_open_market_orders",
+                    "native_bar_volume_consumption",
+                    "daily_settlement",
+                }),
+            )
     source_adapter = plan.get("source_adapter") or {}
     window = plan.get("run_window") or {}
     staging_requests = plan.get("catalog_staging")
@@ -237,11 +255,19 @@ def run_strategy_family_run_spec(
         if not isinstance(run_spec_value, dict):
             raise ValueError("strategy plan has no product catalogs and no RunSpec")
         staging_requests = staging_requests or catalog_staging_requests(run_spec_value)
+        data_start = str(window.get("start") or "")
+        if execution_plan is not None and execution_plan.factor_warmup.mode == "custom":
+            from server.services.nautilus_bridge.catalog_staging import _ns
+
+            custom_start = execution_plan.factor_warmup.data_start_utc
+            if _ns(custom_start) > _ns(data_start):
+                raise ValueError("custom warmup starts after the run window")
+            data_start = custom_start
         catalogs = stage_run_spec_catalogs(
             staging_requests=staging_requests,
             source_key=str(source_adapter.get("member_key") or ""),
             frequency=str(source_adapter.get("frequency") or ""),
-            start_utc=str(window.get("start") or ""),
+            start_utc=data_start,
             end_utc=str(window.get("end") or ""),
             target_root=Path(output_dir) / "catalogs",
         )
@@ -265,25 +291,6 @@ def run_strategy_family_run_spec(
         )
         for product, value in catalogs.items()
     }
-    execution_plan = None
-    run_spec = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
-    if isinstance(run_spec, dict):
-        analyses = (run_spec.get("configuration") or {}).get("analyses") or {}
-        backtest = analyses.get("backtest") or {}
-        execution = backtest.get("execution") or {}
-        contract = execution.get("nautilus_contract") or {}
-        settings = contract.get("settings") if isinstance(contract, dict) else None
-        if isinstance(settings, dict):
-            from server.services.nautilus_bridge.config import compile_frozen_execution_plan
-
-            execution_plan = compile_frozen_execution_plan(
-                settings, feed_kind="bar",
-                adapter_capabilities=frozenset({
-                    "native_bar_open_market_orders",
-                    "native_bar_volume_consumption",
-                    "daily_settlement",
-                }),
-            )
     aliases={key:key for key in inputs}
     aliases.update({value.expected_contract_uid:key for key,value in inputs.items()})
     selections=shared.get('product_selections') or {}

@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from server.services.nautilus_bridge import strategy_backtest
 from tools.factors.expr import CLOSE
 
@@ -87,6 +89,53 @@ def test_strategy_family_compiles_run_spec_execution_plan(monkeypatch, tmp_path)
     }
     strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec, plan=plan, output_dir=tmp_path)
     assert captured["execution_plan"] is not None
+
+
+@pytest.mark.parametrize(("warmup", "expected_start"), [
+    ({"mode": "custom", "data_start_utc": "2024-01-02T01:30:00Z"}, "2024-01-02T01:30:00+00:00"),
+    ({"mode": "disabled", "diagnostic_only": True}, "2025-04-01T01:00:00Z"),
+    ({"mode": "custom", "data_start_utc": "2025-04-02T01:00:00Z"}, None),
+])
+def test_frozen_warmup_controls_staging_window(monkeypatch, tmp_path, warmup, expected_start):
+    from tests.server.test_nautilus_bridge_config import _minimal_frozen
+
+    class Resolver:
+        def __init__(self, **kwargs): pass
+        def resolve(self, **kwargs): return SimpleNamespace(expr=CLOSE)
+
+    monkeypatch.setattr(
+        "server.modules.shared.run_spec_resolution.factors.RunFactorResolver", Resolver,
+    )
+    calls = {}
+    monkeypatch.setattr(
+        "server.services.nautilus_bridge.catalog_staging.stage_run_spec_catalogs",
+        lambda **kwargs: calls.update(kwargs) or {
+            "T": {"catalog_dir": str(tmp_path), "contract_uid": "CFFEX|F|T|2403"}
+        },
+    )
+    monkeypatch.setattr(strategy_backtest, "run_strategy_family_replay", lambda **kwargs: kwargs)
+    settings = _minimal_frozen(factor_warmup=warmup)
+    job_spec = {"run_spec": {"configuration": {
+        "shared": {"factors": []},
+        "analyses": {"backtest": {"execution": {"nautilus_contract": {"settings": settings}}}},
+    }}}
+    plan = {
+        "strategy": {"kind": "threshold", "parameters": {},
+                     "factor_roles": {"signal": {"ref": "factor:v2:" + "a" * 43}}},
+        "source_adapter": {"member_key": "source", "frequency": "MIN1"},
+        "run_window": {"start": settings["start_utc"], "end": settings["end_utc"]},
+        "catalog_staging": [{"paths": ["CFFEX|F|T|2403"]}],
+        "session_calendar": object(),
+    }
+    if expected_start is None:
+        with pytest.raises(ValueError, match="custom warmup starts after the run window"):
+            strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec, plan=plan, output_dir=tmp_path)
+        assert calls == {}
+        return
+    result = strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec, plan=plan, output_dir=tmp_path)
+    assert calls["start_utc"] == expected_start
+    assert calls["end_utc"] == settings["end_utc"]
+    assert result["execution_plan"].start_utc == "2025-04-01T01:00:00+00:00"
 
 
 def test_strategy_family_engine_uses_frozen_venue(monkeypatch):
