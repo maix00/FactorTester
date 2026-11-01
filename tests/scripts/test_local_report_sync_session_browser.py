@@ -22,7 +22,7 @@ import {{useLocalResearchContext}} from {json.dumps(str(APP / "src/local-researc
 import {{pendingNoticeCount}} from {json.dumps(str(APP / "src/notifications/core.ts"))};
 import {json.dumps(str(APP / "src/i18n.ts"))};
 (window as any).pendingNoticeCount=pendingNoticeCount;
-function Probe() {{const local=useLocalResearchContext();return <button onClick={{local.requestSync}}>sync</button>;}}
+function Probe() {{const local=useLocalResearchContext();return <><button onClick={{local.requestSync}}>sync</button><span data-testid="revision">{{local.syncRevision}}</span></>;}}
 function Screen() {{const [open,setOpen]=useState(false);const auth=useAuth();return <>
   <button onClick={{()=>setOpen(!open)}}>tabs</button><button onClick={{()=>void auth.logout()}}>logout</button>
   {{open && <><Probe/><Probe/></>}}
@@ -46,6 +46,11 @@ createRoot(document.getElementById('root')!).render(<AuthGate><Screen/></AuthGat
                 if(m.action==='capabilities')return Promise.resolve({success:true,schema:'tr-local-research-bridge:v1',
                   binding:{issuer:'https://identity.test/realm',identity_id:'stable-1'},actions:['list','sync_reports'],
                   profiles:[{profile_id:'self',display_name:'Self'}]});
+                if(window.importFixture){
+                  window.importFixture=false;
+                  return Promise.resolve({success:true,schema:'tr-local-research-bridge:v1',reports:[],next_report_id:null,
+                    report_imports:[{research_id:'research-1',report_id:'report-1',status:'imported'}]});
+                }
                 if(window.conflictFixture){
                   const second=!!m.after_report_id;
                   const reports=(second?['b1','b2','b3','b4']:['a1','a2','a3','a4']).map(report_id=>({report_id,research_id:'r',status:'conflict'}));
@@ -64,14 +69,18 @@ createRoot(document.getElementById('root')!).render(<AuthGate><Screen/></AuthGat
             assert page.get_by_role("button", name="sync").count() == 2
             page.get_by_role("button", name="sync").first.click()
             page.wait_for_function("calls.filter(x=>x==='sync_reports').length >= 2")
+            before_revision = int(page.get_by_test_id("revision").first.inner_text())
+            page.evaluate("window.importFixture=true; window.dispatchEvent(new Event('online'))")
+            page.wait_for_function("value => Number(document.querySelector('[data-testid=revision]').textContent) > value", arg=before_revision)
             page.get_by_role("button", name="tabs").click()
             page.evaluate("window.dispatchEvent(new Event('online'))")
             page.wait_for_function("calls.filter(x=>x==='sync_reports').length >= 3")
             assert page.evaluate("calls.filter(x=>x==='capabilities').length") == 1
+            notices_before = page.evaluate("pendingNoticeCount()")
             before = page.evaluate("calls.filter(x=>x==='sync_reports').length")
             page.evaluate("window.conflictFixture=true; window.dispatchEvent(new Event('online'))")
             page.wait_for_function("count => calls.filter(x=>x==='sync_reports').length >= count + 2", arg=before)
-            assert page.evaluate("pendingNoticeCount()") == 1
+            assert page.evaluate("pendingNoticeCount()") == notices_before + 1
             page.get_by_role("button", name="logout").click()
             page.get_by_role("button", name="logout").wait_for(state="detached")
             count = page.evaluate("calls.length")

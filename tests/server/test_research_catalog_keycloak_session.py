@@ -153,3 +153,31 @@ def test_research_lists_use_verified_session_for_directory(monkeypatch, path, sc
     assert responses[0][1] == 200
     assert calls[0]["viewer"] == "alice"
     assert calls[0]["subordinate_refs"] == (["bob"] if scope == "subordinates" else [])
+
+
+def test_owned_report_cursor_is_bound_to_user_and_research(monkeypatch):
+    from urllib.parse import urlencode
+    from types import SimpleNamespace
+    from server.manager.http import research_catalog_routes
+    replies, calls = [], []
+    session = {'username': 'alice', 'keycloak_subject': 'subject', 'tr_identity_id': 'stable'}
+    class Service:
+        def owned_report_sync_page(self, **kwargs):
+            calls.append(kwargs)
+            return {'reports': [], 'next_cursor': 'private-report'}
+    class Handler(research_catalog_routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=Service())
+        def _session(self): return session
+        def _refresh_research_catalog(self, _viewer): raise AssertionError('bounded discovery must not refresh')
+    monkeypatch.setattr(research_catalog_routes, 'json_response', lambda _handler, body, status=200: replies.append((body, status)))
+    handler = Handler()
+    def get(query):
+        return handler._get_research_catalog_routes(SimpleNamespace(path='/api/research/owned-report-sync', query=urlencode(query)))
+    assert get({'research_id': 'research-1', 'limit': 2})
+    token = replies[-1][0]['next_cursor']
+    assert replies[-1][1] == 200 and 'private-report' not in token
+    assert get({'research_id': 'research-1', 'cursor': token}) and calls[-1]['after_ref'] == 'private-report'
+    assert get({'research_id': 'research-2', 'cursor': token}) and replies[-1][1] == 400
+    session['tr_identity_id'] = 'another'
+    assert get({'research_id': 'research-1', 'cursor': token}) and replies[-1][1] == 400
+    assert len(calls) == 2

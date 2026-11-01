@@ -271,6 +271,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
                     ON research_catalog_workspaces(research_id, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_research_catalog_report_research
                     ON research_catalog_reports(research_id, updated_at);
+                CREATE INDEX IF NOT EXISTS idx_research_catalog_owned_report_sync
+                    ON research_catalog_reports(research_id, owner_ref, status, report_id);
                 CREATE INDEX IF NOT EXISTS idx_research_catalog_evidence
                     ON research_catalog_report_evidence_links(evidence_ref, status);
                 CREATE UNIQUE INDEX IF NOT EXISTS
@@ -659,6 +661,26 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         cursor = ({'updated_at': float(scanned[-1]['updated_at']), 'research_id': str(scanned[-1]['research_id'])}
                   if len(rows) > limit else None)
         return {'researches': items, 'next_cursor': cursor}
+
+    def owned_report_sync_page(self, *, viewer: str, research_id: str, after_ref: str, limit: int) -> dict[str, Any]:
+        """Scan one owner's reports in bounded key order with fresh report authorization."""
+        viewer_ref = str(viewer or '').strip()
+        if (not viewer_ref or self._research_authorizer is None or type(limit) is not int
+                or not 1 <= limit <= 100 or not isinstance(after_ref, str) or len(after_ref) > 256):
+            raise ValueError('invalid owned Report synchronization page')
+        research = self._viewable_research(research_id, viewer=viewer_ref)
+        if str(research['owner_ref']) != viewer_ref:
+            raise PermissionError('owned Research is required')
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            rows = conn.execute('''SELECT report_id, research_id FROM research_catalog_reports
+                WHERE research_id=? AND owner_ref=? AND status='active' AND report_id>?
+                ORDER BY report_id LIMIT ?''', (research_id, viewer_ref, after_ref, limit + 1)).fetchall()
+        scanned = rows[:limit]
+        decisions = self._research_authorizer.report_access_many(viewer=viewer_ref,
+            reports=[(str(row['report_id']), None) for row in scanned]) if scanned else {}
+        reports = [{'research_id': research_id, 'report_id': str(row['report_id'])} for row in scanned
+                   if decisions.get(str(row['report_id']), {}).get('can_view') is True]
+        return {'reports': reports, 'next_cursor': str(scanned[-1]['report_id']) if len(rows) > limit else None}
 
     def get_research(
         self, research_id: str, *, viewer: str | None,

@@ -58,6 +58,18 @@ class LocalResearchCatalog:
             db.execute('''CREATE TABLE IF NOT EXISTS server_research_origins (
                 research_id TEXT PRIMARY KEY, manager_hash TEXT NOT NULL, profile_id TEXT NOT NULL,
                 title TEXT NOT NULL, description TEXT NOT NULL, updated_at REAL NOT NULL)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS server_report_scans (
+                research_id TEXT NOT NULL, manager_hash TEXT NOT NULL, profile_id TEXT NOT NULL,
+                cursor TEXT NOT NULL DEFAULT '', last_attempt REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY(research_id, manager_hash, profile_id))''')
+            db.execute('''CREATE INDEX IF NOT EXISTS server_report_scans_page
+                ON server_report_scans(manager_hash, profile_id, last_attempt, research_id)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS server_report_pending (
+                research_id TEXT NOT NULL, report_id TEXT NOT NULL, manager_hash TEXT NOT NULL,
+                profile_id TEXT NOT NULL, last_attempt REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY(report_id, manager_hash, profile_id))''')
+            db.execute('''CREATE INDEX IF NOT EXISTS server_report_pending_page
+                ON server_report_pending(manager_hash, profile_id, last_attempt, report_id)''')
             db.execute('''CREATE TABLE IF NOT EXISTS server_research_pending (
                 research_id TEXT NOT NULL, manager_hash TEXT NOT NULL, profile_id TEXT NOT NULL,
                 last_attempt REAL NOT NULL DEFAULT 0, PRIMARY KEY(research_id, manager_hash, profile_id))''')

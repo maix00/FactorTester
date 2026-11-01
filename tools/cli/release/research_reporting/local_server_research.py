@@ -46,6 +46,11 @@ def discover_server_researches(store, *, binding: dict, manager: dict, profile_i
         queued = queue_server_researches(store, manager=manager, profile_id=profile, research_ids=candidates) if candidates else 0
     else:
         queued = 0
+    if versions:
+        # Every scan revisits owned Research, including unchanged metadata, so a
+        # newly published report is discovered independently of Research mtime.
+        from .local_server_reports import queue_report_scans
+        queue_report_scans(store, manager_hash=manager_hash, profile_id=profile, research_ids=list(versions))
     return {'queued': queued, 'next_cursor': next_cursor}
 
 

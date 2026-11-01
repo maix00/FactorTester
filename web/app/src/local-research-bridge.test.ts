@@ -252,3 +252,18 @@ test("catalog report import checks returned identity and session scope", async (
   response=ok({report:item,status:"unexpected"});
   await assert.rejects(client.importCatalogReport("self",record.research_id,item.report_id),code("local_research_invalid_response"));
 });
+
+test("background report discovery validates import and scan outcomes", async () => {
+  const item={report_id:"report-1",research_id:record.research_id,status:"imported"};
+  let response=ok({reports:[],researches:[],next_report_id:null,report_imports:[item],report_scans:[],report_imports_pending_more:true});
+  const client=localResearchBridge(host(message=>message.action==="capabilities" ?
+    ok({actions:["sync_reports"],profiles:[{profile_id:"self",display_name:"Self"}]}) : response))!;
+  await client.capabilities(currentBinding);
+  const result=await client.syncReports("self","",4);
+  assert.deepEqual(result.report_imports,[item]);
+  assert.equal(result.report_imports_pending_more,true);
+  response=ok({reports:[],researches:[],next_report_id:null,report_imports:[{...item,status:"unknown"}]});
+  await assert.rejects(client.syncReports("self","",4),code("local_research_invalid_response"));
+  response=ok({reports:[],researches:[],next_report_id:null,report_scans:[{research_id:record.research_id,status:"unknown"}]});
+  await assert.rejects(client.syncReports("self","",4),code("local_research_invalid_response"));
+});

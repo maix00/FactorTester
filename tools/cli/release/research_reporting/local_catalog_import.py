@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import subprocess
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 from .authoring.tree_bundle import import_report_bundle
 from .authoring.tree_projection import load_snapshot
@@ -27,12 +27,21 @@ def _tree(root: Path) -> str:
     return subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^{tree}'], text=True).strip()
 
 
+def _require_owned_research(session, research_id: str, owner: str) -> None:
+    value = session.get('/api/research/' + quote(research_id, safe=''))
+    research = value.get('research') if value.get('success') is True else None
+    if (not isinstance(research, dict) or research.get('research_id') != research_id
+            or research.get('owner_ref') != owner or research.get('is_owned') is not True
+            or research.get('status') != 'active' or not isinstance(research.get('access'), dict)
+            or research['access'].get('can_view') is not True):
+        raise PermissionError('Research ownership or access cannot be verified')
+
+
 def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: str,
                           research_id: str, report_id: str) -> dict:
     """Import an owned catalog report; never replace an existing local workspace."""
     profile = store._profile(profile_id)
-    if not re.fullmatch(r'report:v1:[A-Za-z0-9_-]{24,128}', report_id):
-        raise ValueError('invalid report identity')
+    root_id = report_workspace_id_for(report_id)
     endpoint, session = manager_session(binding, manager)
     identity = session.get('/api/session')
     manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
@@ -40,6 +49,7 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
         origin = db.execute('SELECT * FROM server_research_origins WHERE research_id=?', (research_id,)).fetchone()
     if not origin or origin['manager_hash'] != manager_hash or origin['profile_id'] != profile:
         raise PermissionError('owned Manager Research must be imported first')
+    _require_owned_research(session, research_id, identity.get('username'))
     ensure_publication_table(store)
     metadata = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind='catalog')
     remote = _remote(session, research_id, report_id, source_kind='catalog')
@@ -50,7 +60,6 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
     title = record.get('title')
     if not isinstance(title, str) or not title.strip() or len(title) > 256:
         raise ValueError('remote report title is invalid')
-    root_id = report_workspace_id_for(report_id)
     if store.workspace_root.is_symlink():
         raise ValueError('local report directory cannot be a symlink')
     store.workspace_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -90,6 +99,7 @@ def import_catalog_report(store, *, binding: dict, manager: dict, profile_id: st
             staged_tree = _tree(staged)
             confirmed = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind='catalog')
             current = session.get('/api/session')
+            _require_owned_research(session, research_id, identity.get('username'))
             if (confirmed != metadata or any(current.get(key) != identity.get(key) for key in
                     ('username', 'keycloak_issuer', 'keycloak_subject', 'tr_identity_id'))):
                 raise PermissionError('report authorization or version changed during import')

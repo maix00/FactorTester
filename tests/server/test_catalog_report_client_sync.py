@@ -35,6 +35,13 @@ def test_catalog_report_uses_catalog_authority_for_sync_and_live_permissions(tmp
             if self.path == '/api/session': return self.reply(200, SESSION)
             parsed = urlsplit(self.path); parts = [unquote(item) for item in parsed.path.strip('/').split('/')]
             query = parse_qs(parsed.query)
+            if parsed.path.startswith('/api/research/') and len(parts) == 3 and parsed.path != '/api/research/owned-report-sync':
+                if not auth['read']: return self.reply(403, {})
+                return self.reply(200, {'success': True, 'research': {'research_id': ids['research'], 'owner_ref': 'alice',
+                    'is_owned': True, 'status': 'active', 'access': {'can_view': True}}})
+            if parsed.path == '/api/research/owned-report-sync':
+                if not auth['read']: return self.reply(403, {})
+                return self.reply(200, {'success': True, 'reports': [{'research_id': ids['research'], 'report_id': ids['report']}], 'next_cursor': None})
             if len(parts) not in (6, 10) or parts[:2] != ['api', 'research'] or parts[3] != 'reports' or parts[5] != 'couchdb-publication':
                 return self.reply(404, {})
             try:
@@ -82,6 +89,23 @@ def test_catalog_report_uses_catalog_authority_for_sync_and_live_permissions(tmp
             db.execute('INSERT INTO researches VALUES (?,?,?,?,?,?,?)', (ids['research'], 'self', 'Research', '', 'server-r', 1, 1))
             db.execute('INSERT INTO server_research_origins VALUES (?,?,?,?,?,?)',
                 (ids['research'], hashlib.sha256(endpoint.encode()).hexdigest(), 'self', 'Research', '', 1))
+        # Background discovery and import use the same authorized publication path.
+        third = LocalResearchRPC(tmp_path / 'third', issuer=SESSION['keycloak_issuer'], identity_id=SESSION['tr_identity_id'],
+            profiles=[{'profile_id': 'self', 'display_name': 'Alice'}], manager=manager)
+        with third.store._connect() as db:
+            db.execute('INSERT INTO researches VALUES (?,?,?,?,?,?,?)', (ids['research'], 'self', 'Research', '', 'server-r', 1, 1))
+            db.execute('INSERT INTO server_research_origins VALUES (?,?,?,?,?,?)',
+                (ids['research'], hashlib.sha256(endpoint.encode()).hexdigest(), 'self', 'Research', '', 1))
+        from tools.cli.release.research_reporting.local_server_reports import queue_report_scans
+        queue_report_scans(third.store, manager_hash=hashlib.sha256(endpoint.encode()).hexdigest(), profile_id='self', research_ids=[ids['research']])
+        auto_request = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
+        auth['read'] = False
+        assert third.request(auto_request)['report_scans'] == [{'research_id': ids['research'], 'status': 'denied'}]
+        with third.store._connect() as db:
+            db.execute('UPDATE server_report_scans SET last_attempt=0')
+        auth['read'] = True
+        assert third.request(auto_request)['report_imports'] == [{'research_id': ids['research'], 'report_id': ids['report'], 'status': 'imported'}]
+        assert third.store.list_reports(profile_id='self', research_id=ids['research'], limit=10, offset=0)['reports'][0]['report_id'] == ids['report']
         import_request = {'action': 'import_catalog_report', 'profile_id': 'self',
                           'research_id': ids['research'], 'report_id': ids['report']}
         auth['write'] = False

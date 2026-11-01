@@ -93,7 +93,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             parsed.path,
         )
         local_grants = parsed.path == '/api/research/local-report-publication/grants'
-        if publication is None and local_publication is None and not local_grants and parsed.path != '/api/research/owned-sync':
+        if publication is None and local_publication is None and not local_grants and parsed.path not in {'/api/research/owned-sync', '/api/research/owned-report-sync'}:
             self._refresh_research_catalog(viewer)
         service = None if local_publication or local_grants else self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
@@ -214,6 +214,32 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 cursor = payload.pop('next_cursor')
                 payload['next_cursor'] = (_OWNED_SYNC_CURSOR.encrypt(json.dumps({
                     'identity_id': stable_id, **cursor}, separators=(',', ':')).encode()).decode('ascii') if cursor else None)
+            elif parsed.path == "/api/research/owned-report-sync":
+                if (set(query) - {'research_id', 'cursor', 'limit'} or len(query.get('research_id', [])) != 1
+                        or any(len(query.get(key, [])) > 1 for key in ('cursor', 'limit'))):
+                    raise ValueError('invalid owned Report synchronization query')
+                stable_id, research_id = str(session.get('tr_identity_id') or ''), query['research_id'][0]
+                if not stable_id:
+                    raise PermissionError('verified stable identity is required')
+                token = query.get('cursor', [''])[0]
+                if len(token) > 2048:
+                    raise ValueError('invalid owned Report synchronization cursor')
+                after_ref = ''
+                if token:
+                    try:
+                        cursor = json.loads(_OWNED_SYNC_CURSOR.decrypt(token.encode('ascii'), ttl=3600))
+                        if (not isinstance(cursor, dict) or set(cursor) != {'identity_id', 'research_id', 'report_id'}
+                                or cursor['identity_id'] != stable_id or cursor['research_id'] != research_id):
+                            raise ValueError('invalid cursor identity')
+                        after_ref = cursor['report_id']
+                    except (InvalidToken, UnicodeError, ValueError, KeyError, TypeError):
+                        raise ValueError('invalid owned Report synchronization cursor') from None
+                payload = service.owned_report_sync_page(viewer=viewer, research_id=research_id, after_ref=after_ref,
+                    limit=int(query.get('limit', ['50'])[0]))
+                cursor = payload.pop('next_cursor')
+                payload['next_cursor'] = (_OWNED_SYNC_CURSOR.encrypt(json.dumps({'identity_id': stable_id,
+                    'research_id': research_id, 'report_id': cursor}, separators=(',', ':')).encode()).decode('ascii')
+                    if cursor else None)
             elif parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
                 subordinate_refs = (

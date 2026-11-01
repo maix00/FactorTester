@@ -175,3 +175,20 @@ def test_explicit_grants_route_uses_manager_session_and_reports_keycloak_outage(
     assert responses[-1][1] == 200 and recorded[-1][1]["actor"] == "alice"
     assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query=""))
     assert responses[-1][1] == 503
+
+
+def test_owned_report_sync_pages_scan_denied_and_recheck_access(tmp_path):
+    catalog, research_id, _other, permissions, calls = _fixture(tmp_path)
+    legacy = ResearchCatalog(catalog.db_path)
+    legacy.register_report(research_id, actor='alice', report_id='second-report')
+    _grant(permissions, 'research', research_id, 'read')
+    _grant(permissions, 'research_report', 'second-report', 'read')
+    first = catalog.owned_report_sync_page(viewer='alice', research_id=research_id, after_ref='', limit=1)
+    assert first['reports'] == [] and first['next_cursor'] == 'public-report'
+    second = catalog.owned_report_sync_page(viewer='alice', research_id=research_id,
+                                            after_ref=first['next_cursor'], limit=1)
+    assert second == {'reports': [{'research_id': research_id, 'report_id': 'second-report'}], 'next_cursor': None}
+    permissions.clear()
+    with pytest.raises(PermissionError):
+        catalog.owned_report_sync_page(viewer='alice', research_id=research_id, after_ref='', limit=1)
+    assert all(size <= 3 for _token, size in calls)

@@ -589,11 +589,15 @@ for _path in (
     "tools/cli/release/research_reporting/local_auto_sync.py",
     "tools/cli/release/research_reporting/local_pull.py",
     "tools/cli/release/research_reporting/local_catalog_import.py",
+    "tools/cli/release/research_reporting/local_server_reports.py",
+    "tools/cli/release/research_reporting/local_catalog.py",
 ):
     EXACT_PATH_TESTS[_path] = (
         "tests/release/test_local_research_rpc.py",
         "tests/server/test_catalog_report_client_sync.py",
         "tests/server/test_client_local_report_publication.py",
+        "tests/release/test_local_server_reports.py",
+        "tests/release/test_local_research_catalog.py",
     )
 EXACT_PATH_TESTS["server/manager/services/research_couchdb_publication.py"] = (
     "tests/server/test_research_couchdb_publication.py",

@@ -112,6 +112,9 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
     from .local_server_research import retry_pending_server_research
     researches, pending_more = retry_pending_server_research(store, binding=binding, manager=manager,
                                                              profile_id=profile, limit=limit)
-    return {'reports': results, 'researches': researches,
-            'researches_pending_more': pending_more,
+    from .local_server_reports import sync_server_reports
+    imports, imports_more, scan_errors = sync_server_reports(store, binding=binding, manager=manager, profile_id=profile,
+                                                limit=limit, endpoint=endpoint, session=session)
+    return {'reports': results, 'researches': researches, 'report_imports': imports,
+            'researches_pending_more': pending_more, 'report_imports_pending_more': imports_more, 'report_scans': scan_errors,
             'next_report_id': rows[limit - 1]['report_id'] if len(rows) > limit else None}

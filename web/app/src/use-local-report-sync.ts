@@ -63,11 +63,22 @@ export function useLocalReportSync(client:LocalResearchClient|null,capabilities:
             if(!warned.has(key)){warned.add(key);notify({code:`research.sync.${item.status}`,type:"warning",message:t("research.importPending")});}
           }
         }
+        for(const item of page.report_imports){
+          if(item.status==="imported")changed=true;
+          if(["conflict","denied","unavailable"].includes(item.status)){
+            const key=`report-import-${item.status}`;seen.add(key);
+            if(!warned.has(key)){warned.add(key);notify({code:`research.report.import.${item.status}`,type:"warning",message:item.status==="conflict"?t("localResearch.syncConflict"):t("localResearch.importReportFailed")});}
+          }
+        }
+        for(const item of page.report_scans){
+          const key=`report-scan-${item.status}`;seen.add(key);
+          if(!warned.has(key)){warned.add(key);notify({code:`research.report.scan.${item.status}`,type:"warning",message:t("localResearch.importReportFailed")});}
+        }
         if(changed)callback.current();
         const discoveryMore=!discoveryDone.has(profile);
         if(page.next_report_id)cursor=page.next_report_id;
-        else {cursor="";if(!discoveryMore&&!page.researches_pending_more)profileIndex=(profileIndex+1)%profiles.length;}
-        const more=!!page.next_report_id||profileIndex!==0||page.researches_pending_more===true||discoveryMore;
+        else {cursor="";if(!discoveryMore&&!page.researches_pending_more&&!page.report_imports_pending_more)profileIndex=(profileIndex+1)%profiles.length;}
+        const more=!!page.next_report_id||profileIndex!==0||page.researches_pending_more===true||page.report_imports_pending_more===true||discoveryMore;
         if(!more){
           // A successful first page does not mean the whole scan recovered.
           // Clear the warning only after every page and Profile has succeeded.

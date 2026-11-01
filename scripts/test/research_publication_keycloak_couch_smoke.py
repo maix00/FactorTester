@@ -200,14 +200,20 @@ def exercise(*, couch, **case):
             peer = LocalResearchRPC(root / 'desktop-peer', issuer=verified['keycloak_issuer'], identity_id=verified['tr_identity_id'],
                 profiles=[{'profile_id': 'self', 'display_name': 'Owner'}], manager={'endpoint': endpoint,
                     'subject': verified['keycloak_subject'], 'token': token, 'certificate_pem': '', 'cookies': []})
-            peer.request({'action': 'import_research', 'profile_id': 'self', 'research_id': ref})
-            peer.request({'action': 'import_catalog_report', 'profile_id': 'self', 'research_id': ref, 'report_id': catalog_report})
+            cursor = ''
+            while True:
+                discovered = peer.request({'action': 'discover_researches', 'profile_id': 'self', 'cursor': cursor, 'limit': 16})
+                cursor = discovered['next_cursor']
+                if cursor is None: break
+            sync = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
+            discovery = peer.request(sync)
+            assert any(item['report_id'] == catalog_report and item['status'] == 'imported' for item in discovery['report_imports']), discovery
             client.request({'action': 'add_report_component', 'profile_id': 'self', 'research_id': ref,
                 'report_id': catalog_report, 'component_id': 'chapter-client', 'kind': 'chapter',
                 'parent_id': '', 'title': 'Desktop edit', 'body': '', **imported_version})
             sync = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
             assert client.request(sync)['reports'][0]['status'] == 'published'
-            assert peer.request(sync)['reports'][0]['status'] == 'updated'
+            assert any(item['report_id'] == catalog_report and item['status'] == 'updated' for item in peer.request(sync)['reports'])
             peer_index = peer.request({'action': 'get_report', 'profile_id': 'self', 'research_id': ref, 'report_id': catalog_report})
             assert peer_index['index']['chapters'][0]['title'] == 'Desktop edit'
 
@@ -285,7 +291,7 @@ def main():
         run(sandbox, on_ready=lambda **case: exercise(couch=couch, **case))
     print(json.dumps({'real_manager_http': True, 'real_keycloak': True, 'real_couchdb': True,
         'single_report_and_attachment': True, 'same_token_role_revocation': True,
-        'catalog_editable_source_roundtrip': True, 'catalog_desktop_import': True, 'catalog_two_client_sync': True,
+        'catalog_editable_source_roundtrip': True, 'catalog_desktop_import': True, 'catalog_two_client_sync': True, 'catalog_automatic_discovery': True,
         'same_token_share_and_read_revocation': True, 'local_first_publication': True,
         'local_retry_does_not_restore_revoked_share': True, 'local_grant_and_revoke': True,
         'cross_manager_tested': False}, sort_keys=True))
