@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 
 import pytest
 
@@ -112,3 +113,56 @@ def test_backend_refuses_a_changed_realm_or_client(monkeypatch):
     current['authz_client_id'] = 'other'
     with pytest.raises(ValueError, match='configuration changed'):
         backend.create('ref', 'subject', 'a' * 64)
+
+
+def test_cli_checks_restored_database_backup_and_quiescence_before_writes(tmp_path, monkeypatch, capsys):
+    import sys
+    from types import SimpleNamespace
+    from scripts.migrations import keycloak_device_stage_cli as cli
+    from server.manager.storage import control_db
+    from server.identity import keycloak_policy_evaluation, user_session
+
+    live = SimpleNamespace(host='db', port=5432, database='live')
+    backup = SimpleNamespace(host='db', port=5432, database='restored')
+    monkeypatch.setattr(control_db.ControlDatabaseConfig, 'from_env', classmethod(lambda _cls: live))
+    monkeypatch.setattr(control_db.ControlDatabaseConfig, 'from_url', classmethod(lambda _cls, _url: backup))
+    monkeypatch.setattr(cli, '_snapshot', lambda _config, **_kw: SNAPSHOT)
+    monkeypatch.setattr(cli, 'read_keycloak_directory', lambda _principal: DIRECTORY)
+    monkeypatch.setattr(user_session, 'oidc_settings', lambda: {'issuer': ISSUER})
+    monkeypatch.setenv('TR_DEVICE_RESTORED_DB_URL', 'unused-in-test')
+    plan_file = tmp_path / 'plan.json'
+    base = ['device-stage', '--manager-id', 'lan', '--principal', 'alice', '--plan', str(plan_file)]
+    monkeypatch.setattr(sys, 'argv', [base[0], 'review', *base[1:]])
+    backup.database = 'live'
+    with pytest.raises(SystemExit): cli.main()
+    assert not plan_file.exists()
+    backup.database = 'restored'
+    cli.main()
+    assert os.stat(plan_file).st_mode & 0o777 == 0o600
+    assert 'alice' not in capsys.readouterr().out
+
+    backup_file = tmp_path / 'keycloak.backup'
+    backup_file.write_bytes(b'isolated realm backup')
+    backup_file.chmod(0o600)
+    digest = hashlib.sha256(backup_file.read_bytes()).hexdigest()
+    stage_args = [base[0], 'stage', *base[1:], '--journal', str(tmp_path / 'journal'),
+                  '--keycloak-backup', str(backup_file), '--keycloak-backup-sha256', digest]
+    monkeypatch.setattr(sys, 'argv', stage_args)
+    with pytest.raises(SystemExit): cli.main()
+    assert not (tmp_path / 'journal').exists()
+
+    class Backend:
+        def __init__(self, **_kwargs): pass
+        def resource_absent(self, _ref): return True
+        def create(self, _ref, _subject, _intent): return 'resource'
+        def verify(self, _identity, _ref): return True
+    monkeypatch.setattr(keycloak_policy_evaluation, 'KeycloakPolicyEvaluator', lambda **_kwargs: object())
+    monkeypatch.setattr(cli, 'KeycloakDeviceStageBackend', Backend)
+    monkeypatch.setattr(sys, 'argv', stage_args + ['--device-writes-quiesced'])
+    cli.main()
+    assert json.loads(capsys.readouterr().out)['staged'] == 1
+
+    with pytest.raises(ValueError, match='checksum'):
+        cli._check_keycloak_backup(str(backup_file), '0' * 64)
+    backup_file.chmod(0o644)
+    with pytest.raises(PermissionError): cli._check_keycloak_backup(str(backup_file), digest)
