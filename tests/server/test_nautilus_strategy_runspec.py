@@ -9,6 +9,52 @@ from server.services.nautilus_bridge import strategy_backtest
 from tools.factors.expr import CLOSE
 
 
+def test_frozen_catalog_frequency_drives_time_window_compilation():
+    def opened(*bar_types):
+        return {str(i): (None, None, {"bar_type": bar_type}, None)
+                for i, bar_type in enumerate(bar_types)}
+
+    minute = "T2403.CFFEX-1-MINUTE-LAST-EXTERNAL"
+    thirty_minutes = "T2403.CFFEX-30-MINUTE-LAST-EXTERNAL"
+    frequency = strategy_backtest._source_frequency(opened(thirty_minutes))
+    spec, _ = strategy_backtest._compile_frozen_roots(
+        {"factor": CLOSE.rolling("1h").mean()}, ("T",), None,
+        source_freq=frequency,
+    )
+    assert next(node for node in spec["nodes"] if node["kind"] == "rolling")["window"] == 2
+    daily = strategy_backtest._source_frequency(opened("T2403.CFFEX-1-DAY-LAST-EXTERNAL"))
+    assert daily == strategy_backtest.DataFreq.DAY1
+    with pytest.raises(ValueError, match="single positive Bar frequency"):
+        strategy_backtest._source_frequency(opened(minute, thirty_minutes))
+    with pytest.raises(ValueError, match="time-aggregated"):
+        strategy_backtest._source_frequency(opened("T2403.CFFEX-1-TICK-LAST-EXTERNAL"))
+
+
+def test_strategy_replay_uses_frozen_catalog_frequency_before_compilation(monkeypatch, tmp_path):
+    from nautilus_trader import _libnautilus
+    from server.services.nautilus_bridge.strategy_families import ThresholdState
+
+    monkeypatch.setattr(_libnautilus, "attach_factor_family", lambda **kwargs: None, raising=False)
+    monkeypatch.setattr(strategy_backtest, "_load_input", lambda _: (
+        None, None, {"bar_type": "T2403.CFFEX-30-MINUTE-LAST-EXTERNAL"}, None,
+    ))
+    monkeypatch.setattr(strategy_backtest, "preflight_catalogs", lambda *args, **kwargs: None)
+    class StopAfterCompilation(Exception): pass
+    original = strategy_backtest._compile_frozen_roots
+    def check_compile(expressions, products, calendar, *, source_freq):
+        spec, _ = original(expressions, products, calendar, source_freq=source_freq)
+        assert next(node for node in spec["nodes"] if node["kind"] == "rolling")["window"] == 2
+        raise StopAfterCompilation
+    monkeypatch.setattr(strategy_backtest, "_compile_frozen_roots", check_compile)
+    with pytest.raises(StopAfterCompilation):
+        strategy_backtest.run_strategy_families_replay(
+            inputs={"T": object()}, output_dir=tmp_path,
+            strategies=[{"strategy_id": "s", "factor_bindings": {"signal": CLOSE.rolling("1h").mean()},
+                         "factor_refs": {"signal": "factor:v2:" + "a" * 43},
+                         "family": ThresholdState(1, 0)}],
+        )
+
+
 def test_strategy_family_resolves_multiple_factor_roles(monkeypatch, tmp_path):
     class Resolver:
         def __init__(self, **kwargs):

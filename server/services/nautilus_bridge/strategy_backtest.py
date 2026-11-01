@@ -28,10 +28,26 @@ def _frozen_shared_plan(bindings, refs, products, calendar):
     return spec, {role: output_by_ref[ref] for role, ref in refs.items()}
 
 
-def _compile_frozen_roots(expressions,products,calendar):
+def _compile_frozen_roots(expressions,products,calendar, *, source_freq=DataFreq.MIN1):
     from tools.factors.expr.streaming.rust_incremental import shared_factor_plan_spec
-    spec,_=shared_factor_plan_spec(expressions,products,source_freq=DataFreq.MIN1,session_calendar=calendar)
+    spec,_=shared_factor_plan_spec(expressions,products,source_freq=source_freq,session_calendar=calendar)
     return spec,{ref:i for i,ref in enumerate(expressions)}
+
+
+def _source_frequency(opened):
+    """Use the frozen catalog clocks, never assume that a Bar is one minute."""
+    import pandas as pd
+    from nautilus_trader.model import BarType
+
+    intervals = set()
+    for product, row in opened.items():
+        bar_type = BarType.from_str(str(row[2]['bar_type']))
+        if not bar_type.spec.is_time_aggregated():
+            raise ValueError(f'{product}: factor replay requires a time-aggregated Bar type')
+        intervals.add(int(bar_type.spec.get_interval_ns()))
+    if len(intervals) != 1 or next(iter(intervals)) <= 0:
+        raise ValueError('shared factor replay requires a single positive Bar frequency')
+    return DataFreq(pd.Timedelta(next(iter(intervals)), unit='ns'))
 
 
 def run_strategy_replay(*, input: ReplayInput, strategy_kind: str, factor_bindings,
@@ -122,7 +138,10 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
         scopes[identity]=chosen
         consumers.append(dict(strategy_id=native_id,
             rule=_family_rule(strategy['family']),product_indices=[products.index(p) for p in chosen]))
-    spec,slots=_compile_frozen_roots(roots,products,session_calendar)
+    opened={product:_load_input(item) for product,item in inputs.items()}
+    preflight_catalogs(opened.values(),max_input_bars=max_bars*len(opened))
+    spec,slots=_compile_frozen_roots(roots,products,session_calendar,
+        source_freq=_source_frequency(opened))
     from alpha.factor.spec import scope_plan_outputs
     requests=[];requested_roles=[]
     for consumer,strategy in zip(consumers,strategies,strict=True):
@@ -134,8 +153,6 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
     for (identity,role),slot in zip(requested_roles,scoped_slots,strict=True):strategy_slots[identity][role]=slot
     for consumer,strategy in zip(consumers,strategies,strict=True):
         consumer['signal_output']=strategy_slots[strategy['strategy_id']]['signal']
-    opened={product:_load_input(item) for product,item in inputs.items()}
-    preflight_catalogs(opened.values(),max_input_bars=max_bars*len(opened))
     warmup=None
     if execution_plan is not None:
         from .warmup import freeze_warmup_settings,resolve_run_warmup
