@@ -14,6 +14,8 @@ from scripts.test.keycloak_cross_realm_smoke import Sandbox
 from server.identity import keycloak_authorization, keycloak_device
 from server.identity.keycloak import KeycloakAdminAdapter
 from scripts.migrations.keycloak_device_inventory import read_keycloak_directory
+from scripts.migrations.keycloak_device_stage import KeycloakDeviceStageBackend, review, stage
+from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
 from server.manager.domain.devices import DeviceRegistry
 from server.manager.http import device_routes
 
@@ -71,6 +73,7 @@ def run(sandbox: Sandbox) -> dict[str, str]:
     replies = []
     with patch.object(keycloak_device, "oidc_settings", return_value=settings), \
          patch.object(keycloak_authorization, "oidc_settings", return_value=settings), \
+         patch("server.identity.user_session.oidc_settings", return_value=settings), \
          patch("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", return_value=admin), \
          patch.object(device_routes, 'json_response', side_effect=lambda _h, payload, status=200, **_kw: replies.append((status, payload))), \
          tempfile.TemporaryDirectory(prefix='tr-device-status-') as temp:
@@ -81,6 +84,29 @@ def run(sandbox: Sandbox) -> dict[str, str]:
             matched = read_keycloak_directory(principal)['accounts']
             assert len(matched) == 1 and matched[0]['keycloak_subject'] == users['owner']['id']
         assert read_keycloak_directory('missing') == {'accounts': []}
+        # Stage one separate legacy device into this disposable realm, then
+        # verify actual user-token decisions as well as the admin evaluation.
+        old_name = 'org@owner@legacy'
+        old_device = 'device-migration-123456'
+        snapshot = {'server_id': 'manager-1', 'devices': [{
+            'device_id': old_device, 'username': old_name, 'public_key': key,
+            'enabled': True, 'source_server_id': 'manager-1',
+        }]}
+        old_directory = read_keycloak_directory(old_name)
+        evaluator = KeycloakPolicyEvaluator(allowed_kinds=('device',), allowed_scopes=('use',),
+                                            adapter=admin, settings=settings)
+        backend = KeycloakDeviceStageBackend(settings=settings, evaluator=evaluator, issuer=issuer)
+        staged = stage(reviewed=review(snapshot, old_directory, manager_id='manager-1', issuer=issuer),
+            backup_snapshot=snapshot, backup_directory=old_directory,
+            live_snapshot=lambda: snapshot, live_directory=lambda: read_keycloak_directory(old_name),
+            manager_id='manager-1', issuer=issuer, journal=Path(temp) / 'staging.jsonl',
+            resource_absent=backend.resource_absent, create=backend.create, verify=backend.verify)
+        assert staged['staged'] == 1 and staged['cutover_ready'] is False
+        migrated = {**args, 'device_id': old_device}
+        assert keycloak_device.may_use_device(token=owner_token, session=owner, **migrated)
+        assert not keycloak_device.may_use_device(token=other_token, session=other, **migrated)
+        assert keycloak_device.revoke_device(session=owner, **migrated)
+        assert not keycloak_device.may_use_device(token=owner_token, session=owner, **migrated)
         keycloak_device.register_device(session=owner, **args)
         registry = DeviceRegistry(Path(temp) / 'devices.json', server_id='manager-1')
         registry.enroll(username='owner', device_id=device_id, public_key=key)
@@ -106,6 +132,7 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         assert replies[-1][1]['registered_device_count'] == 2 and replies[-1][1]['public_device_count'] == 0
         assert not keycloak_device.revoke_device(session=owner, **args)
     return {"owner": "allowed", "other_user": "denied", "other_key": "denied", "live_inventory": "verified",
+            "legacy_stage": "verified",
             "same_token_after_revoke": "denied"}
 
 
