@@ -23,6 +23,28 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def compare_formal_values(reference, candidate) -> dict:
+    """Require comparable finite outputs; matching NaNs are not evidence of correctness."""
+    left = np.asarray(reference, dtype=float)
+    right = np.asarray(candidate, dtype=float)
+    if left.ndim != 1 or left.shape != right.shape or not left.size:
+        raise ValueError('formal comparison requires equal nonempty series')
+    left_finite, right_finite = np.isfinite(left), np.isfinite(right)
+    both_finite = left_finite & right_finite
+    return {
+        'rows': int(left.size),
+        'reference_nonfinite': int((~left_finite).sum()),
+        'candidate_nonfinite': int((~right_finite).sum()),
+        'finite_status_mismatches': int((left_finite != right_finite).sum()),
+        'mismatches': int((both_finite & ~np.isclose(left, right, rtol=1e-9, atol=1e-8)).sum()),
+    }
+
+
+def comparison_passed(comparison: dict) -> bool:
+    return all(comparison[key] == 0 for key in (
+        'reference_nonfinite', 'candidate_nonfinite', 'finite_status_mismatches', 'mismatches'))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--factors', required=True, type=Path)
@@ -110,7 +132,7 @@ def main():
         raise ValueError('formal batch signals cannot all be matched to source Bars')
     batch_values = batch[product].to_numpy()[mask]
     increment_values = incremental[positions[mask]]
-    different = ~np.isclose(batch_values, increment_values, equal_nan=True, rtol=1e-9, atol=1e-8)
+    comparison = compare_formal_values(batch_values, increment_values)
     peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if sys.platform.startswith('linux'):
         peak_rss *= 1024
@@ -120,9 +142,10 @@ def main():
         'rows': len(times), 'trading_days': len(starts), 'formal_start': args.formal_start,
         'source_start_utc': pd.Timestamp(times[0], unit='ns', tz='UTC').isoformat(),
         'source_end_utc': pd.Timestamp(times[-1], unit='ns', tz='UTC').isoformat(),
-        'batch_signal_rows_compared': int(mask.sum()), 'mismatches': int(different.sum()),
-        'batch_nonfinite': int((~np.isfinite(batch_values)).sum()),
-        'incremental_nonfinite': int((~np.isfinite(increment_values)).sum()),
+        'batch_signal_rows_compared': comparison['rows'], 'mismatches': comparison['mismatches'],
+        'batch_nonfinite': comparison['reference_nonfinite'],
+        'incremental_nonfinite': comparison['candidate_nonfinite'],
+        'finite_status_mismatches': comparison['finite_status_mismatches'],
         'batch_diagnostic_seconds': batch_seconds, 'incremental_diagnostic_seconds': incremental_seconds,
         'process_peak_rss_bytes': int(peak_rss),
         'limitation': 'factor-only diagnostic, not a trading backtest or remote Job; time excludes data loading',
@@ -148,21 +171,23 @@ def main():
             boundary[:] = i == first or days[i] != days[i - 1]
             suffix[i - first] = state.update_context(int(times[i]), row, boundary)[0]
         formal_positions = np.flatnonzero(times >= formal_start.value)
-        suffix_different = ~np.isclose(incremental[formal_positions], suffix[formal_positions - first],
-                                       equal_nan=True, rtol=1e-9, atol=1e-8)
-        suffix_mismatch = bool(suffix_different.any())
+        suffix_comparison = compare_formal_values(incremental[formal_positions], suffix[formal_positions - first])
+        suffix_mismatch = not comparison_passed(suffix_comparison)
         result['suffix_comparison'] = {
             'requested_start': args.suffix_start, 'source_ordinal': first,
             'source_ordinal_bound': args.suffix_use_source_ordinal,
             'formal_bar_rows_compared': len(formal_positions),
-            'mismatches': int(suffix_different.sum()),
+            'mismatches': suffix_comparison['mismatches'],
+            'full_nonfinite': suffix_comparison['reference_nonfinite'],
+            'suffix_nonfinite': suffix_comparison['candidate_nonfinite'],
+            'finite_status_mismatches': suffix_comparison['finite_status_mismatches'],
             'diagnostic_seconds': time.perf_counter() - started,
         }
     with args.output.open('x', encoding='utf-8') as output:
         json.dump(result, output, indent=2)
     print(json.dumps(result, ensure_ascii=False))
-    if different.any():
-        raise SystemExit('batch and incremental factor values differ')
+    if not comparison_passed(comparison):
+        raise SystemExit('batch and incremental factor values differ or contain nonfinite values')
     if suffix_mismatch:
         raise SystemExit('factor values depend on the warmup replay start')
 
