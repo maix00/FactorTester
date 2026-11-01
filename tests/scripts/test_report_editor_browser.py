@@ -216,3 +216,75 @@ createRoot(document.getElementById('root')!).render(<LocalResearchDetail client=
                 browser.close()
     finally:
         server.shutdown(); server.server_close(); worker.join(timeout=2)
+
+
+def test_local_report_reader_with_real_local_rpc(tmp_path):
+    """Exercise the real local store and RPC; HTTP substitutes only for WebKit IPC."""
+    from tools.cli.release.research_reporting.local_rpc import LocalResearchRPC
+
+    rpc = LocalResearchRPC(tmp_path / 'store', issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'}])
+    research = rpc.request({'action': 'create', 'profile_id': 'self', 'title': '本机研究',
+                            'description': '', 'operation_id': 'research-create'})['research']
+    report = rpc.request({'action': 'create_report', 'profile_id': 'self', 'research_id': research['research_id'],
+                          'title': '本机报告', 'operation_id': 'report-create'})['report']
+    base = {'profile_id': 'self', 'research_id': research['research_id'], 'report_id': report['report_id']}
+    version = rpc.request({'action': 'get_report', **base})['version']
+    version = rpc.request({'action': 'add_report_component', **base, 'component_id': 'chapter-1',
+                           'kind': 'chapter', 'parent_id': '', 'title': '第一章', 'body': '', **version})['version']
+    rpc.request({'action': 'add_report_component', **base, 'component_id': 'entry-1',
+                 'kind': 'entry', 'parent_id': 'chapter-1', 'title': '原段落', 'body': '真实本机正文', **version})
+
+    harness = tmp_path / 'rpc.tsx'; bundle = tmp_path / 'rpc.js'
+    harness.write_text(f'''
+import React from {json.dumps(str(APP / 'node_modules/react/index.js'))};
+import {{createRoot}} from {json.dumps(str(APP / 'node_modules/react-dom/client.js'))};
+import {{localResearchBridge}} from {json.dumps(str(APP / 'src/local-research-bridge.ts'))};
+import {{LocalResearchDetail}} from {json.dumps(str(APP / 'src/components/local-research-page.tsx'))};
+import {json.dumps(str(APP / 'src/i18n.ts'))};
+import {json.dumps(str(ROOT / 'server/manager/web/styles/app.css'))};
+import {json.dumps(str(APP / 'src/shell.css'))};
+const client=localResearchBridge({{webkit:{{messageHandlers:{{tradeResearchLocalResearch:{{postMessage:async (value:unknown)=>
+  (await fetch('/rpc',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(value)}})).json()}}}}}}}})!;
+const research={json.dumps(research, ensure_ascii=False)};
+const report={json.dumps(report, ensure_ascii=False)};
+void client.capabilities({{issuer:'https://id.test/realm',identity_id:'stable'}}).then(capabilities=>
+  createRoot(document.getElementById('root')!).render(<LocalResearchDetail client={{client}}
+    capabilities={{capabilities}} item={{research as any}}
+    initialReport={{report as any}} onClose={{()=>{{}}}} />));
+''', encoding='utf-8')
+    subprocess.run([str(APP / 'node_modules/.bin/esbuild'), str(harness), '--bundle', '--format=iife',
+                    '--target=es2020', f'--outfile={bundle}'], cwd=APP, check=True, capture_output=True, text=True)
+    (tmp_path / 'index.html').write_text('<link rel="stylesheet" href="/rpc.css"><div id="root"></div><script src="/rpc.js"></script>', encoding='utf-8')
+
+    class Handler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs): super().__init__(*args, directory=str(tmp_path), **kwargs)
+        def do_POST(self):
+            if self.path != '/rpc': self.send_error(404); return
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 < size <= 65536: self.send_error(400); return
+            try: result = rpc.request(json.loads(self.rfile.read(size)))
+            except (ValueError, TypeError, PermissionError): self.send_error(400); return
+            body = json.dumps(result, ensure_ascii=False).encode()
+            self.send_response(200); self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel='chrome', headless=True)
+            try:
+                page = browser.new_page(viewport={'width': 1440, 'height': 900}, locale='zh-CN')
+                page.set_default_timeout(5000); page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
+                reader = page.locator('.tr-report-reading'); reader.get_by_text('真实本机正文').wait_for()
+                page.get_by_role('button', name='编辑报告内容').click()
+                page.get_by_label('段落标题').fill('新增段落'); page.get_by_label('段落正文').fill('真实写入正文')
+                page.get_by_role('button', name='添加段落').click()
+                reader.get_by_text('真实写入正文').wait_for()
+                chapter = rpc.request({'action': 'get_report_chapter', **base, 'chapter_id': 'chapter-1'})['chapter']
+                assert any(item['body'] == '真实写入正文' for item in chapter['components'])
+                page.close()
+            finally: browser.close()
+    finally:
+        server.shutdown(); server.server_close(); worker.join(timeout=2)
