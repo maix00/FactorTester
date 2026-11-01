@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from server.identity.keycloak_authorization import AuthorizationUnavailable, keycloak_resource_name
+from server.identity.keycloak_authorization import AuthorizationUnavailable, keycloak_resource_name, keycloak_resource_uri
 from server.identity.keycloak_research import KeycloakResearchGrantManager
 from server.jobs.storage.couchdb_research_publication import prepare_authoring, prepare_projection, publication_id
 from server.manager.services.research_couchdb_publication import ResearchCouchPublicationService
@@ -31,6 +31,12 @@ def _validate_refs(research_id: str, report_id: str) -> None:
 def _receipt_id(manager_id: str, owner_id: str, report_id: str) -> str:
     raw = json.dumps([manager_id, owner_id, report_id], ensure_ascii=False, separators=(',', ':')).encode()
     return 'research-report-registration:' + hashlib.sha256(raw).hexdigest()
+
+
+def _research_binding(research_id: str, report_id: str) -> str:
+    raw = json.dumps(['tr-research-report-binding:v1', research_id, report_id],
+                     ensure_ascii=False, separators=(',', ':')).encode()
+    return hashlib.sha256(raw).hexdigest()
 
 
 class LocalReportPublicationService(ResearchCouchPublicationService):
@@ -103,6 +109,9 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
         if (receipt['state'] != 'registered' or not owner_ref
                 or (resource.get('attributes') or {}).get('traderesearch_creation_intent') != [receipt['creation_intent']]):
             raise AuthorizationUnavailable('report registration requires repair')
+        binding = (resource.get('attributes') or {}).get('traderesearch_research_binding')
+        if binding is not None and binding != [_research_binding(research_id, report_id)]:
+            raise AuthorizationUnavailable('report research binding differs')
 
     def owned_page(self, *, session: dict, after: str = '', limit: int = 50) -> dict:
         """List only this identity's currently authorized shared report metadata."""
@@ -220,12 +229,34 @@ class LocalReportPublicationService(ResearchCouchPublicationService):
                 if not self.admission(session, state=self.state, use_cache=False)[0]:
                     raise PermissionError('current Manager access is not authorized')
                 manager.ensure_resource(resource_type='research_report', resource_ref=report_id,
-                    owner_subject=identity.subject, creation_intent=receipt['creation_intent'], create_only=True)
+                    owner_subject=identity.subject, creation_intent=receipt['creation_intent'], create_only=True,
+                    binding_sha256=_research_binding(research_id, report_id))
             resource = manager._resource(settings, pat, 'research_report', report_id)
             attrs = resource.get('attributes') or {}
-            if (attrs.get('traderesearch_owner_subject') != [identity.subject]
-                    or attrs.get('traderesearch_creation_intent') != [receipt['creation_intent']]):
+            if attrs.get('traderesearch_owner_subject') != [identity.subject]:
                 raise AuthorizationUnavailable('report resource belongs to another registration')
+            source_intents = attrs.get('traderesearch_creation_intent')
+            if source_intents != [receipt['creation_intent']]:
+                # A different Manager may register a resource already owned by
+                # this user in the same realm. Never re-create its policies.
+                # Legacy resources without the immutable research binding need
+                # separately verified migration evidence and cannot be adopted.
+                if (receipt['state'] != 'pending' or not isinstance(source_intents, list)
+                        or len(source_intents) != 1 or not isinstance(source_intents[0], str)
+                        or not re.fullmatch(r'[0-9a-f]{64}', source_intents[0])
+                        or attrs.get('traderesearch_research_binding') != [_research_binding(research_id, report_id)]):
+                    raise AuthorizationUnavailable('report resource belongs to another registration')
+                uri = keycloak_resource_uri('research_report', report_id)
+                decisions = self.authorize_many(identity.token,
+                    permissions=[(uri, name, scope) for scope in ('write', 'share')], use_cache=False)
+                current_identity = manager.identity_provider(actor)
+                current_resource = manager._resource(settings, pat, 'research_report', report_id)
+                if (not self.admission(session, state=self.state, use_cache=False)[0]
+                        or current_identity != identity or current_identity.token != identity.token
+                        or current_resource != resource
+                        or any(decisions.get((uri, scope)) is not True for scope in ('write', 'share'))):
+                    raise PermissionError('current report access is not authorized')
+                receipt = self._put_receipt({**receipt, 'creation_intent': source_intents[0]})
             if receipt['state'] != 'registered':
                 receipt = self._put_receipt({**receipt, 'state': 'registered'})
         # Existing resources are only evaluated, never re-ensured: a revoked

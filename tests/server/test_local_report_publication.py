@@ -38,14 +38,15 @@ class Manager:
     def request(self, _settings, _token, method, path):
         assert method == 'GET' and path.startswith('resource_set?')
         return 200, [self.resource] if self.resource else [], ''
-    def ensure_resource(self, *, resource_type, resource_ref, owner_subject, creation_intent, create_only):
+    def ensure_resource(self, *, resource_type, resource_ref, owner_subject, creation_intent, create_only, binding_sha256):
         assert resource_type == 'research_report' and create_only is True
         assert self.resource is None
         self.ensure_calls += 1
         if self.failure == 'before': raise AuthorizationUnavailable('network failed')
         self.resource = {'_id': 'resource-1', 'name': keycloak_resource_name(resource_type, resource_ref),
             'attributes': {'traderesearch_owner_subject': [owner_subject],
-                           'traderesearch_creation_intent': [creation_intent]}}
+                           'traderesearch_creation_intent': [creation_intent],
+                           'traderesearch_research_binding': [binding_sha256]}}
         if self.failure == 'after': raise AuthorizationUnavailable('response lost')
         return 'resource-1'
     def _resource(self, *_args):
@@ -183,6 +184,48 @@ def test_foreign_resource_and_removed_existing_resource_are_never_adopted(tmp_pa
     manager.resource = None
     with pytest.raises(AuthorizationUnavailable, match='needs repair'): publish(service, branch='later')
     assert manager.ensure_calls == 1
+
+
+def test_second_manager_adopts_same_bound_resource_without_recreating_policy(tmp_path):
+    source, manager, store, auth = harness(tmp_path)
+    publish(source)
+    target = LocalReportPublicationService(state=SimpleNamespace(server_id='peer', public_server=True,
+        state_root=tmp_path / 'peer'), store=store, manager=manager,
+        admission=source.admission, authorize_many=source.authorize_many)
+    result = publish(target)
+    assert result['report_id'] == REPORT and manager.ensure_calls == 1
+    receipts = [row for row in store.docs.values() if row['kind'] == 'research_report_registration']
+    assert len(receipts) == 2 and len({row['creation_intent'] for row in receipts}) == 1
+    auth['share'] = False
+    with pytest.raises(PermissionError): publish(target, branch='later')
+    assert manager.ensure_calls == 1
+
+
+def test_second_manager_cannot_attach_report_to_another_research(tmp_path):
+    source, manager, store, _auth = harness(tmp_path)
+    publish(source)
+    target = LocalReportPublicationService(state=SimpleNamespace(server_id='peer', public_server=True,
+        state_root=tmp_path / 'peer'), store=store, manager=manager,
+        admission=source.admission, authorize_many=source.authorize_many)
+    with pytest.raises(AuthorizationUnavailable, match='another registration'):
+        publish(target, research='research:v1:' + 'Q' * 24)
+    assert manager.ensure_calls == 1
+
+
+@pytest.mark.parametrize('failure', ['wrong_binding', 'legacy_binding', 'write', 'share', 'admit'])
+def test_second_manager_never_adopts_unverified_or_revoked_resource(tmp_path, failure):
+    source, manager, store, auth = harness(tmp_path)
+    publish(source)
+    if failure == 'wrong_binding': manager.resource['attributes']['traderesearch_research_binding'] = ['f' * 64]
+    if failure == 'legacy_binding': manager.resource['attributes'].pop('traderesearch_research_binding')
+    if failure in auth: auth[failure] = False
+    target = LocalReportPublicationService(state=SimpleNamespace(server_id='peer', public_server=True,
+        state_root=tmp_path / 'peer'), store=store, manager=manager,
+        admission=source.admission, authorize_many=source.authorize_many)
+    with pytest.raises((PermissionError, AuthorizationUnavailable)): publish(target)
+    assert manager.ensure_calls == 1
+    peer_reports = [row for row in store.docs.values() if row.get('kind') == 'research_report' and row.get('manager_id') == 'peer']
+    assert not peer_reports
 
 
 def test_uncertain_registration_only_recovers_if_resource_is_confirmed_without_regrant(tmp_path):

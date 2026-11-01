@@ -367,6 +367,7 @@ def ensure_keycloak_resource(
     owner_scopes: tuple[str, ...] | None = None,
     creation_intent: str | None = None,
     create_only: bool = False,
+    binding_sha256: str | None = None,
 ) -> str:
     """Idempotently register a user-authorized object in Keycloak.
 
@@ -381,6 +382,10 @@ def ensure_keycloak_resource(
     if creation_intent is not None and (not isinstance(creation_intent, str)
             or len(creation_intent) != 64 or any(ch not in "0123456789abcdef" for ch in creation_intent)):
         raise ValueError("invalid Keycloak resource creation intent")
+    if binding_sha256 is not None and (resource_type != 'research_report' or creation_intent is None
+            or not isinstance(binding_sha256, str) or len(binding_sha256) != 64
+            or any(ch not in '0123456789abcdef' for ch in binding_sha256)):
+        raise ValueError('invalid immutable report binding')
     selected_scopes = _RESOURCE_SCOPES if owner_scopes is None else tuple(owner_scopes)
     if (not selected_scopes or len(set(selected_scopes)) != len(selected_scopes)
             or any(scope not in _RESOURCE_SCOPES for scope in selected_scopes)):
@@ -425,6 +430,8 @@ def ensure_keycloak_resource(
                 raise AuthorizationUnavailable("Keycloak resource is owned by a different subject")
             if (creation_intent is not None and attributes.get("traderesearch_creation_intent") != [creation_intent]):
                 raise AuthorizationUnavailable("Keycloak resource belongs to another creation intent")
+            if binding_sha256 is not None and attributes.get('traderesearch_research_binding') != [binding_sha256]:
+                raise AuthorizationUnavailable('Keycloak report binding differs')
             uris = row.get("uris") or ([row.get("uri")] if row.get("uri") else [])
             if resource_uri not in {str(uri) for uri in uris if uri}:
                 body = {
@@ -434,7 +441,7 @@ def ensure_keycloak_resource(
                                         "ownerManagedAccess": True,
                     "uris": [resource_uri],
                     "resource_scopes": list(_RESOURCE_SCOPES),
-                    "attributes": {"traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
+                    "attributes": {**attributes, "traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
                         str(resource_ref).encode("utf-8")
                     ).hexdigest()], **({"traderesearch_creation_intent": [creation_intent]}
                                        if creation_intent is not None else {})},
@@ -459,6 +466,9 @@ def ensure_keycloak_resource(
                 if (creation_intent is not None and confirmed.get("attributes", {}).get(
                         "traderesearch_creation_intent") != [creation_intent]):
                     raise AuthorizationUnavailable("Keycloak creation intent was not confirmed")
+                if (binding_sha256 is not None and confirmed.get('attributes', {}).get(
+                        'traderesearch_research_binding') != [binding_sha256]):
+                    raise AuthorizationUnavailable('Keycloak report binding was not confirmed')
             _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject, selected_scopes)
             return resource_id
 
@@ -471,7 +481,8 @@ def ensure_keycloak_resource(
         "attributes": {"traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
             str(resource_ref).encode("utf-8")
         ).hexdigest()], **({"traderesearch_creation_intent": [creation_intent]}
-                           if creation_intent is not None else {})},
+                           if creation_intent is not None else {}),
+                           **({'traderesearch_research_binding': [binding_sha256]} if binding_sha256 is not None else {})},
     }
     try:
         _, result, location = _protection_request(settings, pat, "POST", "resource_set", body)
@@ -505,6 +516,7 @@ def ensure_keycloak_resource(
         if (not isinstance(attributes, dict)
                 or attributes.get("traderesearch_owner_subject") != [owner_subject]
                 or attributes.get("traderesearch_creation_intent") != [creation_intent]
+                or (binding_sha256 is not None and attributes.get('traderesearch_research_binding') != [binding_sha256])
                 or resource_uri not in uris):
             raise AuthorizationUnavailable("Keycloak creation intent was not confirmed")
     _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject, selected_scopes)

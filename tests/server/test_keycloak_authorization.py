@@ -231,17 +231,21 @@ def test_creation_intent_recovers_lost_response_but_rejects_foreign_resource(mon
             return 200, state["resource"], ""
         raise AssertionError((method, path))
     monkeypatch.setattr(authz, "_protection_request", protection)
-    args = dict(resource_type="research_report", resource_ref="report", owner_subject="subject-alice")
+    args = dict(resource_type="research_report", resource_ref="report", owner_subject="subject-alice",
+                binding_sha256="c" * 64)
     intent = "a" * 64
     with pytest.raises(authz.AuthorizationUnavailable, match="registration failed"):
         authz.ensure_keycloak_resource(**args, creation_intent=intent)
     assert authz.ensure_keycloak_resource(**args, creation_intent=intent) == "kc-report"
+    assert state['resource']['attributes']['traderesearch_research_binding'] == ['c' * 64]
     assert state["posts"] == 1
     monkeypatch.setattr(authz, "_ensure_owner_policy", lambda *_args: pytest.fail("must not restore an existing policy"))
     with pytest.raises(authz.AuthorizationUnavailable, match="already exists"):
         authz.ensure_keycloak_resource(**args, creation_intent=intent, create_only=True)
     with pytest.raises(authz.AuthorizationUnavailable, match="another creation intent"):
         authz.ensure_keycloak_resource(**args, creation_intent="b" * 64)
+    with pytest.raises(authz.AuthorizationUnavailable, match='binding differs'):
+        authz.ensure_keycloak_resource(**{**args, 'binding_sha256': 'd' * 64}, creation_intent=intent)
     assert state["posts"] == 1
     with pytest.raises(ValueError, match="creation intent"):
         authz.ensure_keycloak_resource(**args, creation_intent="bad")
