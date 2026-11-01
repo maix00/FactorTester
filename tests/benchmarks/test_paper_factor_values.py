@@ -35,3 +35,37 @@ def test_threshold_comparison_requires_actual_comparable_observations():
         threshold_comparison([], [])
     with pytest.raises(ValueError, match='equal nonempty'):
         threshold_comparison([1, 2], [1])
+
+
+def test_observed_sampling_does_not_treat_a_market_break_as_bars():
+    from tests.benchmarks.verify_paper_factor_values import sample_signal
+    minute = 60_000_000_000
+    # A market break after 20 observations shifts the wall-clock grid while
+    # the observed clock waits for the thirtieth actual Bar.
+    times = np.r_[np.arange(20), np.arange(80, 100)].astype(np.int64) * minute
+    values = np.arange(len(times), dtype=float)
+    observed = sample_signal(times, values, 'observed_bars')
+    assert np.isnan(observed[:29]).all()
+    np.testing.assert_array_equal(observed[29:], np.full(11, 29.))
+    wall = sample_signal(times, values, 'wall_clock')
+    assert wall[20] == 19.
+    assert np.isnan(observed[20])
+    # No future observation can change a previously formed value.
+    np.testing.assert_equal(observed[:35], sample_signal(times[:35], values[:35], 'observed_bars'))
+
+
+def test_observed_clock_selection_matches_legacy_signal_align_with_a_gap():
+    import pandas as pd
+    from tools.factors.expr.signal_align import signal_align
+    from tests.benchmarks.verify_paper_factor_values import sample_signal
+
+    index = pd.DatetimeIndex(
+        list(pd.date_range('2025-01-02 09:01', periods=20, freq='min'))
+        + list(pd.date_range('2025-01-02 10:30', periods=50, freq='min')),
+        name='MIN1',
+    )
+    values = np.arange(len(index), dtype=float)
+    legacy = signal_align(pd.DataFrame({'T': values}, index=index), '30m', basepoint='last')
+    np.testing.assert_array_equal(legacy['T'].to_numpy(), values[[29, 59]])
+    sampled = sample_signal(index.as_unit('ns').asi8, values, 'observed_bars')
+    np.testing.assert_array_equal(sampled[[29, 59]], legacy['T'].to_numpy())
