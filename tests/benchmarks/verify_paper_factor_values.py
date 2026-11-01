@@ -5,7 +5,7 @@ oracle. Rust is advanced through its diagnostic binding; no trading or profits
 are claimed. Only explicitly requested output arrays are retained by this tool.
 """
 from __future__ import annotations
-import argparse,json,time
+import argparse,hashlib,json,re,time
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -13,7 +13,7 @@ import pyarrow.parquet as pq
 from pandas.api.indexers import BaseIndexer
 
 
-def oracle(times,days,price,adjusted):
+def oracle(times,days,price,adjusted,window_days):
     starts=np.r_[0,np.flatnonzero(days[1:]!=days[:-1])+1]
     ordinals=np.searchsorted(starts,np.arange(len(times)),side='right')-1
     def rolling(values,count,q):
@@ -45,7 +45,7 @@ def oracle(times,days,price,adjusted):
     top=(duration>=quantile).astype(float)
     fair=pd.Series(price*top).groupby(ordinals).cumsum().to_numpy()/(pd.Series(top).groupby(ordinals).cumsum().to_numpy()+1e-10)
     deviation=signal(fair-price)
-    high=rolling(deviation,20,.8);low=rolling(deviation,20,.2)
+    high=rolling(deviation,window_days,.8);low=rolling(deviation,window_days,.2)
     return signal(np.where(deviation>=high,1.,np.where(deviation<=low,-1.,0.))),threshold
 
 
@@ -60,6 +60,9 @@ def main():
     from tools.factors.expr.streaming.calendar_window import TradingCalendarWindow,TradingSession
     from tools.data.types import DataFreq
     frozen=json.loads(args.factors.read_text());refs={r['ref']:r for r in frozen['factors']}
+    window=str(frozen.get('parameters',{}).get('window',''))
+    if not re.fullmatch(r'[1-9][0-9]*d',window):raise ValueError('paper oracle requires an explicit trading-day outer window')
+    window_days=int(window[:-1])
     factor=_resolve_frozen_factor(refs[frozen['signal_ref']],username='alice',frozen_by_ref=refs)
     frame=pq.read_table(args.source,columns=['trade_timestamp','trading_day','close_price','adjustment_mul','adjustment_add']).to_pandas()
     times=frame.trade_timestamp.to_numpy(dtype=np.int64)*1000000;days=frame.trading_day.to_numpy()
@@ -82,14 +85,17 @@ def main():
             if i>=first:result[i-first]=value
         return result,time.perf_counter()-started
     full,seconds=replay(0);suffix,subset_seconds=replay(int(np.searchsorted(times,bound)))
-    expected,expected_threshold=oracle(times,days,price,adjusted)
+    expected,expected_threshold=oracle(times,days,price,adjusted,window_days)
     comparisons={
         'formal_signal_mismatches':int(np.count_nonzero(full[:,0]!=expected[first:])),
         'warmup_suffix_signal_mismatches':int(np.count_nonzero(full[:,0]!=suffix[:,0])),
         'formal_threshold_nonfinite':int(np.count_nonzero(~np.isfinite(full[:,1]))),
         'threshold_max_abs_error':float(np.nanmax(np.abs(full[:,1]-expected_threshold[first:]))),
         'warmup_suffix_threshold_max_abs_error':float(np.nanmax(np.abs(full[:,1]-suffix[:,1])))}
-    result=dict(source=str(args.source),rows=len(times),days=len(starts),formal_start=args.formal_start,
+    with args.source.open('rb') as handle:source_sha256=hashlib.file_digest(handle,'sha256').hexdigest()
+    with args.factors.open('rb') as handle:factor_sha256=hashlib.file_digest(handle,'sha256').hexdigest()
+    result=dict(source=str(args.source),source_sha256=source_sha256,frozen_factor_sha256=factor_sha256,
+        signal_ref=frozen['signal_ref'],outer_window=window,rows=len(times),days=len(starts),formal_start=args.formal_start,
         data_start_utc=pd.Timestamp(times[0],unit='ns',tz='UTC').isoformat(),data_end_utc=pd.Timestamp(times[-1],unit='ns',tz='UTC').isoformat(),
         exact=exact,conservative_start_ns=bound,nodes=len(nodes),comparisons=comparisons,
         diagnostic_binding_seconds=seconds,suffix_binding_seconds=subset_seconds,
