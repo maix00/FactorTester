@@ -40,7 +40,8 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         sandbox.api("POST", realm, "users", {
             "username": username, "enabled": True, "emailVerified": True,
             "firstName": "Temporary", "lastName": "User", "email": username + "@example.invalid",
-            "attributes": {"tr_identity_id": ["stable-" + username]},
+            "attributes": {"tr_identity_id": ["stable-" + username],
+                           "legacy_username": ["org@" + username + "@legacy"]},
             "credentials": [{"type": "password", "value": password, "temporary": False}],
         })
         users[username] = sandbox.find(realm, "users?" + urlencode({"username": username, "exact": "true"}),
@@ -76,6 +77,9 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         directory = read_keycloak_directory('owner')
         assert directory['accounts'] == [{'username': 'owner', 'tr_identity_id': 'stable-owner',
                                            'keycloak_subject': users['owner']['id'], 'active': True}]
+        for principal in ('Owner', 'org@owner@legacy'):
+            matched = read_keycloak_directory(principal)['accounts']
+            assert len(matched) == 1 and matched[0]['keycloak_subject'] == users['owner']['id']
         assert read_keycloak_directory('missing') == {'accounts': []}
         keycloak_device.register_device(session=owner, **args)
         registry = DeviceRegistry(Path(temp) / 'devices.json', server_id='manager-1')
@@ -89,7 +93,8 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         status = {row['device_id']: row['keycloak_authorized'] for row in replies[-1][1]['devices']}
         assert replies[-1][0] == 200 and status == {device_id: True, missing_id: False}
         assert keycloak_device.may_use_device(token=owner_token, session=owner, **args)
-        records = [{"username": "owner", "device_id": device_id, "public_key": key, "enabled": True}]
+        records = [{"username": "owner", "device_id": device_id, "public_key": key,
+                    "enabled": True, "source_server_id": "manager-1"}]
         assert keycloak_device.may_use_devices(token=owner_token, session=owner, server_id="manager-1", records=records) == {device_id}
         assert not keycloak_device.may_use_device(token=other_token, session=other, **args)
         assert not keycloak_device.may_use_device(token=owner_token, session=owner, **{**args, "public_key": other_key})
