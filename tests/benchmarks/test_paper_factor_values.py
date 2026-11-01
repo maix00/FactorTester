@@ -54,7 +54,7 @@ def test_observed_sampling_does_not_treat_a_market_break_as_bars():
     np.testing.assert_equal(observed[:35], sample_signal(times[:35], values[:35], 'observed_bars'))
 
 
-def test_observed_clock_selection_matches_legacy_signal_align_with_a_gap():
+def test_observed_clock_selection_matches_signal_align_without_gap_reset():
     import pandas as pd
     from tools.factors.expr.signal_align import signal_align
     from tests.benchmarks.verify_paper_factor_values import sample_signal
@@ -65,10 +65,27 @@ def test_observed_clock_selection_matches_legacy_signal_align_with_a_gap():
         name='MIN1',
     )
     values = np.arange(len(index), dtype=float)
-    legacy = signal_align(pd.DataFrame({'T': values}, index=index), '30m', basepoint='last')
+    legacy = signal_align(pd.DataFrame({'T': values}, index=index), '30m', basepoint='last', end_session_skip=False)
     np.testing.assert_array_equal(legacy['T'].to_numpy(), values[[29, 59]])
     sampled = sample_signal(index.as_unit('ns').asi8, values, 'observed_bars')
     np.testing.assert_array_equal(sampled[[29, 59]], legacy['T'].to_numpy())
+
+
+def test_gap_reset_changes_observed_signal_phase():
+    import pandas as pd
+    from tools.factors.expr.signal_align import signal_align
+
+    index = pd.DatetimeIndex(
+        list(pd.date_range('2025-01-02 09:01', periods=20, freq='min'))
+        + list(pd.date_range('2025-01-02 13:30', periods=50, freq='min')),
+        name='MIN1',
+    )
+    values = np.arange(len(index), dtype=float)
+    frame = pd.DataFrame({'T': values}, index=index)
+    without_reset = signal_align(frame, '30m', end_session_skip=False)
+    with_reset = signal_align(frame, '30m', end_session_skip=True)
+    np.testing.assert_array_equal(without_reset['T'].to_numpy(), values[[29, 59]])
+    np.testing.assert_array_equal(with_reset['T'].to_numpy(), values[[49]])
 
 
 def test_intermediate_diagnostics_do_not_change_the_oracle_output():
