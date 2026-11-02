@@ -50,7 +50,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
                     p==='/api/docs/index'?{sections:[{title:'Guide',pages:[{slug:'network-topology',title:'网络拓扑'},
                       {slug:'identity-permissions',title:'用户与权限'}]}]}:
                     p==='/api/docs/pages/network-topology'?{title:'网络拓扑',html:'<p>Topology article</p>'}:
-                    p==='/api/docs/pages/identity-permissions'?{title:'用户与权限',html:'<a href="#section">Section</a><p id="section">Permission article</p>'}:{items:[]};
+                    p==='/api/docs/pages/identity-permissions'?{title:'用户与权限',html:'<h2 id="identity">用户与权限</h2><a href="#section">Section</a><p id="section">Permission article</p>'}:{items:[]};
                   return Promise.resolve(new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}}));};}''')
                 page.add_script_tag(path=str(bundle))
                 header = page.locator('ion-header.tr-mobile-header')
@@ -80,6 +80,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
                 page.get_by_text('Topology article').wait_for()
                 page.get_by_role('tab', name='用户与权限').click()
                 page.get_by_text('Permission article').wait_for()
+                assert page.locator('article h2').filter(has_text='用户与权限').count() == 1
                 page.get_by_role('link', name='Section').click()
                 assert page.evaluate('location.hash') == '#section'
                 page.go_back()

@@ -43,6 +43,11 @@ export function TechnicalDocsPage(): React.ReactElement {
     return page ? [page] : [];
   });
   const filtered = pages.filter(page => `${page.title} ${page.summary || ""} ${page.section_title || ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const hasTitle = useMemo(() => {
+    if (!html || !title || typeof DOMParser === "undefined") return false;
+    const first = new DOMParser().parseFromString(html, "text/html").body.firstElementChild;
+    return first?.tagName === "H2" && first.textContent?.trim() === title.trim();
+  }, [html, title]);
 
   useEffect(() => {
     if (!instance.mobile) return;
@@ -97,7 +102,7 @@ export function TechnicalDocsPage(): React.ReactElement {
           const link = (event.target as HTMLElement).closest("a"); if (!link) return;
           const href = link.getAttribute("href") || "";
           if (href.startsWith("/docs/")) { event.preventDefault(); const target = decodeURIComponent(href.split("#")[0].slice(6) || slug); openDoc(target); }
-        }}><h2>{title}</h2><div dangerouslySetInnerHTML={{ __html: html }} /></article>
+        }}>{!hasTitle ? <h2>{title}</h2> : null}<div dangerouslySetInnerHTML={{ __html: html }} /></article>
       </>}
     </>}
   </FunctionPage>;
