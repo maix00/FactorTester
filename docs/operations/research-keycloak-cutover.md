@@ -90,3 +90,7 @@ Manager 与 7997 数据面共用 Keycloak Research 授权工厂；发布投影�
 CLI 移除旧 `research reports publication settings/unpublish` 和 PublicResearchClient 对应方法、outbox 新建 revoke 操作；授权使用 `research grant/grants`，撤权使用 `research grant --revoke`。历史 revoke 队列只读保留并转为显式迁移冲突，不再请求旧服务端 API或当作成功完成。内容 publication publish 及其旧分支消费者仍需迁往统一 CouchDB 发布路径，未声称旧发布客户端已完整移除。
 
 React 登录切换：移除密码、密码确认、机构注册字段，以及 POST /auth/login 和 /auth/register 的客户端回退；账户菜单移除自建注册。只允许明确的 keycloak provider 启用 OIDC 登录；旧/未知/缺失 provider 显示不可用并允许重试，保留合规和公网访客入口、注销与原生会话通知。桌面/移动静态包已重建，未重新下载依赖。35 项模型/桥测试、登录组件 DOM 渲染检查及 TypeScript 通过；DOM 检查不是视觉验收，Browser 仍被 Work 设置禁用。真实内网 public entry 返回 keycloak、关闭注册。
+
+旧 Research 整图同步退役：Manager 不再把 ResearchCatalog 绑定到 account-domain 自动同步器；同步服务不再 backfill、materialize 或自动合并研究整图。新建整图写入与旧冲突回写拒绝；旧待发项原样保留并标记 research_sync_needs_review，即使旧 feature flag 为真也不能发送。入站旧整图不覆盖本地目录，使用现有冲突表记录 ref、来源 revision、删除状态及内容 SHA-256；不把未经 Keycloak 验证的原文复制到用户冲突视图。原文留在远端权威库供显式迁移。重复观察幂等，游标正常推进，pull 明确返回 retired 数量并在本次同步报告 incomplete。历史已缓存整图保留在库内，但从普通目录列表排除；未生成 tombstone。
+
+此修改后真实隔离 Manager HTTP＋Keycloak＋CouchDB 的单报告发布、两客户端同步、撤权、冲突保护和共享 realm 跨 Manager 演练通过。旧整图模块的剩余离线实现及历史数据最终清理仍需核对后完成，不代表真实两台服务器已切换。

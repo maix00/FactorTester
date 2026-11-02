@@ -147,6 +147,8 @@ class LocalAccountDomainStore:
         deleted: bool = False,
         connection: sqlite3.Connection | None = None,
     ) -> str:
+        if entity_type == "research_catalog":
+            raise ValueError("Research graph synchronization is retired; use explicit CouchDB publication")
         now = time.time()
         operation_id = uuid.uuid4().hex
         encoded = _encode(payload)
@@ -297,40 +299,12 @@ class LocalAccountDomainStore:
                 WHERE operation_id=? AND entity_type='research_catalog'""",
                 [(RESEARCH_SYNC_NEEDS_REVIEW, operation_id) for operation_id in operation_ids])
 
-    def _rebase_research(self, conn, key, remote) -> bool:
-        if key[1] != 'research_catalog' or remote.get('deleted'):
-            return False
-        pending = conn.execute('SELECT * FROM account_domain_outbox WHERE principal=? AND entity_type=? AND entity_id=?', key).fetchone()
-        base = conn.execute('SELECT * FROM account_domain_research_bases WHERE principal=? AND entity_id=?', (key[0], key[2])).fetchone()
-        if (pending is None or base is None or pending['deleted'] or base['deleted']
-                or pending['base_revision'] != base['revision']):
-            return False
-        from .research_merge import merge_research, remember_base
-        merged = merge_research(_decode(base['payload_json']), _decode(pending['payload_json']), remote.get('payload') or {})
-        if merged is None:
-            return False
-        revision = int(remote.get('revision') or 0)
-        if revision <= base['revision']:
-            return False
-        manager = conn.execute('SELECT origin_manager_id FROM account_domain_entities WHERE principal=? AND entity_type=? AND entity_id=?', key).fetchone()[0]
-        conn.execute('UPDATE account_domain_entities SET remote_revision=?,base_revision=? WHERE principal=? AND entity_type=? AND entity_id=?', (revision, revision, *key))
-        operation = self.upsert_local(principal=key[0], entity_type=key[1], entity_id=key[2],
-                                      payload=merged, manager_id=manager, connection=conn)
-        conn.execute("UPDATE account_domain_outbox SET base_revision=?,last_error='' WHERE operation_id=?", (revision, operation))
-        remember_base(conn, principal=key[0], entity_type=key[1], entity_id=key[2], revision=revision, payload=remote['payload'])
-        from .research_sync import materialize_research
-        materialize_research(self.path, {'principal': key[0], 'entity_type': key[1], 'entity_id': key[2],
-                             'revision': revision, 'payload': merged}, connection=conn)
-        return True
-
     def record_push_conflict(
         self, item: dict[str, Any], remote: dict[str, Any],
     ) -> bool:
-        """Rebase disjoint research edits; preserve other conflicts for review."""
+        """Preserve remote conflicts for explicit review."""
         with connect_sqlite(self.path) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if self._rebase_research(conn, (item['principal'], item['entity_type'], item['entity_id']), remote):
-                return True
             _record_conflict(conn, item, remote)
             conn.execute(
                 "UPDATE account_domain_outbox SET last_error='remote revision conflict' WHERE operation_id=?",
@@ -358,6 +332,8 @@ class LocalAccountDomainStore:
         The local value and latest conflict revision are preconditions. A new
         authority edit is still protected by the normal remote compare-and-set.
         """
+        if entity_type == "research_catalog":
+            raise ValueError("Research graph conflicts require explicit migration review")
         key = (principal, entity_type, entity_id)
         encoded = _encode(payload)
         operation = uuid.uuid4().hex
@@ -465,6 +441,16 @@ class LocalAccountDomainStore:
         payload = row.get("payload")
         if not principal or not entity_type or not entity_id or not isinstance(payload, dict):
             raise ValueError("remote account-domain row is invalid")
+        if entity_type == "research_catalog":
+            with connect_sqlite(self.path) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                # The remote authority retains the original graph. Keep an
+                # audit digest here, never redistribute its unverified ACL/data.
+                observed = {**row, "payload": {"retired_entity_type": "research_catalog",
+                    "payload_sha256": hashlib.sha256(_encode(payload).encode()).hexdigest()}}
+                _record_conflict(conn, {"principal": principal, "entity_type": entity_type,
+                    "entity_id": entity_id, "payload": {}}, observed)
+            return "retired"
         revision = int(row.get("revision") or 0)
         deleted = bool(row.get("deleted"))
         with connect_sqlite(self.path) as conn:
@@ -495,8 +481,6 @@ class LocalAccountDomainStore:
                     "deleted": bool(pending["deleted"]),
                 }
                 if local != {"payload": payload, "deleted": deleted}:
-                    if self._rebase_research(conn, (principal, entity_type, entity_id), row):
-                        return "rebased"
                     _record_conflict(conn, {
                         "principal": principal, "entity_type": entity_type,
                         "entity_id": entity_id, "payload": local["payload"],
@@ -609,7 +593,11 @@ class LocalAccountDomainStore:
         include_shared: bool = True,
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
-        clauses = [] if include_deleted else ["deleted=0"]
+        if entity_type == "research_catalog":
+            return []
+        clauses = ["entity_type != 'research_catalog'"]
+        if not include_deleted:
+            clauses.append("deleted=0")
         if entity_type != "factor_catalog_entry":
             clauses.append("entity_type != 'factor_catalog_entry'")
         params: list[Any] = []
