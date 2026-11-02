@@ -95,7 +95,8 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         let python = "/opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/python"
         guard FileManager.default.isExecutableFile(atPath: python) else { throw XCTSkip("GTHT Python is unavailable") }
         let serverCode = """
-import json
+import json, sys
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 class Handler(BaseHTTPRequestHandler):
  calls = 0
@@ -108,19 +109,24 @@ class Handler(BaseHTTPRequestHandler):
   self.send_response(200); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
  def log_message(self, *args): pass
 server=HTTPServer(('127.0.0.1',0),Handler)
-print(server.server_port, flush=True)
+Path(sys.argv[1]).write_text(str(server.server_port))
 server.serve_forever()
 """
-        let process = Process(); process.executableURL = URL(fileURLWithPath: python); process.arguments = ["-u", "-c", serverCode]
-        let pipe = Pipe(); process.standardOutput = pipe; process.standardError = Pipe(); try process.run()
-        defer { if process.isRunning { process.terminate(); process.waitUntilExit() } }
-        var bytes = Data()
-        while bytes.count < 10 {
-            let chunk = try XCTUnwrap(try pipe.fileHandleForReading.read(upToCount: 1))
-            if chunk.isEmpty || chunk == Data([10]) { break }
-            bytes.append(chunk)
+        let portFile = FileManager.default.temporaryDirectory.appendingPathComponent("tr-manager-probe-\(UUID().uuidString)")
+        let process = Process(); process.executableURL = URL(fileURLWithPath: python)
+        // The fixture uses only stdlib; skip unrelated site/PYTHONPATH scans.
+        process.arguments = ["-I", "-S", "-u", "-c", serverCode, portFile.path]
+        process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
+        try process.run()
+        defer {
+            if process.isRunning { process.terminate() }
+            try? FileManager.default.removeItem(at: portFile)
         }
-        let port = try XCTUnwrap(Int(String(decoding: bytes, as: UTF8.self)))
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !FileManager.default.fileExists(atPath: portFile.path), process.isRunning, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let port = try XCTUnwrap(Int((try? String(contentsOf: portFile, encoding: .utf8)) ?? ""), "HTTP fixture did not start before deadline")
         let target = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)"))
         ManagerSessionTokenStore.save("isolated-test-token", for: target)
         defer { ManagerSessionTokenStore.remove(for: target) }
