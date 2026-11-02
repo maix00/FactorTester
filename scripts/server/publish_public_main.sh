@@ -13,6 +13,12 @@ remote_git_root="${FACTORTESTER_REMOTE_GIT_ROOT:-/opt/factortester}"
 remote_container_root="${FACTORTESTER_REMOTE_CONTAINER_ROOT:-/opt/factortester-container}"
 remote_env="${FACTORTESTER_REMOTE_PUBLIC_ENV:-/etc/factortester-container/public.env}"
 release_retention="${FACTORTESTER_PUBLIC_RELEASE_RETENTION:-3}"
+prepare_only="${TR_PUBLIC_PREPARE_ONLY:-0}"
+
+[[ "$prepare_only" == "0" || "$prepare_only" == "1" ]] || {
+  echo "TR_PUBLIC_PREPARE_ONLY must be 0 or 1" >&2
+  exit 2
+}
 
 [[ "$release_retention" =~ ^[1-9][0-9]*$ ]] || {
   echo "FACTORTESTER_PUBLIC_RELEASE_RETENTION must be a positive integer" >&2
@@ -135,7 +141,7 @@ remote_revision="$(
 
 remote_exec bash -s -- \
   "$revision" "$remote_git_root" "$remote_container_root" "$remote_env" \
-  "$release_retention" "$native_build_id" <<'REMOTE'
+  "$release_retention" "$native_build_id" "$prepare_only" <<'REMOTE'
 set -Eeuo pipefail
 
 revision="$1"
@@ -144,6 +150,7 @@ container_root="$3"
 production_env="$4"
 release_retention="$5"
 native_build_id="$6"
+prepare_only="$7"
 activation_script="$(mktemp "${TMPDIR:-/tmp}/factortester-activate.XXXXXX")"
 cleanup() {
   rm -f "$activation_script"
@@ -155,5 +162,5 @@ git --git-dir="$git_root/repo.git" show \
 chmod 0700 "$activation_script"
 bash "$activation_script" \
   "$revision" "$git_root" "$container_root" "$production_env" \
-  "$release_retention" "$native_build_id"
+  "$release_retention" "$native_build_id" "$prepare_only"
 REMOTE
