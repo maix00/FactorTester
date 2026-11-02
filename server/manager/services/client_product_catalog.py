@@ -544,8 +544,14 @@ class ClientProductCatalogMixin:
                 if isinstance(node, dict)
                 else ([] if node_path else list(cached_contracts()))
             )
+        ordered = sorted(objects, key=lambda item: str(getattr(item, "name", item)))
+        offset = (requested_page - 1) * requested_limit
+        # Normal tree expansion needs metadata for one page, not every leaf.
+        # Search still projects source metadata because it is searchable data.
+        total = len(ordered)
+        candidates = ordered if search else ordered[offset:offset + requested_limit]
         result = []
-        for product in sorted(objects, key=lambda item: str(getattr(item, "name", item))):
+        for product in candidates:
             name = str(getattr(product, "name", product))
             is_contract = isinstance(product, FuturesContract)
             sources = available_sources_for_product(product)
@@ -581,11 +587,11 @@ class ClientProductCatalogMixin:
             ).casefold()
             if not search or search in searchable:
                 result.append(value)
-        total = len(result)
+        if search:
+            total = len(result)
         total_pages = max(1, (total + requested_limit - 1) // requested_limit)
-        offset = (requested_page - 1) * requested_limit
         return {
-            "nodes": result[offset:offset + requested_limit],
+            "nodes": result[offset:offset + requested_limit] if search else result,
             "page": requested_page,
             "limit": requested_limit,
             "total": total,
