@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import threading
 from functools import partial
@@ -32,6 +33,9 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
     subprocess.run([str(APP / 'node_modules/.bin/esbuild'), str(source), '--bundle', '--format=iife',
                     '--target=es2020', f'--outfile={bundle}'], cwd=APP, check=True, capture_output=True, text=True)
     (tmp_path / 'index.html').write_text('<link rel="stylesheet" href="/harness.css"><div id="root"></div>', encoding='utf-8')
+    images = tmp_path / 'research-static/vendor/web-app'
+    images.mkdir(parents=True)
+    shutil.copyfile(ROOT / 'static/vendor/web-app/network-topology.zh.svg', images / 'network-topology.zh.svg')
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(SimpleHTTPRequestHandler, directory=str(tmp_path)))
     worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
     try:
@@ -42,7 +46,11 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
                 page.set_default_timeout(8000)
                 page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
                 page.evaluate('''() => {window.fetch = input => {const p=new URL(String(input),location.origin).pathname;
-                  const body=p==='/api/session'?{session:{username:'alice'}}:p==='/api/client/profiles'?{profiles:[]}:{items:[]};
+                  const body=p==='/api/session'?{session:{username:'alice'}}:p==='/api/client/profiles'?{profiles:[]}:
+                    p==='/api/docs/index'?{sections:[{title:'Guide',pages:[{slug:'network-topology',title:'网络拓扑'},
+                      {slug:'identity-permissions',title:'用户与权限'}]}]}:
+                    p==='/api/docs/pages/network-topology'?{title:'网络拓扑',html:'<p>Topology article</p>'}:
+                    p==='/api/docs/pages/identity-permissions'?{title:'用户与权限',html:'<a href="#section">Section</a><p id="section">Permission article</p>'}:{items:[]};
                   return Promise.resolve(new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}}));};}''')
                 page.add_script_tag(path=str(bundle))
                 header = page.locator('ion-header.tr-mobile-header')
@@ -67,6 +75,19 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
                 page.locator('.ant-drawer-open .ant-drawer-close').click()
                 page.locator('.ant-drawer-open').wait_for(state='hidden')
                 assert header.is_visible()
+                page.locator('ion-tab-button[tab="more"]').click()
+                page.get_by_role('button', name='技术文档').click()
+                page.get_by_text('Topology article').wait_for()
+                page.get_by_role('tab', name='用户与权限').click()
+                page.get_by_text('Permission article').wait_for()
+                page.get_by_role('link', name='Section').click()
+                assert page.evaluate('location.hash') == '#section'
+                page.go_back()
+                page.get_by_text('Permission article').wait_for()
+                page.go_back()
+                page.get_by_text('Topology article').wait_for()
+                assert header.locator('ion-title').inner_text().strip() == '技术文档'
+                page.screenshot(path='/tmp/tr-mobile-docs-return.png')
             finally:
                 browser.close()
     finally:

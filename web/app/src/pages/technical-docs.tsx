@@ -4,6 +4,7 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { FunctionPage } from "../components/function-page.tsx";
+import { usePageInstance } from "../page-instance.ts";
 import "../components/network-topology.css";
 
 type DocPage = { slug: string; title: string; summary?: string; section_title?: string };
@@ -25,7 +26,9 @@ function NetworkTopology(): React.ReactElement {
 
 export function TechnicalDocsPage(): React.ReactElement {
   const { t } = useTranslation();
+  const instance = usePageInstance();
   const article = useRef<HTMLElement>(null);
+  const initialDoc = useRef(FEATURE_PAGES[0]);
   const [index, setIndex] = useState<DocIndex | null>(null);
   const [slug, setSlug] = useState(FEATURE_PAGES[0]);
   const [html, setHTML] = useState("");
@@ -42,11 +45,31 @@ export function TechnicalDocsPage(): React.ReactElement {
   const filtered = pages.filter(page => `${page.title} ${page.summary || ""} ${page.section_title || ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
 
   useEffect(() => {
+    if (!instance.mobile) return;
+    const update = (event: PopStateEvent): void => {
+      if (event.state?.trPage === instance.id) {
+        const previous = event.state?.trDoc;
+        setSlug(typeof previous === "string" && previous ? previous : initialDoc.current);
+      }
+    };
+    window.addEventListener("popstate", update);
+    return () => window.removeEventListener("popstate", update);
+  }, [instance.id, instance.mobile]);
+  const openDoc = (next: string): void => {
+    if (next === slug) return;
+    if (instance.mobile) history.pushState({ ...history.state, trPage: instance.id, trDoc: next }, "", location.href);
+    setSlug(next);
+  };
+
+  useEffect(() => {
     const controller = new AbortController(); setError("");
     void request("/api/docs/index", { signal: controller.signal }).then(value => {
       if (!controller.signal.aborted) {
         setIndex(value);
-        if (!(value.sections || []).some((section: { pages?: DocPage[] }) => (section.pages || []).some(page => page.slug === slug))) setSlug(value.default_page || "getting-started");
+        if (!(value.sections || []).some((section: { pages?: DocPage[] }) => (section.pages || []).some(page => page.slug === slug))) {
+          initialDoc.current = value.default_page || "getting-started";
+          setSlug(initialDoc.current);
+        }
       }
     }).catch(reason => { if (!controller.signal.aborted) setError(reason.message); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -66,14 +89,14 @@ export function TechnicalDocsPage(): React.ReactElement {
       <Input.Search allowClear aria-label={t("technicalDocs.search")} placeholder={t("technicalDocs.search")} value={query} onChange={event => setQuery(event.target.value)} />
     </div>
     {loading && !index ? <Spin /> : error && !index ? <Alert type="error" showIcon message={error} action={<Button onClick={() => setRevision(value => value + 1)}>{t("retry")}</Button>} /> : <>
-      {featured.length > 0 && <Tabs activeKey={slug} onChange={setSlug} items={featured.map(page => ({ key: page.slug, label: page.title }))} />}
-      {query && !filtered.some(page => page.slug === slug) && <div className="tr-technical-docs-search-results">{filtered.map(page => <Button key={page.slug} type="link" onClick={() => setSlug(page.slug)}>{page.title}</Button>)}</div>}
+      {featured.length > 0 && <Tabs activeKey={slug} onChange={openDoc} items={featured.map(page => ({ key: page.slug, label: page.title }))} />}
+      {query && !filtered.some(page => page.slug === slug) && <div className="tr-technical-docs-search-results">{filtered.map(page => <Button key={page.slug} type="link" onClick={() => openDoc(page.slug)}>{page.title}</Button>)}</div>}
       {error ? <Alert type="error" showIcon message={error} /> : loading ? <Spin /> : !html ? <Empty description={t("empty")} /> : <>
         {slug === "network-topology" ? <NetworkTopology /> : null}
         <article ref={article} className="tr-technical-document" onClick={event => {
           const link = (event.target as HTMLElement).closest("a"); if (!link) return;
           const href = link.getAttribute("href") || "";
-          if (href.startsWith("/docs/") || href.startsWith("#")) { event.preventDefault(); const target = decodeURIComponent(href.split("#")[0].slice(6) || slug); if (target !== slug) setSlug(target); }
+          if (href.startsWith("/docs/")) { event.preventDefault(); const target = decodeURIComponent(href.split("#")[0].slice(6) || slug); openDoc(target); }
         }}><h2>{title}</h2><div dangerouslySetInnerHTML={{ __html: html }} /></article>
       </>}
     </>}
