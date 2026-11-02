@@ -29,3 +29,4 @@ def test_activation_passes_pinned_native_revision_to_remote_image_build():
     script=(root/'scripts/server/activate_public_revision.sh').read_text()
     build=script.split('if [[ "$reuse_status" == "3" ]]; then',1)[1].split('elif [[ "$reuse_status"',1)[0]
     assert 'FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision"' in build
+    assert script.index('nautilus_revision="$(git') < script.index('cache_plan="$(sudo')
