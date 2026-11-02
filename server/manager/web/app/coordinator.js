@@ -475,12 +475,15 @@
       }),
       report,
       research,
-      strategyLibrary: (pageContext, scope, objectKind) => FTStrategyLibraryList.render(
-        pageContext, scope || "public", objectKind || "strategy_family",
-      ),
-      strategy: (pageContext, id, mode, route) => FTStrategyLibraryDetail.render(
-        pageContext, id, mode || "view", route || {},
-      ),
+      strategyLibrary: (pageContext, scope) => {
+        window.location.assign(`/app?${new URLSearchParams({page: "strategies", section: scope || "public"})}`);
+      },
+      strategy: (pageContext, id, mode) => {
+        const query = new URLSearchParams({page: "strategies", section: "mine"});
+        if (id) query.set("object_ref", id);
+        if (mode === "create" || mode === "edit") query.set("mode", mode);
+        window.location.assign(`/app?${query}`);
+      },
       researchDetail: (pageContext, id) => FTResearchCatalog.detail(
         pageContext, pageContext.content, id,
       ),

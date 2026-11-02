@@ -610,11 +610,17 @@ class CoreGetRoutesMixin:
             return True
         # Retired catalog URLs only select canonical React views; they never render legacy editors.
         set_route = re.fullmatch(r"/factors/(sets|set|families|family|factor)(?:/([^/]+))?/?", parsed.path)
-        if set_route or parsed.path == "/factors":
+        strategy_route = re.fullmatch(r"/strategies(?:/([^/]+))?/?", parsed.path)
+        if set_route or parsed.path == "/factors" or strategy_route:
             query = parse_qs(parsed.query)
-            target = unquote((set_route.group(2) or "") if set_route else "")
-            section = set_route.group(1) if set_route else "factor"
-            values = {"page": "factors", "section": {"sets":"sets", "set":"sets", "families":"families", "family":"families", "factor":"factors"}[section]}
+            if strategy_route:
+                target = unquote(strategy_route.group(1) or "")
+                scope = query.get("scope", ["mine" if target else "public"])[0]
+                values = {"page": "strategies", "section": scope if scope in {"mine", "public", "shared", "subordinates", "strategyFamilies"} else "mine"}
+            else:
+                target = unquote((set_route.group(2) or "") if set_route else "")
+                section = set_route.group(1) if set_route else "factor"
+                values = {"page": "factors", "section": {"sets":"sets", "set":"sets", "families":"families", "family":"families", "factor":"factors"}[section]}
             if target and target != "new":
                 values["object_ref"] = target
             mode = str(query.get("mode", ["create" if target == "new" else ""])[0])

@@ -10,7 +10,7 @@ import { ObjectReference } from "./object-reference.tsx";
 import { formatDate } from "../format.ts";
 import { notify } from "../notifications/core.ts";
 type Row = Record<string, any>;
-export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row | null; onUpdated: (strategy: Row) => void; onRemoved: () => void }): React.ReactElement {
+export function StrategyDetail({ detail, onUpdated, onRemoved, initialEdit=false }: { detail: Row | null; onUpdated: (strategy: Row) => void; onRemoved: () => void; initialEdit?:boolean }): React.ReactElement {
   const { t } = useTranslation(); const strategy = detail?.strategy || detail;
   const [tab, setTab] = useState("overview"), [selectedRef, setSelectedRef] = useState("");
   const [source, setSource] = useState<Row | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState("");
@@ -19,6 +19,7 @@ export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row |
   const [principal, setPrincipal] = useState("");
   const editRequest = useRef<AbortController | null>(null);
   const actionPending = useRef(false);
+  const openedEditor = useRef(false);
   useEffect(() => () => editRequest.current?.abort(), []);
   const [sharePage, setSharePage] = useState(1), [shareSize, setShareSize] = useState(20);
   const [retry, setRetry] = useState(0);
@@ -41,6 +42,10 @@ export function StrategyDetail({ detail, onUpdated, onRemoved }: { detail: Row |
     try { const data = await request(`/api/strategy-library/strategies/${encodeURIComponent(strategy.strategy_ref)}?include_source=1`, { signal: controller.signal }); if (!controller.signal.aborted) setEditing(data.strategy); }
     catch (reason) { if (!controller.signal.aborted) notify({code:"strategy.edit.load.failed",type:"error",message:t("loadFailed"),description:(reason as Error).message}); } finally { if (!controller.signal.aborted) setLoading(false); }
   };
+  useEffect(()=>{
+    if(!initialEdit||openedEditor.current||!strategy?.access?.can_edit)return;
+    openedEditor.current=true;void edit();
+  },[initialEdit,strategy?.strategy_ref,strategy?.access?.can_edit]);
   const action = async (suffix: string, method: string, body?: Row): Promise<void> => {
     if (actionPending.current) return;
     actionPending.current = true;
