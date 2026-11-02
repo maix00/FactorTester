@@ -1,13 +1,6 @@
-export type AuthenticationEntry = {
-  public_registration_enabled?: boolean;
-  authentication_provider?: "manager" | "keycloak";
-};
-
-export function managerRegistrationEnabled(entry: AuthenticationEntry | null): boolean {
-  return Boolean(
-    entry?.public_registration_enabled
-    && entry.authentication_provider !== "keycloak",
-  );
+/** The application never falls back to local account/password authentication. */
+export function keycloakLoginAvailable(entry: {authentication_provider?: string} | null): boolean {
+  return entry?.authentication_provider === "keycloak";
 }
 
 /** Map only known OIDC outcomes to user-facing translations. */

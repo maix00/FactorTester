@@ -17,8 +17,8 @@
 | A03 | 自由分栏、布局保存恢复 | app/tab-workspace.js | 原生 | DockView；旧布局语义不强行复制 |
 | A04 | 前进/后退、对象深链接、返回来源 | app/navigation.js, tab-return.js | 部分 | 尚缺通用旧对象 URL → 新页面参数映射 |
 | A05 | 页面草稿、离开保护与状态恢复 | app/tab-view-cache.js | 部分 | 测试有草稿；库编辑关闭保护待补 |
-| A06 | 登录、保持登录、退出 | app/auth.js | 部分 | /app 侧栏/移动端账户菜单及设置均有入口；原生表单、cookie 会话、注销失败保留身份、principal 隔离布局；1440/390 中英文 API 回放检查通过，部署服务验收待做 |
-| A07 | 注册开关、访客设备认证 | app/auth.js, visitor-device.js | 部分 | 原生注册复用 /auth/register，关闭注册和密码不一致不提交；访客登录按需复用同一 visitor-device helper（非旧页面），登记失败不撤销有效会话；真实设备/公网权限待验收 |
+| A06 | 登录、保持登录、退出 | app/auth.js | 部分 | /app 侧栏/移动端账户菜单及设置均有入口；Keycloak OIDC 登录与 cookie 会话；已删除 React 密码/注册回退，未知 provider 拒绝启用登录；注销失败保留身份、principal 隔离布局；DOM/类型检查通过，当前版本视觉及真实登录待验收 |
+| A07 | 注册开关、访客设备认证 | app/auth.js, visitor-device.js | 部分 | 已移除 React 自建注册及访客设备脚本登录回退；公开访客保留合规入口，用户创建由 Keycloak 管理；真实访客设备及公网权限待验收 |
 | A08 | 按角色/权限显示模块 | app/navigation.js | 部分 | 新侧栏固定注册；不能据此认定权限开放 |
 | A09 | 中英文、时间/数字格式 | core/i18n.js | 原生 | 审核服务端枚举与辅助功能名称 |
 | A10 | 公共通知、去重、关闭、自动消除 | app/runtime.js（createNoticeQueue） | 原生 | 复用 React 通知队列 |

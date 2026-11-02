@@ -2,10 +2,9 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useTranslation } from "react-i18next";
 import { Brand } from "./components/brand.tsx";
 import { CloseOutlined } from "@ant-design/icons";
-import { loadScript } from "./assets.ts";
-import { request } from "./configuration/api.ts";
+import { Button } from "antd";
 import { notify } from "./notifications/core.ts";
-import { keycloakErrorKey, managerRegistrationEnabled } from "./auth-model.ts";
+import { keycloakErrorKey, keycloakLoginAvailable } from "./auth-model.ts";
 import { LocalResearchProvider } from "./local-research-context.tsx";
 
 export type AuthSession = {
@@ -30,17 +29,16 @@ type PublicEntry = {
   public_registration_enabled?: boolean;
   require_device_auth?: boolean;
   public_server?: boolean;
-  authentication_provider?: "manager" | "keycloak";
+  authentication_provider?: string;
 };
 
 type AuthContextValue = {
   session: AuthSession;
   logout: () => Promise<void>;
-  openAuth: (mode:"login"|"register")=>void;
-  registrationEnabled:boolean;
+  openAuth: (mode:"login")=>void;
 };
 
-const AuthContext = createContext<AuthContextValue>({ session: null, logout: async () => undefined, openAuth:()=>undefined, registrationEnabled:false });
+const AuthContext = createContext<AuthContextValue>({ session: null, logout: async () => undefined, openAuth:()=>undefined });
 
 export function useAuth(): AuthContextValue {
   return useContext(AuthContext);
@@ -63,7 +61,7 @@ function currentPath(): string {
 
 export function AuthGate({ children, mobile = false }: { children: React.ReactNode; mobile?: boolean }): React.ReactElement {
   const {t}=useTranslation();
-  const [dialogMode,setDialogMode]=useState<"login"|"register"|null>(null);
+  const [dialogMode,setDialogMode]=useState<"login"|null>(null);
   const [session, setSession] = useState<AuthSession>(null);
   const [entry, setEntry] = useState<PublicEntry | null>(null);
   const [checking, setChecking] = useState(true);
@@ -111,26 +109,22 @@ export function AuthGate({ children, mobile = false }: { children: React.ReactNo
       if (typeof value.logout_url === "string" && value.logout_url) location.assign(value.logout_url);
     } catch {notify({code:"auth.logout.failed",type:"error",message:t("auth.logoutFailed")});}
   },[t]);
-  const registrationEnabled = managerRegistrationEnabled(entry);
-  const value = useMemo(() => ({session,logout,openAuth:setDialogMode,registrationEnabled}), [session,logout,registrationEnabled]);
-  const authenticated=(next:AuthSession):void=>{notifyNative("session-updated");setSession(next);setDialogMode(null);};
+  const value = useMemo(() => ({session,logout,openAuth:setDialogMode}), [session,logout]);
   if(checking)return <div className="tr-auth-loading" role="status">{t("loading")}</div>;
   return <AuthContext.Provider value={value}>
     {session ? <div key={session.username||"session"} className="tr-authenticated-app" inert={Boolean(dialogMode)} aria-hidden={dialogMode?true:undefined}><LocalResearchProvider session={session} mobile={mobile}>{children}</LocalResearchProvider></div>:null}
-    {!session || dialogMode ? <AuthOverlay key={dialogMode||"login"} mode={dialogMode||"login"} entry={entry} unavailable={unavailable} authError={authError}
-      onClose={session?()=>setDialogMode(null):undefined} onAuthenticated={authenticated}/>:null}
+    {!session || dialogMode ? <AuthOverlay key={dialogMode||"login"} entry={entry} unavailable={unavailable} authError={authError}
+      onClose={session?()=>setDialogMode(null):undefined}/>:null}
   </AuthContext.Provider>;
 }
 
-function AuthOverlay({ entry, unavailable, authError, onAuthenticated, mode:initialMode, onClose }: {
-  mode:"login"|"register"; onClose?:()=>void;
+export function AuthOverlay({ entry, unavailable, authError, onClose }: {
+  onClose?:()=>void;
   entry: PublicEntry | null;
   unavailable: boolean;
   authError: string;
-  onAuthenticated: (session: AuthSession) => void;
 }): React.ReactElement {
   const { t } = useTranslation();
-  const [mode,setMode]=useState(initialMode);
   const card=useRef<HTMLElement>(null);
   useEffect(()=>{
     const prior=document.activeElement as HTMLElement|null;
@@ -146,62 +140,16 @@ function AuthOverlay({ entry, unavailable, authError, onAuthenticated, mode:init
     document.addEventListener('keydown',escape);
     return ()=>{document.removeEventListener('keydown',escape);queueMicrotask(()=>{if(prior?.isConnected)prior.focus();});};
   },[onClose]);
-  const [organization,setOrganization]=useState("");
-  const [confirmation,setConfirmation]=useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [redirect, setRedirect] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const compliance = String(entry?.compliance_notice || "").trim()
     || t("auth.complianceFallback");
   const publicGate = Boolean(entry?.require_device_auth || entry?.public_server);
   const fullCompliance = `/compliance?next=${encodeURIComponent(currentPath())}`;
-  const keycloakMode = entry?.authentication_provider === "keycloak";
-  const displayMode = keycloakMode ? "login" : mode;
+  const keycloakMode = keycloakLoginAvailable(entry);
   const startKeycloakLogin = (): void => {
     location.assign(`/auth/oidc/start?next=${encodeURIComponent(currentPath())}`);
   };
   const errorKey = keycloakErrorKey(authError);
   const keycloakErrorMessage = errorKey ? t(`auth.keycloakErrors.${errorKey}`) : "";
-
-  const submit = async (event: React.FormEvent): Promise<void> => {
-    event.preventDefault();
-    setError("");
-    if(mode==="register" && password!==confirmation){setError(t("auth.passwordMismatch"));return;}
-    if(mode==="register" && !entry?.public_registration_enabled)return;
-    setRedirect("");
-    setSubmitting(true);
-    try {
-      const response = await fetch(mode==="register"?"/auth/register":"/auth/login", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ username, password, ...(mode==="register"?{organization_id:organization}:{}) }),
-      });
-      const value = await readJSON(response);
-      if (!response.ok || !value.success) {
-        const message = String(value.error || t("auth.loginFailed"));
-        setError(message);
-        if (value.redirect) setRedirect(String(value.redirect));
-        return;
-      }
-      const {username:principal,alias,role,capabilities,admin_capabilities,visitor_login}=value;
-      if(visitor_login){
-        try {
-          await loadScript("/research-static/app/visitor-device.js");
-          const devices=(window as Window & {FTVisitorDevice?:{ensureForSession:(context:{api:typeof request},session:AuthSession)=>Promise<unknown>}}).FTVisitorDevice;
-          if(!devices)throw new Error("Device enrollment unavailable");
-          await devices.ensureForSession({api:request},{username:principal,visitor_login});
-        } catch {notify({code:"auth.device.failed",type:"error",message:t("auth.deviceEnrollmentFailed")});}
-      }
-      onAuthenticated({username:principal,alias,role,capabilities,admin_capabilities,visitor_login});
-    } catch {
-      setError(t("auth.networkFailed"));
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return (
     <div className="tr-auth-overlay" role="dialog" aria-modal="true" aria-labelledby="tr-auth-title">
@@ -210,42 +158,14 @@ function AuthOverlay({ entry, unavailable, authError, onAuthenticated, mode:init
           {onClose?<button type="button" className="tr-auth-close" onClick={onClose} aria-label={t("close")}><CloseOutlined/></button>:null}
           <Brand />
 
-          <h1 id="tr-auth-title">{displayMode==="register"?t("auth.register"):t("auth.title")}</h1>
-          <p>{displayMode==="register"?t("auth.registerHint"):t("auth.hint")}</p>
+          <h1 id="tr-auth-title">{t("auth.title")}</h1>
         </header>
-        {keycloakMode ? <div className="tr-auth-form">
-          <button type="button" className="tr-auth-submit" onClick={startKeycloakLogin}>{t("auth.keycloakSignIn")}</button>
+        <div className="tr-auth-form">
+          <button type="button" className="tr-auth-submit" disabled={!keycloakMode || unavailable} onClick={startKeycloakLogin}>{t("auth.keycloakSignIn")}</button>
           {publicGate?<a className="tr-auth-redirect" href={fullCompliance}>{t("auth.publicVisitorEntry")}</a>:null}
           {keycloakErrorMessage ? <p className="tr-auth-error" role="alert">{keycloakErrorMessage}</p> : null}
-          {unavailable ? <p className="tr-auth-error" role="alert">{t("auth.unavailable")}</p> : null}
-        </div> : <>
-        <nav className="tr-auth-switch" aria-label={t("auth.account")}>
-          <button type="button" aria-pressed={mode==="login"} onClick={()=>{setMode("login");setError("");}}>{t("auth.signIn")}</button>
-          {entry?.public_registration_enabled?<button type="button" aria-pressed={mode==="register"} onClick={()=>{setMode("register");setError("");}}>{t("auth.register")}</button>:null}
-        </nav>
-        {mode==="register"&&!entry?.public_registration_enabled?<p role="status">{entry?.registration_notice||t("auth.registrationClosed")}</p>:<form className="tr-auth-form" onSubmit={submit}>
-          <label>
-            <span>{t("auth.username")}</span>
-            <input value={username} onChange={(event) => setUsername(event.target.value)}
-              autoComplete="username" autoFocus required maxLength={mode === "register" ? 32 : undefined} disabled={submitting} />
-          </label>
-          {mode === "register" ? <small className="tr-auth-alias-hint">{t("auth.aliasHint")}</small> : null}
-          <label>
-            <span>{t("auth.password")}</span>
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)}
-              autoComplete={mode==="register"?"new-password":"current-password"} required disabled={submitting} />
-          </label>
-          {mode==="register"?<>
-            <label><span>{t("auth.confirmPassword")}</span><input type="password" autoComplete="new-password" required value={confirmation} onChange={event=>setConfirmation(event.target.value)} disabled={submitting}/></label>
-            <label><span>{t("auth.organization")}</span><input value={organization} onChange={event=>setOrganization(event.target.value)} disabled={submitting}/></label>
-          </>:null}
-          <button type="submit" className="tr-auth-submit" disabled={submitting || !username || !password}>
-            {submitting ? t(mode==="register"?"auth.registering":"auth.signingIn") : t(mode==="register"?"auth.register":"auth.signIn")}
-          </button>
-          {error ? <p className="tr-auth-error" role="alert">{error}</p> : null}
-          {redirect ? <a className="tr-auth-redirect" href={redirect}>{t("auth.guidedLogin")}</a> : null}
-          {unavailable ? <p className="tr-auth-error" role="alert">{t("auth.unavailable")}</p> : null}
-        </form>}</>}
+          {unavailable || !keycloakMode ? <div role="alert"><p className="tr-auth-error">{t("auth.unavailable")}</p><Button onClick={()=>location.reload()}>{t("retry")}</Button></div> : null}
+        </div>
         <footer>
           <details className="tr-auth-access"><summary>{t("auth.accessInformation")}</summary>
             <p>{compliance}</p>

@@ -88,3 +88,5 @@ Manager 与 7997 数据面共用 Keycloak Research 授权工厂；发布投影�
 真实内网只读 staging 计划（2026-11-02）：25 个研究中 7 个可完整准备（29 个资源、14 条授权），18 个 needs_repair；没有全局孤立引用错误。原因按研究分组计数：3 个含未验证的动态上级规则、13 个含非活动对象、15 个含未映射 owner、15 个含未映射活跃成员/Profile 主体，原因可能重叠。计划仅在内存中生成，未写 Keycloak、未切换数据库；不能把 ready 视为已迁移。公网部署缺少 inventory 模块，已通过只读 SQL 聚合确认数量和摘要，未向公网传输未发布实现。
 
 CLI 移除旧 `research reports publication settings/unpublish` 和 PublicResearchClient 对应方法、outbox 新建 revoke 操作；授权使用 `research grant/grants`，撤权使用 `research grant --revoke`。历史 revoke 队列只读保留并转为显式迁移冲突，不再请求旧服务端 API或当作成功完成。内容 publication publish 及其旧分支消费者仍需迁往统一 CouchDB 发布路径，未声称旧发布客户端已完整移除。
+
+React 登录切换：移除密码、密码确认、机构注册字段，以及 POST /auth/login 和 /auth/register 的客户端回退；账户菜单移除自建注册。只允许明确的 keycloak provider 启用 OIDC 登录；旧/未知/缺失 provider 显示不可用并允许重试，保留合规和公网访客入口、注销与原生会话通知。桌面/移动静态包已重建，未重新下载依赖。35 项模型/桥测试、登录组件 DOM 渲染检查及 TypeScript 通过；DOM 检查不是视觉验收，Browser 仍被 Work 设置禁用。真实内网 public entry 返回 keycloak、关闭注册。
