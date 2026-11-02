@@ -138,6 +138,24 @@ def main() -> int:
             if expected_role and session.get("role") != expected_role:
                 raise SystemExit("Manager role does not match migration acceptance")
             checks = ["react_login_entry", "manager_login", "verified_session"]
+            if os.environ.get('KEYCLOAK_VERIFY_REFRESH') == '1':
+                if not any(c['name'] == 'tr-oidc-refresh' and c['httpOnly']
+                           for c in context.cookies(manager)):
+                    raise SystemExit('Login did not issue an HttpOnly refresh credential')
+                # Model an idle browser whose access cookie has expired. Keep
+                # its real Keycloak refresh credential; no realm TTL mutation.
+                context.clear_cookies(name='ft-manager-session')
+                renewed = page.evaluate("""async () => Promise.all(Array.from({length: 8}, async () => {
+                    const r = await fetch('/api/session', {cache:'no-store'});
+                    const s = await r.json();
+                    return {status:r.status, subject:s.keycloak_subject};
+                }))""")
+                if any(r['status'] != 200 or r.get('subject') != session['keycloak_subject']
+                       for r in renewed):
+                    raise SystemExit('Concurrent browser refresh failed or changed identity')
+                if not any(c['name'] == 'ft-manager-session' for c in context.cookies(manager)):
+                    raise SystemExit('Refresh did not restore the access cookie')
+                checks.append('concurrent_browser_refresh:8')
             directory = context.request.get(manager + "/api/admin/account-directory")
             is_admin = session.get('role') in {'super_admin', 'org_admin', 'level_admin'}
             if directory.status != (200 if is_admin else 403):

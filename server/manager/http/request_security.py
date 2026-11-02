@@ -271,14 +271,42 @@ class RequestSecurityMixin:
         scheme, _, supplied = self.headers.get("Authorization", "").partition(" ")
         if scheme.lower() == "bearer" and supplied:
             return supplied.strip()
+        if hasattr(self, '_browser_access_token'):
+            return self._browser_access_token
         # Embedded documentation/database pages are ordinary browser
         # navigations and cannot attach the SPA Authorization header.  The
         # Manager login cookie is HttpOnly and is therefore only parsed here.
-        for item in self.headers.get("Cookie", "").split(";"):
-            name, separator, value = item.strip().partition("=")
-            if separator and name == "ft-manager-session":
-                return value.strip()
-        return ""
+        token = self._cookie_value('ft-manager-session')
+        refresh = self._cookie_value('tr-oidc-refresh')
+        if refresh and self._has_secure_ui_transport():
+            from server.identity.keycloak import jwt_claims
+            import time
+            try:
+                # Unverified expiry is only a refresh scheduling hint. It never
+                # grants access: state.session verifies the resulting token.
+                expires = float(jwt_claims(token).get('exp') or 0) if token else 0
+            except (ValueError, TypeError, KeyError, IndexError, UnicodeError, AttributeError):
+                expires = 0
+            if expires <= time.time() + 30:
+                from server.identity.manager_oidc import refresh_browser_tokens
+                from urllib.error import HTTPError
+                from server.identity.keycloak_authorization import AuthorizationUnavailable
+                try:
+                    result = refresh_browser_tokens(refresh)
+                    token = result['access_token']
+                    self._oidc_response_cookies = [
+                        self._session_cookie(token),
+                        self._refresh_cookie(result['refresh_token'], max_age=result['refresh_expires_in']),
+                    ]
+                except HTTPError as exc:
+                    if exc.code not in {400, 401}:
+                        self._oidc_temporarily_unavailable = True
+                except PermissionError:
+                    pass
+                except (OSError, ValueError, TypeError, AuthorizationUnavailable):
+                    self._oidc_temporarily_unavailable = True
+        self._browser_access_token = token
+        return token
 
     def _cookie_value(self, name: str) -> str:
         for item in self.headers.get("Cookie", "").split(";"):
@@ -813,6 +841,11 @@ class RequestSecurityMixin:
                 return True
 
         session = self._session()
+        if getattr(self, '_oidc_temporarily_unavailable', False):
+            json_response(self, {'success': False, 'error': 'authentication service temporarily unavailable',
+                                 'code': 'authentication_unavailable'}, 503,
+                          headers={'Retry-After': '5'})
+            return False
         device_gate_required = (
             self.state.require_device_auth
             and not self._is_loopback_client()
@@ -852,9 +885,7 @@ class RequestSecurityMixin:
                         "HTTPS is required for public Manager access"
                         if status == 400
                         else (
-                            "device authentication required"
-                            if self.state.require_device_auth
-                            else "login required"
+                            "login required"
                         )
                     ),
                 },
