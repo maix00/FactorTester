@@ -138,14 +138,16 @@ only the namespace flags and mount operations Bubblewrap requires. It does not
 enable new network/time namespaces or `ptrace`. Re-audit the profile against
 the deployed Docker default when upgrading the engine.
 
-For a **reviewed, unchanged** Python/alpha base, a one-off BuildKit
-`manager-base=docker-image://<existing-image>` named-context override builds
-only the Agent layers without downloading Python packages. Check the base
-image's Python/alpha provenance first; an old image without a build identity
-does not prove which alpha revision it contains. A normal build without the
-override builds the Python and alpha inputs from source. Keep the running image
-available until the candidate's sandbox and login checks pass, so rollback uses
-the existing image tag/ID.
+For a **reviewed, unchanged** Python/system dependency base, a one-off BuildKit
+`manager-base=docker-image://<immutable-image-id>` named-context override reuses
+installed Python packages without downloading them. Verify the base's Python
+ABI, installed requirements and system dependencies first. The separate
+`manager-runtime` stage always builds and installs the checked-out alpha wheel
+with `--no-deps --force-reinstall`, even if the reused image contains an older
+alpha. Both the CLI and Agent layers consume that refreshed runtime. A normal
+build without the override builds all inputs from source. Keep the running
+image available until the candidate's sandbox and login checks pass, so
+rollback uses the existing image tag/ID.
 
 ## Public-node variant
 

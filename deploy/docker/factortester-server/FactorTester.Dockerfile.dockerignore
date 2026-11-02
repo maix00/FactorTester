@@ -19,3 +19,12 @@
 !vendor/py-alpha-lib/**
 vendor/py-alpha-lib/.git
 vendor/py-alpha-lib/target
+# Nested adapter/workspace caches are never build inputs.
+**/target
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/.DS_Store
+**/*.pyc
+**/*.so
+**/*.dylib
