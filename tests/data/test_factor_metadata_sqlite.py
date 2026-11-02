@@ -53,15 +53,8 @@ def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatc
     )
     monkeypatch.setattr(
         factor_metadata_sqlite,
-        "_load_accounts",
-        lambda: [
-            {
-                "username": "default$alice@1",
-                "alias": "alice",
-                "organization_id": "default",
-                "organization_name": "默认机构",
-            }
-        ],
+        "_account_map",
+        lambda: {"default$alice@1": "alice"},
     )
     monkeypatch.setattr(
         factor_metadata_sqlite,
@@ -125,7 +118,7 @@ def test_factor_metadata_loads_sources_before_opening_write_connection(monkeypat
 
     monkeypatch.setattr(factor_metadata_sqlite, "_load_public_factors", _load_public_from_source_store)
     monkeypatch.setattr(factor_metadata_sqlite, "_load_custom_factors", lambda username: [])
-    monkeypatch.setattr(factor_metadata_sqlite, "_load_accounts", lambda: [])
+    monkeypatch.setattr(factor_metadata_sqlite, "_account_map", lambda: {})
 
     path = factor_metadata_sqlite.ensure_factor_metadata_sqlite_store()
     assert path == str(sqlite_path)

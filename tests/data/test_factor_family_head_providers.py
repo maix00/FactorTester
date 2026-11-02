@@ -29,3 +29,30 @@ def test_same_alias_tombstone_is_owner_scoped(tmp_path, monkeypatch):
         entity_id='custom:Mm', payload={}, manager_id='a', deleted=True)
     payload = {'source_kind': 'custom', 'factor_id': 'Mm', 'owner_username': 'bob'}
     assert list(legacy_source_manifests([{'principal': 'bob', 'payload': payload}], 'custom', 'bob')) == [payload]
+
+
+@pytest.mark.parametrize('deleted', [False, True])
+def test_couchdb_catalog_applies_committed_owner_head(tmp_path, monkeypatch, deleted):
+    from tools.data.sqlite.factor_metadata import list_factor_summaries
+    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+    from server.jobs.storage import couchdb_reports
+
+    monkeypatch.setattr(settings, 'CACHE_DB_PATH', tmp_path / 'db.sqlite')
+    monkeypatch.setenv('TRADERESEARCH_COUCHDB_AUTHORITY', '1')
+    monkeypatch.setenv('FACTORTESTER_COUCHDB_URL', 'http://unused.invalid')
+    monkeypatch.setattr(couchdb_reports, 'CouchDBObjectStore', lambda *args: object())
+    monkeypatch.setattr(CouchDBLibraryReader, 'factor_families', lambda *args: [
+        {'owner_ref': 'alice', 'factor_id': 'F', 'catalog': {'description': 'stale'}},
+    ])
+    monkeypatch.setattr(CouchDBLibraryReader, 'factor_family_heads', lambda *args: [])
+    store = LocalAccountDomainStore(settings.CACHE_DB_PATH)
+    for owner in ('alice', 'bob'):
+        store.upsert_local(principal=owner, entity_type='factor_family',
+            entity_id='custom:F', payload={'factor_id': 'F', 'description': owner},
+            manager_id='a', deleted=deleted if owner == 'alice' else False)
+    values = list_factor_summaries('custom', 'alice')
+    assert values == ([] if deleted else [
+        {'factor_id': 'F', 'description': 'alice', 'owner_username': 'alice'},
+    ])
+    # Explicit snapshot reads retain the CouchDB snapshot without overlay.
+    assert list_factor_summaries('custom', 'alice', include_heads=False)[0]['description'] == 'stale'

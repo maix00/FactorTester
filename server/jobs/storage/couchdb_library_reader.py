@@ -114,9 +114,9 @@ class CouchDBLibraryWriter:
     def upsert_factor_family(self, source_kind: str, owner_ref: str, row: dict) -> None:
         import json
 
-        factor_id = str(row.get("factor_id") or "").strip()
+        factor_id = str(row.get("factor_id") or row.get("id") or "").strip()
         if not factor_id:
-            return
+            raise ValueError("factor family identity is required")
         doc_id = f"factor-family:{owner_ref or 'public'}:{factor_id}"
         try:
             status, body = self.store._request("GET", doc_id)
