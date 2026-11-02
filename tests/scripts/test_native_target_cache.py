@@ -80,6 +80,7 @@ def test_cli_runs_under_existing_build_lock_and_reports_budget(tmp_path):
     assert '"action": "retained"' in result.stdout
     assert 'native build exit=0' in result.stdout
     build_script = Path(cache.__file__).with_name('native_wheel_build.sh').read_text()
+    assert '${NAUTILUS_TARGET_CACHE_MAX_GB:-6}' in build_script
     assert build_script.count('python3 "$ROOT/scripts/server/native_target_cache.py"') == 2
     assert build_script.index('refusing to build Nautilus on the public application host') < build_script.index(
         'python3 "$ROOT/scripts/server/native_target_cache.py"')

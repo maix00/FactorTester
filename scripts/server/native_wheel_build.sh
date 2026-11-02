@@ -50,7 +50,9 @@ fi
 echo "native wheel cache=miss build_id=$BUILD_ID reason=missing-or-invalid-wheel-receipt"
 bash "$ROOT/scripts/server/check_local_build_capacity.sh"
 mkdir -p "$CACHE/cargo/registry" "$CACHE/cargo/git" "$TARGET_CACHE"
-limit_gb="${NAUTILUS_TARGET_CACHE_MAX_GB:-4}"
+# Full adapter dependencies alone exceeded 4 GiB in the representative Linux
+# build. A 6 GiB ceiling retains those crates after dropping incremental state.
+limit_gb="${NAUTILUS_TARGET_CACHE_MAX_GB:-6}"
 [[ "$limit_gb" =~ ^[1-9][0-9]*$ ]] || { echo "invalid target cache budget" >&2; exit 2; }
 # Never build on the public application host. It must pull a finished wheel
 # from the intranet builder; a 3 GiB Rust build alongside CouchDB/app caused an

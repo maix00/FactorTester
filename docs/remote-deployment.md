@@ -50,7 +50,9 @@ Keycloak、CouchDB、RabbitMQ 和独立计算/数据节点由各自的部署项�
 
 默认保留最新三个 verified 应用版本；可以用 `FACTORTESTER_PUBLIC_RELEASE_RETENTION` 调整。清理仅允许删除匹配 `factortester-public:<40 位 SHA>` 的旧应用镜像和相应 release，不删除 PostgreSQL 镜像、数据卷、其他 Compose 项目或 Docker 全局缓存。
 
-本机原生构建在同一独占锁内管理自有 `target-reusable`，默认限额 4 GiB。超限时先
+本机原生构建在同一独占锁内管理自有 `target-reusable`，默认限额 6 GiB，可用
+`NAUTILUS_TARGET_CACHE_MAX_GB` 调整。完整适配器构建的已编译依赖实测超过 4 GiB，
+因此更小预算会丢弃这部分复用能力。超限时先
 删除可重建的 `release/incremental`，保留已编译依赖；仍超限才移除该自有 target。
 构建前和构建后均检查，已完成 wheel 保存在 target 之外。外部 target 超限时拒绝并
 保持原样，不清理其他构建目录或正在运行的构建。该策略保留可用缓存，但不保证所有
