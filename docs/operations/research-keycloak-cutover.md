@@ -104,3 +104,7 @@ React 登录切换：移除密码、密码确认、机构注册字段，以及 P
 2026-11-02 设备迁移补充：设备 inventory/stage 工具可用 `--manager-state-root` 读取所选 Manager 的既有控制库设置，复用环境优先于设置文件的运行规则；不启动 ManagerState 或初始化 schema。19 项聚焦测试通过。使用临时真实 Keycloak＋PostgreSQL 的 `scripts.test.keycloak_device_smoke` 通过备份恢复与 CLI 迁移、所有者允许、其他用户/密钥拒绝、同 token 撤权拒绝，临时容器自动清理。
 
 实际只读设备盘点：两端均 3 个稳定用户、6 个精确新旧用户名；匹配 14 条设备记录，全部属于公网 `remote-main` 且启用，内网盘点正确报告 outside_manager。尚未证明实际 Keycloak use 授权。公网 entrypoint 将控制库 secret 仅导出给其子进程，普通 docker exec 的环境缺少该 URL，不可据此声称 Manager 未配置控制库；采用与 entrypoint 相同的受保护配置来源后，已完成只读聚合并确认上述所有权。公网已部署版本没有新版 keycloak_device 和 keycloak_policy_evaluation 模块，当前未做线上迁移或发布。不得把启用标记或临时演练当作现网切换完成。
+
+2026-11-02 身份标签与真实实例核对：本机 `/app` 使用用户授权的 MaxJJW 账户完成真实 Keycloak 网页登录，`/api/session` 为超级管理员，username 保留受管理的旧主体标签，研究/报告接口分别返回 10/11 条可见记录。登录名、跨 Manager 的 tr_identity_id、realm 内 sub 和历史 tr_username 必须区分；保留历史引用不等于创建新用户，也不能被用作本地权限绕过。随后直接检查目标 Keycloak 命名空间，现有三个稳定用户的 10 个研究和 11 个报告均缺少对应资源，故当前实例尚未满足新授权路径切换验收。认证成功与资源授权迁移完成是不同结论；本次登录可能触发身份懒同步，不能称为纯数据库只读。
+
+研究授权演练增强：`scripts.test.keycloak_research_grant_smoke` 现在使用生产 identity_mappers 和 UserSessionVerifier，从真实 token 验证三个不同登录名对应其历史主体；Research 与 Profile 均使用真实 Keycloak 授权器，新增同用户 self/work、多用户同名 work 的隔离及同 token 撤权验证。撤销一项 Research read 不会错误地撤销独立的 Profile read，所有实际 read 来源撤销后才拒绝；旧 owner/member 元数据不能恢复权限。真实 Manager HTTP＋Keycloak＋CouchDB 的可编辑报告、两客户端/新设备双向同步、冲突恢复及共享 realm 的双 Manager 演练亦再次通过。Agent 运行准入仍是明确测试替身；另两个 smoke 使用的 NoProfileGrants 测试辅助类尚保留，不据此声称其 Profile 路径全部已覆盖。

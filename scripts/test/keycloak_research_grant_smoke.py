@@ -2,8 +2,8 @@
 """Exercise Research explicit grants against a disposable local Keycloak.
 
 No existing realm is modified and no image or Python package is downloaded.
-The Profile-membership provider is a denial-only test double: the exercised
-Research grant, token introspection, UMA decisions and SQLite catalog are real.
+Research and exact Profile grants use real Keycloak decisions. Agent runtime
+admission in the page-assistance check remains an explicit test double.
 """
 from __future__ import annotations
 
@@ -19,9 +19,11 @@ from urllib.parse import urlencode
 
 from scripts.test.keycloak_cross_realm_smoke import Sandbox
 from server.identity.keycloak import ServiceOIDCClient
+from server.identity.keycloak_profile import identity_mappers
+from server.identity.user_session import UserSessionVerifier
 from server.identity.keycloak_authorization import ensure_keycloak_resource
 from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
-from server.identity.keycloak_research import KeycloakResearchAuthorization, KeycloakResearchGrantManager
+from server.identity.keycloak_research import KeycloakResearchAuthorization, KeycloakResearchGrantManager, profile_resource_ref
 from server.identity.request_context import bind_verified_identity, identity_request
 from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
@@ -31,37 +33,32 @@ class NoProfileGrants:
         return {pair: {"can_view": False, "can_download": False} for pair in profiles}
 
 
-def run(sandbox, *, on_ready=None):
+def run(sandbox, *, on_ready=None, renamed_logins=False):
     realm, client_id = "research-grant", "research-client"
     secret, password = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
     sandbox.request("POST", "/admin/realms", token=sandbox.admin, body={
         "realm": realm, "enabled": True, "sslRequired": "none", "registrationAllowed": False,
     })
     profile = sandbox.api("GET", realm, "users/profile")
-    profile["attributes"].append({"name": "tr_identity_id", "displayName": "Stable ID",
-                                  "permissions": {"view": ["admin"], "edit": ["admin"]}})
+    for attribute in ("tr_identity_id", "legacy_username"):
+        profile["attributes"].append({"name": attribute, "displayName": attribute,
+                                      "permissions": {"view": ["admin"], "edit": ["admin"]}})
     sandbox.api("PUT", realm, "users/profile", profile)
     sandbox.api("POST", realm, "clients", {"clientId": client_id, "enabled": True,
         "protocol": "openid-connect", "publicClient": False, "secret": secret,
         "directAccessGrantsEnabled": True, "serviceAccountsEnabled": True,
         "authorizationServicesEnabled": True})
     client_row = sandbox.find(realm, "clients?" + urlencode({"clientId": client_id}), client_id, field="clientId")
-    sandbox.api("POST", realm, "clients/" + client_row["id"] + "/protocol-mappers/models", {
-        "name": "stable-id", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-attribute-mapper",
-        "config": {"user.attribute": "tr_identity_id", "claim.name": "tr_identity_id",
-                   "jsonType.label": "String", "access.token.claim": "true", "introspection.token.claim": "true"},
-    })
-    sandbox.api("POST", realm, "clients/" + client_row["id"] + "/protocol-mappers/models", {
-        "name": "client-audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
-        "config": {"included.client.audience": client_id, "access.token.claim": "true"},
-    })
+    for mapper in identity_mappers(client_id):
+        sandbox.api("POST", realm, "clients/" + client_row["id"] + "/protocol-mappers/models", mapper)
+    logins = {name: "signin-" + name if renamed_logins else name for name in ("owner", "member", "late")}
     for name in ("owner", "member", "late"):
-        sandbox.api("POST", realm, "users", {"username": name, "enabled": True, "emailVerified": True,
+        sandbox.api("POST", realm, "users", {"username": logins[name], "enabled": True, "emailVerified": True,
             "firstName": "Temporary", "lastName": "User", "email": name + "@example.invalid",
-            "attributes": {"tr_identity_id": ["stable-" + name]},
+            "attributes": {"tr_identity_id": ["stable-" + name], "legacy_username": [name]},
             "credentials": [{"type": "password", "value": password, "temporary": False}]})
-    users = {name: sandbox.find(realm, "users?" + urlencode({"username": name, "exact": "true"}),
-                                name, field="username") for name in ("owner", "member", "late")}
+    users = {name: sandbox.find(realm, "users?" + urlencode({"username": logins[name], "exact": "true"}),
+                                logins[name], field="username") for name in ("owner", "member", "late")}
     if on_ready is not None:
         sandbox.api("POST", realm, "clients/" + client_row["id"] + "/roles", {"name": "public_server:login"})
         public_role = sandbox.api("GET", realm, "clients/" + client_row["id"] + "/roles/public_server%3Alogin")
@@ -70,9 +67,10 @@ def run(sandbox, *, on_ready=None):
     client = ServiceOIDCClient(sandbox.base, realm, client_id, client_secret=secret)
     issuer = "http://localhost:8080/realms/" + realm
     sessions = {}
+    verifier = UserSessionVerifier(client, issuer=issuer, audience=client_id)
     for name, row in users.items():
         token = client._token({"grant_type": "password", "client_id": client_id,
-                               "username": name, "password": password})["access_token"]
+                               "username": logins[name], "password": password})["access_token"]
         claims = client.introspect(token)
         if (claims.get("active") is not True or claims.get("iss") != issuer
                 or claims.get("sub") != row["id"] or claims.get("tr_identity_id") != "stable-" + name):
@@ -80,8 +78,13 @@ def run(sandbox, *, on_ready=None):
                 "active": claims.get("active") is True, "issuer": claims.get("iss") == issuer,
                 "subject": claims.get("sub") == row["id"],
                 "stable": claims.get("tr_identity_id") == "stable-" + name}))
-        sessions[name] = (token, {"username": name, "keycloak_issuer": issuer,
-                                  "keycloak_subject": row["id"], "tr_identity_id": "stable-" + name})
+        verified = verifier.session(token, use_cache=False)
+        if (not verified or verified["username"] != name or verified["tr_identity_id"] != "stable-" + name
+                or verified["keycloak_subject"] != row["id"]):
+            raise AssertionError("verified session lost the stable legacy principal")
+        if renamed_logins and claims["preferred_username"] == verified["username"]:
+            raise AssertionError("renamed-login case did not exercise distinct principals")
+        sessions[name] = (token, verified)
     settings = {"base_url": sandbox.base, "realm": realm, "authz_client_id": client_id,
                 "authz_client_secret": secret}
     def by_identity(stable):
@@ -112,8 +115,16 @@ def run(sandbox, *, on_ready=None):
         research = legacy.create_research(owner_ref="owner", title="Temporary")
         ref = research["research_id"]
         ensure_keycloak_resource(resource_type="research", resource_ref=ref, owner_subject=users["owner"]["id"])
-        catalog = ResearchCatalog(database, research_authorizer=KeycloakResearchAuthorization(),
-            profile_authorizer=NoProfileGrants(), profile_grant_manager=manager,
+        # Seed the historical owner's existing self association in Keycloak,
+        # as the real migration must do before enabling Profile authorization.
+        with identity_request():
+            bind_verified_identity(*sessions["owner"])
+            manager.set_profile_membership(actor="owner", research_id=ref,
+                identity_id="stable-owner", subject=users["owner"]["id"], profile_ref="self",
+                role="owner", status="active")
+        authorization = KeycloakResearchAuthorization()
+        catalog = ResearchCatalog(database, research_authorizer=authorization,
+            profile_authorizer=authorization, profile_grant_manager=manager,
             profile_identity_resolver=resolver)
         if on_ready is not None:
             on_ready(sandbox=sandbox, realm=realm, client_id=client_id, client_uuid=client_row['id'],
@@ -121,7 +132,9 @@ def run(sandbox, *, on_ready=None):
                      manager=manager, catalog=catalog, research_id=ref, public_role=public_role)
         with identity_request():
             bind_verified_identity(*sessions["owner"])
-            created = catalog.create_research(owner_ref="owner", title="Keycloak-created Research")
+            created = catalog.create_research(owner_ref="owner", title="Keycloak-created Research", profile_ref="work")
+            assert authorization.may_write_profile(research_id=created["research_id"], viewer="owner", profile_ref="self")
+            assert authorization.may_write_profile(research_id=created["research_id"], viewer="owner", profile_ref="work")
             assert created["access"]["can_manage"] is True
             try:
                 catalog.create_research(owner_ref="owner", title="Must not be public", visibility="public")
@@ -220,11 +233,21 @@ def run(sandbox, *, on_ready=None):
         without_read = {**original, 'scopes': [scope for scope in original['scopes'] if scope != 'read']}
         manager.request(settings, pat, 'PUT', 'uma-policy/' + owner_policy['id'], without_read)
         with identity_request():
-            # The same token is intentionally reused: ownership alone must
-            # never bypass the current Keycloak read decision.
+            # The independent Profile read grant still authorizes discovery.
+            # Revoking a Research grant must not revoke another live grant.
+            bind_verified_identity(*sessions['owner'])
+            assert ref in owned_refs()
+        owner_profile = profile_resource_ref(ref, "stable-owner", "self")
+        manager._reconcile_user_grant(resource_type="research_profile", resource_ref=owner_profile,
+            source="membership", identity_id="stable-owner", subject=users["owner"]["id"], scopes=[])
+        with identity_request():
+            # Once both read paths are revoked, the same token and historical
+            # owner/member metadata cannot restore discovery access.
             bind_verified_identity(*sessions['owner'])
             assert ref not in owned_refs()
         manager.request(settings, pat, 'PUT', 'uma-policy/' + owner_policy['id'], original)
+        manager._reconcile_user_grant(resource_type="research_profile", resource_ref=owner_profile,
+            source="membership", identity_id="stable-owner", subject=users["owner"]["id"], scopes=["read", "use", "write"])
         without_share = {**original, "scopes": [scope for scope in original["scopes"] if scope != "share"]}
         manager.request(settings, pat, "PUT", "uma-policy/" + owner_policy["id"], without_share)
         with identity_request():
@@ -250,14 +273,35 @@ def run(sandbox, *, on_ready=None):
         with sqlite3.connect(database) as db:
             assert {row[0] for row in db.execute("SELECT authorized_users_json FROM research_catalog_researches")} == {"[]"}
             assert db.execute("SELECT count(*) FROM research_catalog_researches WHERE title='Must not be public'").fetchone()[0] == 0
-    return {"real_keycloak": True, "real_catalog": True, "same_token_revocation": True,
+        with identity_request():
+            bind_verified_identity(*sessions["owner"])
+            catalog.add_membership(created["research_id"], actor="owner", principal_ref="member",
+                profile_ref="work", role="viewer")
+        with identity_request():
+            bind_verified_identity(*sessions["member"])
+            assert not authorization.may_write_profile(research_id=created["research_id"], viewer="member", profile_ref="work")
+            profile_access = authorization.profile_membership_access_many(viewer="member", profiles=[(created["research_id"], "work")])
+            assert profile_access[(created["research_id"], "work")]["can_view"]
+        with identity_request():
+            bind_verified_identity(*sessions["owner"])
+            catalog.remove_membership(created["research_id"], actor="owner", principal_ref="member", profile_ref="work")
+        with identity_request():
+            bind_verified_identity(*sessions["member"])
+            profile_access = authorization.profile_membership_access_many(viewer="member", profiles=[(created["research_id"], "work")])
+            assert not profile_access[(created["research_id"], "work")]["can_view"]
+        with identity_request():
+            bind_verified_identity(*sessions["owner"])
+            assert authorization.may_write_profile(research_id=created["research_id"], viewer="owner", profile_ref="work")
+    return {"real_keycloak": True, "real_catalog": True, "renamed_login_principals": renamed_logins,
+            "sessions_verified_by_runtime": True, "same_token_revocation": True,
             "revoked_page_context_removed": True, "real_link_redemption": True,
             "issuer_and_link_revocation": True, "real_research_creation": True, "legacy_acl_written": False,
             "owned_discovery_real_keycloak_revocation": True,
             "local_redeem_seconds": round(redemption_seconds, 3),
-            "profile_membership_provider": "denial-only test double", "agent_runtime_admission": "test double"}
+            "profile_membership_provider": "live Keycloak", "multiple_profiles_one_user": True,
+            "same_profile_different_users_isolated": True, "same_token_profile_revocation": True, "agent_runtime_admission": "test double"}
 
 
 if __name__ == "__main__":
     with Sandbox() as server:
-        print(json.dumps(run(server), sort_keys=True))
+        print(json.dumps(run(server, renamed_logins=True), sort_keys=True))
