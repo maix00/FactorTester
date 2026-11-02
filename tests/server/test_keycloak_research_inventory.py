@@ -73,3 +73,22 @@ def test_snapshot_is_read_only_and_uses_a_consistent_projection(tmp_path):
     snapshot = read_snapshot(db)
     assert snapshot["researches"][0]["research_id"] == "r"
     assert db.read_bytes() == before
+
+
+def test_explicit_aliases_share_one_identity_without_guessing():
+    from scripts.migrations.keycloak_research_inventory import reviewed_identity_map
+    assert reviewed_identity_map([{"username": "alice", "tr_identity_id": "stable", "aliases": ["org@alice@1"]}]) == {"alice": "stable", "org@alice@1": "stable"}
+    with pytest.raises(ValueError, match="duplicate"):
+        reviewed_identity_map([{"username": "alice", "tr_identity_id": "a", "aliases": ["old"]}, {"username": "bob", "tr_identity_id": "b", "aliases": ["old"]}])
+    with pytest.raises(ValueError, match="invalid"):
+        reviewed_identity_map([{"username": "alice", "tr_identity_id": "a", "aliases": "old"}])
+
+
+def test_multiple_profiles_and_legacy_aliases_do_not_inflate_user_count():
+    snapshot = {"researches": [{"research_id": "r", "owner_ref": "old-alice", "status": "active", "visibility": "private", "authorized_users_json": "[]"}], "reports": [], "links": [],
+        "memberships": [{"research_id": "r", "principal_ref": name, "profile_ref": profile, "role": "editor", "status": "active"} for name, profile in [("alice", "self"), ("old-alice", "self"), ("alice", "research-a"), ("alice", "research-b")]]}
+    result = plan(snapshot, [{"username": "alice", "tr_identity_id": "stable", "aliases": ["old-alice"]}], now=0)
+    assert result["summary"]["reviewed_users"] == 1
+    assert result["summary"]["membership_profiles"] == 3
+    assert result["summary"]["unresolved_principals"] == 0
+    assert {member["identity"] for member in result["resources"][0]["memberships"]} == {"stable"}

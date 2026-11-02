@@ -59,6 +59,26 @@ def _explicit(value: Any) -> list[str]:
     return sorted(set(item.strip() for item in parsed))
 
 
+def reviewed_identity_map(accounts: list[dict[str, Any]]) -> dict[str, str]:
+    """Resolve explicitly reviewed aliases; never infer identity from spelling."""
+    identities: dict[str, str] = {}
+    seen: set[str] = set()
+    for account in accounts:
+        name = str(account.get("username") or "").strip()
+        stable = str(account.get("tr_identity_id") or "").strip()
+        aliases = account.get("aliases", [])
+        if not isinstance(aliases, list) or any(not isinstance(alias, str) or not alias.strip() for alias in aliases):
+            raise ValueError("reviewed identity aliases are invalid")
+        if not name or not stable or stable in seen:
+            raise ValueError("reviewed directory has missing or duplicate stable identities")
+        seen.add(stable)
+        names = [name, *[alias.strip() for alias in aliases]]
+        if len(set(names)) != len(names) or any(alias in identities for alias in names):
+            raise ValueError("reviewed directory has duplicate identity aliases")
+        identities.update((alias, stable) for alias in names)
+    return identities
+
+
 def plan(snapshot: dict[str, list[dict[str, Any]]], accounts: list[dict[str, Any]], *, now: float) -> dict[str, Any]:
     """Create a deterministic migration inventory using stable identities.
 
@@ -66,14 +86,7 @@ def plan(snapshot: dict[str, list[dict[str, Any]]], accounts: list[dict[str, Any
     list would make future Keycloak hierarchy changes grant stale access.
     Report inheritance also stays a reference so revocation is immediate.
     """
-    identity_by_name: dict[str, str] = {}
-    known_identities: set[str] = set()
-    for account in accounts:
-        name, identity = str(account.get("username") or "").strip(), str(account.get("tr_identity_id") or "").strip()
-        if not name or not identity or name in identity_by_name or identity in known_identities:
-            raise ValueError("reviewed directory has missing or duplicate stable identities")
-        identity_by_name[name] = identity
-        known_identities.add(identity)
+    identity_by_name = reviewed_identity_map(accounts)
     issues: list[dict[str, str]] = []
 
     def identity(name: str, kind: str, ref: str, purpose: str) -> str:
@@ -133,6 +146,10 @@ def plan(snapshot: dict[str, list[dict[str, Any]]], accounts: list[dict[str, Any
     digest = hashlib.sha256(json.dumps(frozen, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return {**frozen, "summary": {
         "resources": len(resources), "kinds": dict(Counter(row["kind"] for row in resources)),
+        "reviewed_users": len(set(identity_by_name.values())),
+        "membership_profiles": len({(identity_by_name.get(str(row["principal_ref"]), str(row["principal_ref"])),
+                                     str(row["profile_ref"])) for row in snapshot["memberships"]}),
+        "unresolved_principals": len({row["principal"] for row in issues if row["principal"]}),
         "unresolved": len(issues), "link_states": dict(Counter(row["state"] for row in links)),
         "ancestor_policies": sum(row["ancestor_policy_required"] for row in resources),
         "public_policies": sum(row["public_policy_required"] for row in resources),

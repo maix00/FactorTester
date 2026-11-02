@@ -15,7 +15,7 @@ import sqlite3
 import time
 from typing import Any
 
-from scripts.migrations.keycloak_research_inventory import _TABLES, _rows, plan as inventory_plan
+from scripts.migrations.keycloak_research_inventory import _TABLES, _rows, plan as inventory_plan, reviewed_identity_map
 from server.identity.keycloak_authorization import AuthorizationUnavailable
 from server.identity.keycloak_research import (
     legacy_authorization_snapshot_digest, legacy_authorization_snapshot_sha256, profile_resource_ref,
@@ -48,7 +48,7 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
         raise ValueError("a specific Keycloak issuer is required")
     snapshot, source = _capture(database)
     inventory = inventory_plan(snapshot, accounts, now=time.time() if now is None else now)
-    identities = {str(row["username"]).strip(): str(row["tr_identity_id"]).strip() for row in accounts}
+    identities = reviewed_identity_map(accounts)
     research = {str(row["research_id"]): row for row in snapshot["researches"]}
     reports = {str(row["report_id"]): row for row in snapshot["reports"]}
     projected = {(row["kind"], row["ref"]): row for row in inventory["resources"]}
@@ -65,8 +65,14 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
         ref = str(issue["ref"])
         parent = ref if issue["kind"] == "research" else str(reports.get(ref, {}).get("research_id") or "")
         mark(parent, "unmapped_" + str(issue["purpose"]))
+    profile_associations: set[tuple[str, str, str]] = set()
     for row in snapshot["memberships"]:
         parent = str(row["research_id"])
+        stable = identities.get(str(row["principal_ref"]))
+        association = (parent, stable or str(row["principal_ref"]), str(row["profile_ref"]))
+        if association in profile_associations:
+            mark(parent, "duplicate_profile_alias_needs_review")
+        profile_associations.add(association)
         if row["role"] not in {"owner", "editor", "contributor", "viewer"} or row["status"] not in {"active", "invited", "revoked"}:
             mark(parent, "invalid_membership")
         if not identities.get(str(row["principal_ref"])):
@@ -206,10 +212,10 @@ def _subjects(adapter, directory: list[dict[str, str]]) -> dict[str, str]:
         legacy = attributes.get("legacy_username") if isinstance(attributes, dict) else None
         if legacy is not None and (not isinstance(legacy, list) or len(legacy) != 1 or not isinstance(legacy[0], str)):
             raise AuthorizationUnavailable("Keycloak migration username is ambiguous")
-        effective = legacy[0] if legacy else str(user.get("username") or "") if isinstance(user, dict) else ""
+        verified_names = {str(user.get("username") or ""), *(legacy or [])} if isinstance(user, dict) else set()
         if (not isinstance(user, dict) or user.get("enabled") is not True
                 or not isinstance(attributes, dict) or attributes.get("tr_identity_id") != [stable]
-                or user.get("id") != active.get(stable) or effective != name):
+                or user.get("id") != active.get(stable) or name not in verified_names):
             raise AuthorizationUnavailable("Keycloak migration identity differs from reviewed directory")
     return active
 

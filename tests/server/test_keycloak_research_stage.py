@@ -360,3 +360,38 @@ def test_protected_plan_and_resume_journal_reject_other_plan_and_symlinks(tmp_pa
     with pytest.raises(ValueError, match="invalid record"):
         _Journal(invalid, plan_sha256="a" * 64, issuer=ISSUER)
     assert invalid.read_bytes() == b'{"not-a-migration-record'
+
+
+def test_stage_subjects_accept_only_keycloak_verified_aliases():
+    from scripts.migrations.keycloak_research_stage import _subjects
+    from server.identity.keycloak_authorization import AuthorizationUnavailable
+    directory = Directory()
+    directory.users["id-a"]["attributes"]["legacy_username"] = ["old-alice"]
+    reviewed = [{"identity": "id-a", "username": "alice"}, {"identity": "id-a", "username": "old-alice"}]
+    assert _subjects(directory, reviewed)["id-a"] == "subject-a"
+    with pytest.raises(AuthorizationUnavailable):
+        _subjects(directory, [{"identity": "id-a", "username": "unverified-alice"}])
+
+
+def test_one_user_multiple_profiles_remain_distinct_in_frozen_plan(tmp_path):
+    path = tmp_path / "profiles.sqlite"
+    catalog = ResearchCatalog(path)
+    research = catalog.create_research(owner_ref="alice", title="Profiles")["research_id"]
+    for profile in ("research-a", "research-b"):
+        catalog.add_membership(research, actor="alice", principal_ref="alice", profile_ref=profile, role="editor")
+    reviewed = build_plan(path, [{"username": "alice", "tr_identity_id": "id-a"}], issuer=ISSUER)
+    group = reviewed["groups"][0]
+    assert group["state"] == "ready"
+    profiles = [resource for resource in group["resources"] if resource["kind"] == "research_profile"]
+    assert len(profiles) == 3 and len({resource["ref"] for resource in profiles}) == 3
+    assert {resource["owner_identity"] for resource in profiles} == {"id-a"}
+
+
+def test_aliases_cannot_silently_merge_two_memberships(tmp_path):
+    path = tmp_path / "aliases.sqlite"
+    catalog = ResearchCatalog(path)
+    research = catalog.create_research(owner_ref="alice", title="Aliases")["research_id"]
+    catalog.add_membership(research, actor="alice", principal_ref="old-alice", profile_ref="self", role="viewer")
+    reviewed = build_plan(path, [{"username": "alice", "tr_identity_id": "id-a", "aliases": ["old-alice"]}], issuer=ISSUER)
+    assert reviewed["groups"][0]["state"] == "needs_repair"
+    assert "duplicate_profile_alias_needs_review" in reviewed["groups"][0]["reasons"]

@@ -80,3 +80,7 @@ Manager 与 7997 数据面共用 Keycloak Research 授权工厂；发布投影�
 独立 realm 补充验收：`python -m scripts.test.federated_report_keycloak_couch_smoke` 通过两套真实临时 Keycloak realm、签名 peer HTTP 和真实 CouchDB。覆盖不同所有者/共享接收人、2 MiB 附件、编辑权限预检、源及目标撤权、同一源会话撤权后再次请求拒绝。浏览器→来源 Manager 网关在该脚本中仍由聚焦测试覆盖，未做浏览器视觉验收；真实内网/公网部署仍未覆盖。
 
 生产 `ResearchCatalog` 已删除公开标记、本地用户名名单、同名 owner、旧层级和本地成员带来的 Research/Report 读取回退，并移除本地账户层级 provider 接口。缺少 Keycloak 授权器时读取抛出 AuthorizationUnavailable；创建在写库前拒绝。历史策略只存于 `scripts/test/historical_research_catalog.py`，作为迁移历史快照/允许集的冻结测试对照，生产目录没有引用。旧 ACL 数据列仍保留为显式迁移输入，不再是生产权限来源。119 项聚焦回归通过；真实临时 Keycloak 验证研究创建、直接授权、链接领取、同 token 撤权及目录撤权均通过，未写旧 ACL。Agent 运行准入和 Profile 成员提供器在该独立检查中分别为测试替身和只拒绝替身，不能据此声称其真实端到端完成。
+
+真实部署只读盘点（2026-11-02）：内网和公网 Keycloak 均为 3 个用户；两端旧 SQLite 均有 25 个 Research、20 个 Report、34 条成员关联，链接分别为内网 0、公网 1。通过已登记的精确 legacy_username 匹配后，两端仍各有 15 条 Research 所有者、9 条 Report 所有者、15 条成员关联引用未匹配。它们是引用次数，不是用户数量；不能由这些计数推导两端引用集合相同。公网已部署源码还没有 research inventory 模块，本次使用只读聚合脚本读取摘要，不修改数据库或 Keycloak。
+
+审核目录支持每个唯一稳定用户显式填写 aliases；当前名和旧名都须在目标 Keycloak 用户当前名或受管理 legacy_username 属性中验证，禁止模糊匹配。多个 Profile 仍以稳定用户身份＋profile_ref 区分；相同用户不同 Profile 不合并。多个旧名映射同一用户同一 Profile 的重复成员关联进入 needs_repair，防止不同角色被静默覆盖。盘点分别输出 reviewed_users、membership_profiles、unresolved_principals 和引用问题次数。
