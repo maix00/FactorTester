@@ -50,6 +50,26 @@ def browser_certificate_trust():
             os.environ['NODE_EXTRA_CA_CERTS'] = previous
 
 
+def verify_assistant_admission(session, get, expected_role: str) -> str:
+    """Check a newly issued claim and the real Manager's gated read API.
+
+    This starts no Agent, creates no Profile and sends no model request. It is
+    permission acceptance, not a claim that chat execution has been verified.
+    """
+    if expected_role not in {'agent_assistant:public:use', 'agent_assistant:internal:use', 'denied'}:
+        raise ValueError('invalid assistant permission expectation')
+    denied = expected_role == 'denied'
+    if not denied and expected_role not in session.get('keycloak_roles', ()):
+        raise SystemExit('New Manager session omitted the expected assistant location role')
+    response = get('/api/client/profile-claims')
+    if response.status != (403 if denied else 200):
+        raise SystemExit(f'Assistant admission failed (HTTP {response.status})')
+    payload = response.json()
+    if not denied and (payload.get('success') is not True or not isinstance(payload.get('claims'), list)):
+        raise SystemExit('Assistant admission returned an invalid response')
+    return 'assistant_denied' if denied else 'assistant_location_permission'
+
+
 def main() -> int:
     manager = os.environ["MANAGER_URL"].rstrip("/")
     origin = urlsplit(manager)
@@ -123,6 +143,10 @@ def main() -> int:
                 checks.append("administrator_directory")
             else:
                 checks.append("administrator_denied")
+            expected_assistant = os.environ.get('KEYCLOAK_EXPECT_ASSISTANT_ROLE')
+            if expected_assistant:
+                checks.append(verify_assistant_admission(session,
+                    lambda path: context.request.get(manager + path), expected_assistant))
             expectations_path = os.environ.get('KEYCLOAK_RESEARCH_EXPECTATIONS')
             if expectations_path:
                 # A separately reviewed migration allow-set, not an owner-name
