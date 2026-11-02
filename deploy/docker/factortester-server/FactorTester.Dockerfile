@@ -43,11 +43,6 @@ COPY deploy/requirements-linux.txt /tmp/requirements-linux.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -r /tmp/requirements-linux.txt
 
-COPY --from=alpha-builder /wheels /tmp/alpha-wheels
-RUN python -m pip install --no-cache-dir --no-deps /tmp/alpha-wheels/*.whl \
-    && rm -rf /tmp/alpha-wheels \
-    && python -c "from alpha.factor.annotations import ExpressionAnnotations"
-
 RUN set -eu; \
     if ! getent group "${FACTORTESTER_GID}" >/dev/null; then \
         groupadd --gid "${FACTORTESTER_GID}" factortester; \
@@ -72,8 +67,19 @@ RUN chmod 0555 \
 USER factortester
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/factortester-manager-entrypoint"]
 
+# Keep native alpha outside the reusable Python dependency base. Even when
+# manager-base is supplied as an immutable image, this stage installs the exact
+# checked-out alpha wheel, replacing any older alpha bundled in that image.
+FROM manager-base AS manager-runtime
+USER root
+COPY --from=alpha-builder /wheels /tmp/alpha-wheels
+RUN python -m pip install --no-cache-dir --no-deps --force-reinstall /tmp/alpha-wheels/*.whl \
+    && rm -rf /tmp/alpha-wheels \
+    && python -c "from alpha.factor.annotations import ExpressionAnnotations"
+USER factortester
+
 # The CLI is the same small, isolated package used in the public image.
-FROM manager-base AS traderesearch-local-cli-builder
+FROM manager-runtime AS traderesearch-local-cli-builder
 USER root
 COPY tools/cli /runtime/tools/cli
 COPY deploy/docker/factortester-public/traderesearch-cli /build/traderesearch-cli
@@ -83,10 +89,9 @@ RUN python -m compileall -q -b /runtime \
     && PYTHONPATH=/runtime /build/traderesearch-cli --help >/tmp/traderesearch-help \
     && grep -F 'TradeResearch CLI' /tmp/traderesearch-help >/dev/null
 
-# Keep these layers after the Python/alpha runtime so installing Agent tools
-# never invalidates unchanged Python dependencies. For an already-running
-# image, BuildKit can override manager-base with that immutable image.
-FROM manager-base AS traderesearch-local-manager
+# Keep Agent layers after the pinned alpha runtime. A reviewed immutable
+# manager-base override reuses only the unchanged Python/system dependencies.
+FROM manager-runtime AS traderesearch-local-manager
 USER root
 ARG TARGETARCH
 ARG CODEX_VERSION=0.147.0
