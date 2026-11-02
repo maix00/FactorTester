@@ -12,7 +12,7 @@ type Target = { researchId: string; reportId?: string };
 type Capabilities = { can_manage_grants: boolean; can_manage_links: boolean };
 type Grant = { identity_id: string; username: string; enabled: boolean; scopes: string[] };
 type ShareLink = { link_id: string; target_kind: string; report_id?: string; mode: string; expires_at?: number; revoked_at?: number; redeemed_by?: string; created_at?: number };
-type Status = { loading: boolean; error: string; unavailable: "" | "missing" | "migration"; capabilities: Capabilities | null };
+type Status = { loading: boolean; error: string; unavailable: "" | "missing" | "disabled"; capabilities: Capabilities | null };
 
 function targetParams(target: Target): URLSearchParams {
   return new URLSearchParams({target_kind:target.reportId ? "report" : "research", report_id:target.reportId || ""});
@@ -38,17 +38,17 @@ export function ResearchSharing({ target }: { target: Target }): React.ReactElem
       setStatus({loading:false,error:"",unavailable:"",capabilities:c});
       setTab(c.can_manage_grants ? "grants" : "links");
     }).catch(reason => {
-      if (!controller.signal.aborted) setStatus({loading:false,error:String(reason.message || reason),unavailable:reason.status === 404 ? "missing" : reason.code === "keycloak_sharing_unavailable" ? "migration" : "",capabilities:null});
+      if (!controller.signal.aborted) setStatus({loading:false,error:String(reason.message || reason),unavailable:reason.status === 404 ? "missing" : reason.code === "keycloak_sharing_unavailable" ? "disabled" : "",capabilities:null});
     });
     return () => controller.abort();
   }, [base, params, retry, t]);
   if (status.loading) return <Spin tip={t("loading")} />;
   if (status.error) return <Alert type={status.unavailable ? "info" : "error"} showIcon
-    message={t(status.unavailable === "missing" ? "researchSharing.targetUnavailable" : status.unavailable === "migration" ? "researchSharing.unavailable" : "researchSharing.capabilityError")}
+    message={t(status.unavailable === "missing" ? "researchSharing.targetUnavailable" : status.unavailable === "disabled" ? "researchSharing.unavailable" : "researchSharing.capabilityError")}
     description={status.unavailable ? undefined : status.error} action={<Button onClick={() => setRetry(value => value + 1)}>{t("retry")}</Button>} />;
   const capabilities = status.capabilities;
   if (!capabilities?.can_manage_grants && !capabilities?.can_manage_links) return <Alert type="info" showIcon message={t("researchSharing.noAccess")} />;
-  return <><p className="tr-research-sharing-note">{t("researchSharing.publicationPending")}</p><Tabs activeKey={tab} onChange={setTab} items={[
+  return <><Tabs activeKey={tab} onChange={setTab} items={[
     ...(capabilities.can_manage_grants ? [{key:"grants",label:t("researchSharing.users"),children:<ResearchGrants target={target} />}]:[]),
     ...(capabilities.can_manage_links ? [{key:"links",label:t("researchSharing.links"),children:<ResearchLinks target={target} />}]:[]),
   ]} /></>;

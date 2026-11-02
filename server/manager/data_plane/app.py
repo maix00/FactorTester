@@ -38,6 +38,10 @@ from server.manager.objects.adapters.profile_workspace import (
     ProfileWorkspaceOriginAdapter,
 )
 from server.manager.objects.adapters.public_research import PublicResearchOriginAdapter
+from server.manager.services.research_authorization_runtime import (
+    create_keycloak_research_catalog,
+    create_keycloak_research_transfer_authorizer,
+)
 from server.manager.objects.adapters.public_research_destination import (
     PublicResearchDestinationAdapter,
 )
@@ -88,15 +92,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def research_read_authorizer(database: str, *, authoring: bool = False):
-    """The byte process has no local identity authority or hierarchy fallback."""
-    if not database:
-        return None
-    from server.manager.services.research_catalog import ResearchCatalog
-    catalog = ResearchCatalog(database)
-    return catalog.can_read_authoring_publication if authoring else catalog.can_read_publication
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     key = NodeKey.load_or_create(args.node_key, node_id=args.server_id)
@@ -108,20 +103,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     adapters = {}
     research_store = None
     if args.research_root:
+        if not args.research_catalog_database:
+            raise ValueError(
+                "Research object transfer requires its Keycloak authorization catalog"
+            )
+        research_catalog = create_keycloak_research_catalog(
+            args.research_catalog_database,
+        )
         research = PublicResearchLibrary(
             Path(args.research_root), storage_server_id=args.server_id,
-            read_authorizer=research_read_authorizer(args.research_catalog_database),
-            authoring_authorizer=research_read_authorizer(args.research_catalog_database, authoring=True),
+            read_authorizer=research_catalog.can_read_publication,
+            authoring_authorizer=research_catalog.can_read_authoring_publication,
         )
         research_store = PublicResearchObjectStore(research)
+        research_transfer_authorizer = create_keycloak_research_transfer_authorizer(
+            args.research_catalog_database,
+            catalog=research_catalog,
+        )
         adapters[TransferObjectKind.RESEARCH_ASSET.value] = PublicResearchOriginAdapter(
-            research_store,
+            research_store, authorization=research_transfer_authorizer,
         )
         adapters[TransferObjectKind.RESEARCH_ATTACHMENT.value] = PublicResearchOriginAdapter(
-            research_store,
+            research_store, authorization=research_transfer_authorizer,
         )
         adapters[TransferObjectKind.RESEARCH_LOCAL_RESOURCE.value] = PublicResearchOriginAdapter(
-            research_store,
+            research_store, authorization=research_transfer_authorizer,
         )
         evidence_root = Path(args.research_root) / "evidence-files"
         adapters[TransferObjectKind.EVIDENCE_FILE.value] = EvidenceFileOriginAdapter(

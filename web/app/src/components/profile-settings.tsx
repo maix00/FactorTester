@@ -32,7 +32,6 @@ export function ProfileSettings():React.ReactElement {
     {key:"owner",label:t("library.owner"),value:detail.owner_ref,render:value=><ObjectReference value={{kind:"user",ref:String(value),label:detail.owner_alias||String(value)}} />},
     {key:"id",label:t("settingsPanel.profileIdentity"),value:detail.profile_key,wide:true},
     {key:"server",label:t("settingsPanel.sections.server"),value:detail.source_server_id},
-    {key:"visibility",label:t("library.visibility"),value:detail.visibility,render:value=>t(`research.visibility.${value}`,{defaultValue:String(value)})},
   ]}]}/>}
  </div>;
  return <div className="tr-settings-browser"><Input.Search allowClear aria-label={t("library.search")} placeholder={t("library.search")} value={query} onChange={event=>{setQuery(event.target.value);setPage(1);}}/>

@@ -7,14 +7,12 @@ import { formatDate } from "../format.ts";
 import { FunctionPage } from "../components/function-page.tsx";
 import { DetailsPanel } from "../components/details-panel.tsx";
 import { TRDataTable } from "../components/data-table.tsx";
-import { ResultView } from "../components/result-view.tsx";
 import { PropertyGroups } from "../components/property-groups.tsx";
 import { ObjectReference } from "../components/object-reference.tsx";
 import { ResearchCreate } from "../components/research-create.tsx";
 import { useAuth } from "../auth.tsx";
 import { usePageInstance } from "../page-instance.ts";
 import { assistantResearchContexts } from "../assistant-research-context.ts";
-import { researchAuthority } from "../research-authority.ts";
 import { ReportMarkdown } from "../components/report-markdown.tsx";
 import { ReportExport } from "../components/report-export.tsx";
 import { ReportBranchReader } from "../components/report-branch-reader.tsx";
@@ -49,7 +47,6 @@ function ResearchPageForSession(): React.ReactElement {
   const missingReportDirectory=useRef(false);
   const localAttempt=useRef<{signature:string;id:string}|null>(null);
   const [creating, setCreating] = useState(false);
-  const [authority, setAuthority] = useState<"legacy"|"keycloak"|null>(null);
   const [tab, setTab] = useState("researches"), [rows, setRows] = useState<Row[]>([]);
   const [page, setPage] = useState(1), [size, setSize] = useState(20), [revision, setRevision] = useState(0);
   const syncLocalReports = local.requestSync;
@@ -65,11 +62,6 @@ function ResearchPageForSession(): React.ReactElement {
   const selectedResearchID = tab === "researches" && selected ? researchRowID(selected) : "";
   const researchSection = researchLocation.id === selectedResearchID ? researchLocation.section : "details";
   const principal = session?.username || "";
-  useEffect(() => {
-    const controller=new AbortController();setAuthority(null);
-    void researchAuthority(controller.signal,t("researchDetail.invalidResponse")).then(value=>{if(!controller.signal.aborted)setAuthority(value.authority);}).catch(()=>{if(!controller.signal.aborted)setAuthority(null);});
-    return()=>controller.abort();
-  },[principal,t]);
   useEffect(() => { setResearchLocation(value => value.id === selectedResearchID ? value : {id:selectedResearchID,section:"details"}); }, [selectedResearchID]);
   useEffect(() => {
     const value = detail as Row | null;
@@ -192,7 +184,6 @@ function ResearchPageForSession(): React.ReactElement {
       {title:t("localResearch.location"),key:"location",filters:[{text:t("localResearch.local"),value:"local"},{text:t("localResearch.server"),value:"server"}],onFilter:(value:React.Key | boolean,row:Row)=>value==="local" ? !!(row.__local || row.__hasLocal) : !row.__local,render:(_:unknown,row:Row)=>row.__hasLocal ? `${t("localResearch.local")} / ${t("localResearch.server")}` : t(row.__local ? "localResearch.local" : "localResearch.server")},
       ...([
         { title: t("library.owner"), key: "owner", filters:Array.from(new Set(filtered.map(row=>String(row.owner_ref || row.owner || "")).filter(Boolean))).map(value=>({text:value,value})), onFilter:(value:React.Key | boolean,row:Row)=>String(row.owner_ref || row.owner || "")===String(value), render: (_:unknown, row:Row) => owner(row) },
-        ...(authority === "legacy" ? [{ title: t("library.visibility"), dataIndex: "visibility", render: (value:string) => value ? <Tag>{t(`research.visibility.${value}`, { defaultValue: value })}</Tag> : "—" }] : []),
         { title: t("jobs.updated"), dataIndex: "updated_at", render: (value:number|string) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—" },
       ]),
     ]} /></div>
@@ -245,23 +236,21 @@ function ResearchPageForSession(): React.ReactElement {
             : <Alert type="info" showIcon message={t("research.reportVersionUnavailable")} description={selectedReportBranch ? t(`research.reportSources.${selectedReportBranch.source_kind || "unknown"}`) : selected.build_source === "workspace" ? t("research.reportSources.workspace") : undefined} />}
       </>
         : editingResearch ? <ResearchEdit research={selected as Row} onCancel={() => setEditingResearch(false)} onArchived={() => { setSelected(null); setEditingResearch(false); setRevision((value) => value + 1); }} onSaved={(value) => { setSelected({ ...selected, ...value }); setDetail(value); setEditingResearch(false); setRevision((revision) => revision + 1); }} />
-        : detail && !(detail as Row).error ? <ResearchRelations key={researchRowID(selected)} research={detail as Row} showLegacyVisibility={authority === "legacy"} onSectionChange={section => setResearchLocation({id:selectedResearchID,section})} overview={<><ResearchSummary value={detail as Row} showLegacyVisibility={authority === "legacy"} />{(detail as Row).access?.can_manage ? <div className="tr-inline-actions"><Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button></div> : null}</>} onReport={(report) => { setTab("reports"); setRows([]); setPage(1); setSelected(report); setSelectedPublicationID(selectReportBranch(report)?.publication_id || ""); }} onResearch={(research) => { setTab("researches"); setSelected(research); setEditingResearch(false); }} /> : <ResearchSummary value={detail as Row | null} showLegacyVisibility={authority === "legacy"} />}
+        : detail && !(detail as Row).error ? <ResearchRelations key={researchRowID(selected)} research={detail as Row} onSectionChange={section => setResearchLocation({id:selectedResearchID,section})} overview={<><ResearchSummary value={detail as Row} />{(detail as Row).access?.can_manage ? <div className="tr-inline-actions"><Button onClick={() => setEditingResearch(true)}>{t("research.edit")}</Button></div> : null}</>} onReport={(report) => { setTab("reports"); setRows([]); setPage(1); setSelected(report); setSelectedPublicationID(selectReportBranch(report)?.publication_id || ""); }} onResearch={(research) => { setTab("researches"); setSelected(research); setEditingResearch(false); }} /> : <ResearchSummary value={detail as Row | null} />}
     </DetailsPanel> : null}
   </FunctionPage></div>;
 }
 
 
-function ResearchSummary({value,showLegacyVisibility}:{value:Row|null;showLegacyVisibility:boolean}):React.ReactElement {
+function ResearchSummary({value}:{value:Row|null}):React.ReactElement {
   const {t}=useTranslation();
   if(!value)return <Spin tip={t("loading")} />;
   if(value.error)return <Alert type="error" showIcon message={String(value.error)} />;
-  const {visibility:legacyVisibility,authorized_users:legacyUsers,...safeDetails}=value;
-  return <><PropertyGroups groups={[{key:"research",title:t("research.tabResearches"),items:[
+  return <PropertyGroups groups={[{key:"research",title:t("research.tabResearches"),items:[
     {key:"title",label:t("editor.name"),value:value.title},
     {key:"description",label:t("library.description"),value:value.description,wide:true},
     {key:"owner",label:t("library.owner"),value:value.owner_ref,render:ref=><ObjectReference value={{kind:"user",ref:String(ref),label:value.owner_alias||String(ref)}} />},
-    ...(showLegacyVisibility ? [{key:"visibility",label:t("library.visibility"),value:legacyVisibility,render:(item:unknown)=>t(`research.visibility.${item}`,{defaultValue:String(item)})}] : []),
     {key:"updated",label:t("jobs.updated"),value:value.updated_at,render:value=>formatDate(value as number|string,{dateStyle:"medium",timeStyle:"short"})},
     {key:"profile",label:t("research.profile"),value:value.profile_ref,render:ref=><ObjectReference value={{kind:"profile",ref:String(ref),profileKey:value.profile_key,owner:value.owner_ref}} />},
-  ]}]} /><details><summary>{t("details")}</summary><ResultView value={showLegacyVisibility ? {...safeDetails,visibility:legacyVisibility,authorized_users:legacyUsers} : safeDetails}/></details></>;
+  ]}]} />;
 }

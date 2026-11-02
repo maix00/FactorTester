@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import pytest
 
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
 from tools.cli.release.research_reporting.public_research.projection import (
@@ -33,7 +34,7 @@ def test_public_research_asset_is_stored_and_read_with_visibility(tmp_path):
         "local_resources": [],
         "projection_hash": "hash",
     }
-    library = PublicResearchLibrary(tmp_path)
+    library = PublicResearchLibrary(tmp_path, read_authorizer=lambda _record, _viewer: True)
     result = library.sync({
         "report_id": "report-1", "owner_ref": "owner", "projection": projection,
     })
@@ -448,7 +449,7 @@ def test_public_research_local_resource_is_stored_and_read(tmp_path):
         }],
         "related_objects": [], "attachments": [], "projection_hash": "hash",
     }
-    library = PublicResearchLibrary(tmp_path)
+    library = PublicResearchLibrary(tmp_path, read_authorizer=lambda _record, _viewer: True)
     result = library.sync({
         "report_id": "report-local-resource", "owner_ref": "owner", "projection": projection,
     })
@@ -496,7 +497,7 @@ def test_public_research_attachment_is_stored_and_read(tmp_path):
         }],
         "projection_hash": "hash",
     }
-    library = PublicResearchLibrary(tmp_path)
+    library = PublicResearchLibrary(tmp_path, read_authorizer=lambda _record, _viewer: True)
     result = library.sync({
         "report_id": "report-attachment", "owner_ref": "owner", "projection": projection,
     })
@@ -511,6 +512,21 @@ def test_public_research_attachment_is_stored_and_read(tmp_path):
     )[:2] == (raw, "text/x-python")
     stored = library.projection(result["publication_id"], None)
     assert "content_base64" not in stored["attachments"][0]
+
+
+def test_publication_metadata_cannot_grant_access_without_authoritative_policy(tmp_path):
+    library = PublicResearchLibrary(tmp_path)
+    record = {"owner_ref": "owner", "visibility": "public", "authorized_users": ["reader"]}
+
+    assert library.can_read(record, "owner") is False
+    assert library.can_read(record, "reader") is False
+    assert library.can_read(record, None) is False
+
+    denied = PublicResearchLibrary(tmp_path / "denied", read_authorizer=lambda _record, _viewer: False,
+                                   authoring_authorizer=lambda _record, _viewer: False)
+    assert denied.can_read(record, "owner") is False
+    with pytest.raises(PermissionError, match="active research membership"):
+        denied.require_resource_access(record, {"purpose": "report_authoring"}, "owner")
 
 
 def test_public_research_sync_removes_unreferenced_attachment_files(tmp_path):

@@ -60,3 +60,9 @@ python -m scripts.migrations.keycloak_research_stage stage \
 真实导入前重新生成两端计划并报告受影响对象、明确的 needs_repair 和备份恢复证据。需要先实现并验收动态上级、链接、公开访客、跨 realm 在线委托及所有读取/写入入口；对所有保留身份和对象进行逐项正反对账，并独立验收 Manager、7997 和 Job 请求。当前工具 **不生成切换许可**，`cutover_ready` 固定为 false。
 
 在确保旧写入口停用、源快照未变化、受保护的真实验收回执完整之后，才可一次性切换授权读取并验证两端；在此之前不得删除旧表或旧路径。若准备阶段失败，恢复采用经过验证的 Keycloak/SQLite 备份；或逐个核对计划、创建标识与完整当前策略后，由授权运维人员回退本次新增资源。存在其他写入或策略冲突时停止，不能按名称、缺失数据或失败结果推断可以删除。
+
+## 2026-11-02 运行入口切换
+
+Manager 与 7997 数据面共用 Keycloak Research 授权工厂；发布投影不再从旧 visibility 或 authorized_users 推导访问权。React 与 CLI 创建研究统一使用 keycloak-create；研究及报告 API 拒绝旧 ACL 字段。CLI 的 grant/grants 命令直接读写 Keycloak。旧 publication publish/settings/revoke 返回 410，原服务器发布写入方法已删除。
+
+这次代码切换不代表历史对象已经迁入目标 realm。旧 ACL 列仍是迁移输入；旧独立 publication 客户端和旧页面的残余调用仍须移除。部署前必须完成上述逐对象映射、Keycloak scope 对账及备份。当前 Manager CLI 运行时检查返回 401 device authentication required，尚不能通过该主体执行真实迁移或声称部署验收完成。

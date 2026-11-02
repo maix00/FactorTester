@@ -295,17 +295,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 payload = {"researches": value, "items": value, "scope": scope}
             elif parsed.path == "/api/research/principals":
                 needle = str(query.get("q", [""])[0]).strip().casefold()
-                relation = str(query.get("relation", [""])[0]).strip()
-                if relation == "superiors":
-                    # These labels come directly from this verified Keycloak
-                    # session, not from a browser-provided username.
-                    candidates = [{"username": ref} for ref in self._research_catalog_superior_refs(viewer)]
-                else:
-                    try:
-                        candidates = self._subordinate_users(session)
-                    except PermissionError:
-                        # A non-administrator has no managed directory scope.
-                        candidates = []
+                if set(query) - {"q"}:
+                    raise ValueError("legacy Research relation filters are not supported")
+                try:
+                    candidates = self._subordinate_users(session)
+                except PermissionError:
+                    # A non-administrator has no managed directory scope.
+                    candidates = []
                 values = []
                 for item in candidates:
                     username = str(item.get("username") or "").strip()
@@ -399,12 +395,6 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     )
                     manifest["source_server_id"] = str(self.state.server_id)
                     payload = {"manifest": manifest}
-                elif child == "share-links":
-                    payload = {
-                        "share_links": service.list_share_links(
-                            research_id, actor=viewer,
-                        ),
-                    }
                 elif child == "keycloak-share-links":
                     service.require_keycloak_sharing()
                     payload = {"share_links": service.list_keycloak_share_links(
@@ -412,10 +402,6 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         report_id=str(query.get("report_id", [""])[0]))}
                 elif child == "keycloak-sharing-capabilities":
                     payload = {"capabilities": service.keycloak_target_sharing_capabilities(
-                        research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
-                        report_id=str(query.get("report_id", [""])[0]))}
-                elif child == "grants":
-                    payload = {"grants": service.list_explicit_grants(
                         research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
                         report_id=str(query.get("report_id", [""])[0]))}
                 elif child == "keycloak-grants":
@@ -549,15 +535,14 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 return True
             if self._post_report_branch_route(parsed, actor, data):
                 return True
-            if parsed.path in {"/api/research", "/api/research/keycloak-create"}:
-                if parsed.path == "/api/research/keycloak-create":
-                    service.require_keycloak_research_creation()
+            if parsed.path == "/api/research/keycloak-create":
+                service.require_keycloak_research_creation()
+                if set(data) - {"title", "description", "profile_ref"}:
+                    raise ValueError("legacy Research access fields are not supported")
                 value = service.create_research(
                     owner_ref=actor,
                     title=data.get("title"),
                     description=str(data.get("description") or ""),
-                    visibility=str(data.get("visibility") or "private"),
-                    authorized_users=data.get("authorized_users"),
                     profile_ref=str(data.get("profile_ref") or ""),
                 )
                 json_response(self, {"success": True, "research": value}, 201)
@@ -568,9 +553,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 )
                 json_response(self, {"success": True, **value}, 200)
                 return True
-            if parsed.path in {"/api/research/share-links/redeem", "/api/research/keycloak-share-links/redeem"}:
-                if parsed.path == "/api/research/keycloak-share-links/redeem":
-                    service.require_keycloak_sharing()
+            if parsed.path == "/api/research/keycloak-share-links/redeem":
+                service.require_keycloak_sharing()
                 value = service.redeem_share_link(
                     str(data.get("token") or ""), actor=actor,
                 )
@@ -610,6 +594,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {"success": True, "workspace": value}, 201)
                 return True
             if child == "reports":
+                if {"visibility", "authorized_users"} & set(data):
+                    raise ValueError("legacy Research report ACL fields are not supported")
                 if data.get("report_id"):
                     value = service.register_report(
                         research_id,
@@ -620,8 +606,6 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         workspace_id=str(data.get("workspace_id") or ""),
                         build_source=str(data.get("build_source") or "client"),
                         build_source_ref=str(data.get("build_source_ref") or ""),
-                        visibility=str(data.get("visibility") or "private"),
-                        authorized_users=data.get("authorized_users"),
                         source_ref=str(data.get("source_ref") or ""),
                     )
                 else:
@@ -630,14 +614,11 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         actor=actor,
                         title=str(data.get("title") or ""),
                         profile_ref=str(data.get("profile_ref") or ""),
-                        visibility=str(data.get("visibility") or "private"),
-                        authorized_users=data.get("authorized_users"),
                     )
                 json_response(self, {"success": True, "report": value}, 201)
                 return True
-            if child in {"share-links", "keycloak-share-links"}:
-                if child == "keycloak-share-links":
-                    service.require_keycloak_sharing()
+            if child == "keycloak-share-links":
+                service.require_keycloak_sharing()
                 value = service.create_share_link(
                     target_kind=str(data.get("target_kind") or "research"),
                     research_id=research_id,
@@ -648,9 +629,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 )
                 json_response(self, {"success": True, "share_link": value}, 201)
                 return True
-            if child in {"grants", "keycloak-grants"}:
-                if child == "keycloak-grants":
-                    service.require_keycloak_sharing()
+            if child == "keycloak-grants":
+                service.require_keycloak_sharing()
                 value = service.set_explicit_grant(research_id, actor=actor,
                     principal_ref=data.get("principal_ref"), scopes=data.get("scopes"),
                     target_kind=str(data.get("target_kind") or "research"),
@@ -687,7 +667,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
 
     def _patch_research_catalog_routes(self, parsed) -> bool:
         share_match = re.fullmatch(
-            r"/api/research/([^/]+)/(share-links|keycloak-share-links)/([^/]+)", parsed.path,
+            r"/api/research/([^/]+)/keycloak-share-links/([^/]+)", parsed.path,
         )
         if share_match:
             session = self._research_catalog_session()
@@ -697,11 +677,10 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 data = self._research_catalog_body()
                 if data.get("revoked") is not True:
                     raise ValueError("share link patch requires revoked=true")
-                if share_match.group(2) == "keycloak-share-links":
-                    self._research_catalog_service().require_keycloak_sharing()
+                self._research_catalog_service().require_keycloak_sharing()
                 value = self._research_catalog_service().revoke_share_link(
                     unquote(share_match.group(1)),
-                    unquote(share_match.group(3)),
+                    unquote(share_match.group(2)),
                     actor=str(session["username"]),
                 )
             except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
@@ -718,18 +697,12 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 return True
             try:
                 data = self._research_catalog_body()
+                if {"visibility", "authorized_users"} & set(data):
+                    raise ValueError("legacy Research report ACL fields are not supported")
                 value = self._research_catalog_service().update_report(
                     unquote(report_match.group(1)),
                     unquote(report_match.group(2)),
                     actor=str(session["username"]),
-                    visibility=data.get("visibility"),
-                    authorized_users=data.get("authorized_users"),
-                )
-                self._sync_research_report_publications(
-                    owner=str(session["username"]),
-                    report_id=str(value["report_id"]),
-                    visibility=str(value["visibility"]),
-                    authorized_users=list(value.get("authorized_users") or []),
                 )
             except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
                 self._research_catalog_error(exc)
@@ -744,13 +717,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             return True
         try:
             data = self._research_catalog_body()
+            if {"visibility", "authorized_users"} & set(data):
+                raise ValueError("legacy Research ACL fields are not supported")
             value = self._research_catalog_service().update_research(
                 unquote(match.group(1)),
                 actor=str(session["username"]),
                 title=data.get("title"),
                 description=data.get("description"),
-                visibility=data.get("visibility"),
-                authorized_users=data.get("authorized_users"),
                 status=data.get("status"),
             )
         except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
@@ -817,42 +790,6 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             if isinstance(item, dict)
         ]
 
-    def _research_catalog_superior_refs(self, viewer: str) -> list[str]:
-        # The Manager uses a native HTTP handler, not Flask's request-local g.
-        # This currently projects the direct parent claim; deeper traversal
-        # requires migrated parent stable identities in Keycloak.
-        identity = self._session()
-        if not isinstance(identity, dict) or str(identity.get("username") or "") != str(viewer):
-            return []
-        parent = str(identity.get("parent_username") or "").strip()
-        return [parent] if parent else []
-
-    def _sync_research_report_publications(
-        self,
-        *,
-        owner: str,
-        report_id: str,
-        visibility: str,
-        authorized_users: list[str],
-    ) -> None:
-        """Apply the canonical Report policy to each uploaded Branch."""
-        users = list(authorized_users)
-        if visibility == "superiors":
-            users = self._research_catalog_superior_refs(owner)
-        for publication in self.state.public_research.list_owner(owner):
-            if str(publication.get("report_id") or "") != report_id:
-                continue
-            self.state.public_research.configure(
-                owner_ref=owner,
-                report_id=report_id,
-                publication_key=str(publication.get("publication_key") or report_id),
-                projection=None,
-                visibility=visibility,
-                auto_sync=bool(publication.get("auto_sync", True)),
-                relay_local_files=bool(publication.get("relay_local_files", False)),
-                authorized_users=users,
-            )
-
     def _discover_research_report_records(self, actor: str) -> list[dict]:
         """Project all three existing report stores into one explicit plan."""
         records: list[dict] = []
@@ -893,7 +830,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:
         match = re.fullmatch(
-            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links|grants|collaboration-branches|keycloak-share-links|keycloak-grants|keycloak-sharing-capabilities))?",
+            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|collaboration-branches|keycloak-share-links|keycloak-grants|keycloak-sharing-capabilities))?",
             path,
         )
         if not match:

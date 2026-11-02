@@ -160,7 +160,12 @@ def test_explicit_grants_route_uses_manager_session_and_reports_keycloak_outage(
             return True
         def list_user_grants(self, **_kwargs):
             raise AuthorizationUnavailable("identity offline")
-    catalog._profile_grant_manager = Manager()
+    manager = Manager()
+    manager.identity_provider = lambda: None
+    manager.user_by_identity = lambda _identity: None
+    manager.require_link_issuer_share = lambda **_kwargs: None
+    manager._reconcile_user_grant = lambda **_kwargs: None
+    catalog._profile_grant_manager = manager
     catalog._profile_identity_resolver = lambda _name: {"identity_id": "stable-bob", "subject": "subject-bob"}
     class Handler(routes.ResearchCatalogRoutesMixin):
         state = SimpleNamespace(research_catalog=catalog)
@@ -170,7 +175,7 @@ def test_explicit_grants_route_uses_manager_session_and_reports_keycloak_outage(
             return {"principal_ref": "bob", "scopes": ["read"]}
     monkeypatch.setattr(routes, "json_response", lambda _self, data, status=200: responses.append((data, status)))
     handler = Handler()
-    path = f"/api/research/{public}/grants"
+    path = f"/api/research/{public}/keycloak-grants"
     assert handler._post_research_catalog_routes(SimpleNamespace(path=path, query=""))
     assert responses[-1][1] == 200 and recorded[-1][1]["actor"] == "alice"
     assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query=""))

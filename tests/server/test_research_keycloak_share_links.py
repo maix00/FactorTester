@@ -194,15 +194,15 @@ def test_share_routes_return_authorization_errors_and_do_not_use_legacy_acl(tmp_
         def _json_body(self, _maximum): return self.body
     monkeypatch.setattr(routes, "json_response", lambda _self, data, status=200: responses.append((data, status)))
     handler = Handler()
-    handler._post_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/share-links"))
+    handler._post_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links"))
     assert responses[-1][1] == 201
     link = responses[-1][0]["share_link"]
     handler.actor, handler.body = "bob", {"token": link["token"]}
     manager.fail_grant = True
-    handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/share-links/redeem"))
+    handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/keycloak-share-links/redeem"))
     assert responses[-1][1] == 503 and not manager.grants
     manager.fail_grant = False
-    handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/share-links/redeem"))
+    handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/keycloak-share-links/redeem"))
     assert responses[-1][1] == 200
     with sqlite3.connect(catalog.db_path) as db:
         assert db.execute("SELECT authorized_users_json FROM research_catalog_researches").fetchone()[0] == "[]"
@@ -303,7 +303,7 @@ def test_keycloak_create_route_never_falls_back_to_legacy_creation(tmp_path, mon
     class Handler(routes.ResearchCatalogRoutesMixin):
         state = SimpleNamespace(research_catalog=catalog)
         def _session(self): return {"username": "alice"}
-        def _json_body(self, _maximum): return {"title": "New", "visibility": "private"}
+        def _json_body(self, _maximum): return {"title": "New"}
     monkeypatch.setattr(routes, "json_response", lambda _self, data, status=200: responses.append((data, status)))
     handler = Handler()
     handler._post_research_catalog_routes(SimpleNamespace(path="/api/research/keycloak-create"))
@@ -338,7 +338,7 @@ def test_keycloak_link_listing_checks_exact_target_and_denies_unscoped_legacy_ro
     handler._get_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/keycloak-share-links", query=query))
     assert responses[-1][1] == 403
     handler._get_research_catalog_routes(SimpleNamespace(path=f"/api/research/{research}/share-links", query=""))
-    assert responses[-1][1] == 409 and responses[-1][0]["code"] == "keycloak_sharing_unavailable"
+    assert responses[-1][1] == 404
 
 
 def test_link_issuer_requires_exact_enabled_subject_and_live_scope():

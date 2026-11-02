@@ -1688,7 +1688,7 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
             for name in ("require_resource_share", "identity_provider", "user_by_identity",
                          "require_link_issuer_share", "_reconcile_user_grant"))
         return {"schema": "tr-research-keycloak-sharing-v1",
-                "authority": "keycloak" if self._research_authorizer is not None else "legacy",
+                "authority": "keycloak" if self._research_authorizer is not None else "unavailable",
                 "share_links": available,
                 "explicit_grants": available and callable(self._profile_identity_resolver),
                 "create_research": self._research_authorizer is not None and all(

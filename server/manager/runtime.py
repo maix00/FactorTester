@@ -83,7 +83,9 @@ from server.manager.domain.federation import (
     ServiceRoute,
 )
 from server.manager.services.test_authoring import TestAuthoringService
-from server.manager.services.research_catalog import ResearchCatalog
+from server.manager.services.research_authorization_runtime import (
+    create_keycloak_research_catalog,
+)
 from server.services.strategy_library import StrategyLibraryService
 from server.manager.services.mihomo_supervisor import MihomoSupervisor
 from server.manager.services.technical_docs import TechnicalDocsLibrary
@@ -340,7 +342,9 @@ class ManagerState(
         # report links, and Evidence links share the Manager metadata store.
         # Report and Evidence bytes remain in their existing stores; this
         # catalog is the single relationship and access-policy seam.
-        self.research_catalog = ResearchCatalog(self.sessions_db_path)
+        self.research_catalog = create_keycloak_research_catalog(
+            self.sessions_db_path,
+        )
         # Account, organisation, hierarchy, profile, quota, and device
         # identity records share one PostgreSQL control plane when deployed.
         # The constructor is lazy: an unavailable database is reported by the

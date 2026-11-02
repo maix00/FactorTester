@@ -18,9 +18,6 @@ from tools.cli.release.research_reporting.authoring.tree_projection import (
     load_snapshot,
 )
 from tools.cli.release.research_reporting.authoring.tree_store import load_head
-from tools.cli.release.research_reporting.public_research.object_uploads import (
-    projection_hash,
-)
 from tools.cli.release.research_reporting.public_research.projection import (
     build_upload_index,
     build_upload_projection,
@@ -316,56 +313,6 @@ class ServerResearchService:
         if value is None:
             raise ValueError("research local resource is unavailable")
         return value
-
-    def publish(
-        self,
-        principal: str,
-        server_ref: str,
-        *,
-        public_research: Any,
-        visibility: str = "public",
-        authorized_users: list[str] | None = None,
-        public_title: str = "",
-    ) -> dict[str, Any]:
-        """Explicitly mirror one server report into the shared catalog."""
-        location = self._location(principal, server_ref)
-        projection = build_upload_projection(self._snapshot(location))
-        title = str(public_title or "").strip()
-        if title:
-            projection = {**projection, "title": title}
-            projection["projection_hash"] = projection_hash(projection)
-        source_ref = str(location["build_source_ref"] or location["profile_id"])
-        synced = public_research.sync({
-            "report_id": projection["report_id"],
-            "owner_ref": principal,
-            "profile_ref": location["profile_id"],
-            "branch_ref": location["branch_id"],
-            "build_source": "server_agent",
-            "build_source_ref": source_ref,
-            "projection": projection,
-        })
-        if synced.get("status") not in {"synced", "stale"}:
-            raise ValueError("server research report is not ready to publish")
-        settings = public_research.configure(
-            owner_ref=principal,
-            report_id=projection["report_id"],
-            projection=None,
-            visibility=visibility,
-            auto_sync=True,
-            relay_local_files=False,
-            authorized_users=authorized_users or [],
-            build_source="server_agent",
-            build_source_ref=source_ref,
-        )
-        shared = visibility in {"superiors", "authorized", "public"}
-        return {
-            **settings,
-            "server_ref": server_ref,
-            "build_source": "server_agent",
-            "build_source_ref": source_ref,
-            "sharing_state": "shared" if shared else "not_shared",
-            "is_shared": shared,
-        }
 
     def _snapshot(self, location: dict[str, Any]) -> dict[str, Any]:
         return load_snapshot(

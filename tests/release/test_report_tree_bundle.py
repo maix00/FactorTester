@@ -115,7 +115,11 @@ def test_bundle_publication_is_detached_private_and_immutable(tmp_path, monkeypa
     assert descriptor['root_ref'] == head['root_ref']
     assert ':revision:' in operation['manifest']['publication_key']
     assert all('content_base64' not in resource for resource in projection['local_resources'])
-    library = PublicResearchLibrary(tmp_path / 'manager', authoring_authorizer=lambda record, viewer: viewer == 'bob')
+    library = PublicResearchLibrary(
+        tmp_path / 'manager',
+        read_authorizer=lambda record, viewer: viewer in {'alice', 'bob'},
+        authoring_authorizer=lambda record, viewer: viewer == 'bob',
+    )
     publication = library.sync({'report_id': 'same-report', 'owner_ref': 'alice', 'projection': projection})
     publication_id = publication['publication_id']
     assert library.index(publication_id, 'alice')['authoring_bundle'] == descriptor
@@ -129,7 +133,7 @@ def test_bundle_publication_is_detached_private_and_immutable(tmp_path, monkeypa
     library.configure(owner_ref='alice', report_id='same-report', projection=None, visibility='public',
                       auto_sync=True, relay_local_files=False, authorized_users=[])
     assert library.local_resource(publication_id, descriptor['resource_id'], 'bob')[0] == path.read_bytes()
-    with pytest.raises(PermissionError, match='active research membership'):
+    with pytest.raises(PermissionError, match='research report access'):
         store.resolve(publication_id, 'research_local_resource', descriptor['resource_id'], None)
     with pytest.raises(PermissionError):
         library.local_resource(publication_id, descriptor['resource_id'], 'outside-reader')
