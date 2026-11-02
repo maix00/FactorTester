@@ -23,7 +23,7 @@ import { LocalResearchCreate, LocalResearchDetail } from "../components/local-re
 import { useLocalResearchContext } from "../local-research-context.tsx";
 import type { LocalReportWithResearch, LocalResearchPage } from "../local-research-bridge.ts";
 import { notify } from "../notifications/core.ts";
-import { linkedResearchID, reportBranches, reportRowID, researchRowID, selectReportBranch } from "../research-model.ts";
+import { linkedResearchID, reportBranches, reportRowID, researchRowID, selectReportBranch, mergeResearchDirectory, researchDirectoryRowKey } from "../research-model.ts";
 type Row = Record<string, any>;
 export function ResearchPage(): React.ReactElement {
   const {session}=useAuth();
@@ -146,14 +146,7 @@ function ResearchPageForSession(): React.ReactElement {
   useEffect(()=>{if(error)notify({code:"research.server.load",type:"error",message:error});},[error]);
   const filtered = useMemo(() => {
     if(tab!=="researches")return [...localRows,...rows];
-    const remaining=new Map(localRows.map(row=>[row.research_id,row]));
-    const server=rows.map(row=>{
-      const id=researchRowID(row),localRow=remaining.get(id);
-      if(!localRow || String(row.owner_ref || row.owner || "")!==principal)return row;
-      remaining.delete(id);
-      return {...row,__hasLocal:true,profile_id:row.profile_id || localRow.profile_id};
-    });
-    return [...remaining.values(),...server];
+    return mergeResearchDirectory(rows,localRows,principal);
   }, [rows,localRows,tab,principal]);
   const availableReportBranches = tab === "reports" && selected ? reportBranches(selected) : [];
   const selectedReportBranch = tab === "reports" && selected ? selectReportBranch(selected, selectedPublicationID) : undefined;
@@ -163,13 +156,13 @@ function ResearchPageForSession(): React.ReactElement {
   const owner = (row:Row): React.ReactNode => row.owner_ref || row.owner ? <ObjectReference value={{kind:"user",ref:row.owner_ref || row.owner,label:row.owner_alias || row.owner_ref || row.owner}} /> : "—";
   const profile = (row:Row): React.ReactNode => {
     const ref = row.profile_ref || row.profile_id || row.selected_branch?.profile_ref;
-    if(ref && row.__local){const item=local.capabilities?.profiles.find(value=>value.profile_id===ref);return <button type="button" className="tr-table-link" onClick={()=>setLocalProfile(String(ref))}>{item?.display_name || String(ref)}</button>;}
+    if(ref && (row.__local || row.__hasLocal)){const item=local.capabilities?.profiles.find(value=>value.profile_id===ref);return <button type="button" className="tr-table-link" onClick={()=>setLocalProfile(String(ref))}>{item?.display_name || String(ref)}</button>;}
     return ref ? <ObjectReference value={{kind:"profile",ref:String(ref),profileKey:row.profile_key,owner:row.owner_ref || row.owner}} /> : "—";
   };
   const researchLink = (row:Row): React.ReactNode => {
     const id = linkedResearchID(row), title = String(row.research?.title || row.research_title || id);
     return id ? <button type="button" className="tr-table-link" onClick={() => {
-      if(row.__local && row.research){setTab("researches");setRows([]);setPage(1);setSelected({...row.research,__local:true,owner_ref:principal});}
+      if(row.__local && row.research){setTab("researches");setRows([]);setPage(1);setSelected({...row.research,profile_id:row.profile_id,__local:true,owner_ref:principal});}
       else openResearch(id,title);
     }}>{title}</button> : "—";
   };
@@ -177,7 +170,7 @@ function ResearchPageForSession(): React.ReactElement {
   const canCreateLocal=local.phase==="ready" && local.capabilities?.actions.includes("create");
   return <div className="tr-research-page" onPointerDownCapture={activateServer} onFocusCapture={activateServer}><FunctionPage title={t("nav.research")} actions={<>{tab === "researches" ? canCreateLocal && session ? <Dropdown trigger={["click"]} menu={{items:[{key:"local",label:t("localResearch.local")},{key:"server",label:t("localResearch.server")}],onClick:({key})=>key==="local" ? setCreatingLocal(true) : setCreating(true)}}><Button type="primary">{t("research.create")} <DownOutlined /></Button></Dropdown> : <Button type="primary" onClick={() => session ? setCreating(true) : openAuth("login")}>{t("research.create")}</Button> : null}<Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} /></>}>
     <Tabs activeKey={tab} onChange={(value) => { setTab(value); setRows([]); setPage(1); setSelected(null); setSelectedPublicationID(""); }} items={[{ key: "researches", label: t("research.tabResearches") }, { key: "reports", label: t("research.tabReports") }]} />
-    <div className="tr-research-table"><TRDataTable clientFiltering rows={filtered} rowKey={(row) => `${row.__local ? "local" : "server"}:${rowID(row)}`} loading={loading} pagination={{ page, pageSize: size, total: filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
+    <div className="tr-research-table"><TRDataTable clientFiltering rows={filtered} rowKey={(row) => researchDirectoryRowKey(row,tab === "reports")} loading={loading} pagination={{ page, pageSize: size, total: filtered.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
       { title: t("editor.name"), key: "title", render: (_, row) => row.__local && tab === "reports" && !local.capabilities?.actions.includes("get_report") ? row.title : <button className="tr-table-link" onClick={() => { setSelected(row); setSelectedPublicationID(tab === "reports" ? selectReportBranch(row)?.publication_id || "" : "");  }}>{row.title || rowID(row)}</button> },
       ...(tab === "reports" ? [{title:t("research.linkedResearch"),key:"research",render:(_:unknown,row:Row) => researchLink(row)}] : []),
       {title:t("research.profile"),key:"profile",className:"tr-research-profile-column",filters:Array.from(new Set(filtered.map(row=>String(row.profile_ref || row.profile_id || row.selected_branch?.profile_ref || "")).filter(Boolean))).map(value=>({text:value,value})),onFilter:(value:React.Key | boolean,row:Row)=>String(row.profile_ref || row.profile_id || row.selected_branch?.profile_ref || "")===String(value),render:(_:unknown,row:Row) => profile(row)},

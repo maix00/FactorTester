@@ -47,7 +47,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                       const ok=x=>({success:true,schema:'tr-local-research-bridge:v1',...x});
                       const bridge={postMessage(m){f.nativeCalls.push(m);
                         if(m.action==='capabilities')return Promise.resolve(ok({binding:{issuer:'https://identity.test/realm',identity_id:'identity-1'},actions:['list','get','create','import_research','import_catalog_report','list_profile_reports','queue_researches'],profiles:[{profile_id:'p1',display_name:'自有身份'},{profile_id:'p2',display_name:'第二身份'},{profile_id:'self',display_name:'本人'}]}));
-                        if(m.action==='list'){const rows=m.profile_id==='p1'?[row('r1','本机样本'),row('synced','同步样本'),...(f.created?[f.created]:[])]:m.profile_id==='self'&&f.serverNew?[row(f.serverNew.research_id,f.serverNew.title,'self')]:[...(f.created?[f.created]:[])].filter(x=>x.profile_id===m.profile_id);return Promise.resolve(ok({researches:rows.slice(m.offset,m.offset+m.limit),next_offset:null}));}
+                        if(m.action==='list'){const rows=m.profile_id==='p1'?[row('r1','本机样本'),row('synced','同步样本'),...(f.created?[f.created]:[])]:m.profile_id==='p2'?[row('synced','同步样本','p2')]:m.profile_id==='self'&&f.serverNew?[row(f.serverNew.research_id,f.serverNew.title,'self')]:[...(f.created?[f.created]:[])].filter(x=>x.profile_id===m.profile_id);return Promise.resolve(ok({researches:rows.slice(m.offset,m.offset+m.limit),next_offset:null}));}
                         if(m.action==='import_research')return Promise.resolve(ok({research:row(m.research_id,f.serverNew.title,'self'),status:'imported'}));
                         if(m.action==='list_profile_reports')return Promise.resolve(ok({reports:[],revision:1,next_offset:null}));
                         if(m.action==='import_catalog_report')return Promise.resolve(ok({report:{report_id:m.report_id,research_id:m.research_id,profile_id:m.profile_id,title:'服务器报告',created_at:1720000000},status:'imported'}));
@@ -75,8 +75,18 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     assert page.evaluate("window.fixture.nativeAuth.some(x=>x.action==='session-updated')")
                     page.get_by_text("服务器样本",exact=True).wait_for()
                     page.wait_for_function("window.fixture.nativeCalls.some(x=>x.action==='queue_researches' && x.research_ids.includes('research:v1:SSSSSSSSSSSSSSSSSSSSSSSS'))")
-                    assert page.get_by_role("button",name="同步样本",exact=True).count()==1
-                    assert page.get_by_text("本机 / 服务器",exact=True).is_visible()
+                    assert page.get_by_role("button",name="同步样本",exact=True).count()==2
+                    copies=page.locator(".ant-table-row").filter(has=page.get_by_role("button",name="同步样本",exact=True))
+                    assert copies.count()==2
+                    assert copies.nth(0).get_by_text("自有身份",exact=True).count()==1
+                    assert copies.nth(1).get_by_text("第二身份",exact=True).count()==1
+                    assert len(set(copies.evaluate_all("rows => rows.map(row=>row.dataset.rowKey)")))==2
+                    assert page.get_by_text("本机 / 服务器",exact=True).count()==2
+                    page.screenshot(path=str(Path('/tmp') / f'tr-multiple-profile-directory-{viewport["width"]}.png'))
+                    copies.nth(1).get_by_role("button",name="第二身份",exact=True).click()
+                    page.get_by_role("dialog").get_by_text("p2",exact=True).wait_for()
+                    if viewport["width"] < 600: page.get_by_role("button",name="返回").last.click()
+                    else: page.locator(".ant-modal-close").last.click()
                     assert page.get_by_role("radiogroup",name="位置").count()==0
                     page.locator("th").filter(has_text="位置").locator(".ant-table-filter-trigger").first.click()
                     page.locator(".ant-dropdown:visible").get_by_text("本机",exact=True).click()

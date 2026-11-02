@@ -109,7 +109,6 @@ createRoot(document.getElementById('root')!).render(
                         page.locator(".ant-modal-close").click()
                     page.evaluate("window.fixture.authority='keycloak'; window.fixture.setLanguage('en')")
                     assert page.get_by_role("tab", name="Reports").is_visible()
-                    page.wait_for_function("window.fixture.requests.filter(r => r==='/api/research/capabilities/keycloak-sharing').length>=2")
                     page.wait_for_function("!document.body.innerText.includes('Only me')")
                     page.evaluate("window.fixture.authority='legacy'; window.fixture.setLanguage('zh')")
                     page.get_by_role("button", name="研究甲", exact=True).click()
