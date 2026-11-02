@@ -24,12 +24,12 @@ class ClientFactorCatalogMixin:
 
         families = []
         for item in list_custom_factors(username):
-            alias = str(item.get("id") or item.get("name") or "").strip()
+            alias = str(item.get("factor_id") or item.get("id") or item.get("name") or "").strip()
             if not alias:
                 continue
             families.append({
                 "factor_family_alias": alias,
-                "factor_family_name": item.get("name") or alias,
+                "factor_family_name": item.get("factor_name") or item.get("name") or alias,
                 "chinese_name": item.get("chinese_name") or "",
                 "description": item.get("description") or "",
                 "math_expr": item.get("math_expr") or "",
