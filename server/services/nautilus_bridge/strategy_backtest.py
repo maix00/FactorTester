@@ -217,6 +217,28 @@ def run_strategy_family_run_spec(
             f"found={runtime['version'] or 'missing'} expected={runtime['expected']}"
         )
 
+    # A formal Job must never inherit the convenience replay helper's
+    # synthetic account, zero fees or implicit venue when its frozen contract
+    # is absent. Reject before resolving strategy code or staging market data.
+    run_spec_value = job_spec.get('run_spec') if isinstance(job_spec, dict) else None
+    configuration = run_spec_value.get('configuration') if isinstance(run_spec_value, dict) else None
+    analyses = configuration.get('analyses') if isinstance(configuration, dict) else None
+    backtest = analyses.get('backtest') if isinstance(analyses, dict) else None
+    execution = backtest.get('execution') if isinstance(backtest, dict) else None
+    contract = execution.get('nautilus_contract') if isinstance(execution, dict) else None
+    settings = contract.get('settings') if isinstance(contract, dict) else None
+    if not isinstance(settings, dict):
+        raise ValueError('strategy Job requires frozen Nautilus execution settings')
+    from server.services.nautilus_bridge.config import compile_frozen_execution_plan
+    execution_plan = compile_frozen_execution_plan(
+        settings, feed_kind='bar',
+        adapter_capabilities=frozenset({
+            'native_bar_open_market_orders',
+            'native_bar_volume_consumption',
+            'daily_settlement',
+        }),
+    )
+
     templates=plan.get('strategy_families')
     if templates is None:templates=[plan.get('strategy')]
     if not isinstance(templates,list) or not templates or any(not isinstance(x,dict) for x in templates):
@@ -250,25 +272,6 @@ def run_strategy_family_run_spec(
         consumers.append(dict(strategy_id=str(template.get('strategy_id') or f'FactorFamily-{i:03}'),
             family=family,factor_bindings=bindings,factor_refs=factor_refs,products=template.get('products') or None))
     catalogs = plan.get("catalog_inputs")
-    run_spec_value = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
-    execution_plan = None
-    if isinstance(run_spec_value, dict):
-        analyses = (run_spec_value.get("configuration") or {}).get("analyses") or {}
-        backtest = analyses.get("backtest") or {}
-        execution = backtest.get("execution") or {}
-        contract = execution.get("nautilus_contract") or {}
-        settings = contract.get("settings") if isinstance(contract, dict) else None
-        if isinstance(settings, dict):
-            from server.services.nautilus_bridge.config import compile_frozen_execution_plan
-
-            execution_plan = compile_frozen_execution_plan(
-                settings, feed_kind="bar",
-                adapter_capabilities=frozenset({
-                    "native_bar_open_market_orders",
-                    "native_bar_volume_consumption",
-                    "daily_settlement",
-                }),
-            )
     source_adapter = plan.get("source_adapter") or {}
     window = plan.get("run_window") or {}
     staging_requests = plan.get("catalog_staging")

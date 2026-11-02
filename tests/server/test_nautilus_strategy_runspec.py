@@ -76,6 +76,7 @@ def test_frozen_node_bar_budget_is_total_across_products(monkeypatch, tmp_path):
 
 
 def test_strategy_family_resolves_multiple_factor_roles(monkeypatch, tmp_path):
+    from tests.server.test_nautilus_bridge_config import _minimal_frozen
     class Resolver:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -94,7 +95,8 @@ def test_strategy_family_resolves_multiple_factor_roles(monkeypatch, tmp_path):
     )
     job_spec = {
         "_owner": "alice",
-        "run_spec": {"configuration": {"shared": {"factors": [{"ref": "a"}]}}},
+        "run_spec": {"configuration": {"shared": {"factors": [{"ref": "a"}]},
+            "analyses": {"backtest": {"execution": {"nautilus_contract": {"settings": _minimal_frozen()}}}}}},
     }
     plan = {
         "strategy": {
@@ -265,6 +267,7 @@ def test_strategy_family_engine_uses_frozen_venue(monkeypatch):
 
 
 def test_multiple_strategy_run_spec_resolves_same_frozen_factor_once(monkeypatch,tmp_path):
+    from tests.server.test_nautilus_bridge_config import _minimal_frozen
     calls=[];captured={}
     class Resolver:
         def __init__(self,**kwargs):pass
@@ -275,10 +278,24 @@ def test_multiple_strategy_run_spec_resolves_same_frozen_factor_once(monkeypatch
     plan={'strategy_families':[dict(strategy_id=f'Group-{i}',kind='cross_sectional_group',
         parameters={'split_count':2,'group_index':i},factor_roles={'signal':{'ref':ref}}) for i in (1,2)],
         'catalog_inputs':{'T':{'catalog_dir':str(tmp_path),'contract_uid':'CFFEX|F|T|2403'}},'max_input_bars':8}
-    result=strategy_backtest.run_strategy_family_run_spec(job_spec={'_owner':'alice','run_spec':{'configuration':{'shared':{'factors':[{'ref':ref}]}}}},plan=plan,output_dir=tmp_path/'out')
+    job_spec={'_owner':'alice','run_spec':{'configuration':{'shared':{'factors':[{'ref':ref}]},
+        'analyses':{'backtest':{'execution':{'nautilus_contract':{'settings':_minimal_frozen()}}}}}}}
+    result=strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec,plan=plan,output_dir=tmp_path/'out')
     assert result=={'ok':True} and len(calls)==1
     assert len(captured['strategies'])==2
     assert captured['strategies'][0]['factor_bindings']['signal'] is captured['strategies'][1]['factor_bindings']['signal']
+
+
+@pytest.mark.parametrize('settings', [None, 'invalid', [], 0])
+def test_strategy_job_rejects_missing_execution_before_factor_resolution(monkeypatch, tmp_path, settings):
+    monkeypatch.setattr('server.modules.shared.run_spec_resolution.factors.RunFactorResolver',
+                        lambda **kwargs: pytest.fail('factor resolution must not run'))
+    monkeypatch.setattr('server.services.nautilus_bridge.catalog_staging.stage_run_spec_catalogs',
+                        lambda **kwargs: pytest.fail('market data must not be staged'))
+    job_spec = {'run_spec': {'configuration': {'analyses': {'backtest': {'execution': {
+        'nautilus_contract': {'settings': settings}}}}}}}
+    with pytest.raises(ValueError, match='requires frozen Nautilus execution settings'):
+        strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec, plan={}, output_dir=tmp_path)
 
 
 def test_overlapping_netting_targets_fail_before_engine_construction(monkeypatch):
