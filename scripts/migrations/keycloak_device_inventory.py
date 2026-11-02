@@ -157,6 +157,7 @@ def main() -> None:
     directory.add_argument('--keycloak-live', action='store_true',
                            help='resolve the scoped owner using the configured Keycloak admin adapter')
     parser.add_argument('--manager-id', required=True)
+    parser.add_argument('--manager-state-root', help='existing Manager state directory when using persisted control DB settings')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
     if args.keycloak_live and not args.postgres:
@@ -164,10 +165,11 @@ def main() -> None:
     if args.postgres:
         if not args.principal:
             parser.error('--postgres requires --principal')
-        from server.manager.storage.control_db import ControlDatabaseConfig, PostgresControlStore
-        config = ControlDatabaseConfig.from_env()
+        from server.manager.storage.control_db import PostgresControlStore
+        from scripts.migrations.control_database import configured_control_database
+        config = configured_control_database(manager_state_root=args.manager_state_root)
         if config is None:
-            parser.error('the control database is not configured')
+            parser.error('no control database in this process; inherit the Manager environment or provide --manager-state-root')
         connection = PostgresControlStore(config)._connect()
         try:
             snapshot = read_postgres_snapshot(connection, manager_id=args.manager_id, principal=args.principal)

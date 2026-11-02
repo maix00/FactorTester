@@ -138,7 +138,7 @@ def test_cli_checks_restored_database_backup_and_quiescence_before_writes(tmp_pa
 
     live = SimpleNamespace(host='db', port=5432, database='live')
     backup = SimpleNamespace(host='db', port=5432, database='restored')
-    monkeypatch.setattr(control_db.ControlDatabaseConfig, 'from_env', classmethod(lambda _cls: live))
+    monkeypatch.setattr(control_db.ControlDatabaseConfig, 'from_env', classmethod(lambda _cls, _environ=None: live))
     monkeypatch.setattr(control_db.ControlDatabaseConfig, 'from_url', classmethod(lambda _cls, _url: backup))
     monkeypatch.setattr(cli, '_snapshot', lambda _config, **_kw: SNAPSHOT)
     monkeypatch.setattr(cli, 'read_keycloak_directory', lambda _principal: DIRECTORY)

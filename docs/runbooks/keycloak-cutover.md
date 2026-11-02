@@ -204,3 +204,30 @@ TRADERESEARCH_KEYCLOAK_ADMIN_CLIENT_SECRET
 ```
 
 The admin client must be able to read users.
+
+## Device inventory and the selected Manager
+
+Device inventory and staging accept `--manager-state-root` when the Manager
+stores its PostgreSQL connection in `control-database.json`. Select the exact
+existing state directory from that deployment. Both commands reuse Manager's
+settings reader: environment configuration takes precedence over the file.
+They do not start ManagerState, create a missing state directory, or initialize
+a database schema merely to discover the connection.
+
+Inventory remains scoped to `--principal`; `--manager-id` identifies the device
+permission namespace. Records belonging to another Manager are reported as
+`outside_manager`, never silently re-granted locally. A user's current name
+and verified legacy aliases refer to one stable user, not separate accounts;
+Profile associations and device records must be counted separately. A device
+metadata inventory is not proof of a live Keycloak grant.
+
+For staging, the restored PostgreSQL backup, quiesced writes, protected
+Keycloak backup and scope parity requirements still apply. Selecting a state
+directory does not authorize migration or relax these checks.
+
+A plain `docker exec` does not inherit secrets exported by the container's
+entrypoint into Manager's process. For deployments using that mechanism,
+invoke migration commands with the same protected environment loading already
+used by the deployment verifier. An absent URL in a diagnostic process is not
+evidence that the running Manager lacks a configured control database. Do not
+print the secret or place it in command-line arguments.

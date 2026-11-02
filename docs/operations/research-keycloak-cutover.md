@@ -100,3 +100,7 @@ React 登录切换：移除密码、密码确认、机构注册字段，以及 P
 移除旧整图模块后，独立 realm 的真实临时 Keycloak＋CouchDB＋签名 peer HTTP 演练再次通过（2 MiB 附件、编辑预检、双端及同会话撤权）。演练容器已由脚本清理；此回执不代表现网发布。
 
 旧在线报告导入入口退役：删除 ResearchCatalog 的旧 `migrate_reports`/失败重写实现及旧报告身份合并助手、Manager 自动发现旧报告函数、CLI 的 `migrate-reports`/`migrate-existing-reports` 和客户端方法。旧 HTTP 地址明确返回 410，不再接受旧 ACL 或导入时重建权限。历史快照生成逻辑仅迁入测试专用 oracle，生产模块不可调用；实际权限迁移使用 `scripts/migrations/keycloak_research_stage.py` 的已审核逐对象计划。75 项聚焦回归通过，包括旧入口不发现/不写入、CLI 移除、现行 CouchDB 路由及事务补偿。
+
+2026-11-02 设备迁移补充：设备 inventory/stage 工具可用 `--manager-state-root` 读取所选 Manager 的既有控制库设置，复用环境优先于设置文件的运行规则；不启动 ManagerState 或初始化 schema。19 项聚焦测试通过。使用临时真实 Keycloak＋PostgreSQL 的 `scripts.test.keycloak_device_smoke` 通过备份恢复与 CLI 迁移、所有者允许、其他用户/密钥拒绝、同 token 撤权拒绝，临时容器自动清理。
+
+实际只读设备盘点：两端均 3 个稳定用户、6 个精确新旧用户名；匹配 14 条设备记录，全部属于公网 `remote-main` 且启用，内网盘点正确报告 outside_manager。尚未证明实际 Keycloak use 授权。公网 entrypoint 将控制库 secret 仅导出给其子进程，普通 docker exec 的环境缺少该 URL，不可据此声称 Manager 未配置控制库；采用与 entrypoint 相同的受保护配置来源后，已完成只读聚合并确认上述所有权。公网已部署版本没有新版 keycloak_device 和 keycloak_policy_evaluation 模块，当前未做线上迁移或发布。不得把启用标记或临时演练当作现网切换完成。

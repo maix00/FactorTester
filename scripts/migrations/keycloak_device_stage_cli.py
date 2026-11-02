@@ -68,6 +68,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('review', 'stage'))
     parser.add_argument('--manager-id', required=True)
+    parser.add_argument('--manager-state-root', help='existing Manager state directory when using persisted control DB settings')
     parser.add_argument('--principal', required=True)
     parser.add_argument('--plan', required=True, help='owner-only review file')
     parser.add_argument('--journal', help='new owner-only write-ahead journal; stage only')
@@ -80,10 +81,11 @@ def main() -> None:
     from server.identity.user_session import oidc_settings
     from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
 
-    live = ControlDatabaseConfig.from_env()
+    from scripts.migrations.control_database import configured_control_database
+    live = configured_control_database(manager_state_root=args.manager_state_root)
     restored = ControlDatabaseConfig.from_url(os.environ.get('TR_DEVICE_RESTORED_DB_URL', ''))
     if live is None:
-        parser.error('live PostgreSQL control database is not configured')
+        parser.error('no live PostgreSQL control database in this process; inherit the Manager environment or provide --manager-state-root')
     # Host aliases can point at the same cluster. Require a differently named
     # restored database even when the configured hosts appear distinct.
     if live.database == restored.database:
