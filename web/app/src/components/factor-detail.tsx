@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Collapse, Empty } from "antd";
 import { useTranslation } from "react-i18next";
+import {parameterLabel} from "../factor-parameters.ts";
 import { Formula } from "./formula.tsx";
 import { ResultView } from "./result-view.tsx";
 import { TRDataTable } from "./data-table.tsx";
@@ -15,7 +16,7 @@ export function FactorDetail({ detail }: { detail: Record<string, any> | null })
     {description ? <p className="tr-factor-description">{description}</p> : null}
     {typeof formula === "string" && formula ? <section><h3>{t("library.formula")}</h3><Formula latex={formula} /></section> : null}
     {Array.isArray(params) && params.length ? <section><h3>{t("editor.parameters")}</h3><TRDataTable rows={params.slice((page - 1) * size, page * size)} rowKey={(row) => row.alias || row.name} pagination={{ page, pageSize: size, total: params.length, hideOnSinglePage: true, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
-      { title: t("editor.name"), key: "name", render: (_, row) => row.name || row.alias },
+      { title: t("editor.name"), key: "name", render: (_, row) => parameterLabel(row) },
       { title: t("library.type"), key: "type", render: (_, row) => row.value_type || row.type || "—" },
       { title: t("library.defaultValue"), key: "default", render: (_, row) => { const value = row.default_value ?? row.default; return value === undefined ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value); } },
       { title: t("library.description"), key: "description", render: (_, row) => row.desc || row.description || "—" },

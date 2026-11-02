@@ -932,3 +932,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-category-entry .ant-form-item:last-child { margin-bottom: 0; }
 
 .tr-definition-paths { margin: 0; padding-left: 18px; overflow-wrap: anywhere; }
+
+.tr-factor-parameter-input { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 10px; }
+@media(max-width: 760px) { .tr-factor-parameter-input { grid-template-columns: 1fr; } }

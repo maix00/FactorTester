@@ -2,7 +2,7 @@
 from functools import partial
 from http.server import SimpleHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
-import json,subprocess,threading
+import json,re,subprocess,threading
 from playwright.sync_api import sync_playwright,expect
 ROOT=Path(__file__).resolve().parents[2]
 APP=ROOT/'web/app'
@@ -24,8 +24,9 @@ window.fetch=async(url,options={})=>{
  window.calls.push({path:u.pathname,query:u.search,method:options.method||'GET',body});
  const ok=value=>new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
  if(u.pathname==='/api/factor-library/families')return ok({families:[{factor_family_alias:'Alpha',factor_family_name:'Alpha',source:'custom',owner_username:'alice'}]});
+ if(u.pathname==='/api/factor-library/families/validate')return ok({valid:true,params:[{alias:'N',name:'N',type:'WindowParam',default_value:'2d'}]});
  if(u.pathname==='/api/factor-library/factors')return ok({factors:[{ref:frozen.ref,alias:frozen.alias,owner_username:'alice'}]});
- if(u.pathname==='/api/factor-library/factors/detail')return ok({factor:{...frozen,ref:u.searchParams.get('factor_ref')||frozen.ref}});
+ if(u.pathname==='/api/factor-library/factors/detail'){const data={factor:{...frozen,ref:u.searchParams.get('factor_ref')||frozen.ref}};if(window.deferDetail){window.deferDetail=false;return new Promise(resolve=>window.releaseDetail=()=>resolve(ok(data)));}return ok(data);}
  if(u.pathname==='/api/factor-library/factor-sets/descriptor'){
   if(window.failDescriptor)return new Response(JSON.stringify({error:'unavailable'}),{status:503});
   return ok({descriptor:{manifest:{alias:'Existing set',identity:{set_id:'set-1',members:[frozen]}}}});
@@ -35,10 +36,10 @@ window.fetch=async(url,options={})=>{
  throw Error('unexpected editor request');
 };
 function Harness(){const [mode,setMode]=React.useState('family-new');return <main>
- <nav>{['family-new','family-edit','set-new','set-edit','set-failed','factor-edit','category-edit','composite-edit'].map(value=><button key={value} onClick={()=>{window.failDescriptor=value==='set-failed';setMode(value);}}>{value}</button>)}</nav>
+ <nav>{['family-new','family-edit','set-new','set-edit','set-failed','factor-edit','category-edit','composite-edit','factor-nested'].map(value=><button key={value} onClick={()=>{window.failDescriptor=value==='set-failed';setMode(value);}}>{value}</button>)}</nav>
  {mode.startsWith('family')?<FactorFamilyEditor key={mode} family={mode==='family-edit'?{factor_family_alias:'Alpha',owner_username:'alice'}:undefined} onSaved={v=>window.saved.push(v)} onCancel={()=>{}}/>:
  mode.endsWith('edit')&&mode.includes('category')||mode==='composite-edit'?<CategoryEditor key={mode} category={{id:'category:1',alias:'Segments',is_composite:mode==='composite-edit',items:[{label:'First',paths:['Product/A/']},{label:'Others',paths:['Product/B/'],label_generated:true}]}} onSaved={v=>window.saved.push(v)} onDeleted={()=>{}} onCancel={()=>{}}/>:
- mode==='factor-edit'?<LibraryCreate kind='factor' factor={{...frozen,factor_family_alias:'Alpha'}} onCreated={v=>window.saved.push(v)} onCancel={()=>{}}/>:
+ mode.startsWith('factor-')?<LibraryCreate key={mode} kind='factor' factor={{...frozen,factor_family_alias:'Alpha',parameter_definitions:mode==='factor-nested'?[{alias:'Child',name:'Nested',type:'FactorParam',input_mode:'factor_ref_custom',options:[{value:'CA',label:'Close'}]}]:[{alias:'N',name:'Window',type:'WindowParam',input_mode:'text'}]}} onCreated={v=>window.saved.push(v)} onCancel={()=>{}}/>:
  <FactorSetEditor key={mode} value={mode==='set-new'?undefined:{target_ref:'factor-set:v1:old',set_id:'set-1',owner_username:'alice'}} onSaved={v=>window.saved.push(v)} onCancel={()=>{}}/>}
  </main>}
 createRoot(document.getElementById('root')).render(<Harness/>);
@@ -58,9 +59,13 @@ createRoot(document.getElementById('root')).render(<Harness/>);
                     errors=[];page.on('pageerror',lambda e:errors.append(type(e).__name__))
                     page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
                     name=page.get_by_label('Name',exact=True);source=page.get_by_label('Source',exact=True)
-                    name.fill('Display only');source.fill('class Alpha(FactorFamily): pass')
+                    name.fill('Display only')
+                    page.locator('input[type=file]').set_input_files({'name':'Alpha.py','mimeType':'text/x-python','buffer':b'class Alpha(FactorFamily): pass'})
+                    expect(source).to_have_value('class Alpha(FactorFamily): pass')
+                    page.get_by_role('button',name='Validate',exact=True).click()
+                    page.get_by_role('cell',name='WindowParam',exact=True).wait_for()
                     page.get_by_role('button',name='Save',exact=True).click();page.wait_for_function('window.saved.length===1')
-                    call=page.evaluate('window.calls.find(c=>c.method==="POST")')
+                    call=page.evaluate('window.calls.find(c=>c.method==="POST"&&c.path.endsWith("/families/custom"))')
                     assert call['path']=='/api/factor-library/families/custom'
                     assert call['body']['chinese_name']=='Display only' and call['body']['source_code'].startswith('class Alpha')
                     page.get_by_role('button',name='family-edit',exact=True).click();source=page.get_by_label('Source',exact=True)
@@ -82,6 +87,9 @@ createRoot(document.getElementById('root')).render(<Harness/>);
                     page.wait_for_function('window.calls.filter(c=>c.path.endsWith("/descriptor")).length===2')
                     assert page.get_by_role('button',name='Save',exact=True).is_disabled()
                     page.get_by_role('button',name='factor-edit',exact=True).click()
+                    page.get_by_label('Window',exact=True).fill('30')
+                    page.get_by_role('switch',name='JSON parameters',exact=True).click()
+                    assert json.loads(page.get_by_label('Parameters',exact=True).input_value())=={'N':'30'}
                     page.get_by_label('Parameters',exact=True).fill('{"N":30}')
                     page.get_by_role('button',name='Save',exact=True).click()
                     page.wait_for_function('window.saved.length===5')
@@ -106,6 +114,31 @@ createRoot(document.getElementById('root')).render(<Harness/>);
                     assert page.get_by_role('button',name='Add entry',exact=True).count()==0
                     page.get_by_role('button',name='Save',exact=True).click()
                     page.wait_for_function('window.saved.length===7')
+                    page.get_by_role('button',name='factor-nested',exact=True).click()
+                    page.get_by_label('Nested Input type',exact=True).first.click()
+                    page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter(has_text='Factor library').click()
+                    page.evaluate('window.deferDetail=true')
+                    page.get_by_role('combobox',name='Nested',exact=True).click()
+                    page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter(has_text='Factor A').click()
+                    page.wait_for_function('typeof window.releaseDetail==="function"')
+                    expect(page.get_by_role('button',name='Save',exact=True)).to_be_disabled()
+                    page.evaluate('window.releaseDetail()')
+                    expect(page.get_by_role('button',name='Save',exact=True)).to_be_enabled()
+                    page.get_by_role('button',name='Save',exact=True).click()
+                    page.wait_for_function('window.saved.length===8')
+                    nested=page.evaluate('window.calls.filter(c=>c.path.endsWith("/Alpha/factors")).at(-1).body.params.Child')
+                    assert nested['ref']=='factor:v2:a' and nested['params']=={'N':20}
+                    page.get_by_role('button',name='New factor',exact=True).click()
+                    dialog=page.get_by_role('dialog')
+                    dialog.wait_for()
+                    assert page.locator('form form').count()==0
+                    dialog.get_by_role('button',name='Cancel',exact=True).click()
+                    dialog.wait_for(state='hidden')
+                    parent_save=page.get_by_role('button',name=re.compile(r'^(loading )?Save$'))
+                    expect(parent_save).to_be_enabled()
+                    expect(parent_save).not_to_have_class(re.compile(r'ant-btn-loading(?: |$)'))
+
+
                     page.screenshot(path=f'/tmp/tr-factor-editors-{width}.png')
                     assert not errors
                     page.close()
