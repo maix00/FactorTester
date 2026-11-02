@@ -467,3 +467,30 @@ def test_request_identity_never_reuses_a_different_unverified_bearer():
         identity = authz.keycloak_request_identity()
         assert identity is not None
         assert identity.token == "verified-token"
+
+
+def test_authorize_many_bounds_repeated_permission_parameter_and_keeps_every_grant(monkeypatch):
+    from urllib.parse import parse_qs
+    from server.identity.keycloak_authorization import keycloak_resource_uri, keycloak_resource_name
+    permissions = [(keycloak_resource_uri("research_report", str(i)),
+                    keycloak_resource_name("research_report", str(i)), "read") for i in range(65)]
+    names = {uri: name for uri, name, _ in permissions}
+    batches = []
+    class Response:
+        def __init__(self, body): self.body = body
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self, _): return self.body
+    class Transport:
+        def open(self, request, *, timeout):
+            values = parse_qs(request.data.decode())["permission"]
+            assert sum(len(value.encode()) + 1 for value in values) <= 3500
+            batches.append(values)
+            return Response(json.dumps([{"rsname": names[value.rsplit("#", 1)[0]],
+                                         "scopes": ["read"]} for value in values]).encode())
+    monkeypatch.setattr("server.manager.domain.federation_transport.FederationTransport", Transport)
+    result = ServiceOIDCClient("https://id.example", "research", "api").authorize_many(
+        "user-token", audience="api", permissions=permissions)
+    assert len(batches) > 2
+    assert [value for batch in batches for value in batch] == [uri + "#read" for uri, _, _ in permissions]
+    assert result == {(uri, "read") for uri, _, _ in permissions}
