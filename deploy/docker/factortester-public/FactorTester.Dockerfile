@@ -140,7 +140,7 @@ COPY web/app/src web/app/src
 COPY skills skills
 COPY apple/Resources apple/Resources
 COPY apple/Sources/Navigation apple/Sources/Navigation
-COPY apple/Sources/Features/Web/LocalResearchBridge.swift apple/Sources/Features/Web/LocalResearchBridge.swift
+COPY apple/Sources/Features/Web apple/Sources/Features/Web
 COPY settings.py start_server.py ./
 COPY deploy/docker/factortester-public/factortester-entrypoint.sh \
     /usr/local/bin/factortester-public-entrypoint
