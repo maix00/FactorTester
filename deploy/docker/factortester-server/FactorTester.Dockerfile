@@ -117,7 +117,7 @@ COPY deploy/docker/factortester-public/traderesearch-cli /usr/local/bin/traderes
 RUN set -eu; \
     rm -f /usr/local/bin/factortester /usr/local/bin/factortester-manager; \
     chmod 0555 /usr/local/bin/traderesearch; \
-    test -x /usr/local/bin/bwrap; \
+    test -x /usr/bin/bwrap; \
     test ! -e /usr/local/bin/factortester; \
     test ! -e /usr/local/bin/factortester-manager; \
     traderesearch --help >/tmp/traderesearch-help; \

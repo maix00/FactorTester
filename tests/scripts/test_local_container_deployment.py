@@ -89,6 +89,8 @@ def test_local_agent_has_shared_pinned_tools_after_existing_python_layer() -> No
     assert dockerfile.index("pip install --no-cache-dir -r /tmp/requirements-linux.txt") < dockerfile.index("FROM manager-runtime AS traderesearch-local-manager")
     assert "bubblewrap=0.12.0-1~deb13u1" in dockerfile
     assert "chmod 0755 /usr/bin/bwrap" in dockerfile
+    assert "test -x /usr/bin/bwrap" in dockerfile
+    assert "test -x /usr/local/bin/bwrap" not in dockerfile
     assert "COPY deploy/docker/factortester-server/install-agent-tools.sh" in dockerfile
     assert "COPY deploy/docker/factortester-server/install-agent-tools.sh" in public
     assert "Codex platform package integrity check failed" in installer
