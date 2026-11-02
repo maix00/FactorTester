@@ -35,7 +35,9 @@ export function FactorFamilyDetail({family,fingerprint,onChanged}:{family:Row;fi
     if(controller.signal.aborted)return;loaded.current.history=versionLimit;setVersions(history.versions||[]);
    }));
    if(loaded.current.source!==version)tasks.push(request(`${endpoint}/${encodeURIComponent(version)}?${query}`,{signal:controller.signal}).then(selected=>{
-    if(controller.signal.aborted)return;loaded.current.source=version;setSource({version,value:selected});
+    if(controller.signal.aborted)return;
+    if(version!=="current"&&selected.family_formula_fingerprint!==version)throw new Error(t("familyDetail.versionMismatch"));
+    loaded.current.source=version;setSource({version,value:selected});
    }));
   }
   if(!tasks.length){setLoading(false);return;}
@@ -66,7 +68,7 @@ export function FactorFamilyDetail({family,fingerprint,onChanged}:{family:Row;fi
    tab==='versions'?<><TRDataTable<Row> rows={(versions||[]).slice((page-1)*size,page*size)} rowKey="family_formula_fingerprint" pagination={{page,pageSize:size,total:versions?.length||0,onChange:(p,s)=>{setPage(p);setSize(s);}}} columns={[
     {key:'version',title:t('library.version'),render:(_,row)=><button className="tr-table-link" onClick={()=>{setVersion(row.family_formula_fingerprint);setTab('source');}}>{String(row.family_formula_fingerprint).slice(0,12)}</button>},
     {key:'subject',title:t('library.description'),dataIndex:'subject'},
-   ]}/>{versions?.length===versionLimit&&versionLimit<500?<Button onClick={()=>setVersionLimit(value=>value+100)}>{t('familyDetail.moreVersions')}</Button>:null}
+   ]}/>{versions?.length===versionLimit&&versionLimit<200?<Button onClick={()=>setVersionLimit(value=>value+100)}>{t('familyDetail.moreVersions')}</Button>:null}
     <Input.Search aria-label={t('familyDetail.exactVersion')} placeholder={t('familyDetail.exactVersion')} value={exactVersion} onChange={event=>setExactVersion(event.target.value)} onSearch={value=>{if(/^[0-9a-f]{64}$/i.test(value)){setVersion(value);setTab('source');}else notify({code:'family.version.invalid',type:'error',message:t('familyDetail.invalidVersion')});}}/></>:
    <TRDataTable<Row> rows={(members||[]).slice((page-1)*size,page*size)} rowKey={row=>String(row.ref||row.factor_ref)} pagination={{page,pageSize:size,total:members?.length||0,onChange:(p,s)=>{setPage(p);setSize(s);}}} columns={[
     {key:'factor',title:t('catalog.factors'),render:(_,row)=><ObjectReference value={{kind:'factor',ref:String(row.ref||row.factor_ref),label:row.alias||row.factor_alias,owner:row.owner_username}}/>},
