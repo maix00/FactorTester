@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 import json
 import pytest
@@ -21,3 +22,10 @@ def test_missing_image_is_distinct_from_daemon_failure():
  def failure(args,**kwargs):return SimpleNamespace(returncode=1,stderr='Cannot connect to Docker daemon')
  with pytest.raises(RuntimeError,match='cannot inspect'):
   inspect_prepared('candidate',revision='x',nautilus_revision='y',python_deps_id='z',run=failure)
+
+
+def test_activation_passes_pinned_native_revision_to_remote_image_build():
+    root=Path(__file__).resolve().parents[2]
+    script=(root/'scripts/server/activate_public_revision.sh').read_text()
+    build=script.split('if [[ "$reuse_status" == "3" ]]; then',1)[1].split('elif [[ "$reuse_status"',1)[0]
+    assert 'FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision"' in build

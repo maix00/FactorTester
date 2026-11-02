@@ -172,6 +172,7 @@ else
     | sudo tee -a "$next_env" >/dev/null
 fi
 cache_plan="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision" \
   TR_PUBLIC_PYTHON_SOURCE_ROOT="$release_root/$old_revision" \
   TR_PUBLIC_PYTHON_SOURCE_IMAGE="$current_image" \
   TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
@@ -189,6 +190,7 @@ snapshot_mib="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["snapsho
 sudo bash "$release_path/scripts/server/check_public_build_capacity.sh" \
   --cache-root "$container_root/python-deps-cache" --snapshot-mib "$snapshot_mib"
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision" \
   TR_PUBLIC_PYTHON_SOURCE_ROOT="$release_root/$old_revision" \
   TR_PUBLIC_PYTHON_SOURCE_IMAGE="$current_image" \
   TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
