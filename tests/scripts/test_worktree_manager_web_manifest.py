@@ -183,10 +183,10 @@ def test_temporary_object_edit_flows_through_shared_actions_and_stays_temporary(
     assert "context.testObjectTemporary === true) return true;" in details
     assert "const canEdit = context.testObjectTemporary === true || (" in details
 
-    strategy = (WEB_ROOT / "catalog/strategy-library-detail.js").read_text(
-        encoding="utf-8",
-    )
-    assert "strategy.access?.can_edit || context.testObjectTemporary === true" in strategy
+    strategy = (ROOT / "web/app/src/components/strategy-detail.tsx").read_text(encoding="utf-8")
+    assert "strategy.access?.can_edit" in strategy
+    assert not (WEB_ROOT / "catalog/strategy-library-detail.js").exists()
+
 
 
 def test_multi_select_groups_candidates_by_object_type() -> None:
@@ -378,7 +378,6 @@ def test_editor_header_actions_respect_route_session() -> None:
     assert "context.isRouteCurrent?.() !== false" in component
     for relative in [
         "catalog/factor-object-form.js",
-        "catalog/strategy-library-detail.js",
         "catalog/product-group-detail.js",
         "catalog/product-category-detail-layout.js",
     ]:
