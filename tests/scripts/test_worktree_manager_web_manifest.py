@@ -103,6 +103,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     discovered_scripts = {
         path.relative_to(WEB_ROOT).as_posix()
         for path in WEB_ROOT.rglob("*.js")
+        if path != WEB_ROOT / "sw.js"  # Dedicated service-worker entry, never a page module.
     }
     assert discovered_scripts == set(manifest["scripts"]), (
         "every production Web module must be listed exactly once in the manifest"
@@ -115,7 +116,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     # Production modules belong to a semantic group.  Keeping the entry HTML,
     # manifest and architecture notes at the root prevents a coordinator or a
     # stylesheet from silently becoming an unowned global again.
-    assert not list(WEB_ROOT.glob("*.js"))
+    assert {path.name for path in WEB_ROOT.glob("*.js")} == {"sw.js"}
     assert not list(WEB_ROOT.glob("*.css"))
 
 
@@ -2835,9 +2836,7 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
         encoding="utf-8",
     )
-    set_editor = (WEB_ROOT / "catalog" / "factor-set-editor.js").read_text(
-        encoding="utf-8",
-    )
+    set_editor = (ROOT / "web/app/src/components/factor-set-editor.tsx").read_text(encoding="utf-8")
 
     assert 'FTUI.iconButton(\n        context, "arrow.up.circle", "上传因子源码"' in editor
     assert 'FTUI.iconButton(context, "checkmark.circle", "校验源码"' in editor
@@ -2862,11 +2861,11 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     # The shared object form routes its actions through the mode component.
     assert "window.FTObjectModeActions?.mount?.(context" in object_form
     assert 'form.append(tabs.root, status)' in object_form
-    assert "familyScopes?.mine" in set_editor
-    assert "mine?.factors" in set_editor
-    assert 'context.api("/api/factor-library/factor-sets"' in set_editor
+    assert "/api/factor-library/factors" in set_editor
+    assert "factor-sets/descriptor" in set_editor
+    assert 'request("/api/factor-library/factor-sets"' in set_editor
     assert "/custom-factors/api/client/factor-sets" not in set_editor
-    assert "FTFactorSetAssistance" in set_editor
+    assert "frozen.current.get(id)" in set_editor
 
 
 def test_factor_assistance_applies_documents_without_a_dom_event() -> None:
@@ -2897,9 +2896,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
         encoding="utf-8",
     )
-    set_editor = (WEB_ROOT / "catalog" / "factor-set-editor.js").read_text(
-        encoding="utf-8",
-    )
+    set_editor = (ROOT / "web/app/src/components/factor-set-editor.tsx").read_text(encoding="utf-8")
     editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
         encoding="utf-8",
     )
@@ -2919,7 +2916,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert object_form.index("context.setHeading") < object_form.index(
         "window.FTObjectModeActions?.mount?.(context",
     )
-    assert "editor.syncFromState()" in set_editor
+    assert "form.setFieldsValue" in set_editor
     assert 'parameter.type === "FactorParam"' in parameter_editor
     assert '"新增因子家族"' in parameter_editor
     assert "factor-param-choice-disabled" not in parameter_editor

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from server.jobs.artifacts import default_user_quota_bytes
 from server.manager.config import VIBE_TRADING_PORT
@@ -607,6 +607,26 @@ class CoreGetRoutesMixin:
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return True
+        # Retired FactorSet screens only select the canonical React view.
+        set_route = re.fullmatch(r"/factors/(sets|set(?:/([^/]+))?)/?", parsed.path)
+        if set_route:
+            query = parse_qs(parsed.query)
+            target = unquote(set_route.group(2) or "")
+            values = {"page": "factors", "section": "sets"}
+            if target and target != "new":
+                values["object_ref"] = target
+            mode = str(query.get("mode", ["create" if target == "new" else ""])[0])
+            if mode in {"create", "edit"}:
+                values["mode"] = mode
+            owner = query.get("owner_username", [""])[0]
+            if owner:
+                values["owner_username"] = owner
+            self.send_response(302)
+            self.send_header("Location", "/app?" + urlencode(values))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
             return True
         shell_paths = {
             "/", "/research", "/researches", "/evidence", "/reference",

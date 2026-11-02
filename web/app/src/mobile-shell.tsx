@@ -1,3 +1,4 @@
+import {appCatalogLink} from "./app-link.ts";
 import {pageObjectKey,pageObjectTitle} from "./page-object.ts";
 import React, { useEffect, useRef, useState } from "react";
 import { IonApp, IonBadge, IonButton, IonButtons, IonContent, IonHeader, IonPage, IonTabBar, IonTabButton, IonTitle, IonToolbar } from "@ionic/react";
@@ -23,12 +24,14 @@ export function MobileShell(): React.ReactElement {
 
 function MobileWorkspace(): React.ReactElement {
   const { t } = useTranslation();
+  const initialLink=appCatalogLink(location.search);
   const initialAccount = new URLSearchParams(location.search).get("settings") === "account";
   const [entries, setEntries] = useState<Entry[]>(() => [
     ...tabs.map((page) => ({ id: newPageInstanceId(page.id), pageId: page.id, args: {}, root: true })),
+    ...(initialLink ? [{id:newPageInstanceId(initialLink.pageId),pageId:initialLink.pageId,args:initialLink.args}] : []),
     ...(initialAccount ? [{id: newPageInstanceId("settings"), pageId: "settings", args: {}}] : []),
   ]);
-  const [active, setActive] = useState(() => initialAccount ? entries[entries.length - 1].id : entries[0].id);
+  const [active, setActive] = useState(() => initialAccount || initialLink ? entries[entries.length - 1].id : entries[0].id);
   const [setting, setSetting] = useState<MobileSettingSection | null>(initialAccount ? "account" : null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const assistantHistoryId = useRef(newPageInstanceId("assistant"));

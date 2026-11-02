@@ -1,3 +1,4 @@
+import {appCatalogLink} from "./app-link.ts";
 import React, { useCallback, useEffect, useState } from "react";
 import { Dropdown, Tooltip } from "antd";
 import { DeleteOutlined, MoreOutlined } from "@ant-design/icons";
@@ -262,6 +263,12 @@ export function DesktopShell(): React.ReactElement {
       if (!rootIds.has(pageId) || (args && Object.keys(args).length > 0)) continue;
       if (seenRootPages.has(pageId)) panel.api.close();
       else seenRootPages.add(pageId);
+    }
+    const link=appCatalogLink(location.search);
+    if(link){
+      const page=getPage(link.pageId);
+      if(page){const matching=event.api.panels.find(panel=>panel.params?.pageId===link.pageId&&JSON.stringify(panel.params?.args||{})===JSON.stringify(link.args));
+        if(matching)matching.api.setActive();else event.api.addPanel({id:newPageInstanceId(link.pageId),component:"page",tabComponent:"page",title:label(page),params:{pageId:link.pageId,args:link.args},renderer:"always"});}
     }
     const currentPageId = String(event.api.activePanel?.params?.pageId ?? "");
     if (currentPageId) setActive(currentPageId);
