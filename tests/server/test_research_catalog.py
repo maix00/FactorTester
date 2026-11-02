@@ -45,7 +45,7 @@ def test_research_catalog_keeps_research_and_profile_workspaces_distinct(tmp_pat
     }
 
 
-def test_existing_research_is_backfilled_with_owner_self_profile(tmp_path):
+def test_catalog_reopen_does_not_recreate_removed_membership_or_workspace(tmp_path):
     db_path = tmp_path / "research.sqlite"
     catalog = ResearchCatalog(db_path)
     research = catalog.create_research(owner_ref="alice", title="旧研究")
@@ -62,12 +62,26 @@ def test_existing_research_is_backfilled_with_owner_self_profile(tmp_path):
     restored = ResearchCatalog(db_path)
     members = restored.list_members(research["research_id"], viewer="alice")
     workspaces = restored.list_workspaces(research["research_id"], viewer="alice")
-    assert [(item["principal_ref"], item["profile_ref"]) for item in members] == [
-        ("alice", "self"),
-    ]
-    assert [(item["principal_ref"], item["profile_ref"]) for item in workspaces] == [
-        ("alice", "self"),
-    ]
+    assert members == []
+    assert workspaces == []
+
+
+def test_schema_checks_do_not_rewrite_historical_acl_or_membership(tmp_path):
+    path = tmp_path / "research.sqlite"
+    catalog = ResearchCatalog(path)
+    research = catalog.create_research(owner_ref="alice", title="History")
+    ref = research["research_id"]
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE research_catalog_memberships SET status='revoked', updated_at=1 WHERE research_id=?", (ref,))
+        db.execute("UPDATE research_catalog_workspaces SET status='archived', updated_at=1 WHERE research_id=?", (ref,))
+        db.execute("INSERT INTO research_catalog_migrations VALUES ('old-publication', 'publication', 'p', 'alice', ?, 'completed', '', 1, 1)", (ref,))
+        before = {table: db.execute("SELECT * FROM " + table).fetchall() for table in
+                  ('research_catalog_researches', 'research_catalog_memberships', 'research_catalog_workspaces', 'research_catalog_migrations')}
+    for _ in range(2):
+        ResearchCatalog(path).list_researches(viewer="alice")
+    with sqlite3.connect(path) as db:
+        after = {table: db.execute("SELECT * FROM " + table).fetchall() for table in before}
+    assert after == before
 
 
 def test_report_binding_and_its_research_drive_evidence_access(tmp_path):

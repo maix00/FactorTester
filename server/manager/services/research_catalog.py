@@ -295,69 +295,6 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
                     "backed-up schema cutover before this Manager can start"
                 )
             conn.executescript(BRANCH_SCHEMA)
-            # Old publication projections were shared before ADR-142. Restore
-            # them exactly once, so a later owner choice of "private" remains
-            # authoritative across restarts.
-            restoration_ref = "schema:restore-publication-superiors:v1"
-            restored = conn.execute(
-                "SELECT 1 FROM research_catalog_migrations WHERE migration_ref=?",
-                (restoration_ref,),
-            ).fetchone()
-            if restored is None:
-                now = time.time()
-                conn.execute(
-                    """UPDATE research_catalog_reports SET visibility='superiors'
-                       WHERE visibility='private' AND research_id IN (
-                         SELECT research_id FROM research_catalog_migrations
-                         WHERE source_kind='publication' AND status='completed'
-                       )"""
-                )
-                conn.execute(
-                    """UPDATE research_catalog_researches SET visibility='superiors'
-                       WHERE visibility='private' AND research_id IN (
-                         SELECT research_id FROM research_catalog_migrations
-                         WHERE source_kind='publication' AND status='completed'
-                       )"""
-                )
-                conn.execute(
-                    """INSERT INTO research_catalog_migrations
-                       (migration_ref, source_kind, source_ref, owner_ref,
-                        research_id, status, error, created_at, completed_at)
-                       VALUES (?, 'schema', ?, '', '', 'completed', '', ?, ?)""",
-                    (restoration_ref, restoration_ref, now, now),
-                )
-            # Every Research is always operable by its owner's self Profile.
-            # This is an idempotent catalog invariant, not a UI default: older
-            # migrated Research rows receive the same membership/workspace as
-            # newly created rows.
-            now = time.time()
-            for research in conn.execute(
-                "SELECT research_id, owner_ref, title FROM research_catalog_researches"
-            ).fetchall():
-                research_id = str(research["research_id"])
-                owner_ref = str(research["owner_ref"])
-                self._upsert_membership(
-                    conn, research_id=research_id, principal_ref=owner_ref,
-                    profile_ref="self", role="owner", status="active",
-                    invited_by=owner_ref, now=now,
-                )
-                workspace_id = "research-workspace:self:" + hashlib.sha256(
-                    f"{research_id}\x1fself".encode("utf-8")
-                ).hexdigest()[:24]
-                conn.execute(
-                    """INSERT INTO research_catalog_workspaces
-                       (workspace_id, research_id, principal_ref, profile_ref,
-                        title, status, created_at, updated_at)
-                       VALUES (?, ?, ?, 'self', ?, 'active', ?, ?)
-                       ON CONFLICT(research_id, principal_ref, profile_ref) DO UPDATE SET
-                         principal_ref=excluded.principal_ref,
-                         status='active', updated_at=excluded.updated_at""",
-                    (
-                        workspace_id, research_id, owner_ref,
-                        f"{str(research['title'])} / self", now, now,
-                    ),
-                )
-
     # ------------------------------------------------------------------
     # Research, membership, workspace, and report records
 
