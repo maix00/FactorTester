@@ -111,12 +111,21 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         figure.write_bytes(b'committed local figure edit')
         commit_report_workspace(selected_root, message='Edit report figure externally')
         assert subprocess.check_output(['git', '-C', str(selected_root), 'status', '--porcelain'], text=True).strip() == ''
+        from tools.cli.release.research_reporting.local_sync_baseline import _path as baseline_path
+        with rpc.store._connect() as db:
+            receipt = db.execute('SELECT manager_hash FROM report_publications WHERE report_id=?', (selected['report_id'],)).fetchone()
+        baseline_file = baseline_path(rpc.store, selected['report_id'], receipt['manager_hash'])
+        os.utime(baseline_file, (1, 1))
+        auto_check = {'action': 'sync_reports', 'profile_id': 'self', 'after_report_id': '', 'limit': 4}
+        assert rpc.request(auto_check)['reports'][0]['status'] == 'conflict'
+        assert figure.read_bytes() == b'committed local figure edit'
         unchanged_pull = {'action': 'pull_report', 'profile_id': 'self', 'research_id': research['research_id'],
                           'report_id': selected['report_id']}
         assert rpc.request(unchanged_pull) == {'success': True, 'schema': 'tr-local-research-bridge:v1',
                                                'status': 'up_to_date', 'local_modified': True}
         figure.write_bytes(raw_asset)
         commit_report_workspace(selected_root, message='Restore report figure')
+        os.utime(baseline_file, None)
         posts_before = transport['posts']
         transport['omit_publish'] = True
         with pytest.raises(PermissionError):

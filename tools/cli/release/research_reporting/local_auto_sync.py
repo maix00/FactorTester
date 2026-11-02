@@ -185,7 +185,16 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                         current = load_head(paths)
                         if (current['generation'], current['root_ref']) != (head['generation'], head['root_ref']):
                             raise LocalReportSyncConflict('local report changed during content check')
-                        current_digest = content_digest(root, paths, current)
+                        try:
+                            current_digest = content_digest(root, paths, current)
+                        except (OSError, ValueError) as exc:
+                            # Hashed report assets reject changed bytes during
+                            # bundling. Preserve the edit and report a conflict;
+                            # unrelated missing dependencies remain unavailable.
+                            from .local_pull import _assets_changed
+                            if _assets_changed(root, paths, current):
+                                raise LocalReportSyncConflict('local report asset changed') from exc
+                            raise
                     if current_digest != baseline:
                         # The server requires a new report generation for a
                         # different authoring bundle. Until that version is
