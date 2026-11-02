@@ -118,6 +118,10 @@ revision="$(git -C "$repo_root" rev-parse main)"
 
 if [[ "$skip_github" == "1" ]]; then
   echo "Skipping GitHub push (FACTORTESTER_SKIP_GITHUB_PUSH=1)"
+elif [[ "$(git -C "$repo_root" rev-parse origin/main)" == "$revision" ]]; then
+  # The fetch above verified this exact ref. A no-op push still runs hooks,
+  # which can rebuild native code even for a frontend-only deployment.
+  echo "GitHub already contains main $revision; no repeated push"
 else
   echo "Pushing main $revision to GitHub"
   git -C "$repo_root" push origin main

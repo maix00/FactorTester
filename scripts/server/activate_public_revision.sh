@@ -176,6 +176,15 @@ cache_plan="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
   TR_PUBLIC_PYTHON_SOURCE_IMAGE="$current_image" \
   TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
   bash "$public_script" python-cache-plan)"
+# A prepare-only run may already have produced this exact image. Reusing it
+# must not reserve another build's disk/RAM or restart the native builder.
+reuse_status=0
+python_deps_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["identity"])' <<< "$cache_plan")"
+nautilus_revision="$(git -C "$release_path" rev-parse HEAD:vendor/nautilus_trader)"
+python3 "$release_path/scripts/server/public_prebuilt_image.py" \
+  --image "factortester-public:$revision" --revision "$revision" \
+  --nautilus-revision "$nautilus_revision" --python-deps-id "$python_deps_id" || reuse_status=$?
+if [[ "$reuse_status" == "3" ]]; then
 snapshot_mib="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["snapshot_mib"])' <<< "$cache_plan")"
 sudo bash "$release_path/scripts/server/check_public_build_capacity.sh" \
   --cache-root "$container_root/python-deps-cache" --snapshot-mib "$snapshot_mib"
@@ -184,6 +193,9 @@ sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
   TR_PUBLIC_PYTHON_SOURCE_IMAGE="$current_image" \
   TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
   bash "$public_script" build factortester-public
+elif [[ "$reuse_status" != "0" ]]; then
+  exit "$reuse_status"
+fi
 if [[ "$prepare_only" == "1" ]]; then
   # The new immutable source/image is available for reviewed migration jobs.
   # Keep the running application and its configuration untouched. Activation
