@@ -1,9 +1,12 @@
 # 远端 main 容器发布
 
-远端 `main` 由 `factortester-public` Compose 项目管理，正式运行两个容器：
+远端 `main` 的 Manager 与控制库由 `factortester-public` Compose 项目管理：
 
 - `factortester-public`：公开 7998 Manager、7997 生成物数据面和 51820/UDP FactorTester WireGuard；固定 8000 由 Manager 在容器内启动，不直接映射到宿主机。
 - `postgresql-control`：运行控制库和独立的 51821/UDP PostgreSQL WireGuard；5432 只在容器私网和数据库隧道内可达，不向公网开放。
+
+Keycloak、CouchDB、RabbitMQ 和独立计算/数据节点由各自的部署项目管理；它们不因此
+成为另一个 Manager，也不随一次应用发布自动清除。
 
 ## 唯一发布命令
 
@@ -19,7 +22,9 @@
 ./scripts/push_main_to_server.sh
 ```
 
-旧的 `--start` 参数仍可接受，但不再改变行为。现在不存在“只准备、不重载”的发布模式；只要命令返回成功，新版本就已经完成切换，7998、7997 和容器内固定 8000 均已通过健康检查。
+旧的 `--start` 参数仍可接受，但不再改变行为。默认执行完整发布；显式设置
+`TR_PUBLIC_PREPARE_ONLY=1` 时仅准备产物和镜像，见下文两阶段发布。准备成功不能作为
+新版本已切换或业务健康的证据。
 
 ## 同步事务
 
@@ -44,6 +49,20 @@
 - `/etc/factortester-container/public.env`：root-only 生产配置；密钥仍分别保存在各服务端自己的受限目录中。
 
 默认保留最新三个 verified 应用版本；可以用 `FACTORTESTER_PUBLIC_RELEASE_RETENTION` 调整。清理仅允许删除匹配 `factortester-public:<40 位 SHA>` 的旧应用镜像和相应 release，不删除 PostgreSQL 镜像、数据卷、其他 Compose 项目或 Docker 全局缓存。
+
+本机原生构建在同一独占锁内管理自有 `target-reusable`，默认限额 6 GiB，可用
+`NAUTILUS_TARGET_CACHE_MAX_GB` 调整。完整适配器构建的已编译依赖实测超过 4 GiB，
+因此更小预算会丢弃这部分复用能力。超限时先
+删除可重建的 `release/incremental`，保留已编译依赖；仍超限才移除该自有 target。
+构建前和构建后均检查，已完成 wheel 保存在 target 之外。外部 target 超限时拒绝并
+保持原样，不清理其他构建目录或正在运行的构建。该策略保留可用缓存，但不保证所有
+源码变更均可免编译。
+
+原生产物按构建身份保存。上传最多四个并发分块，每块不超过 4 MiB；传输前按
+SHA-256 检查已完成文件或分块，不依赖文件大小或本地进度。SSH 断线与超时最多重试
+三次，先写临时文件、校验后再原子替换；完整文件校验通过后批量删除分块。
+失败时保留该构建的已验证暂存分块，重跑相同发布入口续传，不重新编译 wheel。
+暂存也计入原生产物的总容量预算；不能借续传绕过容量、版本或校验门槛。
 
 控制库首次迁移与校验见 [`remote-control-postgres.md`](remote-control-postgres.md)，当前生产访问应走独立 PostgreSQL WireGuard，不应重新开放公网 5432/TCP。
 

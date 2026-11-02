@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Drawer, Select, Spin, Typography } from "antd";
+import { Alert, Button, Drawer, Select, Space, Spin, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
@@ -304,19 +304,19 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
       {providers.length ? <>
         <label className="tr-agent-assistant-provider-label" htmlFor="tr-agent-assistant-provider">{t("assistant.modelProvider")}</label>
         <Select id="tr-agent-assistant-provider" value={providerID || undefined} onChange={setProviderID} options={providers.map((item) => ({ value: item.provider_id, label: `${item.label} · ${item.default_model}` }))} />
-        <div className="tr-agent-assistant-provider-actions">
+        <Space wrap>
           <Button type="primary" loading={setupBusy} disabled={!providerID} onClick={() => void claimAgent()}>{t("assistant.claimAgent")}</Button>
           <Button disabled={setupBusy || !runtimeCapabilities.length} onClick={() => setModelSetupOpen(true)}>{t("assistant.addModelProvider")}</Button>
-        </div>
+        </Space>
       </> : <>
         <Typography.Paragraph type="secondary">{setupError || t("assistant.noServerProvider")}</Typography.Paragraph>
-        <div className="tr-agent-assistant-setup-actions"><Button type="primary" disabled={!runtimeCapabilities.length} onClick={() => setModelSetupOpen(true)}>{t("assistant.addModelProvider")}</Button><Button size="small" onClick={() => void loadProviders()}>{t("assistant.refreshProviders")}</Button></div>
+        <Space wrap><Button type="primary" disabled={!runtimeCapabilities.length} onClick={() => setModelSetupOpen(true)}>{t("assistant.addModelProvider")}</Button><Button onClick={() => void loadProviders()}>{t("assistant.refreshProviders")}</Button></Space>
       </>}
       {setupError && providers.length ? <Alert type="error" showIcon message={setupError} /> : null}
     </div> : null}
     {error ? <div className="tr-agent-assistant-error"><Alert type="error" showIcon message={t("assistant.loadFailed")} description={error} action={<Button size="small" icon={<ReloadOutlined />} onClick={retryLoad}>{t("assistant.retry")}</Button>} /></div> : null}
     {!rootRef.current && !error && !setupRequired ? <div className="tr-agent-assistant-loading" role="status"><Spin size="small" />{loading ? t("assistant.loading") : t("assistant.openHint")}</div> : null}
-    <div className="tr-agent-assistant-mount" ref={mountRef} />
+    <div className="tr-agent-assistant-mount" aria-busy={loading || setupBusy} ref={mountRef} />
     <AgentModelSetupModal
       open={modelSetupOpen}
       onCancel={() => setModelSetupOpen(false)}

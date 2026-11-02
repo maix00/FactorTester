@@ -222,6 +222,32 @@ def test_real_keycloak_admission_apply_revoke_and_rollback(tmp_path, monkeypatch
         assert access.current_administrative_groups(identity) == ()
         assert can_use_agent_assistant(identity, public_server=False)
         assert not can_use_agent_assistant(identity, public_server=True)
+        # A location role is not cross-organization admission. Drive the real
+        # Manager session path with this genuinely issued Keycloak token.
+        from server.identity import user_session
+        from server.manager.state.sessions import SessionStateMixin
+        monkeypatch.setattr(user_session, "keycloak_session", verifier.session)
+        own_manager = SessionStateMixin()
+        own_manager.public_server = False
+        own_manager.server_id = "internal-a"
+        own_manager.managed_organizations = ("org-a",)
+        other_manager = SessionStateMixin()
+        other_manager.public_server = False
+        other_manager.server_id = "internal-b"
+        other_manager.managed_organizations = ("org-b",)
+        access.clear_server_admission_cache()
+        assert own_manager.session(user_token) is not None
+        assert other_manager.session(user_token) is None
+        # The same token still has its original group claims and assistant
+        # role after an administrator removes the current org membership.
+        migration._delete(admin, "users/" + user + "/groups/" + org_id)
+        access.clear_server_admission_cache()
+        assert orgpath in verifier.session(user_token)["keycloak_groups"]
+        assert can_use_agent_assistant(identity, public_server=False)
+        assert own_manager.session(user_token) is None
+        admin._put("users/" + user + "/groups/" + org_id, {})
+        access.clear_server_admission_cache()
+        assert own_manager.session(user_token) is not None
         migration._delete(admin, "users/" + user + "/role-mappings/clients/" + login, [agent_role])
         # The same already-issued token still contains its old role, but the
         # assistant gate must reject it as soon as Keycloak revokes the role.
