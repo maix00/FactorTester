@@ -212,12 +212,30 @@ def load_node_descriptor(path, *, manager_id=""):
     return matches[0]
 
 
+def validate_node_runtime_revision(descriptor, *, root=None):
+    """Image-owned receipt binds advertised deployment to the executing code.
+
+    Editable installations have no image receipt; their deployment identity
+    remains the installer's explicit descriptor. Never rewrite that identity.
+    """
+    root=Path(root) if root is not None else Path(__file__).resolve().parents[3]
+    receipt=root/".deployment-revision"
+    if not receipt.is_file():
+        return
+    revision=receipt.read_text().strip()
+    if len(revision)!=40 or any(c not in "0123456789abcdef" for c in revision):
+        raise ValueError("execution image revision receipt is invalid")
+    if descriptor.get("target",{}).get("deployment_ref")!=revision:
+        raise ValueError("execution descriptor deployment differs from actual image revision")
+
+
 def remote_repository_from_env():
     endpoint = os.environ.get("TR_MANAGER_ENDPOINT", "").strip()
     if not endpoint:
         return None
     node_id = os.environ["TR_EXECUTION_NODE_ID"]
     descriptor = load_node_descriptor(Path(os.environ["TR_NODE_DESCRIPTOR_FILE"]), manager_id=os.environ.get("TR_MANAGER_ID", ""))
+    validate_node_runtime_revision(descriptor)
     client = ServiceHTTPClient(endpoint, oidc=configured_client(), response_limit=16*1024**2)
     if descriptor["target"]["node_id"] != node_id:
         raise ValueError("node identity differs from its selected descriptor")
