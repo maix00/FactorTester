@@ -46,9 +46,9 @@ class ProjectPdfManifestTests(unittest.TestCase):
         self.assertIn("document manifest check: passed", result.stdout)
         manifest = tomllib.loads((ROOT / "docs/latex/manifest.toml").read_text(encoding="utf-8"))
         sources = {doc["source"] for section in manifest["sections"] for doc in section["documents"]}
-        self.assertTrue({"docs/operations/research-keycloak-cutover.md",
-                         "docs/operations/local-path-migration.md",
-                         "docs/operations/federated-compute-keycloak.md"} <= sources)
+        self.assertIn("docs/latex/operations.md", sources)
+        self.assertIn("product_docs/concepts/identity-permissions.md", sources)
+        self.assertFalse(any(source.startswith(("docs/operations/", "docs/audits/", "docs/adr/")) for source in sources))
 
     def test_inline_code_can_be_used_with_listings_without_verbatim_macro_error(self) -> None:
         source = r"\passthrough{\lstinline!product\_docs/foo.md!}"

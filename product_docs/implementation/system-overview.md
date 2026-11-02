@@ -1,22 +1,22 @@
 ## 职责与系统位置 {#responsibility}
 
-Manager 提供统一 Web Shell、登录会话、公开目录与任务聚合；工作端口执行测试；Swift 客户端承载本地资源访问与原生标签页；用户工作区保存本地因子、报告工作区和可追溯输入。Manager 是公共业务边界，工作端口不是数据库或文件浏览入口。
+Manager 提供 React `/app`、登录会话、目录与任务聚合。独立计算节点通过 Celery/RabbitMQ 执行冻结任务，数据 I/O 服务在 Bundle 所在主机读取并提供有界数据批次。Nautilus 承担回测与执行，Alpha 因子引擎提供共用因子计算；二者通过 bridge 协作。Swift 客户端是共享 Web 页面的原生宿主，提供本机研究、设备和 Manager 连接等窄桥接能力。
 
 字段、对象和结果的职责也分开：测试注册协议声明可编辑/可冻结字段，目录服务提供稳定对象引用，执行器消费冻结 RunSpec，结果服务只读取已登记生成物。客户端可以有不同呈现方式，但不能各自发明字段语义。
 
 ## 主要流程 {#main-flow}
 
-浏览器或 Swift 打开 Manager 页面，Manager 根据注册模块提供界面与公共数据。页面首屏只加载路由和当前功能所需模块，未打开的 tab、字段候选和结果查看器按需加载。
+浏览器、桌面客户端和移动端打开共用 React 页面。桌面使用 Dockview 工作区，移动端使用 Ionic 导航与 Header；字段候选和结果查看器按需读取。保留挂载的非活动页面隐藏内容并保留草稿，避免其他页控件叠到当前页。
 
-提交测试时，Manager 先规范化配置并冻结 RunSpec，再选择兼容的工作端口并记录路由；工作端口执行冻结 RunSpec，结果和生成物通过 Manager 的对象引用聚合展示。工作端口是否在线不应影响已经保存在可读存储端的结果展示。
+测试配置页面编辑包含 RunSpec 的 ExecutionPlan。自动或手动选择执行位置后，配置 JSON、页面和冻结计划保持一致；Manager 按节点能力、权限与数据可达性核验路由，再派发任务。结果和生成物通过对象引用聚合展示，计算节点离线不改变已持久化结果的身份。
 
 ## 规范代码入口 {#canonical-paths}
 
 - Manager 组合与状态：`server/manager/runtime.py`
 - HTTP 路由：`server/manager/http/`
-- Web Shell：`server/manager/web/app/`
+- React Web Shell：`web/app/src/desktop-shell.tsx`、`web/app/src/mobile-shell.tsx`
 - 测试定义与执行：`server/services/`、`server/modules/`
-- Swift 导航与嵌入：`apple/Sources/Navigation/`
+- Swift 宿主与桥：`apple/Sources/Features/Web/`、`apple/Sources/Navigation/`
 
 这些路径用于定位职责，不代表整个目录都属于公开接口。
 
