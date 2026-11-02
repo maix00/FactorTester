@@ -76,3 +76,5 @@ Manager 与 7997 数据面共用 Keycloak Research 授权工厂；发布投影�
 `python -m scripts.test.research_publication_keycloak_couch_smoke` 使用临时真实 Manager HTTP、Keycloak、CouchDB，通过单报告及附件、可编辑源码往返、桌面导入、两客户端同步、自动发现、新设备发现及双向同步、已提交资源修改保护、收敛恢复、同一 token 撤销分享/读取/公网准入、撤权后重试拒绝，以及共享 realm 下两 Manager 客户端中转同步。独立 realm 未覆盖；真实内网/公网部署未覆盖。临时容器自动清理。Browser 调用返回 `Local browser use is disabled in Work settings`，所以本轮没有声称页面视觉验收通过。
 
 目录初始化不再执行旧 publication→superiors 授权字段重写，也不再按 owner_ref 自动重建 self 成员及工作区。创建时的关联仍由创建事务和 Keycloak 资源登记处理；历史缺失关系由显式迁移解决。61 项聚焦回归通过，新增重开/重复读取不改变历史 ACL、撤销成员、归档工作区及迁移日志的逐行对比。
+
+独立 realm 补充验收：`python -m scripts.test.federated_report_keycloak_couch_smoke` 通过两套真实临时 Keycloak realm、签名 peer HTTP 和真实 CouchDB。覆盖不同所有者/共享接收人、2 MiB 附件、编辑权限预检、源及目标撤权、同一源会话撤权后再次请求拒绝。浏览器→来源 Manager 网关在该脚本中仍由聚焦测试覆盖，未做浏览器视觉验收；真实内网/公网部署仍未覆盖。
