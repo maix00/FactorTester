@@ -145,3 +145,17 @@ def test_http_route_reads_exact_publication_and_attachment_without_legacy_refres
     auth['read'] = False
     assert handler._get_research_catalog_routes(SimpleNamespace(path=base, query=''))
     assert replies[-1][0] == 403
+
+
+@pytest.mark.parametrize('path', ['/api/research/migrations/reports', '/api/research/migrations/reports/discover'])
+def test_retired_import_does_not_discover_or_apply_legacy_acl(monkeypatch, path):
+    responses = []
+    monkeypatch.setattr(routes, 'json_response', lambda _handler, payload, status=200: responses.append((status, payload)))
+    class Handler(routes.ResearchCatalogRoutesMixin):
+        def _research_catalog_session(self): return SESSION
+        def _research_catalog_service(self): return object()
+        def _research_catalog_body(self, maximum):
+            return {'apply': True, 'records': [{'owner_ref': 'another-user', 'visibility': 'public'}]}
+    assert Handler()._post_research_catalog_routes(SimpleNamespace(path=path))
+    assert responses[0][0] == 410 and responses[0][1]['success'] is False
+    assert not hasattr(routes.ResearchCatalogRoutesMixin, '_discover_research_report_records')

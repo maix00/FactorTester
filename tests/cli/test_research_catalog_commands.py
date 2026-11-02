@@ -274,3 +274,13 @@ def test_retired_publication_permission_commands_are_not_exposed():
     assert "settings" not in result.output and "unpublish" not in result.output
     grants = CliRunner().invoke(cli, ["research", "grant", "--help"])
     assert grants.exit_code == 0 and "--revoke" in grants.output
+
+
+def test_legacy_report_import_commands_and_client_methods_are_removed():
+    from tools.cli.client_research import ResearchClientMixin
+    commands = CliRunner().invoke(cli, ["research", "--help"])
+    assert commands.exit_code == 0
+    assert "migrate-reports" not in commands.output
+    assert "migrate-existing-reports" not in commands.output
+    assert not hasattr(ResearchClientMixin, "migrate_research_reports")
+    assert not hasattr(ResearchClientMixin, "discover_research_report_migration")

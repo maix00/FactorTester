@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 import click
@@ -11,20 +10,10 @@ import click
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.locations import default_client_root
-from tools.cli.release.research_reporting.public_research.client import (
-    PublicResearchClient,
-)
 
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
-
-
-def _read_json(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise click.ClickException(f"无法读取 JSON 文件: {path}") from exc
 
 
 def register_research_catalog_commands(research: click.Group) -> None:
@@ -294,47 +283,6 @@ def register_research_catalog_commands(research: click.Group) -> None:
                 "purpose": purpose,
             },
         )))
-
-    @research.command("migrate-reports")
-    @click.option(
-        "--file",
-        "records_file",
-        required=True,
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    )
-    @friendly_errors
-    def migrate_reports(records_file: Path) -> None:
-        """显式、幂等地把已有报告元数据迁移到同名 Research。"""
-        value = _read_json(records_file)
-        records = value.get("records") if isinstance(value, dict) else value
-        if not isinstance(records, list):
-            raise click.ClickException("迁移文件必须是报告数组或 {records: []}")
-        click.echo(_json(client_from_config().migrate_research_reports(records)))
-
-    @research.command("migrate-existing-reports")
-    @click.option("--apply", is_flag=True, help="执行计划；省略时只显示发现结果。")
-    @friendly_errors
-    def migrate_existing_reports(apply: bool) -> None:
-        """发现客户端、服务器 Agent 与公共发布中的旧报告并显式迁移。"""
-        client = client_from_config()
-        local_records = PublicResearchClient(
-            default_client_root(), session=client.session,
-        ).local_report_migration_records(apply_identities=apply)
-        remote = client.discover_research_report_migration(apply=apply)
-        if not apply:
-            click.echo(_json({
-                "status": "planned",
-                "local_count": len(local_records),
-                "remote_count": int(remote.get("count") or 0),
-                "records": local_records + list(remote.get("records") or []),
-            }))
-            return
-        local = client.migrate_research_reports(local_records)
-        click.echo(_json({
-            "status": "completed",
-            "local": local,
-            "remote": remote,
-        }))
 
     @research.command("manifest")
     @click.argument("research_id")

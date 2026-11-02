@@ -140,18 +140,6 @@ class ResearchClientMixin(ClientMixinBase):
         ))
         return dict(data.get("evidence_link") or {})
 
-    def migrate_research_reports(
-        self, records: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/research/migrations/reports", {"records": records},
-        ))
-
-    def discover_research_report_migration(self, *, apply: bool = False) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/research/migrations/reports/discover", {"apply": bool(apply)},
-        ))
-
     def list_research_reports(
         self, *, scope: str = "all", include_archived: bool = False,
     ) -> dict[str, Any]:

@@ -3,9 +3,14 @@
 Application modules must never import this fixture. It builds pre-Keycloak
 snapshots so parity checks can compare historical allow sets independently.
 """
+import hashlib
+import time
 from typing import Any
 from tools.data.sqlite.db import connect_sqlite
-from server.manager.services.research_catalog import ResearchCatalog, _access, _loads_list
+from server.manager.services.research_catalog import (
+    ResearchCatalog, _access, _loads_list, _principal, _json,
+    _authorized_users, VISIBILITIES, KeycloakResearchCreationUnavailable,
+)
 
 
 class HistoricalResearchCatalog(ResearchCatalog):
@@ -163,3 +168,287 @@ class HistoricalResearchCatalog(ResearchCatalog):
             users = sorted(set(_loads_list(row["authorized_users_json"]) + [actor]))
             db.execute("UPDATE research_catalog_researches SET authorized_users_json=? WHERE research_id=?", (json.dumps(users), link["research_id"]))
         return {"research_id": link["research_id"]}
+
+    def migrate_reports(
+        self, records: list[dict[str, Any]], *, actor: str,
+    ) -> dict[str, Any]:
+        """Idempotently import report metadata supplied by existing stores.
+
+        The method accepts projections from client/server/public report stores
+        rather than importing those stores itself.  This keeps the migration
+        explicit and makes it possible to run once against each source without
+        making request-time reads mutate the catalog.
+        """
+        if self._research_authorizer is not None:
+            raise KeycloakResearchCreationUnavailable("Legacy report import requires a Keycloak migration")
+        principal = _principal(actor)
+        canonical_report_ids, legacy_report_ids = _canonical_migration_report_ids(
+            records, principal,
+        )
+        counts = {"seen": 0, "migrated": 0, "already_migrated": 0, "failed": 0}
+        results: list[dict[str, Any]] = []
+        for item in records:
+            counts["seen"] += 1
+            if not isinstance(item, dict):
+                counts["failed"] += 1
+                results.append({"status": "failed", "error": "report record must be an object"})
+                continue
+            source_kind = str(item.get("source_kind") or item.get("source") or "report")
+            source_ref = str(item.get("source_ref") or item.get("report_id") or "").strip()
+            owner = str(item.get("owner_ref") or principal).strip()
+            report_id = canonical_report_ids.get(
+                _legacy_report_workspace_key(item, principal),
+                legacy_report_ids.get(
+                    str(item.get("report_id") or "").strip(),
+                    str(item.get("report_id") or source_ref).strip(),
+                ),
+            )
+            if not source_ref or not report_id or owner != principal:
+                counts["failed"] += 1
+                results.append({
+                    "source_ref": source_ref,
+                    "status": "failed",
+                    "error": "owner, source_ref and report_id are required",
+                })
+                continue
+            try:
+                result = self._migrate_one_report(
+                    item,
+                    actor=principal,
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    report_id=report_id,
+                )
+            except (KeyError, TypeError, ValueError, PermissionError) as exc:
+                self._mark_migration_failed(
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    owner=principal,
+                    error=str(exc),
+                )
+                counts["failed"] += 1
+                results.append({
+                    "source_ref": source_ref,
+                    "status": "failed",
+                    "error": str(exc),
+                })
+                continue
+            counts["already_migrated" if result["status"] == "already_migrated" else "migrated"] += 1
+            results.append(result)
+        return {"status": "completed", "counts": counts, "items": results}
+
+    def _migrate_one_report(
+        self,
+        item: dict[str, Any],
+        *,
+        actor: str,
+        source_kind: str,
+        source_ref: str,
+        report_id: str,
+    ) -> dict[str, Any]:
+        # Branches and replicated/public projections are provenance of one
+        # Report, not separate Research roots.  The durable Research identity
+        # therefore follows owner + report_id; each source still receives its
+        # own idempotent migration receipt below.
+        migration_key = f"report:{actor}:{report_id}"
+        research_id = "research:migrated:" + hashlib.sha256(
+            migration_key.encode("utf-8")
+        ).hexdigest()[:32]
+        title = str(item.get("title") or report_id).strip() or report_id
+        profile_ref = str(item.get("profile_ref") or item.get("profile_id") or "").strip()
+        visibility = str(
+            item.get("visibility")
+            or ("superiors" if source_kind == "publication" else "private")
+        )
+        if visibility not in VISIBILITIES:
+            visibility = "private"
+        if source_kind == "publication" and visibility == "private":
+            visibility = "superiors"
+        now = time.time()
+        with connect_sqlite(self.db_path) as conn:
+            existing_research = conn.execute(
+                "SELECT visibility FROM research_catalog_researches WHERE research_id=?",
+                (research_id,),
+            ).fetchone()
+            if (
+                not item.get("visibility") and source_kind != "publication"
+                and existing_research is not None
+                and str(existing_research["visibility"]) != "private"
+            ):
+                visibility = str(existing_research["visibility"])
+            existing_migration = conn.execute(
+                """SELECT * FROM research_catalog_migrations
+                   WHERE source_kind=? AND source_ref=? AND owner_ref=?""",
+                (source_kind, source_ref, actor),
+            ).fetchone()
+            if existing_migration is not None and existing_migration["status"] == "completed":
+                return {
+                    "status": "already_migrated",
+                    "source_ref": source_ref,
+                    "research_id": str(existing_migration["research_id"]),
+                    "report_id": report_id,
+                }
+            conn.execute(
+                """INSERT INTO research_catalog_researches
+                   (research_id, owner_ref, title, description, status,
+                    visibility, authorized_users_json, migration_source,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, '', 'active', ?, ?, ?, ?, ?)
+                   ON CONFLICT(research_id) DO UPDATE SET
+                     title=excluded.title, visibility=excluded.visibility,
+                     authorized_users_json=excluded.authorized_users_json,
+                     updated_at=excluded.updated_at""",
+                (
+                    research_id, actor, title, visibility,
+                    _json(_authorized_users(item.get("authorized_users") or [], actor)),
+                    migration_key, now, now,
+                ),
+            )
+            conn.execute(
+                """INSERT INTO research_catalog_migrations
+                   (migration_ref, source_kind, source_ref, owner_ref,
+                    research_id, status, error, created_at, completed_at)
+                   VALUES (?, ?, ?, ?, ?, 'running', '', ?, 0)
+                   ON CONFLICT(source_kind, source_ref, owner_ref) DO UPDATE SET
+                     research_id=excluded.research_id, status='running', error='',
+                     completed_at=0""",
+                (
+                    "research-migration:v1:" + hashlib.sha256(
+                        f"{source_kind}\x1f{source_ref}\x1f{actor}".encode()
+                    ).hexdigest(),
+                    source_kind, source_ref, actor, research_id, now,
+                ),
+            )
+        # An old source may carry a workspace identifier from a different
+        # store. Only a workspace created in this Research catalog is a valid
+        # relationship; dangling legacy identifiers must not be persisted.
+        workspace_id = ""
+        if profile_ref:
+            self.add_membership(
+                research_id,
+                actor=actor,
+                principal_ref=str(item.get("profile_owner_ref") or actor),
+                profile_ref=profile_ref,
+                role="owner",
+            )
+            existing_workspaces = self.list_workspaces(
+                research_id, viewer=actor,
+            )
+            workspace = next(
+                (
+                    value for value in existing_workspaces
+                    if str(value.get("profile_ref") or "") == profile_ref
+                ),
+                None,
+            )
+            if workspace is None:
+                workspace = self.create_workspace(
+                    research_id,
+                    actor=actor,
+                    principal_ref=str(item.get("profile_owner_ref") or actor),
+                    profile_ref=profile_ref,
+                    title=f"{title} / {profile_ref}",
+                )
+            workspace_id = str(workspace["workspace_id"])
+        self.register_report(
+            research_id,
+            actor=actor,
+            report_id=report_id,
+            title=title,
+            profile_ref=profile_ref,
+            workspace_id=workspace_id,
+            build_source=str(item.get("build_source") or "client"),
+            build_source_ref=str(item.get("build_source_ref") or ""),
+            visibility=visibility,
+            authorized_users=list(item.get("authorized_users") or []),
+            source_ref=source_ref,
+        )
+        evidence_refs = item.get("evidence_refs") or []
+        for evidence_ref in evidence_refs:
+            self.link_evidence(
+                research_id,
+                actor=actor,
+                evidence_ref=str(evidence_ref),
+                evidence_owner_ref=str(item.get("evidence_owner_ref") or actor),
+                report_id=report_id,
+                profile_ref=profile_ref,
+                purpose="migrated report reference",
+            )
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute(
+                """UPDATE research_catalog_migrations
+                   SET status='completed', completed_at=?, error=''
+                   WHERE source_kind=? AND source_ref=? AND owner_ref=?""",
+                (time.time(), source_kind, source_ref, actor),
+            )
+        return {
+            "status": "migrated",
+            "source_ref": source_ref,
+            "research_id": research_id,
+            "report_id": report_id,
+        }
+
+    def _mark_migration_failed(
+        self, *, source_kind: str, source_ref: str, owner: str, error: str,
+    ) -> None:
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute(
+                """UPDATE research_catalog_migrations
+                   SET status='failed', error=?, completed_at=?
+                   WHERE source_kind=? AND source_ref=? AND owner_ref=?""",
+                (str(error)[:2000], time.time(), source_kind, source_ref, owner),
+            )
+
+
+
+def _legacy_report_branch_group_key(
+    item: dict[str, Any], owner: str,
+) -> tuple[str, str, str] | None:
+    """Group old per-Branch records while migrating stable Report identities."""
+    legacy_workspace_id = str(
+        item.get("work_package_id") or item.get("record_id") or ""
+    ).strip()
+    if not legacy_workspace_id:
+        return None
+    profile_ref = str(
+        item.get("profile_ref") or item.get("profile_id") or ""
+    ).strip()
+    return owner, profile_ref, legacy_workspace_id
+
+
+def _legacy_report_workspace_key(
+    item: dict[str, Any], owner: str,
+) -> tuple[str, str, str] | None:
+    """Normalize pre-ReportWorkspace package IDs during import."""
+    return _legacy_report_branch_group_key(item, owner)
+
+
+def _canonical_migration_report_ids(
+    records: list[dict[str, Any]], owner: str,
+) -> tuple[dict[tuple[str, str, str] | None, str], dict[str, str]]:
+    """Collapse old per-Branch report IDs into one stable Report identity."""
+    grouped: dict[tuple[str, str, str], set[str]] = {}
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        key = _legacy_report_branch_group_key(item, owner)
+        report_id = str(item.get("report_id") or "").strip()
+        if key is not None and report_id:
+            grouped.setdefault(key, set()).add(report_id)
+    result: dict[tuple[str, str, str] | None, str] = {}
+    aliases: dict[str, set[str]] = {}
+    for key, report_ids in grouped.items():
+        if len(report_ids) == 1:
+            result[key] = next(iter(report_ids))
+            continue
+        stable_key = "\x1f".join(key)
+        result[key] = "report-migrated-" + hashlib.sha256(
+            stable_key.encode()
+        ).hexdigest()[:24]
+        for legacy_report_id in report_ids:
+            aliases.setdefault(legacy_report_id, set()).add(result[key])
+    return result, {
+        legacy_report_id: next(iter(canonical_ids))
+        for legacy_report_id, canonical_ids in aliases.items()
+        if len(canonical_ids) == 1
+    }

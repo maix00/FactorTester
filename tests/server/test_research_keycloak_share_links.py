@@ -285,8 +285,8 @@ def test_strict_research_creation_and_update_cannot_silently_write_legacy_acl(tm
                                 visibility="public", authorized_users=["bob"])
     with pytest.raises(ValueError, match="managed in Keycloak"):
         catalog.update_research(research, actor="alice", authorized_users=[])
-    with pytest.raises(RuntimeError, match="Legacy report import requires"):
-        catalog.migrate_reports([{"report_id": "old"}], actor="alice")
+    from server.manager.services.research_catalog import ResearchCatalog as LiveResearchCatalog
+    assert not hasattr(LiveResearchCatalog, "migrate_reports")
     with sqlite3.connect(catalog.db_path) as db:
         assert db.execute("SELECT count(*) FROM research_catalog_researches").fetchone()[0] == 1
         assert db.execute("SELECT title,visibility,authorized_users_json FROM research_catalog_researches").fetchone() == (

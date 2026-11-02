@@ -547,11 +547,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 )
                 json_response(self, {"success": True, "research": value}, 201)
                 return True
-            if parsed.path == "/api/research/migrations/reports":
-                value = service.migrate_reports(
-                    list(data.get("records") or []), actor=actor,
-                )
-                json_response(self, {"success": True, **value}, 200)
+            if parsed.path in {"/api/research/migrations/reports", "/api/research/migrations/reports/discover"}:
+                json_response(self, {"success": False, "error": "Legacy report import is retired; use reviewed Keycloak migration"}, 410)
                 return True
             if parsed.path == "/api/research/keycloak-share-links/redeem":
                 service.require_keycloak_sharing()
@@ -559,17 +556,6 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     str(data.get("token") or ""), actor=actor,
                 )
                 json_response(self, {"success": True, "grant": value})
-                return True
-            if parsed.path == "/api/research/migrations/reports/discover":
-                records = self._discover_research_report_records(actor)
-                if not bool(data.get("apply")):
-                    json_response(self, {
-                        "success": True, "status": "planned",
-                        "count": len(records), "records": records,
-                    })
-                    return True
-                value = service.migrate_reports(records, actor=actor)
-                json_response(self, {"success": True, **value}, 200)
                 return True
             research_id, child = self._research_catalog_target(parsed.path)
             if child == "members":
@@ -789,43 +775,6 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             for item in subordinate_users
             if isinstance(item, dict)
         ]
-
-    def _discover_research_report_records(self, actor: str) -> list[dict]:
-        """Project all three existing report stores into one explicit plan."""
-        records: list[dict] = []
-        for item in self.state.client_state.local_research(actor):
-            value = dict(item)
-            value.update(
-                source_kind="client",
-                source_ref=str(item.get("local_ref") or ""),
-                owner_ref=actor,
-                profile_ref=str(item.get("profile_id") or ""),
-            )
-            records.append(value)
-        for item in self.state.server_research.list_owner(actor):
-            value = dict(item)
-            value.update(
-                source_kind="server_agent",
-                source_ref=str(item.get("server_ref") or ""),
-                owner_ref=actor,
-                profile_ref=str(item.get("profile_id") or ""),
-            )
-            records.append(value)
-        for item in self.state.public_research.list_owner(actor):
-            value = dict(item)
-            value.update(
-                source_kind="publication",
-                source_ref=str(item.get("publication_id") or ""),
-                owner_ref=actor,
-            )
-            records.append(value)
-        return sorted(
-            records,
-            key=lambda item: (
-                str(item.get("source_kind") or ""),
-                str(item.get("source_ref") or ""),
-            ),
-        )
 
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:

@@ -98,3 +98,5 @@ React 登录切换：移除密码、密码确认、机构注册字段，以及 P
 旧整图代码移除：删除 `account_domain/research_sync.py`、`research_merge.py` 和仅覆盖旧 PostgreSQL 整图机制的 smoke；ResearchCatalog 不再保留 synchronizer/scheduler 入口，account-domain 不再新建旧 merge-base/intent 表或写入 merge-base。已存在的数据表不在启动时删除，仍留给有备份的显式迁移核对。删除已被真实 Keycloak+CouchDB 跨 Manager 演练取代的旧 peer 测试；分支测试改为验证入站旧图及 tombstone 均不能覆盖同一用户两个 Profile 的独立分支；资源补偿测试直接模拟 SQLite 提交前失败与提交后连接清理失败。56 项聚焦测试通过；真实服务器迁移和部署尚未完成。
 
 移除旧整图模块后，独立 realm 的真实临时 Keycloak＋CouchDB＋签名 peer HTTP 演练再次通过（2 MiB 附件、编辑预检、双端及同会话撤权）。演练容器已由脚本清理；此回执不代表现网发布。
+
+旧在线报告导入入口退役：删除 ResearchCatalog 的旧 `migrate_reports`/失败重写实现及旧报告身份合并助手、Manager 自动发现旧报告函数、CLI 的 `migrate-reports`/`migrate-existing-reports` 和客户端方法。旧 HTTP 地址明确返回 410，不再接受旧 ACL 或导入时重建权限。历史快照生成逻辑仅迁入测试专用 oracle，生产模块不可调用；实际权限迁移使用 `scripts/migrations/keycloak_research_stage.py` 的已审核逐对象计划。75 项聚焦回归通过，包括旧入口不发现/不写入、CLI 移除、现行 CouchDB 路由及事务补偿。
