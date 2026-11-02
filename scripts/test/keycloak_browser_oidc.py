@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Verify browser login through Manager, its Keycloak session, and logout.
 
-Uses the browser's normal TLS trust. Credentials come from the environment;
+Uses normal TLS trust or an explicitly supplied CA with a pinned Chrome key.
+Credentials come from the environment;
 no passwords, cookies, codes or tokens are included in the acceptance receipt.
 """
 from __future__ import annotations
@@ -9,9 +10,44 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import contextmanager
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
+
+
+@contextmanager
+def browser_certificate_trust():
+    """Trust one reviewed public certificate, never disable TLS globally."""
+    path = os.environ.get('KEYCLOAK_BROWSER_CA_FILE')
+    if not path:
+        yield {}
+        return
+    import base64
+    import hashlib
+    from pathlib import Path
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+    certificate = Path(path).expanduser().resolve(strict=True)
+    if not certificate.is_file() or certificate.stat().st_size > 1024*1024:
+        raise ValueError('browser CA file is invalid or too large')
+    pem = certificate.read_bytes()
+    if b'PRIVATE KEY' in pem:
+        raise ValueError('browser CA file must contain public certificates only')
+    cert = x509.load_pem_x509_certificate(pem)
+    spki = cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    pin = base64.b64encode(hashlib.sha256(spki).digest()).decode('ascii')
+    previous = os.environ.get('NODE_EXTRA_CA_CERTS')
+    # Playwright's APIRequestContext runs in its Node driver. Chrome requires
+    # its own explicit key pin; ignore_https_errors remains disabled in both.
+    os.environ['NODE_EXTRA_CA_CERTS'] = str(certificate)
+    try:
+        yield {'args': ['--ignore-certificate-errors-spki-list='+pin]}
+    finally:
+        if previous is None:
+            os.environ.pop('NODE_EXTRA_CA_CERTS', None)
+        else:
+            os.environ['NODE_EXTRA_CA_CERTS'] = previous
 
 
 def main() -> int:
@@ -19,8 +55,8 @@ def main() -> int:
     origin = urlsplit(manager)
     if origin.scheme not in {"http", "https"} or not origin.netloc or origin.path:
         raise SystemExit("MANAGER_URL must be a Manager origin")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, channel=os.environ.get("PLAYWRIGHT_CHANNEL", "chrome"))
+    with browser_certificate_trust() as tls_options, sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, channel=os.environ.get("PLAYWRIGHT_CHANNEL", "chrome"), **tls_options)
         try:
             context = browser.new_context()
             # Validate deployment readiness before requesting credentials. A
