@@ -31,6 +31,7 @@ from tools.data.sqlite.account_manager import (
     delete_factor_set as _delete_factor_set,
 )
 from tools.data.sqlite.account_manager.domain_sync import (
+    enqueue_entity as _enqueue_domain_entity,
     replace_entities as _replace_domain_entities,
 )
 
@@ -336,12 +337,12 @@ def save_factor_param_config(
         username, ff_alias, params_list, scope_key, metadata=metadata,
         **({'resolved_factors': resolved_factors} if resolved_factors is not None else {}),
     )
-    _enqueue_domain_entity(
-        username,
-        "factor_param_config",
-        f"{scope_key}:{ff_alias}",
-        result,
-    )
+    # Materialized v2 rows already publish through the same SQLite transaction.
+    # Re-enqueuing here duplicates the outbox revision and can fail after commit.
+    if resolved_factors is None:
+        _enqueue_domain_entity(
+            username, "factor_param_config", f"{scope_key}:{ff_alias}", result,
+        )
     return result
 
 

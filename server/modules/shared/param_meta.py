@@ -36,7 +36,7 @@ def serialize_param_meta(param):
     """Return frontend-safe metadata for a Parameter instance."""
     return {
         'alias': getattr(param, 'alias', ''),
-        'name': getattr(param, 'name', '') or getattr(param, 'alias', ''),
+        'name': getattr(param, 'alias', '') or getattr(param, 'name', ''),
         'desc': getattr(param, 'desc', '') or '',
         'type': display_param_type(param),
         'input_help': serialize_param_input_help(param),

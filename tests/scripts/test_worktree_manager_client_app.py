@@ -1897,7 +1897,6 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
                 "workbench/test-factors.js",
                 "workbench/test-factor-candidates.js",
                 "workbench/test-factor-candidate-sources.js",
-                "catalog/factor-editor.js",
                 "workbench/factor-family-picker.js",
             "workbench/test-configuration-compiler.js",
             "workbench/test-object-picker.js",
@@ -2002,7 +2001,6 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTFactors.factorDetail" in scripts[
         "object-overlay.js"
     ]
-    assert "function parameterEditor" in scripts["factor-editor.js"]
     assert "setting_template" not in scripts["tests.js"]
     assert 'test_templates: Object.freeze' in scripts["test-content-adapters.js"]
     assert "FTTestTemplates.panel" in scripts["test-content-adapters.js"]

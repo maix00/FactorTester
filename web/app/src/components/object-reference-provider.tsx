@@ -6,6 +6,7 @@ import { request } from "../configuration/api.ts";
 import { matchingFamily, objectDetailURL, type ObjectReferenceValue } from "../object-reference.ts";
 import { usePageInstance } from "../page-instance.ts";
 import { DetailsPanel } from "./details-panel.tsx";
+import {FactorFamilyDetail} from "./factor-family-detail.tsx";
 import { FactorDetail } from "./factor-detail.tsx";
 import { ObjectReferenceContext } from "./object-reference.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
@@ -16,7 +17,7 @@ export function ObjectReferenceProvider({ children }: { children: React.ReactNod
   const instance = usePageInstance();
   const [stack, setStack] = useState<ObjectReferenceValue[]>([]);
   const current = stack.at(-1);
-  const key = current ? JSON.stringify([current.kind, current.ref, current.owner, current.profileKey]) : "";
+  const key = current ? JSON.stringify([current.kind, current.ref, current.owner, current.profileKey,current.familyAlias,current.versionRef]) : "";
   const [response, setResponse] = useState<{ key: string; detail?: unknown; error?: string } | null>(null);
   useEffect(() => {
     if (!current) return;
@@ -26,7 +27,7 @@ export function ObjectReferenceProvider({ children }: { children: React.ReactNod
     void request(url, { signal: controller.signal }).then(data => {
       if (controller.signal.aborted) return;
       if (current.kind === "factorFamily") {
-        const match = matchingFamily(Array.isArray(data.families) ? data.families : [], current.ref, current.owner);
+        const match = matchingFamily(Array.isArray(data.families) ? data.families : [], current.ref, current.owner,{alias:current.familyAlias,version:current.versionRef});
         if (!match) throw new Error(t("objectReference.notFoundOrAmbiguous"));
         setResponse({ key, detail: match });
       } else setResponse({ key, detail: data });
@@ -54,7 +55,7 @@ export function ObjectReferenceProvider({ children }: { children: React.ReactNod
       ...(current.owner ? [{ key: "owner", label: t("library.owner"), value: current.owner }] : []),
     ] }]} />
     {loading ? <Spin tip={t("loading")} /> : error ? <Alert type="error" showIcon message={t("objectReference.loadFailed")} description={error} /> :
-      current.kind === "factor" || current.kind === "factorFamily" ? selected ? <FactorDetail detail={selected as Record<string, unknown>} /> : null :
+      current.kind === "factorFamily" ? selected ? <FactorFamilyDetail key={key} family={selected as Record<string, unknown>} fingerprint={current.versionRef}/>:null : current.kind === "factor" ? selected ? <FactorDetail detail={selected as Record<string, unknown>} /> : null :
       selected ? <ResultView value={selected} /> : <p className="tr-object-reference-hint">{t("objectReference.knownOnly")}</p>}
   </DetailsPanel> : null}</ObjectReferenceContext.Provider>;
 }

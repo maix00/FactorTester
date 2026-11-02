@@ -21,3 +21,14 @@ test("factor tabs select their resource even if category metadata is present", a
   assert.deepEqual(catalogRows({items:[]}, "factors", "sets"), []);
   assert.throws(() => catalogRows({categories}, "factors", "factors"), /factors/);
 });
+
+import {catalogIdentity,catalogTitle,familyConfigurationKey} from "./catalog-search.ts";
+test("sets use canonical target refs and server titles",()=>{
+ assert.equal(catalogIdentity({target_ref:"factor-set:v1:a",alias:"display"}),"factor-set:v1:a");
+ assert.equal(catalogTitle({target_ref:"factor-set:v1:a",title_zh:"Set A"}),"Set A");
+});
+test("same-named families keep source ownership in the configuration request",()=>{
+ assert.equal(familyConfigurationKey({factor_family_alias:"Momentum",source:"public",owner_username:"alice"}),"public:Momentum");
+ assert.equal(familyConfigurationKey({factor_family_alias:"Momentum",source:"custom",owner_username:"alice"}),"alice:Momentum");
+ assert.equal(familyConfigurationKey({factor_family_alias:"other:Momentum",source:"custom",owner_username:"alice"}),"other:Momentum");
+});

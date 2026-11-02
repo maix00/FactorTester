@@ -495,6 +495,7 @@ class JobProxyRoutesMixin:
                 route,
                 path=internal_path,
                 principal=str(session["username"]),
+                delegated_user_token=self._bearer_token(),
                 method=method,
                 body=body,
                 content_type=content_type,
@@ -510,6 +511,10 @@ class JobProxyRoutesMixin:
             )
             return True
         if method != "GET" and suffix != "families/formula-preview" and 200 <= response.status < 300:
+            if prefix == "/api/factor-library/" and response.json_object().get("success", True):
+                invalidate = getattr(getattr(self.state, "federated_public_data", None), "invalidate_factor_cache", None)
+                if callable(invalidate):
+                    invalidate()
             refresh = getattr(getattr(self.state, "client_state", None), "_refresh_account_domain_async", None)
             if callable(refresh) and response.json_object().get("success", True):
                 refresh(str(session["username"]), force=True)

@@ -24,12 +24,16 @@
     ));
   }
 
-  async function ensureEditor() {
-    if (window.FTFactorEditor?.render || !window.FTStaticLoader?.loadGroups) return;
-    await window.FTStaticLoader.loadGroups(["factor-catalog-editor"]);
+  function openReactEditor(context, section, targetRef, mode) {
+    const query = new URLSearchParams({page: "factors", section, mode});
+    if (targetRef) query.set("object_ref", targetRef);
+    const owner = new URLSearchParams(globalThis.location.search).get("owner_username");
+    if (owner) query.set("owner_username", owner);
+    globalThis.location.assign(`/app?${query}`);
   }
 
   async function factorDetail(context, targetRef, mode = "view", options = {}) {
+    if (mode === "create" || mode === "edit") return openReactEditor(context, "factors", targetRef, mode);
     context.activeNav("factors");
     // A factor created inline in the test editor already carries its complete
     // view model.  Do not make a catalog round-trip just to render that
@@ -98,13 +102,13 @@
       }
     }
     if (!catalog().isCurrent(context)) return;
-    if (mode === "create" || mode === "edit") await ensureEditor();
     return window.FTFactorDetails.factorDetail(
       context, data, targetRef, mode, catalog().nativeRequest, options,
     );
   }
 
   async function familyDetail(context, targetRef, mode = "view", options = {}) {
+    if (mode === "create" || mode === "edit") return openReactEditor(context, "families", targetRef, mode);
     context.activeNav("factors");
     // A factor family created inline in the test editor already carries its
     // complete view model; render it read-only without a catalog round-trip.
@@ -122,67 +126,16 @@
       data = await catalog().load(context, {refresh: true, library: true});
     }
     if (!catalog().isCurrent(context)) return;
-    if (mode === "create" || mode === "edit") await ensureEditor();
     return window.FTFactorDetails.familyDetail(
       context, data, targetRef, mode, options,
     );
   }
 
-  async function setDetail(context, targetRef, mode = "view", options = {}) {
-    context.activeNav("factors");
-    const inline = context.testObjectTemporary && context.testObjectInitialValue;
-    const canonicalReadOnly = !inline
-      && context.testObjectTemporary !== true
-      && context.testObjectSnapshot !== true
-      && mode === "view"
-      && String(targetRef || "").startsWith("factor-set:v2:");
-    let data = inline
-      ? {sets: [context.testObjectInitialValue], factors: []}
-      : await catalog().load(context, {
-        // A frozen detail request already returns the set's owner, edit
-        // capability and first member page.  Avoid fetching every own and
-        // subordinate set merely to render a cold read-only deep link.
-        // Legacy refs still need the catalog to resolve their canonical ref;
-        // editors need the list projection for access checks and hydration.
-        sets: !canonicalReadOnly,
-        library: mode === "create" || mode === "edit",
-      });
-    if (!catalog().isCurrent(context)) return;
-    if (mode === "create" || mode === "edit") {
-      await ensureEditor();
-      let initialValue = options.initialValue || context.testObjectInitialValue || null;
-      if (mode === "edit" && !initialValue) {
-        initialValue = await editableSet(context, data, targetRef);
-      }
-      return FTFactorSetEditor.render(
-        context, data, targetRef, mode, {...options, initialValue},
-      );
-    }
-    return window.FTFactorDetails.setDetail(
-      context, data, targetRef, catalog().nativeRequest,
-    );
-  }
-
-  async function editableSet(context, data, targetRef) {
-    const selected = data.sets.find(item => (
-      item.target_ref === targetRef || item.set_ref === targetRef
-    ));
-    if (!selected?.can_edit) {
-      throw new Error(context.t("当前因子集合为只读，不能编辑"));
-    }
-    const related = [];
-    let offset = 0;
-    for (let page = 0; page < 11; page += 1) {
-      const payload = await context.api(
-        `/api/factor-library/factor-sets/detail?target_ref=${encodeURIComponent(targetRef)}`
-        + `&offset=${offset}&limit=100`,
-      );
-      const value = payload.factor_set || payload;
-      related.push(...(value.related_references || []));
-      if (!value.has_more) return {...selected, ...value, related_references: related};
-      offset = Number(value.next_offset || related.length);
-    }
-    throw new Error(context.t("因子集合成员超过允许上限"));
+  function setDetail(_context, targetRef, mode = "view") {
+    const query = new URLSearchParams({page: "factors", section: "sets"});
+    if (targetRef) query.set("object_ref", targetRef);
+    if (["create", "edit"].includes(mode)) query.set("mode", mode);
+    window.location.assign(`/app?${query}`);
   }
 
   window.FTFactors = Object.freeze({factorDetail, familyDetail, setDetail});

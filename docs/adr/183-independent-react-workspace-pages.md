@@ -4,7 +4,9 @@ Status: implementation in progress (issue #445).
 
 ## Decision
 
-Desktop navigation creates a fresh DockView panel instance on every click. Page
+Desktop functional navigation opens Dockview panels; repeated Research/report
+references activate the existing identity-bound panel. Research and report are
+separate page types with distinct tabs and titles. Page
 arguments and draft/navigation state belong to that instance, not a shared URL.
 Visible split panels remain active; hidden Job pages close their stream/poll.
 Mobile keeps Research, Test, Trading and More as roots; libraries, Jobs and
@@ -32,9 +34,18 @@ formula rendering, mobile creator navigation, metadata-driven typed IC inputs,
 shared Research lists/detail and Settings presentation cleanup.
 
 Remaining: structured result charts and domain result plugins; complete version
-editing/recovery flows; the Research graph editor still uses its existing
-embedded route; real authenticated local Job acceptance. Trading has no verified
+editing/recovery flows; the remaining Research workspace storage/embedded routes still need retirement; real authenticated local Job acceptance. Trading has no verified
 broker/session management API in this frontend migration: its paper/live entry
 must not pretend that broker connections or order execution are available.
 
 No deployment or integration is authorized by this ADR.
+
+## Research navigation
+
+Research/report details render as native React work pages. Desktop uses Dockview
+tabs, mobile uses the existing Ionic header and history stack. Content does not
+add another page-level Back button. Local reports open the same report page type
+through the native bridge; metadata creation/edit forms keep the common overlay.
+A local object's identity includes its Profile. Identically named Profiles or
+reports cannot merge navigation state. Hidden details clear their assistant
+context; rejected reads cannot leave a previous Research bound to the assistant.

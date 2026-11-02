@@ -740,10 +740,7 @@
     "factor-catalog-editor": [
       "catalog/factor-assistance.js",
       "catalog/factor-parameter-editor.js",
-      "catalog/factor-editor.js",
-      "catalog/factor-object-form.js",
-      "catalog/factor-set-assistance.js",
-      "catalog/factor-set-editor.js"
+      "catalog/factor-object-form.js"
     ],
     "output-choice": [
       "core/output-choices.js"
@@ -1181,10 +1178,7 @@
     "catalog/factor-catalog-list.js",
     "catalog/factor-assistance.js",
     "catalog/factor-parameter-editor.js",
-    "catalog/factor-editor.js",
     "catalog/factor-object-form.js",
-    "catalog/factor-set-assistance.js",
-    "catalog/factor-set-editor.js",
     "catalog/factor-details.js",
     "catalog/factors.js",
     "catalog/strategy-library-runtime.js",

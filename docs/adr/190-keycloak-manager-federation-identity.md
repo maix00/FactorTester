@@ -129,3 +129,15 @@ HTTPS 使用 Secure。Manager 在 access token 到期前 30 秒按需兑换，
 旋转竞态，不替代身份或对象授权。HTTP keep-alive 的每个请求清空临时状态。
 认证服务短暂故障返回可重试的 503，不删除 Cookie；无有效登录返回 401，
 不误称为设备认证失败。注销清除访问和刷新 Cookie，并使用 Keycloak 注销入口。
+
+### 原生客户端与浏览器凭据边界
+
+WebKit 持有 refresh Cookie。原生研究桥在发布、拉取和远程发现前，通过同源
+Manager 会话接口复用续期，再只导出新的 access Cookie/token 给受身份绑定的
+CLI 请求。刷新凭据不传给 CLI，不增加另一套续期或用户权限存储。请求有超时，
+结果仍由 Manager 和原生稳定身份核验。
+
+Manager 切换清除目标主机的 access/refresh Cookie，保留无关 Cookie；目标端点
+自己的凭据仍按完整 URL 隔离。无权限的目标清除原生登录，暂时不可达的目标不
+替换当前连接。Cookie 按主机而非端口隔离，不能把同一主机的其他端口当作独立
+Cookie 安全边界。

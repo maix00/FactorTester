@@ -73,3 +73,20 @@ live policies reference it or delete database volumes.
 Run `python -m scripts.test.keycloak_research_hierarchy_smoke` for disposable real
 Keycloak acceptance, including same-token reparenting, explicit-grant independence,
 read-only scope limits, invalid hierarchy denial and idempotent migration parity.
+
+## Separate execution containers
+
+If execution workers use a private control network different from the Manager
+network, include `-f compose.execution-control.yaml` in **every** Keycloak
+activation/recreate command, together with the base file and any policy override.
+Set `TR_EXECUTION_CONTROL_NETWORK` in the protected host environment to the
+existing worker/broker control network. The override attaches only Keycloak,
+with the `tr-keycloak` alias; it does not attach the identity database or publish
+another listener. Retain the browser's canonical issuer and the worker's private
+backchannel separately. A one-off `docker network connect` is insufficient:
+container recreation would remove the connection and prevent worker login.
+
+Verify the rendered Compose network membership before activation, then verify
+worker client-credential authentication, the exact frozen deployment identity,
+and its scoped queue subscription. Do not broaden broker permissions to mask a
+stale node descriptor or mismatched deployment revision.

@@ -25,13 +25,32 @@ enum WebSessionCookieSynchronizer {
         endpoint: URL?
     ) async {
         let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
-        let cookies = await withCheckedContinuation { continuation in
+        var cookies = await withCheckedContinuation { continuation in
             cookieStore.getAllCookies { cookies in
                 continuation.resume(returning: cookies)
             }
         }
         let origin = endpoint ?? webView.url
         guard let host = origin?.host?.lowercased() else { return }
+        // WebKit owns the refresh credential. Reuse Manager's same-origin
+        // refresh path rather than passing refresh tokens to native/CLI code.
+        if cookies.contains(where: { $0.name == "tr-oidc-refresh" && cookieBelongsToHost($0, host: host) }),
+           let loaded = webView.url,
+           LocalResearchBridgeContract.sameOrigin(scheme: loaded.scheme ?? "", host: loaded.host ?? "",
+                                                  port: loaded.port ?? 0, endpoint: origin) {
+            _ = try? await webView.callAsyncJavaScript(
+                """
+                const controller=new AbortController();
+                const timer=setTimeout(()=>controller.abort(),10000);
+                try { return (await fetch('/api/session', {credentials:'same-origin', cache:'no-store', signal:controller.signal})).status; }
+                finally { clearTimeout(timer); }
+                """,
+                arguments: [:], in: nil, contentWorld: .page
+            )
+            cookies = await withCheckedContinuation { continuation in
+                cookieStore.getAllCookies { continuation.resume(returning: $0) }
+            }
+        }
         let matching = cookies.filter { cookie in
             cookie.name == "ft-manager-session" && cookieBelongsToHost(cookie, host: host)
         }
@@ -52,7 +71,8 @@ enum WebSessionCookieSynchronizer {
     static func clearManagerSession(for endpoint: URL, webView: WKWebView?) async {
         guard let host = endpoint.host?.lowercased() else { return }
         func belongs(_ cookie: HTTPCookie) -> Bool {
-            cookie.name == "ft-manager-session" && cookieBelongsToHost(cookie, host: host)
+            ["ft-manager-session", "tr-oidc-refresh"].contains(cookie.name)
+                && cookieBelongsToHost(cookie, host: host)
         }
         for cookie in HTTPCookieStorage.shared.cookies ?? [] where belongs(cookie) {
             HTTPCookieStorage.shared.deleteCookie(cookie)

@@ -6,6 +6,7 @@ import { getPage } from "./registry.ts";
 import { PageFrame } from "./frame.tsx";
 import { AccountPage } from "./pages/account.tsx";
 import { CatalogPage } from "./pages/catalog.tsx";
+import { ResearchDetailPage } from "./pages/research-detail.tsx";
 import { ResearchPage } from "./pages/research.tsx";
 import { TradingPage } from "./pages/trading.tsx";
 import { WorkspacePage } from "./pages/workspace.tsx";
@@ -29,6 +30,7 @@ function PageContent({ pageId }: { pageId: string }): React.ReactElement {
   if (pageId === "account") return <AccountPage />;
   if (["products", "factors", "strategies", "catalog"].includes(pageId)) return <CatalogPage domain={pageId === "catalog" ? "products" : pageId as "products" | "factors" | "strategies"} />;
   if (pageId === "more") return <WorkspacePage />;
+  if(pageId === "research-detail" || pageId === "research-report") return <ResearchDetailPage/>;
   if (pageId === "research") return <ResearchPage />;
   if (pageId === "trading") return <TradingPage />;
   if (pageId === "test-bench") return <TestBenchPage />;

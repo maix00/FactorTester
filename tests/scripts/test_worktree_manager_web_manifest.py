@@ -103,6 +103,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     discovered_scripts = {
         path.relative_to(WEB_ROOT).as_posix()
         for path in WEB_ROOT.rglob("*.js")
+        if path != WEB_ROOT / "sw.js"  # Dedicated service-worker entry, never a page module.
     }
     assert discovered_scripts == set(manifest["scripts"]), (
         "every production Web module must be listed exactly once in the manifest"
@@ -115,7 +116,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     # Production modules belong to a semantic group.  Keeping the entry HTML,
     # manifest and architecture notes at the root prevents a coordinator or a
     # stylesheet from silently becoming an unowned global again.
-    assert not list(WEB_ROOT.glob("*.js"))
+    assert {path.name for path in WEB_ROOT.glob("*.js")} == {"sw.js"}
     assert not list(WEB_ROOT.glob("*.css"))
 
 
@@ -376,7 +377,6 @@ def test_editor_header_actions_respect_route_session() -> None:
     )
     assert "context.isRouteCurrent?.() !== false" in component
     for relative in [
-        "catalog/factor-editor.js",
         "catalog/factor-object-form.js",
         "catalog/strategy-library-detail.js",
         "catalog/product-group-detail.js",
@@ -1193,42 +1193,6 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     assert ".test-field-table > .test-setting-row:last-child" in styles
 
 
-def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
-    source = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(encoding="utf-8")
-
-    assert "FTMultiSelectFilter.create" in source
-    assert "function sharedPicker" in source
-    assert "function familyPicker" in source
-    assert "FTTestFieldRow.create" in source
-    assert "function parameterEditor" in source
-    assert "factor-editor-source-metadata" in source
-    source_controls = source.split("function sourceControls", 1)[1].split(
-        "function sourceMetadata", 1,
-    )[0]
-    assert "FTFactorDetailShared.summary" not in source_controls
-    assert "const formulaSource = state.inspection || state.family || state.loaded" in source
-    assert "topMount.append(window.FTFactorDetailShared.summary(context, {" in source
-    assert "function normalizedInspection" in source
-    assert "state.validationMessage" in source
-    assert "state.validationError" in source
-    assert 'params: state.parameterValues || {}' in source
-    assert "FTUI.iconButton" in source_controls
-    assert "FTUI.sourcePanel" in source_controls
-    assert "FTUI.codeEditor" in source
-    assert 'loadSourceVersion(\n              context, state.family, "current"' in source
-    assert 'loadSourceVersion(\n          context, selectedFamily, "current"' in source
-    # A failed eager history lookup must leave loading state and surface a
-    # retryable error; otherwise every redraw can re-enter the request and the
-    # editor stays stuck at “正在读取源码版本…”.
-    assert "sourceVersionLoadFailed" in source
-    assert "state.sourceVersionError = window.FTFactorDetailShared.sourceUnavailableText" in source
-    assert "factor-editor-upload-action" not in source
-    assert "const title = document.createElement(\"h2\")" not in source
-    assert "test-factor-family-row" not in source
-
-    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
-    assert ".editable-code-editor > textarea" in styles
-    assert "background: transparent !important" in styles
 
 
 def test_factor_family_delete_warns_and_backend_cascades_registered_factors() -> None:
@@ -1272,9 +1236,6 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     details = (WEB_ROOT / "catalog" / "factor-details.js").read_text(
         encoding="utf-8",
     )
-    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
-        encoding="utf-8",
-    )
     factor_view = details.split("async function familyDetail", 1)[0]
     family_view = details.split("async function familyDetail", 1)[1].split(
         "function sourceVersionHistory", 1,
@@ -1292,14 +1253,10 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     assert "onActivate: loadMembers" in family_view
     assert "onActivate: loadCurrentSource" in family_view
     assert "withCurrentFamilySource" not in details
-    assert "FTFactorDetailShared.versionPicker" in editor
-    assert 'context.t("读取版本历史")' not in editor
     assert "/api/factor-library/family-sources/" in shared
     assert "/custom-factors/api/source-versions/" not in shared
     assert "/custom-factors/api/public-factor/" not in details
     assert "/custom-factors/api/get/" not in details
-    assert "/custom-factors/api/public-factor/" not in editor
-    assert "/custom-factors/api/get/" not in editor
 
 
 def test_factor_object_detail_tabs_share_kind_and_mode_contract() -> None:
@@ -1309,9 +1266,6 @@ def test_factor_object_detail_tabs_share_kind_and_mode_contract() -> None:
         WEB_ROOT / "catalog" / "shared" / "object-detail-tabs.js"
     ).read_text(encoding="utf-8")
     details = (WEB_ROOT / "catalog" / "factor-details.js").read_text(
-        encoding="utf-8"
-    )
-    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
         encoding="utf-8"
     )
     object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
@@ -1327,9 +1281,7 @@ def test_factor_object_detail_tabs_share_kind_and_mode_contract() -> None:
     assert '"未保存"' in source
     assert '"只读"' in source
     assert "FTObjectDetailTabs.create" in details
-    assert "FTObjectDetailTabs.create" in editor
     assert "FTObjectDetailTabs.create" in object_form
-    assert editor.index("topMount") < editor.index("FTObjectDetailTabs.create")
     assert "FTUI.pagedTable" in object_jobs
     assert '"visible"' in object_jobs
     assert "object_kind" in object_jobs
@@ -2184,11 +2136,6 @@ def test_object_mode_actions_component_mounts_shared_header_actions() -> None:
         encoding="utf-8",
     )
     assert "window.FTObjectModeActions?.mount?.(context" in details
-    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
-        encoding="utf-8",
-    )
-    assert "window.FTObjectModeActions?.mount?.(context" in editor
-    assert "const submit = actions[actions.length - 1];" in editor
 
 
 def test_multi_select_object_rows_open_matching_view_overlays() -> None:
@@ -2227,9 +2174,6 @@ def test_multi_select_object_rows_open_matching_view_overlays() -> None:
     assert helper_result.stdout.strip() == "ok"
 
     # Call sites must declare row views so the shared picker can open them.
-    factor_editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
-        encoding="utf-8"
-    )
     factors_page = (WEB_ROOT / "catalog" / "factors.js").read_text(
         encoding="utf-8"
     )
@@ -2251,8 +2195,6 @@ def test_multi_select_object_rows_open_matching_view_overlays() -> None:
     assert "view: {...view, onSaved: savedGroup}" in products
     assert "testState: state" in products
     assert "refreshProductsForExecution" in products
-    assert "familyRowView" in factor_editor
-    assert "factorRowView" in factor_editor
     assert "factor_set_only === true" in shared.read_text(encoding="utf-8")
     assert "testObjectTemporary" in factors_page
 
@@ -2276,16 +2218,12 @@ def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:
     overlay = (WEB_ROOT / "workbench" / "object-overlay.js").read_text(
         encoding="utf-8",
     )
-    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
-        encoding="utf-8",
-    )
     styles = (WEB_ROOT / "styles" / "workbench.css").read_text(encoding="utf-8")
 
     assert "frame.toolbar ||= document.createElement" in overlay
     assert "frameActions.replaceChildren(frame.toolbar)" in overlay
     assert "toolbar: frame.toolbar" in overlay
     assert "testObjectOverlay: true" in overlay
-    assert 'context.testObjectOverlay === true' in editor
     # Overlay save label (保存) vs standalone create 提交 now lives in the
     # shared mode-actions component that the editor mounts.
     actions = (WEB_ROOT / "catalog" / "shared" / "object-mode-actions.js").read_text(
@@ -2293,9 +2231,6 @@ def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:
     )
     assert "overlaySaveLabel" in actions
     assert 'mode === "create" ? "提交" : "保存"' in actions
-    assert 'kind: "factor_family", mode: currentFamily ? "edit" : "create"' in editor
-    assert 'onSaved: family => {' in editor
-    assert "temporary: true" in editor
     assert ".ft-object-overlay-frame-actions" in styles
     assert ".ft-object-overlay-frame-toolbar" in styles
 
@@ -2831,20 +2766,11 @@ def test_shared_action_button_contract() -> None:
 
 
 def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() -> None:
-    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(encoding="utf-8")
     object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
         encoding="utf-8",
     )
-    set_editor = (WEB_ROOT / "catalog" / "factor-set-editor.js").read_text(
-        encoding="utf-8",
-    )
+    set_editor = (ROOT / "web/app/src/components/factor-set-editor.tsx").read_text(encoding="utf-8")
 
-    assert 'FTUI.iconButton(\n        context, "arrow.up.circle", "上传因子源码"' in editor
-    assert 'FTUI.iconButton(context, "checkmark.circle", "校验源码"' in editor
-    assert "FTUI.codeEditor(state.sourceCode" in editor
-    assert "registered = libraryValue.factors?.[0] || null" in editor
-    assert "frozen Factor v2 identity" in editor
-    assert "factor-editor-upload-action" not in editor
     # Mode actions (取消编辑/保存/提交) moved into the shared component that
     # the editor mounts; the editor keeps only its save-button reference.
     actions = (WEB_ROOT / "catalog" / "shared" / "object-mode-actions.js").read_text(
@@ -2852,21 +2778,14 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     )
     assert 'context.t("取消编辑")' in actions or '"取消编辑"' in actions
     assert 'mode === "create" ? "提交" : "保存"' in actions
-    assert "window.FTObjectModeActions?.mount?.(context" in editor
-    assert "const submit = actions[actions.length - 1];" in editor
-    assert 'source: {save_mode: "auto"}' in editor
-    assert 'await validateSourceDraft()' in editor
-    assert 'object-detail-tab-change' in editor
-    assert "familyClassNameMatches(name.value, state.inspection)" in editor
-    assert 'form.append(topMount, tabs.root, status)' in editor
     # The shared object form routes its actions through the mode component.
     assert "window.FTObjectModeActions?.mount?.(context" in object_form
     assert 'form.append(tabs.root, status)' in object_form
-    assert "familyScopes?.mine" in set_editor
-    assert "mine?.factors" in set_editor
-    assert 'context.api("/api/factor-library/factor-sets"' in set_editor
+    assert "/api/factor-library/factors" in set_editor
+    assert "factor-sets/descriptor" in set_editor
+    assert 'request("/api/factor-library/factor-sets"' in set_editor
     assert "/custom-factors/api/client/factor-sets" not in set_editor
-    assert "FTFactorSetAssistance" in set_editor
+    assert "frozen.current.get(id)" in set_editor
 
 
 def test_factor_assistance_applies_documents_without_a_dom_event() -> None:
@@ -2879,30 +2798,13 @@ def test_factor_assistance_applies_documents_without_a_dom_event() -> None:
     assert result.stdout.strip() == "ok"
 
 
-def test_persistent_factor_save_refreshes_catalog_but_inline_save_does_not() -> None:
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_persistence_refresh.js"
-    result = subprocess.run(
-        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert result.stdout.strip() == "ok"
-    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(encoding="utf-8")
-    assert "if (!state.familyMode)" in editor
-    assert "params_list: [state.parameterValues]" not in editor
-    assert "replace_factor_ref: state.mode === \"edit\"" in editor
 
 
 def test_factor_object_editors_share_submit_assistance_and_reference_controls() -> None:
     object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
         encoding="utf-8",
     )
-    set_editor = (WEB_ROOT / "catalog" / "factor-set-editor.js").read_text(
-        encoding="utf-8",
-    )
-    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
-        encoding="utf-8",
-    )
+    set_editor = (ROOT / "web/app/src/components/factor-set-editor.tsx").read_text(encoding="utf-8")
     parameter_editor = (WEB_ROOT / "catalog" / "factor-parameter-editor.js").read_text(
         encoding="utf-8",
     )
@@ -2919,7 +2821,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert object_form.index("context.setHeading") < object_form.index(
         "window.FTObjectModeActions?.mount?.(context",
     )
-    assert "editor.syncFromState()" in set_editor
+    assert "form.setFieldsValue" in set_editor
     assert 'parameter.type === "FactorParam"' in parameter_editor
     assert '"新增因子家族"' in parameter_editor
     assert "factor-param-choice-disabled" not in parameter_editor
@@ -2930,7 +2832,6 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     # column layout per table), with the parameter list shared via
     # createParameterList and the section shell shared via parameterSection.
     assert "FTFactorDetailShared.createParameterList" in parameter_editor
-    assert "FTFactorDetailShared.parameterSection" in editor
     # Family tables carry no Value column (a family defines parameters only);
     # factor-instance tables always do.  The shared list builds the header
     # from the base labels and appends Value exactly when shown.
@@ -2962,29 +2863,13 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "valuePicker" in parameter_editor
     assert "factor-param-nested-factor-mount" in parameter_editor
     assert "FTFactorDetailShared.parameterSection" in parameter_editor
-    assert 'method: "POST"' in editor
-    assert "resolve_factor_alias" in editor
-    assert "onChange: nextValues =>" in editor
-    assert "state.parameterValues = {...nextValues}" in editor
     # Editing a saved object must hydrate opaque factor:v2 FactorParam refs
     # from the row's frozen factor_dependencies instead of showing a bare
     # ref in a manual input.
-    assert "function hydrateFactorParamValues" in editor
-    assert "hydrateFactorParamValues(" in editor
-    assert "loaded.factor_dependencies" in editor
-    assert "FTObjectOverlay.open" in editor
-    assert "factor-source-mode" not in editor
-    assert 'onAddCandidate: async (_context, {add})' in editor
-    assert "sourceMount.append(familyPicker(context, data, state, redraw));" in editor
-    assert 'state.family.source_kind === "transient"' in editor
     assert "factor-param-choice-family" not in parameter_editor
     assert "compact: true, multi: false" in parameter_editor
     assert "align-items: center" in app_css
     assert "min-height: 34px" in app_css
-    assert "state.onInspected?.(state.inspection)" in editor
-    assert "name.value = inspection.factor_name" not in editor
-    assert "familyClassNameMatches(name.value, state.inspection)" in editor
-    assert 'readOnly: mode === "edit"' in editor
 
 
 def test_factor_parameter_picker_preserves_frozen_nested_factor_records() -> None:
@@ -3012,17 +2897,6 @@ def test_factor_parameter_picker_enriches_nested_family_metadata_and_preview() -
     assert result.stdout.strip() == "ok"
 
 
-def test_factor_family_drafts_materialize_recursively_without_library_write() -> None:
-    fixture = (
-        ROOT / "tests" / "scripts" / "fixtures"
-        / "factor_family_draft_materialization.js"
-    )
-    result = subprocess.run(
-        ["node", str(fixture)], cwd=ROOT,
-        capture_output=True, text=True, check=False,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert result.stdout.strip() == "ok"
 
 
 def test_factor_library_lists_original_class_name_and_description_columns() -> None:

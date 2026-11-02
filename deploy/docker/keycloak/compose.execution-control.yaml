@@ -1,0 +1,12 @@
+# Include on hosts which run the separate execution-node stack.
+# Persist this override in every identity recreate command; do not rely on
+# `docker network connect`, which disappears when Keycloak is recreated.
+services:
+  keycloak:
+    networks:
+      execution-control:
+        aliases: [tr-keycloak]
+networks:
+  execution-control:
+    external: true
+    name: ${TR_EXECUTION_CONTROL_NETWORK:?set the existing private execution control network}
