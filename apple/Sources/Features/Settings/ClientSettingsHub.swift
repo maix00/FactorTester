@@ -80,7 +80,7 @@ private struct ClientAdapterSettingsView: View {
     var body: some View {
         SettingsPageShell(
             title: "本地适配器",
-            subtitle: "启动并打开安装在本机的 FactorTester 组件",
+            subtitle: "启动并打开安装在本机的 TradeResearch 组件",
             systemImage: "shippingbox.and.arrow.backward"
         ) {
             SettingsSectionCard("本地适配器") {

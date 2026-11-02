@@ -39,7 +39,7 @@ struct ClientAdapterPanel: View {
             }
             if let error = controller.error {
                 Label(
-                    "无法加载外部服务，请在设置中检查 FactorTester CLI。",
+                    "无法加载外部服务，请在设置中检查 TradeResearch CLI。",
                     systemImage: "exclamationmark.triangle.fill"
                 )
                     .font(.footnote)

@@ -24,9 +24,9 @@ struct ServerSettingsView: View {
     var body: some View {
         SettingsPageShell(
             title: SettingsDisplayText(
-                isInitialSetup ? "连接 FactorTester" : "服务器"
+                isInitialSetup ? "连接 TradeResearch" : "服务器"
             ),
-            subtitle: "配置 Manager；具体 FactorTester 服务端口由 Manager 发现",
+            subtitle: "配置 Manager；具体 TradeResearch 服务端口由 Manager 发现",
             systemImage: "server.rack"
         ) {
             SettingsSectionCard("Manager") {
@@ -125,7 +125,7 @@ struct ServerSettingsView: View {
                 .disabled(testing || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
-            SettingsSectionCard("FactorTester 服务端口") {
+            SettingsSectionCard("TradeResearch 服务端口") {
                 SettingsRow(
                     title: "服务端口",
                     description: "可填写固定端口；留空时由 Manager 自动选择可用端口"

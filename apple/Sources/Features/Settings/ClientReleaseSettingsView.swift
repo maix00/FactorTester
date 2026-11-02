@@ -189,7 +189,7 @@ struct ClientReleaseSettingsView: View {
 
     private var sourceLabel: String {
         controller.channel == "beta"
-            ? L10n.text("Beta · FactorTester 服务器")
+            ? L10n.text("Beta · TradeResearch 服务器")
             : L10n.text("Main · GitHub")
     }
 
