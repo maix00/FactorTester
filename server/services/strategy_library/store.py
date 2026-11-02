@@ -245,10 +245,25 @@ class StrategyLibraryStore:
         if not url:
             return
         try:
-            entry = self.get_entry(strategy_ref)
-            if entry is None:
-                return
-            revision = self.get_revision(entry.get("current_revision_ref") or "")
+            # Publish the committed authoring snapshot, never a read-through
+            # of the old remote head we are replacing. Release SQLite before
+            # performing network I/O.
+            with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
+                db.execute("BEGIN")
+                row = db.execute(
+                    "SELECT * FROM strategy_library_entries WHERE strategy_ref=? AND deleted_at=0",
+                    (strategy_ref,),
+                ).fetchone()
+                if row is None:
+                    return
+                entry = self._entry(row)
+                row = db.execute(
+                    "SELECT * FROM strategy_library_revisions WHERE revision_ref=?",
+                    (entry["current_revision_ref"],),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("committed strategy revision is missing")
+                revision = self._revision(row)
             from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
             from server.jobs.storage.couchdb_reports import CouchDBObjectStore
 

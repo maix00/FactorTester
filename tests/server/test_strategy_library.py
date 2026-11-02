@@ -416,3 +416,29 @@ def test_registered_strategy_boolean_parameter_keeps_false_as_a_value() -> None:
     }
     with pytest.raises(ValueError, match="boolean"):
         _normalize_parameters(template, {"allow_short": "false"})
+
+
+def test_couchdb_publication_uses_new_local_revision_not_remote_head(tmp_path, monkeypatch):
+    service = library(tmp_path)
+    initial = create_strategy(service)
+    store = service.store
+    old_ref = initial['current_revision']['revision_ref']
+    published = []
+    monkeypatch.setenv('TRADERESEARCH_COUCHDB_AUTHORITY', '1')
+    monkeypatch.setenv('FACTORTESTER_COUCHDB_URL', 'http://unused.invalid')
+    monkeypatch.setattr('server.jobs.storage.couchdb_reports.CouchDBObjectStore', lambda *args: object())
+    monkeypatch.setattr('server.jobs.storage.couchdb_library_reader.CouchDBLibraryWriter.upsert_strategy',
+                        lambda self, ref, entry, revision: published.append((ref, entry, revision)))
+    # Normal reads may still see the old remote head while publication runs.
+    monkeypatch.setattr(store, 'get_entry', lambda *args: {**initial, 'current_revision_ref':old_ref})
+    monkeypatch.setattr(store, 'get_revision', lambda *args: initial['current_revision'])
+    revision = {**initial['current_revision'], 'source_code':SOURCE_V2,
+                'source_sha256':__import__('hashlib').sha256(SOURCE_V2.encode()).hexdigest()}
+    updated = store.update_entry_with_revision(initial['strategy_ref'], name='Updated',
+        description='', visibility='private', expected_revision_ref=old_ref, revision=revision)
+    assert len(published) == 1
+    _, entry, actual = published[0]
+    assert entry['name'] == 'Updated'
+    assert entry['current_revision_ref'] == updated['revision_ref'] != old_ref
+    assert actual['revision_ref'] == updated['revision_ref']
+    assert actual['source_code'] == SOURCE_V2
