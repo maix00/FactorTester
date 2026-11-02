@@ -395,7 +395,7 @@ shift
 case "$command" in
   check-source) check_source ;;
   config) "${compose[@]}" config "$@" ;;
-  container-id) "${compose[@]}" ps --quiet "$@" ;;
+  container-id) "${compose[@]}" ps --all --quiet "$@" ;;
   control-table-count) control_table_count ;;
   build)
     check_source
