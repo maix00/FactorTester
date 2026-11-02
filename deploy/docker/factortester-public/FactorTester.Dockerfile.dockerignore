@@ -29,6 +29,10 @@ deploy/docker/*
 !docs/**
 !product_docs/
 !product_docs/**
+!web/
+!web/app/
+!web/app/src/
+!web/app/src/**
 !skills/
 !skills/**
 !apple/
@@ -45,3 +49,8 @@ apple/Sources/*
 **/*.pyc
 **/.DS_Store
 **/.workspace/
+
+!apple/Sources/Features/
+apple/Sources/Features/*
+!apple/Sources/Features/Web/
+!apple/Sources/Features/Web/**

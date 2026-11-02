@@ -93,6 +93,8 @@ def test_public_image_includes_runtime_localizations_and_git() -> None:
     assert "COPY product_docs product_docs" in dockerfile
     assert "!product_docs/" in dockerignore
     assert "!product_docs/**" in dockerignore
+    for path in ("web/", "web/app/", "web/app/src/", "web/app/src/**", "apple/Sources/Features/", "apple/Sources/Features/Web/", "apple/Sources/Features/Web/**"):
+        assert f"!{path}" in dockerignore
     assert "!skills/" in dockerignore
     assert "!skills/**" in dockerignore
     assert re.search(r"(?m)^\s+git \\?$", dockerfile)
