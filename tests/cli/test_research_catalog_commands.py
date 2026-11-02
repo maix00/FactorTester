@@ -266,3 +266,11 @@ def test_keycloak_grant_cli_has_no_legacy_acl_options(monkeypatch):
         help_result = runner.invoke(cli, ["research", command, "--help"])
         assert "--visibility" not in help_result.output
         assert "--authorized-user" not in help_result.output
+
+
+def test_retired_publication_permission_commands_are_not_exposed():
+    result = CliRunner().invoke(cli, ["research", "reports", "publication", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "settings" not in result.output and "unpublish" not in result.output
+    grants = CliRunner().invoke(cli, ["research", "grant", "--help"])
+    assert grants.exit_code == 0 and "--revoke" in grants.output

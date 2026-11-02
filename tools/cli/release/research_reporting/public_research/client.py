@@ -332,26 +332,8 @@ class PublicResearchClient:
             operation = self.outbox.load(operation_id)
             manifest = operation["manifest"]
             if manifest["kind"] == "revoke":
-                try:
-                    value = self._request(
-                        "POST", "/api/research-publications/revoke",
-                        payload={"publication_id": manifest["publication_id"]},
-                    )
-                except ManagerRequestError as exc:
-                    if exc.status_code != 404:
-                        raise
-                    value = {
-                        "status": "already_absent",
-                        "publication_id": manifest["publication_id"],
-                    }
-                self.outbox.update(
-                    operation_id, state="completed", last_error="",
-                )
-                return {
-                    "operation_id": operation_id,
-                    "status": "synced",
-                    **value,
-                }
+                raise ManagerRequestError(409,
+                    "Legacy publication revocation requires migration to Keycloak Research grants")
 
             projection = operation["projection"]
             publication_id = str(manifest.get("publication_id") or "").strip()
@@ -501,43 +483,6 @@ class PublicResearchClient:
             raise ManagerRequestError(
                 0, "research object data plane is unavailable",
             ) from exc
-
-    def unpublish(self, publication_id: str) -> dict[str, Any]:
-        operation_id = self.outbox.enqueue_revoke(
-            publication_id=str(publication_id or "").strip(),
-        )
-        return self.sync_pending(operation_id=operation_id)[0]
-
-    def configure(
-        self,
-        publication_id: str,
-        *,
-        visibility: str,
-        auto_sync: bool,
-        relay_local_files: bool = False,
-        authorized_users: tuple[str, ...] = (),
-    ) -> dict[str, Any]:
-        """Update one uploaded Branch without changing its report projection."""
-        publication_id = str(publication_id or "").strip()
-        if not publication_id:
-            raise ValueError("publication_id is required")
-        value = self._request(
-            "POST", "/api/research-publications/settings",
-            payload={
-                "publication_id": publication_id,
-                "visibility": str(visibility or "private"),
-                "auto_sync": bool(auto_sync),
-                "relay_local_files": bool(relay_local_files),
-                "authorized_users": sorted({
-                    str(item).strip() for item in authorized_users
-                    if str(item).strip()
-                }),
-            },
-        )
-        settings = value.get("settings")
-        if not isinstance(settings, dict):
-            raise ManagerRequestError(502, "Manager returned no report settings")
-        return settings
 
     def _request(
         self,
