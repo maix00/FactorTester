@@ -401,19 +401,19 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-workspace .dv-tab .tr-dock-tab:not(.is-foreground) .tr-dock-close,
 .tr-workspace .dv-tab .tr-dock-tab:not(.is-foreground) .tr-dock-arrange { display: none; }
 .tr-workspace .dv-tabs-overflow-container {
-  width: min(340px, calc(100vw - 24px)); max-height: min(62vh, 460px); padding: 6px;
+  box-sizing:border-box; width:max-content; min-width:180px; max-width:min(360px,calc(100vw - 24px)); max-height:min(62vh,460px); padding:4px;
   border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
   box-shadow: 0 16px 40px rgb(21 35 55 / 18%); color: var(--text); scrollbar-color: #c8cfda transparent;
 }
 .tr-workspace .dv-tabs-overflow-container .dv-tab {
-  min-height: 42px; margin: 2px 0; padding: 0 12px; border: 0; border-radius: 8px;
+  box-sizing:border-box; display:flex; align-items:center; flex:none; height:36px; min-height:36px; margin:0; padding:0 10px; border:0; border-radius:6px;
   background: transparent; color: var(--text); font-size: 13px;
 }
 .tr-workspace .dv-tabs-overflow-container .dv-tab:hover { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
 .tr-workspace .dv-tabs-overflow-container .dv-tab.dv-active-tab {
   background: color-mix(in srgb, var(--accent) 11%, var(--panel)); color: var(--accent); font-weight: 600;
 }
-.tr-workspace .dv-tabs-overflow-container .tr-dock-tab { width: 100%; justify-content: flex-start; gap: 10px; }
+.tr-workspace .dv-tabs-overflow-container .tr-dock-tab { width:100%; min-height:0; justify-content:flex-start; gap:8px; }
 .tr-workspace .dv-tabs-overflow-container .tr-dock-tab-title { display: inline-block; max-width: 260px; }
 .tr-dock-close-group {
   display: inline-grid; place-items: center; width: 28px; height: 28px; margin: 0 6px;

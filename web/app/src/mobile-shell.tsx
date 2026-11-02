@@ -1,3 +1,4 @@
+import {pageObjectKey,pageObjectTitle} from "./page-object.ts";
 import React, { useEffect, useRef, useState } from "react";
 import { IonApp, IonBadge, IonButton, IonButtons, IonContent, IonHeader, IonPage, IonTabBar, IonTabButton, IonTitle, IonToolbar } from "@ionic/react";
 import { useTranslation } from "react-i18next";
@@ -74,6 +75,9 @@ function MobileWorkspace(): React.ReactElement {
     setActive(id); setSetting(null);
   };
   const open = (pageId: string, args: PageArguments = {}): void => {
+    const key=pageObjectKey(pageId,args);
+    const matching=key?entries.find(entry=>pageObjectKey(entry.pageId,entry.args)===key):undefined;
+    if(matching){setRoute(matching.id);return;}
     if (Object.keys(args).length === 0) {
       const existing = entries.find((item) => item.pageId === pageId && Object.keys(item.args).length === 0);
       if (existing) { setRoute(existing.id); return; }
@@ -85,8 +89,8 @@ function MobileWorkspace(): React.ReactElement {
   const currentPage = getPage(current.pageId);
   const title = current.pageId === "settings" && setting
     ? t(`settingsPanel.sections.${setting}`)
-    : current.pageId === "product-detail" && current.args.productTitle
-      ? current.args.productTitle
+    : pageObjectTitle(current.pageId,current.args)
+      ? pageObjectTitle(current.pageId,current.args)!
       : t(`nav.${current.pageId}`, { defaultValue: currentPage?.title || current.pageId });
   const nested = !current.root || Boolean(setting);
   return <>

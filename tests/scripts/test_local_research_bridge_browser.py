@@ -17,14 +17,21 @@ def test_local_research_capability_and_idempotent_retry(tmp_path):
     harness.write_text(f"""
 import React from {json.dumps(str(APP / 'node_modules/react/index.js'))};
 import {{createRoot}} from {json.dumps(str(APP / 'node_modules/react-dom/client.js'))};
+import {{ResearchDetailPage}} from {json.dumps(str(APP / 'src/pages/research-detail.tsx'))};
 import {{ResearchPage}} from {json.dumps(str(APP / 'src/pages/research.tsx'))};
 import {{PageInstanceProvider}} from {json.dumps(str(APP / 'src/page-instance.ts'))};
 import {{AuthGate}} from {json.dumps(str(APP / 'src/auth.tsx'))};
 import {json.dumps(str(APP / 'src/i18n.ts'))};
 import {json.dumps(str(APP / 'src/shell.css'))};
-createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvider value={{{{
-  id:'fixture',pageId:'research',mobile:window.fixture.mobile,args:{{}},active:true,open:()=>{{}}
-}}}}><ResearchPage /></PageInstanceProvider></AuthGate>);
+function Harness() {{
+ const [current,setCurrent]=React.useState(null);
+ return <AuthGate><PageInstanceProvider value={{{{id:'fixture',pageId:'research',mobile:window.fixture.mobile,args:{{}},active:!current,
+  open:(pageId,args)=>setCurrent(args)}}}}><div hidden={{!!current}}><ResearchPage/></div></PageInstanceProvider>
+  {{current?<PageInstanceProvider value={{{{id:'fixture-detail',pageId:'research-detail',mobile:window.fixture.mobile,args:current,active:true,open:(pageId,args)=>setCurrent(args),back:()=>setCurrent(null)}}}}>
+   <button onClick={{()=>setCurrent(null)}}>返回研究列表</button><ResearchDetailPage/>
+  </PageInstanceProvider>:null}}</AuthGate>;
+}}
+createRoot(document.getElementById('root')!).render(<Harness/>);
 """, encoding="utf-8")
     subprocess.run([str(APP / "node_modules/.bin/esbuild"), str(harness), "--bundle", "--format=iife",
                     "--target=es2020", f"--outfile={bundle}"], cwd=APP, check=True, capture_output=True, text=True)
@@ -67,6 +74,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                         if(u.pathname==='/api/research')return res({researches:[{research_id:'server-r',title:'服务器样本',owner_ref:'alice'},{research_id:'synced',title:'同步样本',owner_ref:'alice'},{research_id:'research:v1:SSSSSSSSSSSSSSSSSSSSSSSS',title:'已有服务器研究',owner_ref:'alice',is_owned:true,access:{can_view:true}},...(f.serverNew?[f.serverNew]:[])]});
                         if(u.pathname==='/api/research/reports')return res({reports:[{report_id:'report:v1:RRRRRRRRRRRRRRRRRRRRRRRR',research_id:'research:v1:RRRRRRRRRRRRRRRRRRRRRRRR',title:'服务器报告',owner_ref:'alice',research_title:'新服务器研究'}]});
                         if(u.pathname==='/api/research/keycloak-create'){f.serverNew={research_id:'research:v1:RRRRRRRRRRRRRRRRRRRRRRRR',title:'新服务器研究',owner_ref:'alice',access:{can_view:true}};return res({research:f.serverNew});}
+                        if(u.pathname.startsWith('/api/research/research%3Av1%3A')&&u.pathname.endsWith('/reports'))return res({reports:[{report_id:'report:v1:RRRRRRRRRRRRRRRRRRRRRRRR',research_id:'research:v1:RRRRRRRRRRRRRRRRRRRRRRRR',title:'服务器报告',owner_ref:'alice'}]});
                         if(u.pathname.startsWith('/api/research/research%3Av1%3A'))return res({research:f.serverNew});
                         throw Error('unexpected request '+u.pathname);};
                     }""",native_only)
@@ -100,19 +108,19 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     page.get_by_role("button",name="本机样本").click()
                     page.get_by_text("r1",exact=True).wait_for()
                     assert not page.evaluate("window.fixture.requests.some(x=>x.path==='/api/research/r1')")
-                    if viewport["width"] < 600: page.get_by_role("button",name="返回").last.click()
-                    else: page.locator(".ant-modal-close").last.click()
+                    page.get_by_role("button",name="返回研究列表",exact=True).click()
                     page.get_by_role("button",name="新建研究").click()
                     page.locator(".ant-dropdown:visible").get_by_role("menuitem",name="本机",exact=True).last.click()
                     page.get_by_label("名称",exact=True).fill("我的本机研究")
                     page.locator(".ant-modal").get_by_role("button",name="新建研究").click()
                     page.get_by_text("保存结果未确认",exact=False).wait_for()
                     page.locator(".ant-modal").get_by_role("button",name="新建研究").click()
-                    page.get_by_text("我的本机研究",exact=True).wait_for()
+                    page.get_by_role("heading",name="我的本机研究",exact=True).wait_for()
                     calls=page.evaluate("window.fixture.nativeCalls.filter(x=>x.action==='create')")
                     assert len(calls)==2 and calls[0]["operation_id"]==calls[1]["operation_id"]
                     assert set(calls[0])=={"action","profile_id","title","description","operation_id"}
                     assert not page.evaluate("window.fixture.requests.some(x=>x.method!=='GET')")
+                    page.get_by_role("button",name="返回研究列表",exact=True).click()
                     page.get_by_role("button",name="新建研究").click()
                     page.locator(".ant-dropdown:visible").get_by_role("menuitem",name="服务器",exact=True).last.click()
                     page.get_by_role("dialog").get_by_role("button",name="新建研究").wait_for()
@@ -120,9 +128,8 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     page.get_by_role("dialog").get_by_label("名称",exact=True).fill("新服务器研究")
                     page.get_by_role("dialog").get_by_role("button",name="新建研究").click()
                     page.wait_for_function("window.fixture.nativeCalls.some(x=>x.action==='import_research' && x.profile_id==='self')")
+                    page.get_by_role("button",name="返回研究列表",exact=True).click()
                     page.get_by_text("本机 / 服务器",exact=True).first.wait_for()
-                    if viewport["width"] < 600: page.get_by_role("button",name="返回").last.click()
-                    else: page.locator(".ant-modal-close").last.click()
                     assert page.locator(".tr-function-header h1").evaluate("e => e.getBoundingClientRect().width >= e.scrollWidth")
                     if viewport["width"] < 600:
                         assert page.locator(".tr-function-header h1").evaluate("e => {const a=e.getBoundingClientRect(),b=document.querySelector('.tr-function-actions').getBoundingClientRect();return a.right<=b.left || a.bottom<=b.top;}")
@@ -133,7 +140,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     page.wait_for_function("!document.querySelector('.ant-btn-loading')")
                     page.wait_for_timeout(500)  # Allow the overlay transition to finish before visual evidence.
                     page.screenshot(path=str(Path('/tmp') / f'tr-local-research-fixture-{viewport["width"]}.png'))
-                    assert page.get_by_text("服务器报告",exact=True).first.is_visible()
+                    assert page.get_by_role("heading",name="服务器报告",exact=True).is_visible()
                     assert not page_errors
                     page.close()
                 for mode in ["wrong-issuer","wrong-identity","missing-identity"]:

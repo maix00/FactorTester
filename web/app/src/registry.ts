@@ -51,7 +51,7 @@ export function pagesForAdminCapabilities(
 }
 
 export const BUILTIN_PAGES: PageDefinition[] = [
-  { id: "research", route: "/research?section=researches", title: "研究", scope: "both", mobileTab: "research", icon: "research" },
+  { id: "research", route: "/research?section=researches", title: "研究台", scope: "both", mobileTab: "research", icon: "research" },
   { id: "test-bench", route: "/tests", title: "测试台", scope: "both", mobileTab: "tests", icon: "runs" },
   { id: "configuration", route: "/backtest?view=configuration", title: "测试", scope: "both", icon: "settings", sidebarVisible: false },
   { id: "jobs", route: "/jobs?section=types", title: "任务队列", scope: "both", icon: "runs", sidebarVisible: false },
@@ -65,5 +65,7 @@ export const BUILTIN_PAGES: PageDefinition[] = [
   { id: "settings", route: "/settings/account", title: "设置", scope: "both", icon: "settings", sidebarVisible: false },
   { id: "source-detail", route: "/products/sources/detail", title: "数据源族", scope: "both", icon: "catalog", sidebarVisible: false },
   { id: "product-detail", route: "/products/product", title: "产品详情", scope: "both", icon: "catalog", sidebarVisible: false },
+  { id:"research-report",route:"/researches/reports/detail",title:"研究报告",scope:"both",icon:"docs",sidebarVisible:false },
+  { id:"research-detail",route:"/researches/detail",title:"研究",scope:"both",icon:"research",sidebarVisible:false },
   { id: "job-detail", route: "/jobs", title: "任务详情", scope: "both", icon: "runs", sidebarVisible: false },
 ];
