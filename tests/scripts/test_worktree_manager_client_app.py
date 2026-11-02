@@ -4794,3 +4794,31 @@ def test_native_report_frame_has_confined_policy_without_weakening_app(tmp_path)
             assert "connect-src 'none'" in policy
             assert "frame-ancestors 'self'" in policy
             assert 'artifact-frame.js' in response.read().decode()
+
+
+def test_retired_strategy_urls_select_react_views(tmp_path):
+    from urllib.error import HTTPError
+    from urllib.parse import parse_qs, urlsplit
+    from urllib.request import HTTPRedirectHandler, build_opener
+
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        opener = build_opener(NoRedirect)
+        for path, expected in (
+            ('/strategies/new?mode=create', {'page':['strategies'],'section':['mine'],'mode':['create']}),
+            ('/strategies/strategy%3Av1%3Aexample?mode=edit', {'page':['strategies'],'section':['mine'],'mode':['edit'],'object_ref':['strategy:v1:example']}),
+            ('/strategies?scope=shared', {'page':['strategies'],'section':['shared']}),
+        ):
+            try:
+                opener.open(base_url + path)
+            except HTTPError as response:
+                assert response.code == 302
+                target = urlsplit(response.headers['Location'])
+                assert target.path == '/app'
+                assert parse_qs(target.query) == expected
+            else:
+                raise AssertionError('retired strategy page rendered a legacy shell')
