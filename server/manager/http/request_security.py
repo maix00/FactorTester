@@ -290,6 +290,7 @@ class RequestSecurityMixin:
             if expires <= time.time() + 30:
                 from server.identity.manager_oidc import refresh_browser_tokens
                 from urllib.error import HTTPError
+                from server.identity.keycloak_authorization import AuthorizationUnavailable
                 try:
                     result = refresh_browser_tokens(refresh)
                     token = result['access_token']
@@ -302,7 +303,7 @@ class RequestSecurityMixin:
                         self._oidc_temporarily_unavailable = True
                 except PermissionError:
                     pass
-                except (OSError, ValueError, TypeError):
+                except (OSError, ValueError, TypeError, AuthorizationUnavailable):
                     self._oidc_temporarily_unavailable = True
         self._browser_access_token = token
         return token

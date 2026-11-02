@@ -26,7 +26,7 @@ def test_concurrent_refresh_uses_one_rotation(monkeypatch):
             time.sleep(.02)
             return {'access_token': 'new-access', 'refresh_token': 'rotated', 'refresh_expires_in': 600}
     monkeypatch.setattr(manager_oidc, 'OIDCClient', Client)
-    monkeypatch.setattr(manager_oidc, 'keycloak_session', lambda _: {'keycloak_subject': 'alice'})
+    monkeypatch.setattr(manager_oidc, 'keycloak_session', lambda _, **kw: {'keycloak_subject': 'alice'})
     with ThreadPoolExecutor(max_workers=8) as pool:
         values = list(pool.map(lambda _: manager_oidc.refresh_browser_tokens('unique-refresh-concurrent'), range(8)))
     assert calls == ['unique-refresh-concurrent']
@@ -56,7 +56,7 @@ def test_refresh_rejects_unverified_identity(monkeypatch):
         'base_url': 'https://identity', 'realm': 'tr', 'client_id': 'manager', 'client_secret': 'test'})
     monkeypatch.setattr(manager_oidc, 'OIDCClient', lambda *a, **k: SimpleNamespace(
         refresh=lambda _: {'access_token': 'revoked', 'refresh_token': 'other'}))
-    monkeypatch.setattr(manager_oidc, 'keycloak_session', lambda _: None)
+    monkeypatch.setattr(manager_oidc, 'keycloak_session', lambda _, **kw: None)
     with pytest.raises(PermissionError):
         manager_oidc.refresh_browser_tokens('unique-refresh-revoked')
 
