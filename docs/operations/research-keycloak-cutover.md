@@ -66,3 +66,5 @@ python -m scripts.migrations.keycloak_research_stage stage \
 Manager 与 7997 数据面共用 Keycloak Research 授权工厂；发布投影不再从旧 visibility 或 authorized_users 推导访问权。React 与 CLI 创建研究统一使用 keycloak-create；研究及报告 API 拒绝旧 ACL 字段。CLI 的 grant/grants 命令直接读写 Keycloak。旧 publication publish/settings/revoke 返回 410，原服务器发布写入方法已删除。
 
 这次代码切换不代表历史对象已经迁入目标 realm。旧 ACL 列仍是迁移输入；旧独立 publication 客户端和旧页面的残余调用仍须移除。部署前必须完成上述逐对象映射、Keycloak scope 对账及备份。当前 Manager CLI 运行时检查返回 401 device authentication required，尚不能通过该主体执行真实迁移或声称部署验收完成。
+
+旧分享链接的本地 ACL 创建、领取和列表代码已删除；创建、领取、撤销均要求 Keycloak 分享能力。报告 HEAD 提交不再自动上传到 Manager，原 notify 模块已删除；显式 CouchDB 发布及已有同步收据仍由客户端同步路径负责。

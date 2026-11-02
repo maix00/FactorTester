@@ -1763,63 +1763,10 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         mode: str = "permanent",
         expires_at: float = 0,
     ) -> dict[str, Any]:
-        if self._research_authorizer is not None:
-            return self._create_keycloak_share_link(target_kind=target_kind,
-                research_id=research_id, report_id=report_id, actor=actor,
-                mode=mode, expires_at=expires_at)
-        if target_kind not in {"research", "report"}:
-            raise ValueError("target_kind must be research or report")
-        if mode not in {"one_time", "permanent"}:
-            raise ValueError("mode must be one_time or permanent")
-        research = self._research_row(research_id)
-        if not self._research_access(research, actor)["can_manage"]:
-            raise PermissionError("research sharing is not authorized")
-        if target_kind == "report":
-            report = self._report_row(report_id)
-            if str(report["research_id"]) != research_id:
-                raise ValueError("report does not belong to research")
-        else:
-            report_id = ""
-        token = secrets.token_urlsafe(32)
-        link_id = "share-" + secrets.token_hex(12)
-        now = time.time()
-        with self._write(research_id) as conn:
-            conn.execute(
-                """INSERT INTO research_catalog_share_links
-                   (link_id, target_kind, research_id, report_id, owner_ref,
-                    token_hash, mode, expires_at, redeemed_by, redeemed_at,
-                    revoked_at, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 0, 0, ?)""",
-                (
-                    link_id, target_kind, research_id, report_id, actor,
-                    hashlib.sha256(token.encode("utf-8")).hexdigest(), mode,
-                    max(0.0, float(expires_at or 0)), now,
-                ),
-            )
-        return {
-            "link_id": link_id,
-            "target_kind": target_kind,
-            "research_id": research_id,
-            "report_id": report_id,
-            "mode": mode,
-            "expires_at": max(0.0, float(expires_at or 0)),
-            "token": token,
-            "created_at": now,
-        }
-
-    def list_share_links(self, research_id: str, *, actor: str) -> list[dict[str, Any]]:
-        if self._research_authorizer is not None:
-            raise KeycloakResearchSharingUnavailable("Target-scoped Keycloak sharing API is required")
-        research = self._research_row(research_id)
-        if not self._research_access(research, actor)["can_manage"]:
-            raise PermissionError("research sharing is not authorized")
-        with connect_sqlite(self.db_path, readonly=True) as conn:
-            rows = conn.execute(
-                """SELECT * FROM research_catalog_share_links
-                   WHERE research_id=? ORDER BY created_at DESC""",
-                (research_id,),
-            ).fetchall()
-        return [self._share_link_value(row) for row in rows]
+        self.require_keycloak_sharing()
+        return self._create_keycloak_share_link(target_kind=target_kind,
+            research_id=research_id, report_id=report_id, actor=actor,
+            mode=mode, expires_at=expires_at)
 
     def list_keycloak_share_links(self, research_id: str, *, actor: str,
                                   target_kind: str = "research", report_id: str = "") -> list[dict[str, Any]]:
@@ -1839,6 +1786,7 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
     def revoke_share_link(
         self, research_id: str, link_id: str, *, actor: str,
     ) -> dict[str, Any]:
+        self.require_keycloak_sharing()
         research = self._research_row(research_id)
         if not self._research_access(research, actor)["can_manage"]:
             raise PermissionError("research sharing is not authorized")
@@ -1864,71 +1812,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         return self._share_link_value(updated)
 
     def redeem_share_link(self, token: str, *, actor: str) -> dict[str, Any]:
-        if self._research_authorizer is not None:
-            return self._redeem_keycloak_share_link(token, actor=actor)
-        clean_token = _text(token, "token", maximum=512)
-        digest = hashlib.sha256(clean_token.encode("utf-8")).hexdigest()
-        now = time.time()
-        with connect_sqlite(self.db_path) as conn:
-            reference = conn.execute(
-                "SELECT research_id FROM research_catalog_share_links WHERE token_hash=?",
-                (digest,),
-            ).fetchone()
-        if reference is None:
-            raise KeyError("share link not found")
-        # Revalidate the token under the same transaction that persists the
-        # granted access and its outbox snapshot. The secret stays local.
-        with self._write(str(reference["research_id"])) as conn:
-            row = conn.execute(
-                "SELECT * FROM research_catalog_share_links WHERE token_hash=?",
-                (digest,),
-            ).fetchone()
-            if row is None or float(row["revoked_at"]) > 0:
-                raise KeyError("share link not found")
-            if float(row["expires_at"]) > 0 and float(row["expires_at"]) <= now:
-                raise PermissionError("share link has expired")
-            if str(row["mode"]) == "one_time" and str(row["redeemed_by"]):
-                if str(row["redeemed_by"]) != actor:
-                    raise PermissionError("share link has already been redeemed")
-            target_kind = str(row["target_kind"])
-            if target_kind == "research":
-                target = conn.execute(
-                    "SELECT * FROM research_catalog_researches WHERE research_id=?",
-                    (str(row["research_id"]),),
-                ).fetchone()
-                table, key, key_value = (
-                    "research_catalog_researches", "research_id", str(row["research_id"]),
-                )
-            else:
-                target = conn.execute(
-                    "SELECT * FROM research_catalog_reports WHERE report_id=?",
-                    (str(row["report_id"]),),
-                ).fetchone()
-                table, key, key_value = (
-                    "research_catalog_reports", "report_id", str(row["report_id"]),
-                )
-            if target is None:
-                raise KeyError("shared object not found")
-            users = _authorized_users(
-                [*_loads_list(target["authorized_users_json"]), actor],
-                str(target["owner_ref"]),
-            )
-            conn.execute(
-                f"UPDATE {table} SET authorized_users_json=?, updated_at=? WHERE {key}=?",
-                (_json(users), now, key_value),
-            )
-            if str(row["mode"]) == "one_time" and not str(row["redeemed_by"]):
-                conn.execute(
-                    """UPDATE research_catalog_share_links
-                       SET redeemed_by=?, redeemed_at=? WHERE link_id=?""",
-                    (actor, now, str(row["link_id"])),
-                )
-        return {
-            "target_kind": target_kind,
-            "research_id": str(row["research_id"]),
-            "report_id": str(row["report_id"]),
-            "mode": str(row["mode"]),
-        }
+        self.require_keycloak_sharing()
+        return self._redeem_keycloak_share_link(token, actor=actor)
 
     @staticmethod
     def _share_link_value(row) -> dict[str, Any]:
