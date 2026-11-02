@@ -59,9 +59,9 @@ def test_manager_forwards_preview_json_without_synchronization(monkeypatch):
         route_request=lambda *a,**kw:calls.append(kw) or GatewayResponse(200,b'{"success":true}', 'application/json'),
         client_state=SimpleNamespace(_refresh_account_domain_async=lambda *a,**kw:pytest.fail('preview must not synchronize')))
     handler=SimpleNamespace(state=state,headers={'Content-Type':'application/json','Content-Length':str(len(body))},
-        rfile=io.BytesIO(body),_session=lambda:{'username':'alice'},
+        rfile=io.BytesIO(body),_session=lambda:{'username':'alice'},_bearer_token=lambda:'verified-user-token',
         _is_local_agent_request=lambda:False,_send_gateway_response=lambda *a,**kw:None)
     assert job_proxy_routes.JobProxyRoutesMixin._proxy_authenticated_local_service(
         handler,urlparse('/api/factor-library/families/formula-preview'),method='POST')
     assert calls==[dict(path='/api/internal/factor-library/formula-preview',principal='alice',
-        method='POST',body=body,content_type='application/json')]
+        method='POST',body=body,content_type='application/json',delegated_user_token='verified-user-token')]

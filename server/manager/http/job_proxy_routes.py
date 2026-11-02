@@ -495,6 +495,7 @@ class JobProxyRoutesMixin:
                 route,
                 path=internal_path,
                 principal=str(session["username"]),
+                delegated_user_token=self._bearer_token(),
                 method=method,
                 body=body,
                 content_type=content_type,

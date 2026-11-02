@@ -321,6 +321,7 @@ class RoutingStateMixin:
         body: bytes | None = None,
         content_type: str = "application/json",
         origin_server_id: str = "",
+        delegated_user_token: str = "",
     ) -> GatewayResponse:
         if not route.remote and route.port == 0:
             from server.manager.services.job_storage_control import (
@@ -340,12 +341,16 @@ class RoutingStateMixin:
             forwarded["body"] = body
             forwarded["content_type"] = content_type
         if route.remote:
+            if delegated_user_token:
+                raise ValueError("user token delegation requires a local service route")
             if str(origin_server_id or "").strip():
                 forwarded["origin_server_id"] = str(origin_server_id).strip()
             return self.federation_gateway.request(
                 route,
                 **forwarded,
             )
+        if delegated_user_token:
+            forwarded["delegated_user_token"] = delegated_user_token
         return self.gateway.request(
             port=route.port,
             **forwarded,
