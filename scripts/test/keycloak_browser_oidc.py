@@ -78,7 +78,10 @@ def main() -> int:
     with browser_certificate_trust() as tls_options, sync_playwright() as p:
         browser = p.chromium.launch(headless=True, channel=os.environ.get("PLAYWRIGHT_CHANNEL", "chrome"), **tls_options)
         try:
-            context = browser.new_context()
+            device = os.environ.get('KEYCLOAK_BROWSER_DEVICE')
+            if device and device not in p.devices:
+                raise ValueError('unknown browser acceptance device')
+            context = browser.new_context(**(p.devices[device] if device else {}))
             # Validate deployment readiness before requesting credentials. A
             # standalone Keycloak form is not proof of Manager integration.
             start = context.request.get(manager + "/auth/oidc/start?next=/app", max_redirects=0)
@@ -187,6 +190,23 @@ def main() -> int:
                 if screenshot:
                     page.screenshot(path=screenshot)
                 checks.append('react_research_table')
+            assistant_screenshot = os.environ.get('KEYCLOAK_ASSISTANT_SCREENSHOT')
+            if assistant_screenshot:
+                if expected_assistant not in {'agent_assistant:public:use', 'agent_assistant:internal:use'}:
+                    raise SystemExit('Assistant UI acceptance requires an allowed location role')
+                page.get_by_role('button', name=re.compile(
+                    r'打开智能体助手|Open agent assistant', re.I)).click()
+                panel = page.locator('.tr-agent-assistant-panel:visible, .tr-agent-assistant-drawer:visible').first
+                panel.wait_for(state='visible')
+                panel.locator('.tr-agent-assistant-loading').wait_for(state='hidden', timeout=60000)
+                panel.locator('.tr-agent-assistant-mount[aria-busy="true"]').wait_for(state='detached', timeout=60000)
+                page.screenshot(path=assistant_screenshot, animations='disabled', scale='css')
+                if panel.locator('.tr-agent-assistant-error, .ant-alert-warning').count():
+                    raise SystemExit('Assistant UI returned an error or permission denial')
+                state = 'setup' if panel.locator('.tr-agent-assistant-setup').count() else 'conversation'
+                if state == 'conversation':
+                    panel.locator('.profile-chatkit-host').wait_for(state='visible')
+                checks.append('react_assistant_' + state)
             for variable, expected in [('KEYCLOAK_ALLOWED_USER_ID', 200),
                                        ('KEYCLOAK_DENIED_USER_ID', 403)]:
                 target = os.environ.get(variable)
