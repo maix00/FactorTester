@@ -403,6 +403,25 @@ def test_explicit_local_publication_transfers_only_selected_report_and_rechecks_
         assert transport['downloads'] == downloads_before
         assert (local_root / 'user-note.txt').read_text() == 'unsynchronized'
         (local_root / 'user-note.txt').unlink()
+        # An independently edited linked file does not change the immutable
+        # report tree. The bounded periodic check must report it without
+        # overwriting either side or pretending it was synchronized.
+        from tools.cli.release.research_reporting.local_sync_baseline import _path as baseline_path
+        from tools.cli.release.research_reporting.local_publication import manager_session
+        endpoint, _session = manager_session(rpc.binding, manager)
+        baseline_file = baseline_path(rpc.store, selected['report_id'], hashlib.sha256(endpoint.encode()).hexdigest())
+        from tools.cli.release.research_reporting.public_research.projection import _local_targets
+        targets = _local_targets(load_snapshot(package_root=local_root, branch_id='main'))
+        linked = local_root / 'branches' / 'main' / next(target for target in targets if target.endswith('/evidence.txt'))
+        original_link = linked.read_bytes()
+        linked.write_text('edited linked evidence for automatic synchronization')
+        os.utime(baseline_file, (1, 1))
+        posts_before = transport['posts']
+        assert rpc.request(auto)['reports'][0]['status'] == 'conflict'
+        assert transport['posts'] == posts_before
+        assert linked.read_text() == 'edited linked evidence for automatic synchronization'
+        linked.write_bytes(original_link)
+        assert rpc.request(auto)['reports'][0]['status'] == 'unchanged'
         index = rpc.request({'action':'get_report', 'profile_id':'self', 'research_id':research['research_id'], 'report_id':selected['report_id']})
         assert [chapter['title'] for chapter in index['index']['chapters']] == ['First', 'Second']
         rpc.request({**edit, **index['version'], 'component_id': 'chapter-3', 'title': 'Third'})

@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
 
 from .authoring.tree_bundle import bundle_from_snapshot
 from .authoring.tree_projection import project_snapshot
@@ -21,6 +22,7 @@ from .public_research.projection import _local_targets
 
 _SHA = re.compile(r'^[0-9a-f]{64}$')
 _FIELDS = {'publication_id', 'revision', 'generation', 'local_root_ref', 'content_sha256'}
+_RECHECK_SECONDS = 60
 
 
 def _path(store, report_id: str, manager_hash: str) -> Path:
@@ -64,6 +66,33 @@ def read_baseline(store, *, report_id: str, manager_hash: str, receipt) -> str |
             or any(value[key] != receipt[key] for key in ('publication_id', 'revision', 'generation', 'local_root_ref'))):
         return None
     return value['content_sha256']
+
+
+def content_check_due(store, *, report_id: str, manager_hash: str) -> bool:
+    """Bound polling cost while eventually checking external authoring bytes."""
+    path = _path(store, report_id, manager_hash)
+    metadata = path.lstat()
+    if not stat.S_ISREG(metadata.st_mode):
+        return True
+    age = time.time() - metadata.st_mtime
+    return age < 0 or age >= _RECHECK_SECONDS
+
+
+def mark_content_checked(store, *, report_id: str, manager_hash: str, receipt, content_sha256: str) -> None:
+    """Advance only the baseline that was actually checked, even across replacement."""
+    path = _path(store, report_id, manager_hash)
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    with os.fdopen(descriptor, 'rb') as source:
+        metadata = os.fstat(source.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4096:
+            return
+        value = json.load(source)
+        if (not isinstance(value, dict) or set(value) != _FIELDS
+                or value.get('content_sha256') != content_sha256
+                or any(value.get(key) != receipt[key] for key in
+                       ('publication_id', 'revision', 'generation', 'local_root_ref'))):
+            return
+        os.utime(source.fileno(), None)
 
 
 def write_baseline(store, *, report_id: str, manager_hash: str, receipt, content_sha256: str) -> None:

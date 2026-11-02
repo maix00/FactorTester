@@ -174,11 +174,30 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                                            research_id=research_id, report_id=report_id)
                 status = 'updated' if pulled['status'] == 'updated' else 'unchanged'
             else:
-                from .local_sync_baseline import read_baseline
-                if read_baseline(store, report_id=report_id, manager_hash=manager_hash, receipt=row) is None:
+                from .local_sync_baseline import content_check_due, content_digest, mark_content_checked, read_baseline
+                baseline = read_baseline(store, report_id=report_id, manager_hash=manager_hash, receipt=row)
+                if baseline is None:
                     _restore_missing_baseline(store, root=root, paths=paths, head=head, row=row,
                         snapshot=snapshot, session=session, binding=binding, manager=manager)
-                status = 'unchanged'
+                    status = 'unchanged'
+                elif content_check_due(store, report_id=report_id, manager_hash=manager_hash):
+                    with tree_lock(paths):
+                        current = load_head(paths)
+                        if (current['generation'], current['root_ref']) != (head['generation'], head['root_ref']):
+                            raise LocalReportSyncConflict('local report changed during content check')
+                        current_digest = content_digest(root, paths, current)
+                    if current_digest != baseline:
+                        # The server requires a new report generation for a
+                        # different authoring bundle. Until that version is
+                        # explicitly produced, preserve the local bytes and
+                        # surface a conflict instead of silently losing them.
+                        status = 'conflict'
+                    else:
+                        mark_content_checked(store, report_id=report_id, manager_hash=manager_hash,
+                                             receipt=row, content_sha256=baseline)
+                        status = 'unchanged'
+                else:
+                    status = 'unchanged'
         except LocalReportSyncConflict:
             status = 'conflict'
         except HttpClientError as exc:
