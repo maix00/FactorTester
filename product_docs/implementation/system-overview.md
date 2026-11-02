@@ -1,6 +1,6 @@
 ## 职责与系统位置 {#responsibility}
 
-Manager 提供 React `/app`、登录会话、目录与任务聚合。独立计算节点通过 Celery/RabbitMQ 执行冻结任务，数据 I/O 服务在 Bundle 所在主机读取并提供有界数据批次。Nautilus 承担回测与执行，Alpha 因子引擎提供共用因子计算；二者通过 bridge 协作。Swift 客户端是共享 Web 页面的原生宿主，提供本机研究、设备和 Manager 连接等窄桥接能力。
+Manager 提供 React /app、登录会话、目录与任务聚合。独立计算节点通过 Celery/RabbitMQ 执行冻结任务，数据 I/O 服务在 Bundle 所在主机读取并提供有界数据批次。Nautilus 承担回测与执行，Alpha 因子引擎提供共用因子计算；二者通过 bridge 协作。Swift 客户端是共享 Web 页面的原生宿主，提供本机研究、设备和 Manager 连接等窄桥接能力。
 
 字段、对象和结果的职责也分开：测试注册协议声明可编辑/可冻结字段，目录服务提供稳定对象引用，执行器消费冻结 RunSpec，结果服务只读取已登记生成物。客户端可以有不同呈现方式，但不能各自发明字段语义。
 
