@@ -102,14 +102,15 @@ else
   remote_exec "used=\$(du -sk '$native_artifact_root' | awk '{print \$1}'); test \$((used + 2 * $incoming_kb)) -le $((artifact_budget_mb * 1024))" || {
     echo "native artifacts exceed ${artifact_budget_mb}MiB budget; retain current/rollback and clean unused artifacts before retry" >&2; exit 3;
   }
-  upload_context="$(remote_exec "mktemp -d '$native_artifact_root/.upload.XXXXXX'")"
-  trap 'remote_exec "rm -rf -- \"$upload_context\"" >/dev/null 2>&1 || true' EXIT
+  upload_context="$native_artifact_root/.upload-$native_build_id"
+  # Keep bounded, content-verified chunks after transport failure. A later
+  # invocation resumes them; failed reads never become an uploaded artifact.
+  remote_exec "mkdir -p '$upload_context' && test -d '$upload_context' && test ! -L '$upload_context'"
   # Only the two wheels and their receipt are sent, never a source/data tree.
   upload_ssh_json="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${ssh_command[@]}" "$remote")"
   python3 "$repo_root/scripts/server/upload_native_context.py" \
     --source "$local_native_context" --destination "$upload_context" --ssh-json "$upload_ssh_json"
   remote_exec "cd '$upload_context' && sha256sum -c checksums.sha256 && test \"\$(cat build-id.txt)\" = '$native_build_id' && test ! -e '$native_context' && mv '$upload_context' '$native_context'"
-  trap - EXIT
   echo "public native artifacts cache=stored build_id=$native_build_id"
 fi
 
