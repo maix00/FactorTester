@@ -44,6 +44,11 @@ function MobileWorkspace(): React.ReactElement {
       history.replaceState({trPage: entries[0].id}, "", url.href);
       history.pushState({trPage: active}, "", url.href);
       history.pushState({trPage: active, trSettings: "account"}, "", url.href);
+    } else if (initialLink) {
+      const url=new URL(location.href);
+      for(const key of ["page","section","object_ref","owner_username","mode"])url.searchParams.delete(key);
+      history.replaceState({trPage:entries[0].id},"",url.href);
+      history.pushState({trPage:active},"",location.href);
     } else history.replaceState({ ...history.state, trPage: active }, "", location.href);
     const onPop = (event: PopStateEvent): void => {
       const known = refs.current.find((item) => item.id === event.state?.trPage);
