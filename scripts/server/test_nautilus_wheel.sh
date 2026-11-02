@@ -2,16 +2,26 @@
 # Smoke-test a locally built wheel inside the public runtime image.
 set -euo pipefail
 WHEEL="${1:?usage: test_nautilus_wheel.sh <wheel>}"
-IMAGE="${FACTORTESTER_IMAGE:-factortester-public:ae67b22a0f98b37454bc8a8ef03682eb7b1a4162}"
+IMAGE="${FACTORTESTER_IMAGE:?set FACTORTESTER_IMAGE to the reviewed runtime image}"
 [ -f "$WHEEL" ] || { echo "missing wheel: $WHEEL" >&2; exit 1; }
-docker run --rm -v "$(cd "$(dirname "$WHEEL")" && pwd):/wheels:ro" "$IMAGE" bash -lc '
+docker run --rm --platform "${NAUTILUS_BUILD_PLATFORM:-linux/amd64}" \
+  --network none --memory=1g --memory-swap=1g --cpus=1 --entrypoint bash \
+  -v "$(cd "$(dirname "$WHEEL")" && pwd):/wheels:ro" \
+  -e "NAUTILUS_SMOKE_WHEEL=$(basename "$WHEEL")" "$IMAGE" -lc '
   set -euo pipefail
-  wheel="$(ls /wheels/nautilus_trader-*.whl | head -n 1)"
-  python -m pip install --no-cache-dir --no-deps "$wheel"
+  python -m pip install --no-index --no-cache-dir --no-deps --quiet \
+    --root-user-action=ignore "/wheels/$NAUTILUS_SMOKE_WHEEL"
   python - <<"PY"
+import json
 import nautilus_trader
-print("nautilus_trader", nautilus_trader.__version__)
-from nautilus_trader.model.identifiers import InstrumentId
-print("instrument id ok", InstrumentId.from_str("ES.GLBX"))
+from nautilus_trader import _libnautilus as native
+from nautilus_trader.model import InstrumentId
+from nautilus_trader.backtest import BacktestEngine
+assert InstrumentId.from_str("T2403.CFFEX").value == "T2403.CFFEX"
+assert callable(BacktestEngine)
+assert callable(native.attach_factor_family)
+assert callable(native.replay_shared_inputs)
+print(json.dumps({"linux_native_import": True, "version": nautilus_trader.__version__,
+                  "factor_family_bridge": True, "shared_replay": True}))
 PY
 '

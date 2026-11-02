@@ -56,6 +56,15 @@ research_profile 资源。这是资源目录证据，尚非其逐对象 scope �
 保留用户的 scope 允许和拒绝。不得把备份计划、准备镜像或旧版本登录成功称为新版本
 权限切换验收。
 
+本次 Linux x86_64 组合 wheel 已构建完成，构建身份
+`a28ab63343832325b20e7acee0e9c576b48068038985d73d8cf717af4a85dc42`，总耗时
+3329.324 秒；Nautilus release 编译 53 分 35 秒。旧构建策略结束后回收约 12.4 GiB
+target。修正烟测脚本中过时的默认镜像与旧版导入路径后，使用明确指定的已有 Linux
+构建镜像、无网络、1 GiB 内存/1 CPU 临时容器验证安装、本地标识符、BacktestEngine、
+`attach_factor_family` 与 `replay_shared_inputs` 导出。没有重新下载 Python 依赖。
+这是原生打包与导入验证，不是公网运行镜像、实际策略回测或收益验收。公网准备进程
+随后开始上传 wheel，应用此时尚未激活。
+
 ## 助手位置权限准备与机构边界（2026-11-02）
 
 真实盘点发现两端保留用户各有一项旧 `agent_assistant:use` 授权，新运行入口要求按
