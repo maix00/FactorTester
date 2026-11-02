@@ -885,12 +885,26 @@ class ServiceOIDCClient(OIDCClient):
         if not token or not normalized:
             return set()
 
-        # Keycloak accepts repeated `permission` form fields. Keep each
-        # request small enough to avoid oversized URLs/bodies and response
-        # payloads for large factor libraries.
+        # Keycloak bounds the aggregate repeated permission parameter to
+        # 4000 characters by default, independently of our item-count limit.
+        # Reserve space and count UTF-8 bytes conservatively; stable resource
+        # URIs are ASCII. Splitting never changes the requested scopes.
+        batches: list[list[tuple[str, str, str]]] = []
+        batch: list[tuple[str, str, str]] = []
+        parameter_bytes = 0
+        for item in normalized:
+            size = len((item[0] + "#" + item[2]).encode("utf-8")) + 1
+            if size > 3500:
+                raise ValueError("Keycloak authorization permission exceeds parameter budget")
+            if batch and (len(batch) == 64 or parameter_bytes + size > 3500):
+                batches.append(batch)
+                batch, parameter_bytes = [], 0
+            batch.append(item)
+            parameter_bytes += size
+        if batch:
+            batches.append(batch)
         granted: set[tuple[str, str]] = set()
-        for offset in range(0, len(normalized), 64):
-            batch = normalized[offset:offset + 64]
+        for batch in batches:
             # Keycloak rejects a whole UMA request when any one requested URI
             # is absent. Remove only the exact URI identified by a verified
             # invalid_resource response; at least one distinct URI disappears
