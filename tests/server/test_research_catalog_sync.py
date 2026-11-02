@@ -79,3 +79,12 @@ def test_historical_projection_stays_stored_but_not_in_live_directory(tmp_path):
     assert sync.entities('alice',sync=False) == []
     assert sync.entities('alice',entity_type='research_catalog',sync=False) == []
     assert sync.local.get_entity('alice','research_catalog','r')['payload'] == envelope()['payload']
+
+
+def test_new_store_does_not_install_retired_graph_merge_tables(tmp_path):
+    sync = service(tmp_path)
+    with sqlite3.connect(sync.local.path) as db:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master")}
+    assert "account_domain_research_bases" not in tables
+    assert "account_domain_research_sync_intents" not in tables
+    assert "account_domain_research_sync_intent_cleanup" not in tables

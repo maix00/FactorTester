@@ -42,8 +42,6 @@ ENTITY_TYPES = {
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create the mirror tables in the existing Manager SQLite database."""
-    from .research_merge import SCHEMA
-    conn.executescript(SCHEMA)
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS account_domain_entities (
@@ -92,15 +90,6 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS account_domain_outbox_entity
             ON account_domain_outbox(principal, entity_type, entity_id, created_at);
-
-        CREATE TABLE IF NOT EXISTS account_domain_research_sync_intents (
-            operation_id TEXT PRIMARY KEY, principal TEXT NOT NULL, entity_id TEXT NOT NULL,
-            kind TEXT NOT NULL, payload_sha256 TEXT NOT NULL
-        );
-        CREATE TRIGGER IF NOT EXISTS account_domain_research_sync_intent_cleanup
-        AFTER DELETE ON account_domain_outbox BEGIN
-            DELETE FROM account_domain_research_sync_intents WHERE operation_id=OLD.operation_id;
-        END;
 
         CREATE TABLE IF NOT EXISTS account_domain_cursors (
             scope_key TEXT PRIMARY KEY,
@@ -167,11 +156,6 @@ class LocalAccountDomainStore:
                 "WHERE principal=? AND entity_type=? AND entity_id=?",
                 (principal, entity_type, entity_id),
             ).fetchone()
-            if current is not None and previous is None:
-                from .research_merge import remember_base
-                remember_base(conn, principal=principal, entity_type=entity_type, entity_id=entity_id,
-                              revision=current["remote_revision"], payload=_decode(current["payload_json"]),
-                              deleted=bool(current["deleted"]))
             if current and current["payload_json"] == encoded and bool(current["deleted"]) == bool(deleted):
                 return str(previous["operation_id"]) if previous else ""
             blocked = bool(previous and previous["last_error"] == "remote revision conflict")
@@ -338,12 +322,7 @@ class LocalAccountDomainStore:
         encoded = _encode(payload)
         operation = uuid.uuid4().hex
         now = time.time()
-        if entity_type == 'research_catalog':
-            from .research_sync import research_sync_lock
-            lock = research_sync_lock(self.path, entity_id)
-        else:
-            lock = nullcontext()
-        with lock, connect_sqlite(self.path) as conn:
+        with connect_sqlite(self.path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT payload_json FROM account_domain_entities WHERE principal=? AND entity_type=? AND entity_id=?", key,
@@ -354,15 +333,6 @@ class LocalAccountDomainStore:
             ).fetchone()[0]
             if row is None or row["payload_json"] != _encode(expected_payload) or latest != remote_revision:
                 raise ValueError("conflict resolution precondition changed; inspect again")
-            conflict_id = None
-            if entity_type == 'research_catalog':
-                conflict = conn.execute('''SELECT conflict_id FROM account_domain_conflicts
-                    WHERE principal=? AND entity_type=? AND entity_id=? AND status='open'
-                    AND remote_revision=? AND local_payload_json=? ORDER BY created_at DESC LIMIT 1''',
-                    (*key, remote_revision, _encode(expected_payload))).fetchone()
-                if conflict is None:
-                    raise ValueError("research conflict snapshot changed; inspect again")
-                conflict_id = str(conflict['conflict_id'])
             conn.execute(
                 "UPDATE account_domain_entities SET payload_json=?, deleted=?, remote_revision=?, base_revision=?, "
                 "origin_manager_id=?, updated_at=? WHERE principal=? AND entity_type=? AND entity_id=?",
@@ -375,11 +345,6 @@ class LocalAccountDomainStore:
                 "deleted, base_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (operation, *key, encoded, int(deleted), remote_revision, now),
             )
-            if conflict_id is not None:
-                conn.execute('''INSERT INTO account_domain_research_sync_intents
-                    (operation_id,principal,entity_id,kind,payload_sha256) VALUES (?,?,?,?,?)''',
-                    (operation, principal, entity_id, 'resolution:' + conflict_id,
-                     hashlib.sha256(encoded.encode('utf-8')).hexdigest()))
             conn.execute(
                 "UPDATE account_domain_conflicts SET status='resolved', resolved_at=? "
                 "WHERE principal=? AND entity_type=? AND entity_id=? AND status='open'", (now, *key),
@@ -389,11 +354,6 @@ class LocalAccountDomainStore:
     def acknowledge(self, operation_id: str, *, revision: int, sent_item: dict[str, Any] | None = None) -> None:
         with connect_sqlite(self.path) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if sent_item is not None:
-                from .research_merge import remember_base
-                remember_base(conn, principal=sent_item['principal'], entity_type=sent_item['entity_type'],
-                              entity_id=sent_item['entity_id'], revision=revision,
-                              payload=sent_item['payload'], deleted=sent_item['deleted'])
             row = conn.execute(
                 """
                 SELECT principal, entity_type, entity_id
@@ -512,9 +472,6 @@ class LocalAccountDomainStore:
                     str(row.get("origin_manager_id") or ""), time.time(),
                 ),
             )
-            from .research_merge import remember_base
-            remember_base(conn, principal=principal, entity_type=entity_type, entity_id=entity_id,
-                          revision=revision, payload=payload, deleted=deleted)
             _materialize_factor_entries(conn, principal, entity_type, entity_id, payload, deleted, str(row.get("origin_manager_id") or ""))
         return "applied"
 

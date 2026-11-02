@@ -14,7 +14,7 @@ import secrets
 import time
 from pathlib import Path
 from collections.abc import Callable
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from typing import Any
 
 from tools.data.sqlite.db import connect_sqlite
@@ -60,8 +60,6 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         self._profile_authorizer = profile_authorizer
         self._profile_grant_manager = profile_grant_manager
         self._profile_identity_resolver = profile_identity_resolver
-        self._synchronizer = None
-        self._schedule_refresh = None
         self.ensure_schema()
         if self._profile_authorizer is not None:
             self._ensure_profile_policy_journal()
@@ -91,40 +89,16 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
             from server.manager.services.research_share_links import ensure_link_journal
             ensure_link_journal(conn)
 
-    def set_synchronizer(self, synchronizer, schedule_refresh=None) -> None:
-        if synchronizer.local.path.resolve() != self.db_path:
-            raise ValueError("research catalog and outbox must share one database")
-        self._synchronizer = synchronizer
-        # The old Research graph has no authenticated destination or live
-        # Keycloak public-access decision. Never publish it automatically;
-        # retain existing outbox records for reviewed migration instead.
-        # Explicit report publication uses the Keycloak/CouchDB path.
-        self._synchronizer.research_legacy_sharing = False
-        self._schedule_refresh = schedule_refresh
-
     @contextmanager
     def _write(self, research_id: str, *, after_commit: Callable[[], None] | None = None):
-        owner = ""
-        from server.manager.storage.account_domain.research_sync import research_sync_lock
-        lock = (research_sync_lock(self.db_path, research_id)
-                if self._synchronizer is not None and getattr(self._synchronizer, 'research_legacy_sharing', False)
-                else nullcontext())
-        with lock, connect_sqlite(self.db_path) as conn:
+        # Research metadata stays local. Explicit publication uses the
+        # Keycloak-authorized CouchDB path; it never serializes this catalog.
+        with connect_sqlite(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
-            if self._synchronizer is not None:
-                from server.manager.storage.account_domain.research_sync import publish_research
-                operation = publish_research(self._synchronizer, conn, research_id)
-                if operation:
-                    row = conn.execute("SELECT owner_ref FROM research_catalog_researches WHERE research_id=?", (research_id,)).fetchone()
-                    owner = str(row["owner_ref"]) if row else ""
             if after_commit is not None:
-                # Mark the actual database commit before either connection
-                # cleanup or the post-commit sync scheduler can fail.
                 conn.commit()
                 after_commit()
-        if owner and self._schedule_refresh is not None:
-            self._schedule_refresh(owner)
 
     def ensure_schema(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

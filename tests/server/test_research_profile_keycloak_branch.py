@@ -393,7 +393,6 @@ def test_new_research_registers_owner_profiles_and_cleans_up_failed_registration
 
 
 def test_research_creation_keeps_keycloak_resources_after_database_commit(tmp_path, monkeypatch):
-    from server.manager.storage.account_domain import research_sync
     class Authorization:
         def profile_membership_access_many(self, **_kwargs):
             return {}
@@ -409,21 +408,28 @@ def test_research_creation_keeps_keycloak_resources_after_database_commit(tmp_pa
     grants = Grants()
     catalog = ResearchCatalog(tmp_path / "research.sqlite", profile_authorizer=Authorization(),
                               profile_grant_manager=grants)
-    catalog._synchronizer = object()
-    monkeypatch.setattr(research_sync, "publish_research", lambda *_args: "pending-operation")
-    def failed_schedule(_owner):
-        raise RuntimeError("sync scheduler failed after commit")
-    catalog._schedule_refresh = failed_schedule
+    from contextlib import contextmanager
+    from server.manager.services import research_catalog as catalog_module
+    connect = catalog_module.connect_sqlite
+
+    @contextmanager
+    def fail_after_commit(*args, **kwargs):
+        with connect(*args, **kwargs) as conn:
+            yield conn
+            raise RuntimeError("connection cleanup failed after commit")
+
+    monkeypatch.setattr(catalog_module, "connect_sqlite", fail_after_commit)
     with pytest.raises(RuntimeError, match="after commit"):
         catalog.create_research(owner_ref="alice", title="Committed")
     with sqlite3.connect(catalog.db_path) as db:
         assert db.execute("SELECT COUNT(*) FROM research_catalog_researches WHERE title='Committed'").fetchone()[0] == 1
     assert grants.removed == []
 
-    def failed_outbox(*_args):
-        raise RuntimeError("outbox failed before commit")
-    monkeypatch.setattr(research_sync, "publish_research", failed_outbox)
-    with pytest.raises(RuntimeError, match="before commit"):
+    monkeypatch.setattr(catalog_module, "connect_sqlite", connect)
+    with sqlite3.connect(catalog.db_path) as db:
+        db.execute("""CREATE TRIGGER reject_research BEFORE INSERT ON research_catalog_researches
+            WHEN NEW.title='Rolled back' BEGIN SELECT RAISE(ABORT, 'write failed before commit'); END""")
+    with pytest.raises(sqlite3.IntegrityError, match="before commit"):
         catalog.create_research(owner_ref="alice", title="Rolled back")
     with sqlite3.connect(catalog.db_path) as db:
         assert db.execute("SELECT COUNT(*) FROM research_catalog_researches WHERE title='Rolled back'").fetchone()[0] == 0
