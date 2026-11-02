@@ -126,7 +126,7 @@ class AuthenticationRoutesMixin:
                 sys.stderr.write(f"[manager] device OIDC binding rejected: {type(exc).__name__}\n")
                 self._send_redirect("/app?auth_error=device", cookie=[
                     self._session_cookie("", clear=True),
-                self._refresh_cookie(""),
+                    self._refresh_cookie(""),
                     self._oidc_state_cookie(clear=True),
                 ])
                 return
