@@ -32,7 +32,7 @@ function Panel(props: IDockviewPanelProps<{ pageId: string; args?: PageArguments
   const [visible, setVisible] = useState(props.api.isVisible);
   useEffect(() => { const subscription = props.api.onDidVisibilityChange((event) => setVisible(event.isVisible)); return () => subscription.dispose(); }, [props.api]);
   return (
-    <div className="tr-tab-layer" data-tab-layer={props.params.pageId} aria-hidden={!visible} inert={!visible}>
+    <div className="tr-tab-layer" data-tab-layer={props.params.pageId} hidden={!visible} aria-hidden={!visible} inert={!visible}>
       <PageInstanceProvider value={{ id: props.api.id, pageId: props.params.pageId, args: props.params.args || {}, mobile: false, active: visible,
         open: (pageId, args) => {
           const page = getPage(pageId); if (!page) return;
@@ -49,7 +49,7 @@ function AgentAssistantPanel(props: IDockviewPanelProps<{ pageId: string }>): Re
     const subscription = props.api.onDidVisibilityChange((event) => setVisible(event.isVisible));
     return () => subscription.dispose();
   }, [props.api]);
-  return <div className="tr-dock-assistant-layer" aria-hidden={!visible} inert={!visible}>
+  return <div className="tr-dock-assistant-layer" hidden={!visible} aria-hidden={!visible} inert={!visible}>
     <AgentAssistant open={visible} presentation="panel" />
   </div>;
 }

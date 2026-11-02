@@ -57,12 +57,14 @@ setupIonicReact({{mode:'md'}});
                         window.fetch=async input=>{
                             const path=new URL(String(input),location.origin).pathname;
                             const value=path==='/api/session'?{session:{username:'Example@Alice@123',alias:'Alice',role:'user'}}:
-                                path==='/api/client/profiles'?{profiles:[]}: {items:[],researches:[],reports:[]};
+                                path==='/api/client/profiles'?{profiles:[]}:
+                                path==='/api/research'?{researches:Array.from({length:25},(_,i)=>({research_id:'research-'+i,title:'Research '+i,owner_ref:'Example@Alice@123'}))}:
+                                {items:[],researches:[],reports:[]};
                             return new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
                         };
                     }""", mobile)
                     page.add_script_tag(path=str(bundle))
-                    reference = page.locator(".tr-object-reference").filter(has_text="Alice")
+                    reference = page.locator(".tr-settings-card .tr-object-reference").filter(has_text="Alice")
                     reference.wait_for()
                     assert reference.inner_text() == "Alice"
                     reference.click()
@@ -76,7 +78,7 @@ setupIonicReact({{mode:'md'}});
                     if mobile:
                         header = page.locator("ion-header.tr-mobile-header")
                         header.locator("ion-title").filter(has_text="账户" if zh else "Account").wait_for()
-                        assert page.locator(".tr-object-reference").filter(has_text="Alice").is_visible()
+                        assert reference.is_visible()
                         assert page.get_by_text("用户" if zh else "User", exact=True).is_visible()
                         page.screenshot(path=str(tmp_path / f"account-mobile-{locale}.png"))
                         header.get_by_role("button", name="返回" if zh else "Back", exact=True).click()
@@ -95,6 +97,39 @@ setupIonicReact({{mode:'md'}});
                         dialog.locator(".ant-modal-close").click()
                         dialog.wait_for(state="hidden")
                     assert "settings=account" not in page.url
+                    if not mobile:
+                        # Dockview keeps pages mounted. Their Ant controls must
+                        # not override a hidden ancestor and bleed into another tab.
+                        for _ in range(2):
+                            for title, page_id in (("研究" if zh else "Research", "research"),
+                                                   ("测试台" if zh else "Test bench", "test-bench")):
+                                page.locator('.tr-module-nav').get_by_role('button', name=title, exact=True).click()
+                                active = page.locator(f'.tr-tab-layer[data-tab-layer="{page_id}"][aria-hidden="false"]')
+                                active.wait_for()
+                                leaked = page.locator('.tr-tab-layer[aria-hidden="true"] button, .tr-tab-layer[aria-hidden="true"] input, .tr-tab-layer[aria-hidden="true"] [role="tab"]').evaluate_all('''nodes => nodes.filter(node => {
+                                    const style=getComputedStyle(node),rect=node.getBoundingClientRect();
+                                    return rect.width>0 && rect.height>0 && style.visibility!=='hidden' && style.display!=='none';
+                                }).map(node=>({tag:node.tagName,text:node.textContent?.slice(0,50)}))''')
+                                assert not leaked, leaked
+                        nav = page.locator('.tr-module-nav')
+                        nav.get_by_role('button', name='产品库' if zh else 'Products', exact=True).click()
+                        search = page.locator('.tr-tab-layer[data-tab-layer="products"] .tr-library-filters input').first
+                        search.fill('retained query')
+                        nav.get_by_role('button', name='研究' if zh else 'Research', exact=True).click()
+                        assert not search.is_visible()
+                        nav.get_by_role('button', name='产品库' if zh else 'Products', exact=True).click()
+                        assert search.input_value() == 'retained query'
+                        nav.get_by_role('button', name='研究' if zh else 'Research', exact=True).click()
+                        research = page.locator('.tr-tab-layer[data-tab-layer="research"] .tr-research-page')
+                        research.locator('.ant-pagination').wait_for()
+                        bounds = research.evaluate('''node => {
+                            node.scrollTop=node.scrollHeight;
+                            return {pageBottom:node.getBoundingClientRect().bottom,
+                                panelBottom:node.closest('.tr-tab-layer').getBoundingClientRect().bottom,
+                                paginationBottom:node.querySelector('.ant-pagination').getBoundingClientRect().bottom};
+                        }''')
+                        assert bounds['pageBottom'] <= bounds['panelBottom'] + 1
+                        assert bounds['paginationBottom'] <= bounds['pageBottom'] + 1
                     assert not page.locator("vite-error-overlay").count()
                     assert not errors
                     page.close()

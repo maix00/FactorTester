@@ -1,6 +1,45 @@
 # Research 授权迁移与验收
 
-适用于 ADR-190 的 Research、Report 与 Profile 授权迁移。此文记录准备和验收程序；目前没有完成严格模式切换，也不能仅凭阶段性迁移日志删除旧授权数据。
+适用于 ADR-190 的 Research、Report 与 Profile 授权迁移。本机已完成身份明确的 10 项研究迁移和真实网页登录核对；公网及 15 项身份未解析的历史研究仍未完成。不能据此删除全部迁移证据或宣称两端全部切换完成。
+
+## 本机真实迁移与页面验收（2026-11-02）
+
+在 `local-feat-docker-staging` 制作新的 SQLite 备份（509,992,960 bytes，完整性与
+授权摘要一致）和 Keycloak PostgreSQL dump（296,992 bytes）。后者恢复到无外网、
+256 MiB 限额的临时 PostgreSQL，17 张身份/授权配置表逐表比较行数和规范化内容摘要
+一致，随后删除临时容器。备份与逐对象计划、日志及回执保存在受保护运维目录，
+不进入 Git 或客户端 API。
+
+保留现有依赖和镜像，部署已审核的 Keycloak 层级脚本 provider；短暂停止本机 Manager，
+独立受限运维进程执行现有 stage 后恢复 Manager。计划
+`2894e3d83385b77844a5ecbf1bc9058cbbfc752109f4deed33417de3317a6226`：
+10 项研究、40 个资源、20 项成员/显式授权、5 项实时上级策略，840 项 scope 决策通过。
+未删除、重绑或重建任何旧业务对象。另 15 项研究仍列 `needs_repair`，不猜测其所有者。
+
+真实浏览器首次发现管理员入口 403：常驻目录服务缺少读取自身角色客户端的授权。
+使用既有准入迁移工具，仅授予 `query-clients` 和 FGAP 对单一 Manager 登录客户端的
+`view`；未授予全局 `view-clients/manage-clients` 或 realm-admin。运维迁移凭据不写入
+Manager 环境。源计划与独立回退回执保留；刷新服务令牌后真实管理员入口通过。
+
+MaxJJW 通过正常 Keycloak 表单登录 `/app`，Manager 校验得到 super_admin；管理员
+入口成功。浏览器携带本次正常会话读取研究和报告目录，与独立迁移允许集合逐 ref
+比较：10 项研究、11 份报告完全一致；随后注销并确认已无用户会话。目录读取可能
+触发正常懒刷新，不称为数据库只读。新增 browser expectations 检查不输出 token 或
+对象内容，不把相同数量当作同一集合。
+
+首次真实截图暴露 Dockview 隐藏页的 Ant 控件仍能绘制，叠在研究表格上。桌面保留
+挂载的页面现以原生 `hidden` 隐藏，保留输入状态和实例；研究页移除旧嵌套 padding/header
+样式，复用公共 FunctionPage。浏览器回归覆盖中英双语反复切页、隐藏控件、查询状态
+保留、长列表底部分页可达，以及移动端账户返回。修复后真实截图与 DOM 检查不再叠页。
+
+公网本次只读枚举：已有 factor_library 3、factor_source 66、job_test_report 307、
+product_group 15、research_report 144 个 Keycloak 资源；未找到 device/research/
+research_profile 资源。这是资源目录证据，尚非其逐对象 scope 验收。公网镜像、业务数据
+与授权本次未改，跨 Manager 真实研究同步/因子 Job 与其余页面仍须完成。
+
+回退采用受保护的本次 Keycloak/SQLite 备份及变更前 identity 配置；先核查之后是否有
+有效新增写入，不覆盖其他用户后续操作。新增层级策略存在时必须保留 provider 和
+`compose.research-policies.yaml`；只有先回退对应策略后才可移除 provider。
 
 ## 可变上下级的迁移进展（2026-11-02）
 

@@ -87,6 +87,46 @@ def main() -> int:
                 checks.append("administrator_directory")
             else:
                 checks.append("administrator_denied")
+            expectations_path = os.environ.get('KEYCLOAK_RESEARCH_EXPECTATIONS')
+            if expectations_path:
+                # A separately reviewed migration allow-set, not an owner-name
+                # heuristic. List reads may schedule the normal lazy refresh.
+                from scripts.migrations.keycloak_research_stage import _read_private_json
+                expected = _read_private_json(expectations_path)
+                if (not isinstance(expected, dict) or expected.get('schema') != 'tr-research-browser-parity-v1'
+                        or expected.get('identity_id') != session.get('tr_identity_id')):
+                    raise SystemExit('Research expectations belong to another identity')
+                for endpoint, field, ref_key, expected_key in (
+                    ('/api/research?scope=all', 'researches', 'research_id', 'research_refs'),
+                    ('/api/research/reports?scope=all', 'reports', 'report_id', 'report_refs'),
+                ):
+                    wanted = expected.get(expected_key)
+                    if (not isinstance(wanted, list) or any(not isinstance(ref, str) or not ref for ref in wanted)
+                            or len(set(wanted)) != len(wanted)):
+                        raise SystemExit('Invalid reviewed Research allow-set')
+                    response = context.request.get(manager + endpoint)
+                    if response.status != 200:
+                        raise SystemExit(f'Research list failed (HTTP {response.status})')
+                    rows = response.json().get(field)
+                    if not isinstance(rows, list) or any(not isinstance(row, dict) or not row.get(ref_key) for row in rows):
+                        raise SystemExit('Research list omitted identities')
+                    refs = [row[ref_key] for row in rows]
+                    if len(set(refs)) != len(refs) or set(refs) != set(wanted):
+                        raise SystemExit(f'Research allow-set mismatch (list={field}, missing={len(set(wanted)-set(refs))}, unexpected={len(set(refs)-set(wanted))})')
+                    checks.append(f'{field}_ref_set_verified:{len(refs)}')
+                page.locator('.tr-module-nav button').filter(has_text=re.compile(r'^(研究|Research)$')).click()
+                page.locator('.tr-research-page .ant-table-tbody').wait_for()
+                page.locator('.tr-research-page .ant-spin-spinning').wait_for(state='hidden')
+                leaked = page.locator('.tr-tab-layer[aria-hidden="true"] button, .tr-tab-layer[aria-hidden="true"] input').evaluate_all('''nodes => nodes.some(node => {
+                    const style=getComputedStyle(node),rect=node.getBoundingClientRect();
+                    return rect.width>0 && rect.height>0 && style.visibility!=='hidden' && style.display!=='none';
+                })''')
+                if leaked:
+                    raise SystemExit('Inactive Dockview controls overlap the Research page')
+                screenshot = os.environ.get('KEYCLOAK_RESEARCH_SCREENSHOT')
+                if screenshot:
+                    page.screenshot(path=screenshot)
+                checks.append('react_research_table')
             for variable, expected in [('KEYCLOAK_ALLOWED_USER_ID', 200),
                                        ('KEYCLOAK_DENIED_USER_ID', 403)]:
                 target = os.environ.get(variable)
