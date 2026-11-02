@@ -1,5 +1,8 @@
 import { assetURL } from "./assets.ts";
-const mobile = window.matchMedia("(max-width: 760px)").matches;
+import { mobileLayout } from "./layout-mode.ts";
+const mobile = mobileLayout(window.matchMedia("(max-width: 760px)").matches,
+  navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
+document.documentElement.classList.toggle("tr-mobile-runtime", mobile);
 const prefix = "/research-static/vendor/web-app";
 const link = document.createElement("link");
 link.rel = "stylesheet";

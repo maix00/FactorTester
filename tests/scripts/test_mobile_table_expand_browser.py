@@ -1,4 +1,4 @@
-"""Mobile table expansion retains the active column filter across rotation."""
+"""Mobile table expansion rotates its content without rotating the device."""
 from __future__ import annotations
 
 import json
@@ -48,15 +48,24 @@ pagination={{{{page:1,pageSize:20,total:2,onChange:()=>{{}}}}}} /></PageInstance
                 assert page.get_by_role('cell', name='乙', exact=True).count() == 0
                 page.get_by_role('button', name='放大表格').click()
                 page.get_by_role('dialog').wait_for()
-                page.set_viewport_size({'width': 844, 'height': 390})
+                assert page.viewport_size == {'width': 390, 'height': 844}
+                logical_size = page.get_by_role('dialog').locator('.ant-modal-content').evaluate('(el) => [el.clientWidth, el.clientHeight]')
+                assert logical_size[0] > logical_size[1]
                 assert page.get_by_role('dialog').get_by_role('cell', name='甲', exact=True).is_visible()
                 assert page.get_by_role('dialog').get_by_role('cell', name='乙', exact=True).count() == 0
+                page.get_by_role('dialog').locator('.ant-table-filter-trigger').first.click()
+                menu = page.locator('.ant-dropdown:visible')
+                menu.get_by_text('甲', exact=True).click()
+                menu.get_by_text('乙', exact=True).click()
+                menu.locator('.ant-table-filter-dropdown-btns button').last.click()
+                assert page.get_by_role('dialog').get_by_role('cell', name='乙', exact=True).is_visible()
+                assert page.get_by_role('dialog').get_by_role('cell', name='甲', exact=True).count() == 0
                 page.wait_for_timeout(350)
                 page.screenshot(path='/tmp/tr-table-landscape-fixture.png')
                 page.get_by_role('dialog').get_by_role('button', name='返回').click()
                 page.get_by_role('dialog').wait_for(state='hidden')
-                assert page.get_by_role('cell', name='甲', exact=True).is_visible()
-                assert page.get_by_role('cell', name='乙', exact=True).count() == 0
+                assert page.get_by_role('cell', name='乙', exact=True).is_visible()
+                assert page.get_by_role('cell', name='甲', exact=True).count() == 0
             finally:
                 browser.close()
     finally:

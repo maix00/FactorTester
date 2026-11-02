@@ -28,6 +28,9 @@ struct FactorTesterClientApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(FTClientAppDelegate.self)
     private var appDelegate
+    #else
+    @UIApplicationDelegateAdaptor(DeviceOrientationAppDelegate.self)
+    private var appDelegate
     #endif
     @StateObject private var config = ServerConfig.shared
     @StateObject private var managerConfig = ManagerConfig.shared

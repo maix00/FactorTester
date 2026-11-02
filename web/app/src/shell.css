@@ -6,6 +6,13 @@ body { margin: 0; }
   --text: #202b3c; --muted: #697587; --line: #e8ecf1;
   --accent: #1677ff; --danger: #d92d20;
 }
+html[data-tr-theme="dark"] {
+  color-scheme: dark;
+  --bg:#121720; --panel:#1d2430; --sidebar:#171d27;
+  --text:#e7ebf2; --muted:#aab4c3; --line:#394150;
+  --ion-background-color:#121720; --ion-text-color:#e7ebf2; --ion-toolbar-background:#1d2430;
+  --ion-tab-bar-background:#1d2430; --ion-item-background:#1d2430; --ion-border-color:#394150;
+}
 .tr-app-shell {
   display: grid;
   grid-template-columns: var(--tr-sidebar-width) minmax(0, 1fr);
@@ -133,6 +140,9 @@ body { margin: 0; }
 .tr-mobile-workspace header p { margin: 4px 0 14px; color: var(--muted); font-size: 12px; }
 /* iOS zooms on focus below 16px. Include portals (drawers, dialogs and
    dropdowns), and override library rules on their internal search inputs. */
+html.tr-mobile-runtime :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  font-size: 16px !important;
+}
 @media (max-width: 767px) {
   input:not([type="checkbox"]):not([type="radio"]), textarea, select {
     font-size: 16px !important;
@@ -185,6 +195,10 @@ body { margin: 0; }
 .tr-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
 .tr-settings-row b { display: block; font-size: 12px; }
 .tr-settings-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.tr-appearance-settings .tr-settings-row:first-child { border-top: 0; }
+.tr-appearance-select { width: min(160px, 55%); min-width: 0; }
+.tr-appearance-dropdown { min-width: max-content !important; }
+.tr-appearance-dropdown .ant-select-item-option-content { white-space: nowrap; overflow: visible; text-overflow: clip; }
 .tr-settings-value { color: var(--muted); font-size: 12px; }
 .tr-settings-migrating p { margin: 0; color: var(--muted); font-size: 12px; }
 @media (max-width: 620px) {
@@ -513,6 +527,15 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-research-page { min-height:100%; }
 .tr-table-expand { display:flex; justify-content:flex-end; margin-bottom:4px; }
 .tr-table-expand .ant-btn { font-size:13px; }
+/* Modal entry animation otherwise replaces the rotated transform and origin. */
+.tr-landscape-table-modal .ant-modal { transform:rotate(90deg) !important; transform-origin:0 0 !important; }
+/* Trigger's screen-space alignment cannot position a popup inside a rotated
+   ancestor. Keep table controls inside the panel in its own coordinate space. */
+.tr-landscape-table-modal .ant-dropdown,
+.tr-landscape-table-modal .ant-select-dropdown {
+  inset: 64px auto auto 50% !important;
+  transform: translateX(-50%) !important;
+}
 .tr-research-mobile-meta { display:flex; flex-wrap:wrap; gap:4px 14px; padding-top:6px; font-size:12px; }
 .tr-research-mobile-reference { display:inline-flex; align-items:baseline; gap:4px; min-width:0; max-width:100%; }
 .tr-research-mobile-reference > span:first-child { color:var(--muted); flex-shrink:0; }
@@ -631,6 +654,9 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-chart-host { min-width:0; }
 .tr-chart-host .ft-lightweight-price { position:relative; }
 .tr-chart-host .ft-lightweight-price-canvas { position:relative; width:100%; min-width:0; height:460px; }
+.tr-chart-fullscreen .tr-market-frame { min-height:0; padding:0; }
+.tr-chart-fullscreen .ft-lightweight-price-canvas { height:max(180px, calc(min(100vw, 100dvh) - 115px)); }
+.tr-chart-fullscreen .ft-factor-chart-canvas { height:max(180px, calc(min(100vw, 100dvh) - 150px)) !important; }
 .tr-chart-host .ft-lightweight-range-bands { position:absolute; inset:0 auto 0 0; pointer-events:none; overflow:hidden; }
 .tr-chart-host .ft-lightweight-range-band { position:absolute; top:0; bottom:26px; background:rgb(22 119 255 / 3%); border-right:1px solid rgb(22 119 255 / 20%); }
 .tr-chart-host .ft-lightweight-range-band:nth-child(even) { background:rgb(22 119 255 / 7%); }

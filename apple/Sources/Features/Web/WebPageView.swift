@@ -51,6 +51,9 @@ final class WebPageSession {
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ManagerConnectionBridgeContract.messageName
         )
+        #if os(iOS)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: DeviceOrientationBridge.name)
+        #endif
         #if os(macOS)
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: LocalResearchBridgeContract.messageName
@@ -390,6 +393,13 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ManagerConnectionBridgeContract.messageName
             )
+            #if os(iOS)
+            existing.configuration.userContentController.removeScriptMessageHandler(forName: DeviceOrientationBridge.name)
+            if let serverOrigin {
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    DeviceOrientationBridge(endpoint: serverOrigin), contentWorld: .page, name: DeviceOrientationBridge.name)
+            }
+            #endif
             if let localResearchSession, let serverOrigin {
                 existing.configuration.userContentController.addScriptMessageHandler(
                     ManagerConnectionBridge(session: localResearchSession, endpoint: serverOrigin),
@@ -447,6 +457,12 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             return existing
         }
         let configuration = WKWebViewConfiguration()
+        #if os(iOS)
+        if let serverOrigin {
+            configuration.userContentController.addScriptMessageHandler(
+                DeviceOrientationBridge(endpoint: serverOrigin), contentWorld: .page, name: DeviceOrientationBridge.name)
+        }
+        #endif
         if let localResearchSession, let serverOrigin {
             configuration.userContentController.addScriptMessageHandler(
                 ManagerConnectionBridge(session: localResearchSession, endpoint: serverOrigin),
@@ -559,6 +575,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ManagerConnectionBridgeContract.messageName
         )
+        #if os(iOS)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: DeviceOrientationBridge.name)
+        #endif
         #if os(macOS)
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: LocalResearchBridgeContract.messageName

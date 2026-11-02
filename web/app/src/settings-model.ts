@@ -5,6 +5,7 @@ export const SETTINGS_SECTIONS = [
   { id: "devices", icon: "trading" },
   { id: "quota", icon: "research" },
   { id: "workspace", icon: "workspace" },
+  { id: "appearance", icon: "settings" },
   { id: "language", icon: "research" },
   { id: "updates", icon: "runs" },
   { id: "manager", icon: "runs" },

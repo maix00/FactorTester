@@ -32,7 +32,7 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
 ''', encoding='utf-8')
     subprocess.run([str(APP / 'node_modules/.bin/esbuild'), str(source), '--bundle', '--format=iife',
                     '--target=es2020', f'--outfile={bundle}'], cwd=APP, check=True, capture_output=True, text=True)
-    (tmp_path / 'index.html').write_text('<link rel="stylesheet" href="/harness.css"><div id="root"></div>', encoding='utf-8')
+    (tmp_path / 'index.html').write_text('<html class="tr-mobile-runtime"><link rel="stylesheet" href="/harness.css"><div id="root"></div></html>', encoding='utf-8')
     images = tmp_path / 'research-static/vendor/web-app'
     images.mkdir(parents=True)
     shutil.copyfile(ROOT / 'static/vendor/web-app/network-topology.zh.svg', images / 'network-topology.zh.svg')
@@ -52,6 +52,12 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
                     p==='/api/docs/pages/network-topology'?{title:'网络拓扑',html:'<p>Topology article</p>'}:
                     p==='/api/docs/pages/identity-permissions'?{title:'用户与权限',html:'<h2 id="identity">用户与权限</h2><a href="#section">Section</a><p id="section">Permission article</p>'}:{items:[]};
                   return Promise.resolve(new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}}));};}''')
+                page.evaluate('''() => {window.selectedOrientation='portrait'; window.webkit={messageHandlers:{
+                  tradeResearchOrientation:{postMessage: async message => {
+                    if(message.action==='set') window.selectedOrientation=message.orientation;
+                    return {success:true,orientation:window.selectedOrientation};
+                  }}
+                }}}''')
                 page.add_script_tag(path=str(bundle))
                 header = page.locator('ion-header.tr-mobile-header')
                 header.wait_for()
@@ -109,7 +115,32 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
                   container.remove(); return result;
                 }''')
                 assert sizes == ['16px', '16px', '16px']
+                page.keyboard.press('Escape')
+                header.get_by_role('button', name='返回').click()
+                page.get_by_role('button', name='外观').click()
+                color_mode = page.get_by_role('combobox', name='颜色模式')
+                color_mode.click(force=True)
+                page.get_by_text('深色', exact=True).click()
+                assert page.evaluate("document.documentElement.dataset.trTheme") == 'dark'
+                assert page.evaluate("localStorage.getItem('traderesearch.color-mode')") == 'dark'
+                direction = page.get_by_role('combobox', name='设备方向')
+                direction.wait_for(state='attached')
+                direction.click(force=True)
+                option = page.get_by_text('跟随设备', exact=True).last
+                option.wait_for(state='visible')
+                page.wait_for_timeout(350)
+                assert option.evaluate('(el) => el.scrollWidth <= el.clientWidth')
+                page.screenshot(path='/tmp/tr-mobile-appearance-dropdown.png')
+                page.get_by_text('横屏', exact=True).click()
+                assert page.evaluate('window.selectedOrientation') == 'landscape'
+                assert header.get_by_role('button', name='返回').is_visible()
                 page.set_viewport_size({'width': 1024, 'height': 844})
+                landscape_size = page.evaluate('''() => {
+                  const field=document.createElement('input'); field.style.fontSize='12px';
+                  document.body.append(field); const size=getComputedStyle(field).fontSize; field.remove(); return size;
+                }''')
+                assert landscape_size == '16px'
+                page.evaluate("document.documentElement.classList.remove('tr-mobile-runtime')")
                 desktop_size = page.evaluate('''() => {
                   const field=document.createElement('input'); field.style.fontSize='12px';
                   document.body.append(field); const size=getComputedStyle(field).fontSize; field.remove(); return size;

@@ -6,6 +6,7 @@ import { DeviceSettings } from "./device-settings.tsx";
 import { AccountActions } from "./account-actions.tsx";
 import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
+import { AppearanceSettings } from "./appearance-settings.tsx";
 import { QuotaSummary } from "./quota-summary.tsx";
 import { ServerSummary } from "./server-summary.tsx";
 import { ManagerConnectionSettings, nativeManagerSettingsAvailable } from "./manager-connection-settings.tsx";
@@ -56,7 +57,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
     return ()=>controller.abort();
   }, [section,reload]);
  if(error && section!=="server")return <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/>;
- return <>          {section === "language" ? (
+ return <>          {section === "appearance" ? <AppearanceSettings /> : section === "language" ? (
             <div className="tr-settings-card">
               <div className="tr-settings-row">
                 <div><b>{t("settingsPanel.language")}</b></div>

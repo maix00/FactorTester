@@ -68,7 +68,7 @@ export function TRDataTable<T extends object>({
     </nav> : null}</>
   );
   return <>{mobile && !expanded ? <div className="tr-table-expand"><Button type="text" icon={<ExpandOutlined />} onClick={()=>setExpanded(true)}>{t("table.expand")}</Button></div> : null}
-    {expanded ? <DetailsPanel title={t("table.title")} forceFullscreen onClose={()=>setExpanded(false)}>{content}</DetailsPanel> : content}</>;
+    {expanded ? <DetailsPanel title={t("table.title")} forceFullscreen landscape onClose={()=>setExpanded(false)}>{content}</DetailsPanel> : content}</>;
 }
 
 
