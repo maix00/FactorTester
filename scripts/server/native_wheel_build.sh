@@ -50,13 +50,8 @@ fi
 echo "native wheel cache=miss build_id=$BUILD_ID reason=missing-or-invalid-wheel-receipt"
 bash "$ROOT/scripts/server/check_local_build_capacity.sh"
 mkdir -p "$CACHE/cargo/registry" "$CACHE/cargo/git" "$TARGET_CACHE"
-cache_kb="$(du -sk "$TARGET_CACHE" | awk '{print $1}')"
 limit_gb="${NAUTILUS_TARGET_CACHE_MAX_GB:-4}"
 [[ "$limit_gb" =~ ^[1-9][0-9]*$ ]] || { echo "invalid target cache budget" >&2; exit 2; }
-if (( cache_kb > limit_gb * 1024 * 1024 )); then
-  echo "native target cache exceeds ${limit_gb}GiB; explicit cache maintenance required: $TARGET_CACHE" >&2
-  exit 3
-fi
 # Never build on the public application host. It must pull a finished wheel
 # from the intranet builder; a 3 GiB Rust build alongside CouchDB/app caused an
 # unreachable public host.
@@ -75,6 +70,8 @@ if [ -r /proc/meminfo ]; then
     exit 1
   fi
 fi
+# The build lock excludes Cargo users of this owned target, including at start.
+python3 "$ROOT/scripts/server/native_target_cache.py" "$CACHE" "$TARGET_CACHE" "$limit_gb"
 echo "building nautilus_trader from local commit $REVISION"
 # Compile immutable committed inputs even when another agent edits the checkout.
 ARCHIVE_SRC="$(mktemp -d "$CACHE/archive-$BUILD_ID.XXXXXX")"
@@ -118,13 +115,8 @@ WHEEL="$(ls "$BUILD_OUT"/nautilus_trader-*.whl | head -n 1)"
 ALPHA_WHEEL="$(ls "$ALPHA_OUT"/py_alpha_lib-*.whl | head -n 1)"
 bash "$ROOT/scripts/server/complete_nautilus_wheel.sh" "$WHEEL"
 shasum -a 256 "$WHEEL" "$ALPHA_WHEEL" > "$BUILD_OUT/checksums.sha256"
-cache_kb="$(du -sk "$TARGET_CACHE" | awk '{print $1}')"
-if (( cache_kb > limit_gb * 1024 * 1024 )); then
-  # Finished wheels remain authoritative. Prefer the storage budget over a
-  # speculative speedup; only this build's owned Cargo target may be evicted.
-  if [[ "$TARGET_CACHE" == "$CACHE/target-reusable" ]]; then rm -rf -- "$TARGET_CACHE";
-  else echo "external target exceeds budget; left untouched: $TARGET_CACHE" >&2; fi
-  echo "native target cache=evicted reason=over-${limit_gb}GiB-budget"
-fi
-echo "native wheel cache=stored build_id=$BUILD_ID target_cache_kb=$cache_kb"
+# Drop incremental compiler state before reusable crate artifacts. Completed
+# wheels are outside the target and remain available under either outcome.
+python3 "$ROOT/scripts/server/native_target_cache.py" "$CACHE" "$TARGET_CACHE" "$limit_gb"
+echo "native wheel cache=stored build_id=$BUILD_ID"
 ls -lh "$WHEEL"
