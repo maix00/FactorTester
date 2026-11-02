@@ -89,6 +89,7 @@ def get_evidence(*, owner: str, evidence_ref: str) -> dict[str, Any]:
         fragments = composed.pop("fragments")
         tags = composed.pop("tags")
         applicability = composed.pop("applicability")
+        applicability_revision = composed.pop("applicability_revision")
         created_at = composed.pop("created_at")
         identity_refs = composed.pop("identity_refs")
         limitations = composed.pop("limitations")
@@ -115,6 +116,7 @@ def get_evidence(*, owner: str, evidence_ref: str) -> dict[str, Any]:
             "evidence_kind": composed["evidence_kind"],
             "envelope": envelope,
             "applicability": applicability,
+            "applicability_revision": applicability_revision,
             "fragments": fragments,
             "tags": tags,
             "owner": owner,

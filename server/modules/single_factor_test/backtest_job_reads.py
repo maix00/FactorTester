@@ -697,23 +697,16 @@ def get_test_job(job_id: str):
     return jsonify(payload)
 
 
-def _keycloak_request_token() -> str:
-    from flask import request
-    scheme, _, value = str(request.headers.get("Authorization") or "").partition(" ")
-    if scheme.lower() == "bearer" and value:
-        return value.strip()
-    return str(request.cookies.get("ft-manager-session") or "").strip()
-
-
 def _keycloak_resource_decision(document: dict, scope: str) -> bool | None:
     """Return None only when Keycloak is unavailable; never trust owner fields."""
-    token = _keycloak_request_token()
+    from server.identity.keycloak_authorization import keycloak_request_identity
+    identity = keycloak_request_identity()
     resource_id = str(document.get("keycloak_resource_id") or "").strip()
-    if not token or not resource_id:
+    if identity is None or not resource_id:
         return False
     try:
         from server.identity.keycloak_authorization import keycloak_authorized
-        return keycloak_authorized(token, resource_id=resource_id, scope=scope)
+        return keycloak_authorized(identity.token, resource_id=resource_id, scope=scope, use_cache=False)
     except Exception:
         return None
 
@@ -1292,7 +1285,8 @@ def get_research_report_document(publication_id: str):
     denied = _keycloak_authorization_response(document, "read", "research report access denied")
     if denied:
         return denied
-    return jsonify({"success": True, "document": document})
+    return jsonify({"success": True, "document": document,
+                    "access": {"can_write": _keycloak_resource_decision(document, "write")}})
 
 
 @sft_bp.get("/api/job-test-reports/<path:report_ref>")

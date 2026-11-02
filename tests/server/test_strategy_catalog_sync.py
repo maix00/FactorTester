@@ -9,7 +9,7 @@ from server.manager.storage.account_domain import AccountDomainSyncService
 from server.manager.storage.account_domain.strategy_sync import publish_strategy
 from server.services.strategy_library import StrategyLibraryService
 from tests.scripts.test_worktree_manager_account_domain_sync import MemoryControlStore
-from tests.server.test_strategy_library import SOURCE, SOURCE_V2
+from tests.server.test_strategy_library import SOURCE, SOURCE_V2, kc
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -98,7 +98,7 @@ def test_legacy_revision_counter_migration_preserves_rows(tmp_path):
         assert db.execute('SELECT count(*) FROM strategy_library_revisions').fetchone()[0] == 2
 
 
-def test_revision_hydration_checks_access_and_bytes_before_persisting(tmp_path, monkeypatch):
+def test_revision_hydration_checks_access_and_bytes_before_persisting(tmp_path, monkeypatch, kc):
     from server.manager.services import strategy_revision_hydration as hydration
     from server.manager.storage.account_domain.strategy_sync import revision_bytes
     control = MemoryControlStore()
@@ -119,7 +119,7 @@ def test_revision_hydration_checks_access_and_bytes_before_persisting(tmp_path, 
     state = SimpleNamespace(strategy_library=reader, account_domain_sync=right,
                             prepare_object_download=prepare, server_id='right')
     load = hydration.StrategyRevisionHydrator(state)
-    with pytest.raises(PermissionError):
+    with kc.as_user('bob'), pytest.raises(PermissionError):
         load(revision_ref, principal='bob')
     assert not requests
     monkeypatch.setattr(hydration, 'loopback_client_access', lambda url: (url, None))

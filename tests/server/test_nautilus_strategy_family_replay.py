@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tests.nautilus_runtime import require_nautilus
-from tests.server.test_nautilus_bridge_backtest_runner import _real_catalog
+from tests.server.test_nautilus_bridge_backtest_runner import ROOT, _real_catalog
 from server.services.nautilus_bridge.strategy_backtest import run_strategy_family_replay
 from server.services.nautilus_bridge.strategy_families import CrossSectionalGroup, ThresholdState
 from tools.factors.expr import CLOSE
@@ -53,6 +53,49 @@ def test_real_threshold_family_consumes_signal_and_creates_orders(tmp_path):
     assert result["python_factor_bar_callbacks"] == 0
     assert result["strategy_publications"] == [8]
     assert result["orders"] == 1
+
+
+def test_real_actor_preserves_source_sampling_phase_for_suffix(tmp_path):
+    """A suffix must not shift observed-bar signals when the actor is rebuilt."""
+    from decimal import Decimal
+    from itertools import islice
+    from server.services.nautilus_bridge.backtest_runner import ReplayInput
+    from server.services.nautilus_bridge.catalog import stage_contract_minute_catalog
+    from server.services.nautilus_bridge.market_data import FuturesContractSpec, iter_minute_bars
+    from server.services.nautilus_bridge.strategy_backtest import run_strategy_families_replay
+    from tests.nautilus_source_fixture import resolved_contract_minute_source
+    from tools.factors.expr import SignalAlign
+
+    require_nautilus()
+    source = ROOT / 'data_mink_product/CFFEX_F_T_2403.parquet'
+    if not source.is_file():
+        pytest.skip('read-only local T source unavailable')
+    bars = list(islice(iter_minute_bars(source, batch_size=7), 7))
+    assert len(bars) == 7 and bars[5].close != bars[6].close
+    spec = FuturesContractSpec(
+        instrument_code='T2403', venue='CFFEX', underlying='T',
+        price_increment=Decimal('0.005'), price_precision=3, multiplier=Decimal('10000'),
+        currency='CNY', activation_ns=1, expiration_ns=2_000_000_000_000_000_000,
+        margin_init=Decimal('0.02'), margin_maint=Decimal('0.02'),
+        provenance='test-only instrument metadata', resolved_source=resolved_contract_minute_source(),
+    )
+    catalog = tmp_path / 'suffix'
+    receipt = stage_contract_minute_catalog(
+        source, catalog, contract_uid='CFFEX|F|T|2403', instrument_spec=spec,
+        start_ns=bars[1].clock.interval_end_ns, end_ns=bars[6].clock.interval_end_ns,
+        batch_bars=3, max_bars=6,
+    )
+    assert receipt.source_ordinal_start == 1
+    result = run_strategy_families_replay(
+        inputs={'T': ReplayInput(catalog, receipt.contract_uid)},
+        strategies=[{'strategy_id': 'phase', 'factor_bindings': {'signal': SignalAlign(CLOSE, '3m')},
+                     'factor_refs': {'signal': 'factor:v2:' + 'a' * 43},
+                     'family': ThresholdState(entry=1, exit=0)}], output_dir=tmp_path / 'reports',
+        max_bars=6, batch_minutes=3, inspect_outputs=True,
+    )
+    assert result['factor_actors'] == 1
+    assert result['python_factor_bar_callbacks'] == 0
+    assert result['latest_outputs']['phase']['signal'][2][0] == pytest.approx(float(bars[5].close))
 
 
 def test_unsupported_python_family_cannot_register_a_callback(tmp_path):

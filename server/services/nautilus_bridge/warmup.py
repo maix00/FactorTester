@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,54 @@ class FactorWarmupSettings:
     diagnostic_only:bool=False
     def manifest(self):
         return dict(mode=self.mode,data_start_utc=self.data_start_utc,diagnostic_only=self.diagnostic_only)
+
+
+def bind_observed_source_clock(spec, receipts):
+    """Bind ordinal sampling to verified, shared catalog clocks before replay.
+
+    The current FactorActor processes complete product slices. Different clocks
+    or sampling phases need a per-product observation channel and cannot be
+    represented by one shared ordinal; never silently use the wrong phase.
+    """
+    nodes = spec.get('nodes') if isinstance(spec, dict) else None
+    if not isinstance(nodes, list):
+        raise ValueError('invalid factor plan')
+    signals = [node for node in nodes if node.get('kind') == 'signal' and node.get('observed_period') is not None]
+    if not signals:
+        return spec
+    if not isinstance(receipts, dict) or not receipts:
+        raise ValueError('observed signal requires frozen source clock receipts')
+    offsets, clocks = [], set()
+    for product, receipt in receipts.items():
+        offset = receipt.get('source_ordinal_start') if isinstance(receipt, dict) else None
+        count = receipt.get('selected_count') if isinstance(receipt, dict) else None
+        clock = receipt.get('selected_clock_sha256') if isinstance(receipt, dict) else None
+        if (type(offset) is not int or not 0 <= offset < 2**64
+                or type(count) is not int or count <= 0
+                or not isinstance(clock, str) or not re.fullmatch(r'[0-9a-f]{64}', clock)):
+            raise ValueError(f'{product}: observed signal requires a verified source ordinal and clock; restage the catalog')
+        offsets.append(offset)
+        clocks.add((count, clock))
+    if len(clocks) != 1:
+        raise ValueError('observed signal requires identical product clocks; per-product observation replay is unavailable')
+    for node in signals:
+        period = node['observed_period']
+        if type(period) is not int or period <= 0:
+            raise ValueError('observed signal period is invalid')
+        if len({offset % period for offset in offsets}) != 1:
+            raise ValueError('observed signal product phases differ; per-product observation replay is unavailable')
+    return {**spec, 'nodes': [{**node, 'source_ordinal': offsets[0]}
+                              if node.get('kind') == 'signal' and node.get('observed_period') is not None
+                              else node for node in nodes]}
+
+
+def require_observed_clock_runtime(spec, native):
+    """An older extension can silently ignore unknown JSON node fields."""
+    if any(node.get('kind') == 'signal' and node.get('observed_period') is not None
+           for node in spec['nodes']):
+        version = getattr(native, 'FACTOR_OBSERVED_SOURCE_ORDINAL_VERSION', None)
+        if type(version) is not int or version != 1:
+            raise RuntimeError('native factor runtime lacks observed source ordinal support; rebuild the composed extension')
 
 
 def freeze_warmup_settings(value=None):

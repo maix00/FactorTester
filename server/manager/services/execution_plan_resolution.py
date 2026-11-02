@@ -8,7 +8,7 @@ from server.modules.single_factor_test.execution_nodes import (
 )
 
 
-def resolve(state, *, owner, request):
+def resolve(state, *, owner, request, delegated_user_token=""):
     workspace=str(request.get('workspace_id') or '')
     stored=load_workspace_configuration(workspace_id=workspace,owner=owner)
     if stored is None:raise PermissionError('workspace is unavailable')
@@ -20,7 +20,8 @@ def resolve(state, *, owner, request):
         directory=visible_targets(owner);route=None
     else:
         route=peer_execution_route(state,manager)
-        directory=state.federation_gateway.public_data(route,kind='execution',operation='targets',principal=owner)['targets']
+        directory=state.federation_gateway.public_data(route,kind='execution',operation='targets',principal=owner,
+            delegated_user_token=delegated_user_token)['targets']
     bundle_keys={(item['bundle_id'],item['owner']) for item in selection['bundles']}
     known=frozenset(offer['product_ref'] for row in directory for offer in row['offers']
         if (offer['installation']['bundle_id'],offer['installation']['owner']) in bundle_keys)
@@ -32,5 +33,5 @@ def resolve(state, *, owner, request):
         binding=bind_prepared_execution(prepared,selection)
     else:
         binding=state.federation_gateway.public_data(route,kind='execution',operation='resolve-selection',principal=owner,
-            payload={'prepared':prepared,'selection':selection})['binding']
+            payload={'prepared':prepared,'selection':selection},delegated_user_token=delegated_user_token)['binding']
     return {'success':True,'binding':binding,'binding_ref':canonical_hash(binding)}

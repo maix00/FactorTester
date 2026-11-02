@@ -55,10 +55,37 @@ def _account_blockers(accounts: list[dict[str, Any]]) -> list[dict[str, str]]:
         {"reason": "duplicate_stable_identity", "count": str(count)}
         for count in identities.values() if count > 1
     )
+    # Resolve the complete reviewed hierarchy before any writes.  Names are
+    # only a legacy migration input; the persisted parent is a stable ID.
+    by_name = {str(row.get("username") or "").strip().casefold(): row
+               for row in accounts if isinstance(row, dict) and str(row.get("username") or "").strip()}
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        username = str(account.get("username") or "").strip()
+        parent = str(account.get("parent_username") or "").strip()
+        if not parent:
+            continue
+        target = by_name.get(parent.casefold())
+        if target is None:
+            blockers.append({"username": username, "reason": "parent_identity_unmapped"})
+        elif str(target.get("organization_id") or "").strip() != str(account.get("organization_id") or "").strip():
+            blockers.append({"username": username, "reason": "parent_in_different_organization"})
+    completed: set[str] = set()
+    for username in by_name:
+        seen: set[str] = set()
+        current = username
+        while current and current in by_name and current not in completed:
+            if current in seen:
+                blockers.append({"username": username, "reason": "parent_hierarchy_cycle"})
+                break
+            seen.add(current)
+            current = str(by_name[current].get("parent_username") or "").strip().casefold()
+        completed.update(seen)
     return blockers
 
 
-def _attributes_for(account: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+def _attributes_for(account: dict[str, Any], identity_by_name: dict[str, str]) -> dict[str, tuple[str, ...]]:
     username = str(account["username"]).strip()
     fields = {
         "tr_identity_id": str(account["tr_identity_id"]).strip(),
@@ -67,6 +94,9 @@ def _attributes_for(account: dict[str, Any]) -> dict[str, tuple[str, ...]]:
         "tr_organization_name": str(account.get("organization_name") or account.get("organization") or "").strip(),
         "tr_parent_username": str(account.get("parent_username") or "").strip(),
     }
+    parent_name = fields["tr_parent_username"]
+    if parent_name:
+        fields["tr_parent_identity_id"] = identity_by_name[parent_name.casefold()]
     level_id = str(account.get("level_id") or "").strip()
     if level_id:
         fields["tr_level_id"] = level_id
@@ -89,6 +119,9 @@ def import_accounts(
         }
     if not dry_run and adapter is None:
         raise ValueError("an authenticated Keycloak adapter is required to apply")
+
+    identity_by_name = {str(row["username"]).strip().casefold(): str(row["tr_identity_id"]).strip()
+                        for row in accounts}
 
     planned = []
     created = []
@@ -147,7 +180,7 @@ def import_accounts(
                 user_id,
                 username=username,
                 email=str(account.get("email") or ""),
-                attributes=_attributes_for(account),
+                attributes=_attributes_for(account, identity_by_name),
                 enabled=enabled,
             )
             updated.append(plan_row)
@@ -156,7 +189,7 @@ def import_accounts(
             username=username,
             email=str(account.get("email") or ""),
             groups=(),
-            attributes=_attributes_for(account),
+            attributes=_attributes_for(account, identity_by_name),
         )
         if not str(user_id or "").strip():
             raise RuntimeError("Keycloak did not return an identity for the created user")

@@ -4,12 +4,13 @@ import { SettingsSection } from "../components/settings-section.tsx";
 import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
 import { useAuth } from "../auth.tsx";
 import { PageIcon } from "../icon.tsx";
+import { ObjectReferenceProvider } from "../components/object-reference-provider.tsx";
 
 export type MobileSettingSection = SettingsSectionID;
 
 export function MobileSettingsPage({ onOpen }: { onOpen: (section: MobileSettingSection) => void }): React.ReactElement {
   const { t } = useTranslation();
-  const {session}=useAuth();const sections=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"}).filter(item=>item.id!=="workspace");
+  const {session}=useAuth();const sections: {id:MobileSettingSection;icon:string}[]=visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:session?.role==="super_admin"}).filter(item=>item.id!=="workspace");
   return (
     <section className="tr-mobile-workspace">
       <header>
@@ -31,10 +32,10 @@ export function MobileSettingsPage({ onOpen }: { onOpen: (section: MobileSetting
 export function MobileSettingDetail({ section }: { section: MobileSettingSection }): React.ReactElement {
   const { t } = useTranslation();
   return (
-    <div className="tr-mobile-settings-detail">
+    <ObjectReferenceProvider><div className="tr-mobile-settings-detail">
       <div className="tr-mobile-settings-body">
         <SettingsSection key={section} section={section}/>
       </div>
-    </div>
+    </div></ObjectReferenceProvider>
   );
 }

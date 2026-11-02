@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 
-from scripts.release.assets import embed_client_runtime
+from scripts.release.assets import client_runtime_resources, default_runtime_cache, embed_client_runtime
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -15,7 +15,7 @@ _REVISION = re.compile(r"^[0-9a-f]{40}$")
 
 
 def ensure_client_runtime(
-    *, app: Path, version: str, source_revision: str,
+    *, app: Path, version: str, source_revision: str, cache_dir: Path | None = None,
 ) -> bool:
     # Validate before the fast path.  A malformed receipt must never be
     # accepted merely because it happens to carry the same malformed value;
@@ -23,7 +23,7 @@ def ensure_client_runtime(
     # error after packaging has already completed.
     if not _REVISION.fullmatch(source_revision):
         raise ValueError("runtime source revision must be a full 40-character Git revision")
-    resources = app / "Contents" / "Resources" / "FactorTester"
+    resources = client_runtime_resources(app)
     receipt_path = resources / "bundle-receipt.json"
     cli_path = resources / "bin" / "traderesearch"
     manager_cli_path = resources / "bin" / "traderesearch-manager"
@@ -47,6 +47,7 @@ def ensure_client_runtime(
         app,
         version=version,
         source_revision=source_revision,
+        cache_dir=cache_dir or default_runtime_cache(),
     )
     return True
 
@@ -56,6 +57,7 @@ def main() -> None:
     parser.add_argument("--app", required=True, type=Path)
     parser.add_argument("--version", required=True)
     parser.add_argument("--source-revision", required=True)
+    parser.add_argument("--cache-dir", type=Path)
     args = parser.parse_args()
     refreshed = ensure_client_runtime(**vars(args))
     print("refreshed" if refreshed else "reused")

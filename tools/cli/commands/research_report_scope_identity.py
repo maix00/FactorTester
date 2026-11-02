@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.release.research_reporting.authoring.tree_store import load_head
-from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
 from tools.cli.release.research_reporting.report_workspace_identity import (
     load_report_workspace_identity,
 )
@@ -77,6 +75,10 @@ def _scope(
     title = str(identity.get("title") or "")
     head_path = root / "branches" / branch_id / "authoring" / "HEAD.json"
     if head_path.is_file():
+        # Loading authoring at module import time cycles through the public
+        # publication client back to this scope resolver.
+        from tools.cli.release.research_reporting.authoring.tree_store import load_head
+        from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
         head = load_head(report_tree_paths(root, branch_id))
         if head["report_id"] != identity["report_id"]:
             raise ValueError("report branch identity does not match its workspace")

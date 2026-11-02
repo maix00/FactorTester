@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote
@@ -318,44 +317,7 @@ class PublicResearchRoutesMixin:
             self.wfile.write(raw)
             return True
         if parsed.path == "/api/research-publications/settings":
-            session = self._session()
-            if session is None:
-                json_response(self, {"success": False, "error": "login required"}, 401)
-                return True
-            owner = str(session["username"])
-            try:
-                reports = research.list_owner(owner)
-                server_research = getattr(self.state, "server_research", None)
-                if server_research is not None:
-                    published_report_ids = {
-                        str(item.get("report_id") or "")
-                        for item in reports
-                        if isinstance(item, dict)
-                    }
-                    reports.extend(
-                        item for item in server_research.list_owner(owner)
-                        if str(item.get("report_id") or "") not in published_report_ids
-                    )
-                catalog_reports = {
-                    str(item.get("report_id") or ""): item
-                    for item in self.state.research_catalog.list_reports_for_scope(
-                        viewer=owner, scope="mine",
-                    )
-                }
-                for report in reports:
-                    policy = catalog_reports.get(str(report.get("report_id") or ""))
-                    if policy is None:
-                        continue
-                    report.update(
-                        research_id=str(policy.get("research_id") or ""),
-                        visibility=str(policy.get("visibility") or "private"),
-                        authorized_users=list(policy.get("authorized_users") or []),
-                    )
-            except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 503)
-                return True
-            json_response(self, {
-                "reports": reports,
-            })
+            json_response(self, {"success": False, "code": "legacy_research_publication_retired",
+                                 "error": "Use Keycloak Research sharing and CouchDB report sync"}, 410)
             return True
         return False

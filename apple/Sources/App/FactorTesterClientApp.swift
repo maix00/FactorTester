@@ -28,6 +28,9 @@ struct FactorTesterClientApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(FTClientAppDelegate.self)
     private var appDelegate
+    #else
+    @UIApplicationDelegateAdaptor(DeviceOrientationAppDelegate.self)
+    private var appDelegate
     #endif
     @StateObject private var config = ServerConfig.shared
     @StateObject private var managerConfig = ManagerConfig.shared
@@ -111,8 +114,12 @@ struct FactorTesterClientApp: App {
             .onOpenURL { url in
                 updates.handleUpdateCommand(url)
             }
+            .task {
+                if AppRuntimePolicy.shouldLoadUserState() { RetiredPasswordCredentials.remove() }
+            }
             #if os(macOS)
             .task {
+                guard AppRuntimePolicy.shouldLoadUserState() else { return }
                 Task { await updates.checkAtLaunch() }
                 do {
                     try await BundledRuntimeActivator.run()

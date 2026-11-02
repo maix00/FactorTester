@@ -1,6 +1,17 @@
 import SwiftUI
 import WebKit
 
+enum WebNavigationFailure {
+    /// WebKit reports an interrupted load when a navigation is deliberately
+    /// cancelled or replaced by a policy decision. Do not overwrite a real
+    /// HTTP access error or cover a succeeding authentication redirect.
+    static func isExpectedInterruption(_ error: Error) -> Bool {
+        let value = error as NSError
+        return (value.domain == NSURLErrorDomain && value.code == NSURLErrorCancelled)
+            || (value.domain == "WebKitErrorDomain" && value.code == 102)
+    }
+}
+
 /// A tab may retain a WebView while it is in the small session cache.  The
 /// cache is bounded by `ClientTabSessionStore`; evicted tabs keep their route
 /// and lightweight Swift state but release the WebContent process.
@@ -37,7 +48,16 @@ final class WebPageSession {
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientWebAuthenticationMessage.handlerName
         )
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: ManagerConnectionBridgeContract.messageName
+        )
+        #if os(iOS)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: DeviceOrientationBridge.name)
+        #endif
         #if os(macOS)
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: LocalResearchBridgeContract.messageName
+        )
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientLocalCatalogBridgeContract.messageName
         )
@@ -128,6 +148,7 @@ struct WebPageView: View {
                     visitorID: externalURL == nil
                         ? VisitorIdentityStore.current() : "",
                     webSession: activeWebSession,
+                    localResearchSession: externalURL == nil ? session : nil,
                     allowsLocalCatalog: externalURL == nil
                         && (presentation == .standalone
                             || ClientLocalCatalogBridgeContract.allowsEmbeddedPage(
@@ -294,6 +315,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let visitorID: String
     let webSession: WebPageSession?
     let allowsLocalCatalog: Bool
+    let localResearchSession: SessionStore?
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
     let onNavigation: ((String) -> Void)?
     let onExternalURL: ((URL) -> Void)?
@@ -311,6 +333,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         clientAccess: Bool = false,
         visitorID: String = "",
         webSession: WebPageSession? = nil,
+        localResearchSession: SessionStore? = nil,
         allowsLocalCatalog: Bool = false,
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
         onNavigation: ((String) -> Void)? = nil,
@@ -330,6 +353,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.clientAccess = clientAccess
         self.visitorID = visitorID
         self.webSession = webSession
+        self.localResearchSession = localResearchSession
         self.allowsLocalCatalog = allowsLocalCatalog
         self.onReference = onReference
         self.onNavigation = onNavigation
@@ -366,7 +390,32 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ClientWebAuthenticationMessage.handlerName
             )
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: ManagerConnectionBridgeContract.messageName
+            )
+            #if os(iOS)
+            existing.configuration.userContentController.removeScriptMessageHandler(forName: DeviceOrientationBridge.name)
+            if let serverOrigin {
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    DeviceOrientationBridge(endpoint: serverOrigin), contentWorld: .page, name: DeviceOrientationBridge.name)
+            }
+            #endif
+            if let localResearchSession, let serverOrigin {
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    ManagerConnectionBridge(session: localResearchSession, endpoint: serverOrigin),
+                    contentWorld: .page, name: ManagerConnectionBridgeContract.messageName
+                )
+            }
             #if os(macOS)
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: LocalResearchBridgeContract.messageName
+            )
+            if let localResearchSession, let serverOrigin {
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    LocalResearchBridge(session: localResearchSession, endpoint: serverOrigin),
+                    contentWorld: .page, name: LocalResearchBridgeContract.messageName
+                )
+            }
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ClientLocalCatalogBridgeContract.messageName
             )
@@ -408,7 +457,25 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             return existing
         }
         let configuration = WKWebViewConfiguration()
+        #if os(iOS)
+        if let serverOrigin {
+            configuration.userContentController.addScriptMessageHandler(
+                DeviceOrientationBridge(endpoint: serverOrigin), contentWorld: .page, name: DeviceOrientationBridge.name)
+        }
+        #endif
+        if let localResearchSession, let serverOrigin {
+            configuration.userContentController.addScriptMessageHandler(
+                ManagerConnectionBridge(session: localResearchSession, endpoint: serverOrigin),
+                contentWorld: .page, name: ManagerConnectionBridgeContract.messageName
+            )
+        }
         #if os(macOS)
+        if let localResearchSession, let serverOrigin {
+            configuration.userContentController.addScriptMessageHandler(
+                LocalResearchBridge(session: localResearchSession, endpoint: serverOrigin),
+                contentWorld: .page, name: LocalResearchBridgeContract.messageName
+            )
+        }
         if allowsLocalCatalog {
             configuration.userContentController.addScriptMessageHandler(
                 ClientLocalCatalogBridge(),
@@ -505,7 +572,16 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientWebAuthenticationMessage.handlerName
         )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: ManagerConnectionBridgeContract.messageName
+        )
+        #if os(iOS)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: DeviceOrientationBridge.name)
+        #endif
         #if os(macOS)
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: LocalResearchBridgeContract.messageName
+        )
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientLocalCatalogBridgeContract.messageName
         )
@@ -569,14 +645,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         // or this scoped session cookie.
         if !sessionToken.isEmpty {
             let managerURL = serverOrigin ?? url
-            if let host = managerURL.host,
-               let cookie = HTTPCookie(properties: [
-                   .domain: host,
-                   .path: "/",
-                   .name: "ft-manager-session",
-                   .value: sessionToken,
-                   .secure: managerURL.scheme == "https" ? "TRUE" : "FALSE",
-               ]) {
+            if let cookie = WebSessionCookieSynchronizer.makeSessionCookie(
+                token: sessionToken, endpoint: managerURL
+            ) {
                 await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
             }
         }
@@ -636,12 +707,16 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            let origin = message.frameInfo.securityOrigin
             if message.name == ClientWebAuthenticationMessage.handlerName,
-               let action = ClientWebAuthenticationMessage.action(
-                   from: message.body
+               let action = ClientWebAuthenticationMessage.authorizedAction(
+                   from: message.body, isMainFrame: message.frameInfo.isMainFrame,
+                   scheme: origin.protocol, host: origin.host, port: origin.port,
+                   endpoint: serverOrigin, currentEndpoint: ManagerConfig.shared.baseURL
                ) {
                 DispatchQueue.main.async { [weak self] in
-                    self?.onAuthentication?(action)
+                    guard let self, self.serverOrigin == ManagerConfig.shared.baseURL else { return }
+                    self.onAuthentication?(action)
                 }
                 return
             }
@@ -734,6 +809,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             didFail navigation: WKNavigation!,
             withError error: Error
         ) {
+            guard !WebNavigationFailure.isExpectedInterruption(error) else { return }
             loadError = error.localizedDescription
         }
 
@@ -742,6 +818,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: Error
         ) {
+            guard !WebNavigationFailure.isExpectedInterruption(error) else { return }
             loadError = error.localizedDescription
         }
 

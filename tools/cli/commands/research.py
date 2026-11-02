@@ -1312,7 +1312,7 @@ def job_artifact(job_id: str, name: str, output: Path) -> None:
     "--output",
     required=False,
     type=click.Path(file_okay=False, path_type=Path),
-    help="写入本地目录；省略时写入 ~/Documents/FactorTester/jobs/<job_id>。",
+    help="写入本地目录；省略时写入 TradeResearch 文档目录的 jobs/<job_id>。",
 )
 @friendly_errors
 def job_download_all(job_id: str, output: Path | None) -> None:

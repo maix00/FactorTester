@@ -54,7 +54,7 @@ def build_run_spec_session_calendar(*, catalogs: dict[str, dict[str, str]]) -> A
 
 def stage_run_spec_catalogs(
     *, staging_requests: list[dict[str, Any]], source_key: str, frequency: str,
-    start_utc: str, end_utc: str, target_root: Path,
+    start_utc: str, end_utc: str, target_root: Path, max_input_bars: int | None = None,
 ) -> dict[str, dict[str, str]]:
     """Select one installed source-owned loader before any plugin activation."""
     matches = [(bundle, member) for bundle in installed_bundles()
@@ -94,5 +94,5 @@ def stage_run_spec_catalogs(
         member_id=member.id,
         related_members=tuple(member.related_members),
         staging_requests=requests, start_utc=start_utc, end_utc=end_utc,
-        start_ns=start_ns, end_ns=end_ns, target_root=target_root,
+        start_ns=start_ns, end_ns=end_ns, target_root=target_root, max_input_bars=max_input_bars,
     ))

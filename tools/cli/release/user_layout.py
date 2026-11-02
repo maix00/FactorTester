@@ -1,4 +1,4 @@
-"""Current principal-scoped FactorTester filesystem contract."""
+"""Current principal-scoped TradeResearch filesystem contract."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 from typing import Any
+from tools.cli.local_paths import documents_root
 
 from .factor_worktree import CanonicalFactorRepoStore
 from .local_profile import LocalProfileStore
@@ -26,7 +27,7 @@ _GIT_ENV = {
 def default_user_root(principal_ref: str) -> Path:
     validate_principal_identifier(principal_ref, "principal_ref")
     return (
-        Path.home() / "Documents" / "FactorTester" / "users"
+        documents_root() / "users"
         / principal_ref
     )
 

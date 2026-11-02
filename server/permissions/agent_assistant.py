@@ -8,7 +8,9 @@ RESOURCE_REF = "global"
 ACTION = "use"
 
 
-def can_use_agent_assistant(username: str, role: str = "", keycloak_roles=()) -> bool:
-    """Require an explicit Keycloak client role; local roles never bypass it."""
-    del role
-    return bool(str(username or "").strip()) and f"{RESOURCE_TYPE}:{ACTION}" in keycloak_roles
+def can_use_agent_assistant(session: object, *, public_server: bool) -> bool:
+    """Require the live Keycloak role for this Manager's execution location."""
+    from server.identity.server_admission import current_manager_role
+
+    location = "public" if public_server else "internal"
+    return current_manager_role(session, f"{RESOURCE_TYPE}:{location}:{ACTION}")

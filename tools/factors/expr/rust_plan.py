@@ -128,6 +128,27 @@ class _PlanBuilder:
                 day_values = day_values.normalize()
             self.days = pd.factorize(day_values, sort=False)[0].astype(np.int64)
         self.base = self.grid(index, np.arange(len(index), dtype=np.int64))
+        self._session_calendar_indices = None
+
+    def session_calendar_indices(self):
+        """Freeze one compact session calendar for every node in the plan."""
+        if self._session_calendar_indices is None:
+            timeline = self.ctx.panel_timeline
+            if timeline is None or not timeline.index.equals(self.index):
+                raise ValueError('session rolling requires a timeline matching the source grid')
+            days = np.asarray(self.days)
+            if not len(days) or np.any(days < 0):
+                raise ValueError('session rolling requires trading-day labels')
+            starts = np.r_[0, np.flatnonzero(days[1:] != days[:-1]) + 1]
+            ends = np.r_[starts[1:], len(days)]
+            if len(np.unique(days[starts])) != len(starts):
+                raise ValueError('session rolling requires contiguous trading-day labels')
+            times = timeline.times_ns
+            indices = [len(starts)]
+            for start, end in zip(starts, ends):
+                indices.extend([int(times[start]), int(times[end - 1]), int(end - start)])
+            self._session_calendar_indices = indices
+        return self._session_calendar_indices
 
     def input(self, values) -> int:
         self.inputs.append(np.ascontiguousarray(values, dtype=float).reshape(-1))
@@ -344,34 +365,32 @@ class _PlanBuilder:
             children = [self.build(c) for c in expr.operands[expr._data_start:expr._data_start + expr._n_data]]
             grid, signal = self.common(children)
             children = [self.align(c, grid) for c in children]
-            if isinstance(expr, RollingOp) and type(expr.window).__name__ == "WindowBarsExpr":
+            session_window = False
+            if isinstance(expr, RollingOp):
                 timeline = getattr(self.ctx, "panel_timeline", None)
-                value = expr.window.window.value
-                if timeline is not None and isinstance(value, str) and value.strip().lower().endswith("d"):
-                    lookback = int(value.strip().lower().removesuffix("d"))
-                    days = pd.Index(timeline.trading_days)
-                    groups: dict[object, list[int]] = {}
-                    for row, day in enumerate(days):
-                        groups.setdefault(day, []).append(row)
-                    indices = [len(groups)]
-                    for rows in groups.values():
-                        indices.extend([
-                            int(timeline.index[rows[0]].value),
-                            int(timeline.index[rows[-1]].value),
-                            len(rows),
-                        ])
+                window = expr.window.window if isinstance(expr.window, WindowBarsExpr) else expr.window
+                value = window.value if isinstance(window, ConstExpr) else None
+                duration = pd.Timedelta(value) if isinstance(value, (str, pd.Timedelta)) else None
+                if duration is not None and duration >= pd.Timedelta(days=1) and timeline is not None:
+                    if duration % pd.Timedelta(days=1):
+                        raise ValueError('session window must contain whole trading days')
+                    if expr._n_data != 1 or expr.trunc_start is not None or expr.trunc_end is not None:
+                        raise ValueError('session rolling does not support multiple inputs or truncation')
+                    lookback = int(duration / pd.Timedelta(days=1))
+                    indices = self.session_calendar_indices()
                     minimum = expr._min_periods_value(1)
                     params = [lookback, minimum,
                               float(expr.nan_policy.value == 'propagate'),
                               0.5 if expr.quantile is None else float(expr.quantile)]
-                    return self.add(
+                    result = self.add(
                         'session_rolling:' + expr.op.removeprefix('rolling_'),
                         children, params, indices, grid=grid, signal=signal,
                         columns=children[0].columns,
                     )
-                else:
-                    raise TypeError('250d rolling requires panel timeline')
-            elif isinstance(expr, RollingOp):
+                    session_window = True
+                elif isinstance(expr.window, WindowBarsExpr):
+                    raise TypeError('trading-day rolling requires panel timeline')
+            if isinstance(expr, RollingOp) and not session_window:
                 if not isinstance(expr.window, ConstExpr):
                     raise TypeError('rolling window must resolve to a constant')
                 common, count, _ = _resolve_windows(expr.window.value, self.ctx.freq, self.products)
@@ -380,19 +399,17 @@ class _PlanBuilder:
                 scope = (0, count, 0)
                 minimum = expr._min_periods_value(count)
                 quantile = expr.quantile
-            elif isinstance(expr, RollingOp):
-                scope = (0, 0, 0); minimum = 1; quantile = None
-            else:
+            elif isinstance(expr, GroupByScopeOp):
                 scope = self.scope(expr.scope)
                 minimum = expr.min_periods if expr.min_periods is not None else 1
                 quantile = expr.quantile_value
                 if isinstance(quantile, ConstExpr):
                     quantile = quantile.value
-            start = float(expr.trunc_start.value) if isinstance(expr.trunc_start, ConstExpr) else -1.0
-            end = float(expr.trunc_end.value) if isinstance(expr.trunc_end, ConstExpr) else -1.0
-            params = [*scope, minimum, float(expr.nan_policy.value == 'propagate'),
-                      0.5 if quantile is None else float(quantile), start, end]
-            if not (isinstance(expr, RollingOp) and type(expr.window).__name__ == "WindowBarsExpr"):
+            if not session_window:
+                start = float(expr.trunc_start.value) if isinstance(expr.trunc_start, ConstExpr) else -1.0
+                end = float(expr.trunc_end.value) if isinstance(expr.trunc_end, ConstExpr) else -1.0
+                params = [*scope, minimum, float(expr.nan_policy.value == 'propagate'),
+                          0.5 if quantile is None else float(quantile), start, end]
                 result = self.add(('rolling:' if isinstance(expr, RollingOp) else 'scope:') + expr.op.removeprefix('rolling_'),
                                   children, params, grid=grid, signal=signal, columns=children[0].columns)
         elif isinstance(expr, CrossSectionalOp):

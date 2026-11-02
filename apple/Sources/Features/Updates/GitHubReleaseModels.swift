@@ -16,8 +16,10 @@ struct GitHubRelease: Decodable {
     }
 
     var installer: GitHubReleaseAsset? {
-        let matches = assets.filter { $0.name == "FactorTester-Client.dmg" }
-        return matches.count == 1 ? matches[0] : nil
+        let current = assets.filter { $0.name == "TradeResearch.dmg" }
+        if !current.isEmpty { return current.count == 1 ? current[0] : nil }
+        let legacy = assets.filter { $0.name == "FactorTester-Client.dmg" }
+        return legacy.count == 1 ? legacy[0] : nil
     }
 }
 

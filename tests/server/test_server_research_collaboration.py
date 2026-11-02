@@ -370,13 +370,12 @@ def test_export_route_streams_attachment_and_maps_errors():
     assert handler.status == 501
 
 
-def test_data_plane_research_asset_reuses_catalog_without_control_database(tmp_path, png_bytes):
+def test_research_asset_library_uses_explicit_policy_without_control_database(tmp_path, png_bytes):
     import base64
     import hashlib
-    from server.manager.data_plane.app import research_read_authorizer
     from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
     from tools.cli.release.research_reporting.public_research.object_store import PublicResearchObjectStore
-    catalog = _service(tmp_path).research_catalog
+    allowed = {READER}
     library = PublicResearchLibrary(tmp_path / "public-research")
     asset_id = "a" * 24
     projection = {"schema_version": 2, "report_id": "report-one-editor", "title": "共享报告",
@@ -387,10 +386,9 @@ def test_data_plane_research_asset_reuses_catalog_without_control_database(tmp_p
     publication = library.sync({"report_id": "report-one-editor", "owner_ref": EDITOR_A,
                                "projection": projection})["publication_id"]
     byte_library = PublicResearchLibrary(library.root,
-        read_authorizer=research_read_authorizer(str(catalog.db_path)))
+        read_authorizer=lambda _record, viewer: viewer in allowed)
     objects = PublicResearchObjectStore(byte_library)
     assert objects.resolve(publication, "research_asset", asset_id, READER).path.read_bytes() == png_bytes
-    research = catalog.list_researches(viewer=EDITOR_A)[0]
-    catalog.update_research(research["research_id"], actor=EDITOR_A, authorized_users=[])
+    allowed.clear()
     with pytest.raises(PermissionError):
         objects.resolve(publication, "research_asset", asset_id, READER)

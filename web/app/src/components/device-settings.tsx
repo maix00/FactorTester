@@ -1,13 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Input, Popconfirm, Segmented, Select, Tag } from "antd";
+import { Button, Input, Popconfirm, Segmented, Select, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { ObjectReference } from "./object-reference.tsx";
+import { objectReferenceLabel } from "../object-reference.ts";
 import { request } from "../configuration/api.ts";
 import { notify } from "../notifications/core.ts";
 import { devicePlatform, DEVICE_PLATFORMS, type DevicePlatform } from "../device-platform.ts";
+import { deviceAuthorizationState } from "../device-authorization.ts";
 import { DetailsPanel } from "./details-panel.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
 import { TRDataTable } from "./data-table.tsx";
+import { managerBridge, type ManagerClient } from "../manager-bridge.ts";
 
 type Device = Record<string, any>;
 type DirectoryUser = { username: string; alias?: string; organization_name?: string; level_id?: string };
@@ -15,7 +19,6 @@ type DirectoryUser = { username: string; alias?: string; organization_name?: str
 export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" }): React.ReactElement {
   const { t } = useTranslation();
   const [devices, setDevices] = useState<Device[]>([]);
-  const [publicServer, setPublicServer] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -31,6 +34,20 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
   const [pending, setPending] = useState("");
   const [selectedID, setSelectedID] = useState("");
   const mutation = useRef<AbortController | null>(null);
+  const nativeBridge = useRef<ManagerClient | null>(null);
+  const [nativeEnrollment, setNativeEnrollment] = useState(false);
+
+  useEffect(() => {
+    if (scope !== "self") return;
+    const client = managerBridge(window);
+    if (!client) return;
+    let active = true;
+    nativeBridge.current = client;
+    void client.capabilities().then(() => client.current()).then(connection => {
+      if (active) setNativeEnrollment(connection.auth_state === "authorized" && client.supports("enroll_device"));
+    }).catch(() => { if (active) setNativeEnrollment(false); });
+    return () => { active = false; client.close(); if (nativeBridge.current === client) nativeBridge.current = null; };
+  }, [scope]);
 
   useEffect(() => () => mutation.current?.abort(), []);
   useEffect(() => {
@@ -60,12 +77,11 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [directoryQuery, scope]);
+  }, [directoryQuery, scope, revision]);
 
   useEffect(() => {
     if (scope === "admin" && !username) {
       setDevices([]);
-      setPublicServer(null);
       setLoading(false);
       setError("");
       return;
@@ -79,7 +95,6 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     void request(endpoint, { signal: controller.signal }).then(data => {
       if (controller.signal.aborted) return;
       setDevices(data.devices || []);
-      setPublicServer(scope === "admin" ? null : Boolean(data.public_server));
     }).catch(reason => {
       if (!controller.signal.aborted) setError(reason.message);
     }).finally(() => {
@@ -87,6 +102,12 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     });
     return () => controller.abort();
   }, [revision, scope, username]);
+  useEffect(() => {
+    if (error) notify({code:`${scope}.devices.load.failed`,type:"error",message:error});
+  }, [error, scope]);
+  useEffect(() => {
+    if (directoryError) notify({code:"admin.devices.directory.failed",type:"error",message:t("adminFunctions.directoryLoadFailed"),description:directoryError});
+  }, [directoryError, t]);
 
   const filtered = useMemo(() => {
     const text = query.trim().toLocaleLowerCase();
@@ -129,6 +150,20 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     }
   };
 
+  const enrollNative = async (): Promise<void> => {
+    const client = nativeBridge.current;
+    if (!client || pending || loading) return;
+    setPending("native-enrollment");
+    try {
+      await client.enrollDevice();
+      if (nativeBridge.current !== client) return;
+      notify({ code: "devices.native.enrolled", type: "success", message: t("devices.nativeEnrolled") });
+      setRevision(value => value + 1);
+    } catch {
+      if (nativeBridge.current === client) notify({ code: "devices.native.enroll.failed", type: "error", message: t("devices.nativeEnrollFailed") });
+    } finally { if (nativeBridge.current === client) setPending(""); }
+  };
+
   const selected = devices.find(device => device.device_id === selectedID);
   const currentPage = Math.min(page, Math.max(1, Math.ceil(filtered.length / size)));
   const options = DEVICE_PLATFORMS.map(value => ({
@@ -142,24 +177,14 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     }
     return rows.map(user => ({
       value: user.username,
-      label: <span>{user.alias || user.username}<small className="tr-device-user-meta">
-        {user.organization_name || user.level_id || user.username}
+      label: <span>{objectReferenceLabel({kind:"user",ref:user.username,label:user.alias},null)}<small className="tr-device-user-meta">
+        {user.organization_name || user.level_id || ""}
       </small></span>,
       searchText: `${user.username} ${user.alias || ""} ${user.organization_name || ""}`.toLocaleLowerCase(),
     }));
   }, [directoryUsers, username]);
 
   return <section className="tr-device-settings" aria-label={t("settingsPanel.sections.devices")}>
-    {scope === "admin" ? <Alert type="info" showIcon
-      message={t("adminFunctions.devicesTitle")}
-      description={username
-        ? t("adminFunctions.devicesHint", { username, devices: devices.length })
-        : t("adminFunctions.devicesSelectUserHint")} /> : <Alert
-      type="info"
-      showIcon
-      message={t(publicServer === false ? "devices.internalPolicy" : "devices.publicPolicy")}
-      description={t(publicServer === false ? "devices.internalHint" : "devices.publicHint")}
-    />}
     <div className="tr-device-controls">
       <Input.Search allowClear aria-label={t(scope === "admin" ? "adminFunctions.searchDevices" : "devices.search")}
         placeholder={t(scope === "admin" ? "adminFunctions.searchDevices" : "devices.search")}
@@ -178,7 +203,11 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
         options={userOptions}
         notFoundContent={directoryLoading ? t("loading") : t("adminFunctions.noUsersInScope")}
         style={{ minWidth: 260, flex: "1 1 280px" }} /> : null}
-      <Button icon={<ReloadOutlined />} aria-label={t("configuration.reload")}
+      {nativeEnrollment ? <Popconfirm title={t("devices.nativeEnrollConfirm")} onConfirm={enrollNative}
+        okText={t("devices.nativeEnroll")} cancelText={t("configuration.cancel")}>
+        <Button className="tr-device-register" loading={pending === "native-enrollment"} disabled={loading || !!pending}>{t("devices.nativeEnroll")}</Button>
+      </Popconfirm> : null}
+      <Button className="tr-device-reload" icon={<ReloadOutlined />} aria-label={t("configuration.reload")}
         onClick={() => setRevision(value => value + 1)} disabled={!!pending} />
     </div>
     <div className="tr-device-filter-row" role="group" aria-label={t("devices.platform")}>
@@ -186,26 +215,23 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
         onChange={value => { setPlatform(value); setPage(1); }} />
       <span className="tr-device-count">{t("total", { count: filtered.length })}</span>
     </div>
-    {error ? <Alert type="error" showIcon message={error}
-      action={<Button onClick={() => setRevision(value => value + 1)}>{t("retry")}</Button>} /> : null}
-    {scope === "admin" && directoryError ? <Alert type="error" showIcon
-      message={t("adminFunctions.directoryLoadFailed")} description={directoryError} /> : null}
     <TRDataTable rows={filtered} rowKey="device_id" loading={loading} empty={t("devices.empty")}
       pagination={{ page: currentPage, pageSize: size, total: filtered.length, hideOnSinglePage: true,
         onChange: (value, pageSize) => { setPage(value); setSize(pageSize); } }}
       columns={[
-        ...(scope === "admin" ? [{ key: "username", title: t("adminFunctions.user"), dataIndex: "username" }] : []),
+        ...(scope === "admin" ? [{ key: "username", title: t("adminFunctions.user"), render: (_: unknown, device: Device) => device.username ? <ObjectReference value={{kind:"user",ref:device.username}} /> : "—" }] : []),
         { key: "name", title: t("devices.name"), render: (_, device) => <div>
           <button className="tr-table-link" onClick={() => setSelectedID(device.device_id)}>{device.device_name || device.device_id}</button>
           <small className="tr-job-mobile-meta">{device.device_id}</small>
         </div> },
-        { key: "client", title: t("devices.client"), render: (_, device) => <div className="tr-device-client">
-          <Tag>{t(`devices.platforms.${devicePlatform(device)}`)}</Tag>
-          <span>{device.client_name || t(`devices.clients.${device.client_type}`, { defaultValue: device.client_type || "—" })}</span>
-        </div> },
+        { key: "client", title: t("devices.client"), render: (_, device) => {
+          const platformName = t(`devices.platforms.${devicePlatform(device)}`);
+          const clientName = device.client_name || t(`devices.clients.${device.client_type}`, { defaultValue: device.client_type || "" });
+          return <div className="tr-device-client"><Tag>{platformName}</Tag>{clientName && clientName !== platformName ? <span>{clientName}</span> : null}</div>;
+        } },
         { dataIndex: "enrollment_ip", title: t("devices.enrollmentIP"), responsive: ["md"] },
         { dataIndex: "last_seen_ip", title: t("devices.lastIP"), responsive: ["md"] },
-        { key: "state", title: t("jobs.status"), render: (_, device) => <Tag color={device.enabled ? "green" : "default"}>{t(device.enabled ? "devices.active" : "devices.revoked")}</Tag> },
+        { key: "state", title: t("jobs.status"), render: (_, device) => { const status=deviceAuthorizationState(device,scope); return <Tag color={status === "active" ? "green" : status === "authorizationDenied" ? "orange" : "default"}>{t(`devices.${status}`)}</Tag>; } },
         { key: "revoke", title: t("devices.action"), render: (_, device) => device.enabled ?
           <Popconfirm title={t("devices.revokeConfirm")} description={device.device_name || device.device_id}
             onConfirm={() => revoke(device)} okText={t("devices.revoke")} cancelText={t("configuration.cancel")}>
@@ -220,7 +246,7 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
         { key: "last", label: t("devices.lastIP"), value: selected.last_seen_ip },
         { key: "fingerprint", label: t("devices.fingerprint"), value: selected.public_key_fingerprint },
         { key: "source", label: t("devices.source"), value: selected.source_server_id },
-        { key: "state", label: t("jobs.status"), value: t(selected.enabled ? "devices.active" : "devices.revoked") },
+        { key: "state", label: t("jobs.status"), value: t(`devices.${deviceAuthorizationState(selected,scope)}`) },
       ] }]} />
     </DetailsPanel> : null}
   </section>;

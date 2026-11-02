@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="FTClient"
+APP_NAME="TradeResearch"
 BUNDLE_ID="com.gtht.client"
 SIGNING_IDENTITY="${FTCLIENT_SIGNING_IDENTITY:-FTClient Beta Release}"
 
@@ -18,7 +18,7 @@ export DEVELOPER_DIR
 
 # Xcode gives every worktree/test invocation its own DerivedData directory.
 # Those Debug app bundles are discoverable by Spotlight and look like many
-# installed clients even though only /Applications/FTClient.app is released.
+# installed clients even though only /Applications/TradeResearch.app is released.
 # Keep the cleanup exact to this project's generated directories; never clean
 # arbitrary DerivedData or the release output owned by this script.
 cleanup_stale_debug_artifacts() {
@@ -167,10 +167,10 @@ verify_install() {
     echo "refusing to install an older client build: $source_build < $installed_build" >&2
     return 1
   fi
-  local cli="Contents/Resources/FactorTester/bin/traderesearch"
-  local manager_cli="Contents/Resources/FactorTester/bin/traderesearch-manager"
-  local report_renderer="Contents/Resources/FactorTester/bin/traderesearch-report-renderer"
-  local receipt="Contents/Resources/FactorTester/bundle-receipt.json"
+  local cli="Contents/Resources/TradeResearch/bin/traderesearch"
+  local manager_cli="Contents/Resources/TradeResearch/bin/traderesearch-manager"
+  local report_renderer="Contents/Resources/TradeResearch/bin/traderesearch-report-renderer"
+  local receipt="Contents/Resources/TradeResearch/bundle-receipt.json"
   test -x "$installed/$cli"
   test -x "$installed/$manager_cli"
   test -x "$installed/$report_renderer"
@@ -186,7 +186,7 @@ verify_install() {
 import hashlib, json, pathlib, sys
 import re
 app = pathlib.Path(sys.argv[1])
-root = app / "Contents/Resources/FactorTester"
+root = app / "Contents/Resources/TradeResearch"
 receipt = json.loads((root / "bundle-receipt.json").read_text())
 cli = root / "bin/traderesearch"
 manager_cli = root / "bin/traderesearch-manager"
@@ -205,7 +205,7 @@ PY
 
 install_app() {
   STAGING_PATH="/Applications/.$APP_NAME.staging.$$"
-  test -f "$APP_BUNDLE/Contents/Resources/FactorTester/bundle-receipt.json"
+  test -f "$APP_BUNDLE/Contents/Resources/TradeResearch/bundle-receipt.json"
   require_same_identity "$APP_BUNDLE" "$INSTALLED_APP"
   rm -rf "$STAGING_PATH"
   ditto "$APP_BUNDLE" "$STAGING_PATH"

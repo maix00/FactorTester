@@ -97,3 +97,24 @@ def test_admin_adapter_migration_update_preserves_unrelated_attributes_and_crede
     assert payload["attributes"]["other"] == ["preserve"]
     assert "credentials" not in payload
     assert payload["email"] == "alice@example.test"
+
+
+def test_user_lookup_handles_unavailable_organization_endpoint_without_name_error():
+    from urllib.error import HTTPError
+    import pytest
+
+    class MissingOrganizations(Fake):
+        def __init__(self, status):
+            super().__init__()
+            self.status = status
+        def _get(self, path):
+            if path == "organizations":
+                raise HTTPError("http://keycloak", self.status, "unavailable", {}, None)
+            return super()._get(path)
+
+    for status in (403, 404):
+        identity = MissingOrganizations(status).user("alice")
+        assert identity.groups == ("/team/a",)
+        assert identity.organizations == ()
+    with pytest.raises(HTTPError):
+        MissingOrganizations(500).user("alice")

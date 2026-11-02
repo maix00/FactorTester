@@ -5,6 +5,29 @@ from pathlib import Path
 from tools.cli.http import ClientConfig, HttpSession, cookie_path_for
 
 
+def test_changing_manager_clears_workspace_without_copying_credentials(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+
+    from tools.cli.commands.auth import configure
+    from tools.cli.http import save_config
+    from tools.cli.state import CliState, load_state, save_state
+
+    monkeypatch.setenv('FACTORTESTER_CONFIG', str(tmp_path / 'config.json'))
+    monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path / 'home'))
+    previous, target = 'https://old.example:7998', 'https://new.example:7998'
+    save_config(ClientConfig(previous))
+    save_state(CliState(current_parent='research', stack=['home'], workspace_id='old', configuration_revision=7))
+    old_cookie = cookie_path_for(previous)
+    old_cookie.parent.mkdir(parents=True)
+    old_cookie.write_text('old session')
+    result = CliRunner().invoke(configure, ['--base-url', target])
+    assert result.exit_code == 0, result.output
+    state = load_state()
+    assert state.current_parent is None and state.workspace_id == '' and state.configuration_revision == 0
+    assert old_cookie.read_text() == 'old session'
+    assert not cookie_path_for(target).exists()
+
+
 def test_cli_service_port_selection_does_not_rewrite_manager_origin(
     monkeypatch, tmp_path,
 ) -> None:
@@ -36,6 +59,7 @@ def test_configure_reuses_native_selected_server_without_guessing_port(tmp_path,
     from tools.cli.commands.auth import configure
     from tools.cli.http import save_config, load_config
     monkeypatch.setenv('FACTORTESTER_CONFIG', str(tmp_path / 'config.json'))
+    monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path / 'home'))
     save_config(ClientConfig('https://manager.example:9443'))
     result = CliRunner().invoke(configure, [])
     assert result.exit_code == 0
@@ -50,6 +74,7 @@ def test_native_selection_is_a_fallback_and_explicit_config_remains_authoritativ
     from tools.cli.http import load_config, native_selection_path, save_native_selection
 
     monkeypatch.setenv('FACTORTESTER_CONFIG', str(tmp_path / 'config.json'))
+    monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path / 'home'))
     save_native_selection(ClientConfig('https://native.example:7998'))
     assert load_config().base_url == 'https://native.example:7998'
     assert not (tmp_path / 'config.json').exists()
@@ -129,3 +154,24 @@ def test_session_rejects_cross_origin_urls_and_redirects(tmp_path, monkeypatch):
     with pytest.raises(HTTPError, match='cross-origin'):
         _OriginBoundRedirect().redirect_request(Request('https://manager.example:9443/api/me'), None, 302,
             'found', {}, 'https://other.example/api/me')
+
+
+def test_native_manager_selection_resets_only_when_cli_follows_it(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+    from tools.cli.commands.client_profile import client_profile
+    from tools.cli.http import ClientConfig, save_config, load_config
+    from tools.cli.state import CliState, save_state, load_state
+    monkeypatch.setenv('TRADERESEARCH_CONFIG', str(tmp_path / 'config.json'))
+    monkeypatch.setenv('TRADERESEARCH_HOME', str(tmp_path / 'home'))
+    runner = CliRunner()
+    assert runner.invoke(client_profile, ['select-manager', '--server-url', 'https://first.test:7998']).exit_code == 0
+    save_state(CliState(workspace_id='old-workspace', configuration_revision=3))
+    assert runner.invoke(client_profile, ['select-manager', '--server-url', 'https://next.test:7998']).exit_code == 0
+    assert load_config().base_url == 'https://next.test:7998'
+    assert load_state().workspace_id == ''
+    save_config(ClientConfig('https://explicit.test:7998'))
+    save_state(CliState(workspace_id='explicit-workspace', configuration_revision=7))
+    assert runner.invoke(client_profile, ['select-manager', '--server-url', 'https://third.test:7998']).exit_code == 0
+    assert load_config().base_url == 'https://explicit.test:7998'
+    assert load_state().workspace_id == 'explicit-workspace'
+    assert runner.invoke(client_profile, ['select-manager', '--server-url', 'https://user:password@test.invalid']).exit_code != 0

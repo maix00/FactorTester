@@ -38,6 +38,8 @@ final class ManagerConfig: ObservableObject {
         didSet { UserDefaults.standard.set(serverID, forKey: Keys.serverID) }
     }
     @Published private(set) var selectionSource: SelectionSource
+    /// A one-use Keycloak handoff is kept in memory, never UserDefaults.
+    @Published private(set) var pendingDeviceLogin: URL?
 
     private init() {
         let defaults = UserDefaults.standard
@@ -87,6 +89,17 @@ final class ManagerConfig: ObservableObject {
     var isValid: Bool {
         baseURL != nil && (isPrivateNetwork || scheme == "https")
     }
+
+    func queueDeviceLogin(_ url: URL, for endpoint: URL) {
+        guard let current = baseURL,
+              ManagerConnectionBridgeContract.endpoint(current.absoluteString) ==
+                ManagerConnectionBridgeContract.endpoint(endpoint.absoluteString),
+              url.scheme?.lowercased() == endpoint.scheme?.lowercased(),
+              url.host?.lowercased() == endpoint.host?.lowercased(), url.port == endpoint.port else { return }
+        pendingDeviceLogin = url
+    }
+
+    func clearDeviceLogin() { pendingDeviceLogin = nil }
 
     /// Automatic mode is driven by the baked public seed and server-provided
     /// candidates. A manually entered single endpoint disables switching.

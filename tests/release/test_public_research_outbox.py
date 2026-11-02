@@ -156,31 +156,25 @@ def test_public_report_sync_marks_operation_complete_after_reconnect(
     assert client.outbox.load(operation_id)["manifest"]["state"] == "completed"
 
 
-def test_client_configures_one_uploaded_branch(monkeypatch, tmp_path: Path) -> None:
+def test_legacy_revocation_is_preserved_for_review_without_network(tmp_path, monkeypatch):
     client = PublicResearchClient(tmp_path, manager_url="http://manager.invalid")
-    requests = []
-
-    def request(method, path, **kwargs):
-        requests.append((method, path, kwargs["payload"]))
-        return {"success": True, "settings": {
-            "publication_id": "publication-branch-b",
-            "report_id": "report-1", "branch_ref": "branch-b",
-            "visibility": "authorized", "auto_sync": False,
-        }}
-
-    monkeypatch.setattr(client, "_request", request)
-    result = client.configure(
-        "publication-branch-b", visibility="authorized", auto_sync=False,
-        authorized_users=("GTHT@Reader@2",),
-    )
-
-    assert result["branch_ref"] == "branch-b"
-    assert requests == [("POST", "/api/research-publications/settings", {
-        "publication_id": "publication-branch-b",
-        "visibility": "authorized", "auto_sync": False,
-        "relay_local_files": False,
-        "authorized_users": ["GTHT@Reader@2"],
-    })]
+    import json
+    operation_id = "historical-revocation"
+    target = client.outbox.root / operation_id
+    target.mkdir(parents=True)
+    (target / "manifest.json").write_text(json.dumps({"schema_version": 1,
+        "operation_id": operation_id, "kind": "revoke", "state": "pending",
+        "publication_id": "publication-1", "attempts": 0, "created_at": 1,
+        "updated_at": 1, "last_error": ""}))
+    def forbidden(*args, **kwargs):
+        raise AssertionError("retired permission requests must not be sent")
+    monkeypatch.setattr(client, "_request", forbidden)
+    result = client.sync_pending(operation_id=operation_id)
+    assert result[0]["status"] == "conflict"
+    assert "Keycloak" in result[0]["error"]
+    assert client.outbox.load(operation_id)["manifest"]["state"] == "conflict"
+    assert not hasattr(client, "configure") and not hasattr(client, "unpublish")
+    assert not hasattr(client.outbox, "enqueue_revoke")
 
 
 def test_local_branch_publication_status_uses_complete_author_identity(tmp_path, monkeypatch):

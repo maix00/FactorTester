@@ -136,11 +136,12 @@ class SessionStateMixin:
 
 
     def session(self, token: str) -> dict[str, object] | None:
-        from server.identity.user_session import keycloak_session, may_login_public_server
+        from server.identity.user_session import keycloak_session
+        from server.identity.server_admission import server_admission
 
         identity = keycloak_session(token)
         if identity is not None:
-            if bool(getattr(self, "public_server", False)) and not may_login_public_server(identity):
+            if not server_admission(identity, state=self)[0]:
                 return None
             return identity
 

@@ -22,12 +22,6 @@ struct ManagerWorktree: Identifiable {
     }
 }
 
-protocol ManagerSessionAPI {
-    func login(username: String, password: String) async throws
-    func restoreSession() async throws -> Bool
-    func logout() async
-}
-
 enum ManagerAction: String {
     case start
     case stop
@@ -36,7 +30,7 @@ enum ManagerAction: String {
     case forceStop = "force-stop"
 }
 
-final class ManagerCLIClient: ManagerSessionAPI {
+final class ManagerCLIClient {
     static let shared = ManagerCLIClient()
 
     private var executable: String { ClientCLIResolution.managerExecutable() }
@@ -48,31 +42,6 @@ final class ManagerCLIClient: ManagerSessionAPI {
             "--host", host,
             "--port", port,
             "--json",
-        ], executable: executable)
-    }
-
-    func login(username: String, password: String) async throws {
-        _ = try await ReleaseCommand.runObject([
-            "login",
-            "--username", username,
-            "--credentials-stdin",
-            "--json",
-        ], executable: executable, stdinJSON: [
-            "username": username,
-            "password": password,
-        ])
-    }
-
-    func restoreSession() async throws -> Bool {
-        _ = try await ReleaseCommand.runObject([
-            "status", "--json",
-        ], executable: executable)
-        return true
-    }
-
-    func logout() async {
-        _ = try? await ReleaseCommand.runObject([
-            "logout", "--json",
         ], executable: executable)
     }
 

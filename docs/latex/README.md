@@ -23,6 +23,8 @@ python scripts/docs/build_project_pdf.py
 
 默认输出到 `.artifacts/docs-pdf/TradeResearch-project-docs.pdf`，不会提交 PDF 或
 临时转换文件。可用 `--output /path/to/file.pdf` 指定其他位置。
+本合集记录产品功能、架构、实现方式与通用运维方法。它不是一次变更的操作记录，
+不收录具体服务器的迁移方案、备份目录、对象数量、执行 SHA 或验收日志。
 
 ## 文档范围与准确性
 
@@ -37,12 +39,15 @@ python scripts/docs/build_project_pdf.py
 
 ## 图示与图例
 
-`figures.md` 是图示的权威源，使用 XeLaTeX/TikZ 绘制网络拓扑、身份层级、RunSpec
-执行链路和因子到交易结果的流程。每张图均带图注与图例；实线、虚线、颜色和禁用
-符号在合集内保持一致。图中虚线标为规划或待验收，不能当作当前已部署能力。
+`figures.md` 收录身份层级、RunSpec 执行链路和因子到交易结果的图。网络拓扑的唯一
+图源为 `network-topology.tex`：PDF 直接引用该图源，网页使用同一图源生成的静态 SVG
+（中、英文各一张）。修改拓扑后运行 `python scripts/docs/build_network_topology.py`
+更新网页图片；需要 XeLaTeX、Poppler 的 pdftocairo、TikZ、ctex 和 Font Awesome 5。
+如 `pdftocairo` 不在 PATH 中，可通过环境变量 `PDFTOCAIRO` 指定可执行文件。每张图均带图注
+与图例；虚线标为规划或待验收，不能当作当前已部署能力。
 
 ## 章节组成
 
-当前清单覆盖用户指南、技术与架构设计、API/字段参考、数据与数据库、部署运维、测试
-验收以及发布和客户端安装。目录会说明每份文档面向谁、解决什么问题，并标注它在 Git
-中的最后更新时间。
+当前清单覆盖用户指南、架构与实现、API/字段参考、测试执行和通用运维。
+运维章节说明部署、监控、缓存与容量、备份恢复及回退机制；具体迁移与现场执行记录
+仍在独立运维档案中维护，不编入 PDF。ADR 是决策与历史上下文，也不直接拼入手册。

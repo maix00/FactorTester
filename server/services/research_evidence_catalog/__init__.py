@@ -13,6 +13,8 @@ from .listing import (
 )
 from .search import list_facets, search_evidence
 from .sources import (
+    EvidenceApplicabilityConflict,
+    EvidenceApplicabilityRevisionRequired,
     capture_job_source,
     create_evidence,
     create_source_fragment,
@@ -37,6 +39,8 @@ from .tags import (
 )
 
 __all__ = [
+    "EvidenceApplicabilityConflict",
+    "EvidenceApplicabilityRevisionRequired",
     "attach_tag",
     "capture_job_source",
     "create_evidence",

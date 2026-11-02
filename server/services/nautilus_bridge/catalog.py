@@ -103,6 +103,8 @@ class CatalogReceipt:
     bundle_version: str = ""
     bundle_fingerprint: str = ""
     member_id: str = ""
+    source_ordinal_start: int | None = None
+    selected_clock_sha256: str = ""
 
 
 from traderesearch_data.shared_cache import batch_input_budget
@@ -117,6 +119,7 @@ def _stage_contract_catalog(
     batch_bars: int = 4_096, max_bars: int = 100_000,
     bundle_id: str = "", bundle_version: str = "",
     bundle_fingerprint: str = "", member_id: str = "",
+    source_row_ordinals: bool = False,
 ) -> CatalogReceipt:
     """Shared bounded NT writer for one source-owned Bar contract.
 
@@ -151,6 +154,7 @@ def _stage_contract_catalog(
         catalog = ParquetDataCatalog(str(staged))
         catalog.write_instruments([instrument])
         selected_hash = hashlib.sha256()
+        selected_clock = hashlib.sha256()
         first: MarketBar | None = None
         last: MarketBar | None = None
         selected_count = 0
@@ -181,6 +185,7 @@ def _stage_contract_catalog(
             if selected_count > max_bars:
                 raise ValueError("selected window exceeds explicit max_bars budget")
             selected_hash.update(_bar_digest_line(bar))
+            selected_clock.update(int(bar.clock.interval_end_ns).to_bytes(8, 'big', signed=True))
             if bar.settlement_price is not None:
                 settlement_records.append({
                     "contract_uid": bar.contract_uid,
@@ -240,6 +245,8 @@ def _stage_contract_catalog(
             first_available_ns=first.clock.available_at_ns,
             last_available_ns=last.clock.available_at_ns,
             selected_bars_sha256=selected_hash.hexdigest(),
+            source_ordinal_start=first.row_number - 1 if source_row_ordinals else None,
+            selected_clock_sha256=selected_clock.hexdigest(),
             catalog_files=files,
             elapsed_ms=round((time.perf_counter() - started) * 1000, 3),
             process_peak_rss_bytes=_peak_rss_bytes(), max_batch_bars=batch_bars,
@@ -292,11 +299,12 @@ def stage_contract_minute_catalog(
         source_path, target_dir, contract_uid=contract_uid,
         instrument_spec=instrument_spec, start_ns=start_ns, end_ns=end_ns,
         bars=iter_minute_bars(Path(source_path), start_ns=start_ns, end_ns=end_ns,
-                              batch_size=batch_bars),
+                              batch_size=batch_bars, expected_contract_uid=contract_uid),
         bar_type_suffix="1-MINUTE-LAST-EXTERNAL",
         batch_bars=batch_bars, max_bars=max_bars,
         bundle_id=bundle_id, bundle_version=bundle_version,
         bundle_fingerprint=bundle_fingerprint, member_id=member_id,
+        source_row_ordinals=True,
     )
 
 

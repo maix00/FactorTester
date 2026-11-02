@@ -1,5 +1,5 @@
 """Research membership is a principal/Profile pair, never a bare Profile name."""
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 def test_same_named_profiles_keep_distinct_members_and_workspaces(tmp_path):

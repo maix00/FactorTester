@@ -68,7 +68,6 @@ def test_research_cli_exposes_report_spaces_without_link_command(monkeypatch, tm
     assert json.loads(created.output)["report_id"] == "report:v1:new"
     assert fake.created == ("research:v1:one", {
         "title": "报告一", "profile_ref": "self",
-        "visibility": "private", "authorized_users": [],
     })
     assert removed.exit_code == 0, removed.output
     assert fake.removed_report == ("research:v1:one", "report:v1:new")
@@ -250,3 +249,38 @@ def test_branch_lifecycle_cli_routes_identity_and_expected_version(monkeypatch):
     assert calls[1][3]['expected_generation'] == 0
     status = runner.invoke(cli, ['research', 'reports', 'branch-status', 'report:v1:one'])
     assert status.exit_code == 0 and json.loads(status.output)['branches'][0]['branch_id'] == 'review'
+
+
+def test_keycloak_grant_cli_has_no_legacy_acl_options(monkeypatch):
+    calls = []
+    class Client:
+        def set_research_grant(self, research_id, **payload):
+            calls.append((research_id, payload))
+            return {"changed": True}
+    monkeypatch.setattr("tools.cli.commands.research_catalog.client_from_config", lambda: Client())
+    runner = CliRunner()
+    result = runner.invoke(cli, ["research", "grant", "r", "--principal", "bob", "--scope", "read", "--report-id", "report"])
+    assert result.exit_code == 0, result.output
+    assert calls == [("r", {"principal_ref": "bob", "scopes": ["read"], "report_id": "report"})]
+    for command in ("create", "update", "report-create"):
+        help_result = runner.invoke(cli, ["research", command, "--help"])
+        assert "--visibility" not in help_result.output
+        assert "--authorized-user" not in help_result.output
+
+
+def test_retired_publication_permission_commands_are_not_exposed():
+    result = CliRunner().invoke(cli, ["research", "reports", "publication", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "settings" not in result.output and "unpublish" not in result.output
+    grants = CliRunner().invoke(cli, ["research", "grant", "--help"])
+    assert grants.exit_code == 0 and "--revoke" in grants.output
+
+
+def test_legacy_report_import_commands_and_client_methods_are_removed():
+    from tools.cli.client_research import ResearchClientMixin
+    commands = CliRunner().invoke(cli, ["research", "--help"])
+    assert commands.exit_code == 0
+    assert "migrate-reports" not in commands.output
+    assert "migrate-existing-reports" not in commands.output
+    assert not hasattr(ResearchClientMixin, "migrate_research_reports")
+    assert not hasattr(ResearchClientMixin, "discover_research_report_migration")

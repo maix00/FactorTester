@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     /build-env/bin/maturin build --release --manifest-path /src/alpha/py-binding/Cargo.toml \
     --interpreter /build-env/bin/python --out /wheels
 
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
+FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS manager-base
 
 ARG FACTORTESTER_UID=1000
 ARG FACTORTESTER_GID=1000
@@ -71,3 +71,51 @@ RUN chmod 0555 \
 
 USER factortester
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/factortester-manager-entrypoint"]
+
+# The CLI is the same small, isolated package used in the public image.
+FROM manager-base AS traderesearch-local-cli-builder
+USER root
+COPY tools/cli /runtime/tools/cli
+COPY deploy/docker/factortester-public/traderesearch-cli /build/traderesearch-cli
+RUN python -m compileall -q -b /runtime \
+    && find /runtime -type f -name '*.py' -delete \
+    && find /runtime -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && PYTHONPATH=/runtime /build/traderesearch-cli --help >/tmp/traderesearch-help \
+    && grep -F 'TradeResearch CLI' /tmp/traderesearch-help >/dev/null
+
+# Keep these layers after the Python/alpha runtime so installing Agent tools
+# never invalidates unchanged Python dependencies. For an already-running
+# image, BuildKit can override manager-base with that immutable image.
+FROM manager-base AS traderesearch-local-manager
+USER root
+ARG TARGETARCH
+ARG CODEX_VERSION=0.147.0
+ARG CODEX_NPM_REGISTRY=https://registry.npmjs.org
+ARG DEBIAN_MIRROR=https://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    sed -i \
+      -e "s|https\\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|https\\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends bubblewrap=0.12.0-1~deb13u1 \
+    && chmod 0755 /usr/bin/bwrap
+COPY deploy/docker/factortester-public/cc-switch-cli-linux-x64-musl-v5.10.2.tar.gz /tmp/cc-switch-linux-x64-musl.tgz
+COPY deploy/docker/factortester-public/cc-switch-cli-linux-arm64-musl-v5.10.2.tar.gz /tmp/cc-switch-linux-arm64-musl.tgz
+COPY deploy/docker/factortester-server/install-agent-tools.sh /tmp/install-agent-tools.sh
+RUN TARGETARCH="${TARGETARCH}" CODEX_VERSION="${CODEX_VERSION}" CODEX_NPM_REGISTRY="${CODEX_NPM_REGISTRY}" \
+    sh /tmp/install-agent-tools.sh && rm -f /tmp/install-agent-tools.sh
+COPY --from=traderesearch-local-cli-builder /runtime /usr/local/lib/traderesearch-cli
+COPY deploy/docker/factortester-public/traderesearch-cli /usr/local/bin/traderesearch
+RUN set -eu; \
+    rm -f /usr/local/bin/factortester /usr/local/bin/factortester-manager; \
+    chmod 0555 /usr/local/bin/traderesearch; \
+    test -x /usr/local/bin/bwrap; \
+    test ! -e /usr/local/bin/factortester; \
+    test ! -e /usr/local/bin/factortester-manager; \
+    traderesearch --help >/tmp/traderesearch-help; \
+    grep -F 'TradeResearch CLI' /tmp/traderesearch-help >/dev/null; \
+    rm -f /tmp/traderesearch-help
+USER factortester

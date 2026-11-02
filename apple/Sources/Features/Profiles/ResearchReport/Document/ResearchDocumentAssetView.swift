@@ -77,10 +77,18 @@ enum ResearchDocumentAssetLoader {
         }
         guard asset.filename == URL(fileURLWithPath: asset.filename).lastPathComponent,
               !asset.filename.isEmpty else { throw ResearchDocumentAssetError.invalidFile }
+        let cacheRoot: URL
+        if let jobCacheRoot {
+            cacheRoot = jobCacheRoot
+        } else if asset.localRef.isEmpty && jobID(from: asset.externalRef) != nil {
+            cacheRoot = try LocalDocumentsRoot.resolve().appendingPathComponent("jobs", isDirectory: true)
+        } else {
+            cacheRoot = reportURL.deletingLastPathComponent()
+        }
         let file = try resolvedFile(
             asset,
             reportURL: reportURL,
-            jobCacheRoot: jobCacheRoot ?? defaultJobCacheRoot
+            jobCacheRoot: cacheRoot
         )
         return try await Task.detached {
             let value: Data
@@ -130,11 +138,6 @@ enum ResearchDocumentAssetLoader {
         let url = packageRoot.appendingPathComponent("assets", isDirectory: true)
             .appendingPathComponent(asset.filename, isDirectory: false)
         return .init(url: url, access: .personalWorkspace)
-    }
-
-    private static var defaultJobCacheRoot: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester/jobs", isDirectory: true)
     }
 
     private static func jobID(from reference: String) -> String? {

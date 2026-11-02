@@ -38,6 +38,10 @@ services:
       args:
         FACTORTESTER_UID: ${FACTORTESTER_UID:-1000}
         FACTORTESTER_GID: ${FACTORTESTER_GID:-1000}
+        CODEX_VERSION: ${FACTORTESTER_CODEX_VERSION:-0.147.0}
+        CODEX_NPM_REGISTRY: ${FACTORTESTER_CODEX_NPM_REGISTRY:-https://registry.npmjs.org}
+        DEBIAN_MIRROR: ${FACTORTESTER_DEBIAN_MIRROR:-https://deb.debian.org/debian}
+        DEBIAN_SECURITY_MIRROR: ${FACTORTESTER_DEBIAN_SECURITY_MIRROR:-https://deb.debian.org/debian-security}
     command:
       - python
       - -m
@@ -124,8 +128,11 @@ services:
       start_period: 20s
     network_mode: service:wireguard
     restart: unless-stopped
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}/deploy/docker/factortester-server/agent-seccomp.json
     working_dir: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
     volumes:
       - type: bind

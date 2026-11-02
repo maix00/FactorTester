@@ -1,5 +1,6 @@
 """Reproducible contract for the local Docker Manager deployment."""
 
+import json
 from pathlib import Path
 
 import yaml
@@ -78,3 +79,39 @@ def test_local_manager_can_import_vendored_research_contracts() -> None:
     python_path = _compose()["services"]["manager"]["environment"]["PYTHONPATH"]
 
     assert python_path == "${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}"
+
+
+def test_local_agent_has_shared_pinned_tools_after_existing_python_layer() -> None:
+    dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text()
+    public = (ROOT / "deploy/docker/factortester-public/FactorTester.Dockerfile").read_text()
+    installer = (DEPLOYMENT / "install-agent-tools.sh").read_text()
+    assert " AS manager-base" in dockerfile
+    assert dockerfile.index("pip install --no-cache-dir -r /tmp/requirements-linux.txt") < dockerfile.index("FROM manager-base AS traderesearch-local-manager")
+    assert "bubblewrap=0.12.0-1~deb13u1" in dockerfile
+    assert "chmod 0755 /usr/bin/bwrap" in dockerfile
+    assert "COPY deploy/docker/factortester-server/install-agent-tools.sh" in dockerfile
+    assert "COPY deploy/docker/factortester-server/install-agent-tools.sh" in public
+    assert "Codex platform package integrity check failed" in installer
+    assert "cc_switch_sha256=" in installer
+    assert "COPY --from=traderesearch-local-cli-builder /runtime /usr/local/lib/traderesearch-cli" in dockerfile
+    assert "/usr/local/bin/traderesearch" in dockerfile
+    assert dockerfile.rstrip().endswith("USER factortester")
+
+
+def test_local_agent_uses_restricted_namespaces_and_keeps_network_sidecar_separate() -> None:
+    services = _compose()["services"]
+    manager, wireguard = services["manager"], services["wireguard"]
+    assert manager["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in manager["security_opt"]
+    assert any("agent-seccomp.json" in item for item in manager["security_opt"])
+    assert all("unconfined" not in item for item in manager["security_opt"])
+    assert wireguard["cap_add"] == ["NET_ADMIN"]
+    profile = json.loads((DEPLOYMENT / "agent-seccomp.json").read_text())
+    assert profile["defaultAction"] == "SCMP_ACT_ERRNO"
+    unshare, clone, mounts = profile["syscalls"][-3:]
+    assert unshare["names"] == ["unshare"] and clone["names"] == ["clone"]
+    allowed_namespaces = 0x10000000 | 0x00020000 | 0x04000000 | 0x08000000 | 0x20000000 | 0x02000000
+    assert unshare["args"][0]["value"] == (2**64 - 1) ^ allowed_namespaces
+    assert clone["args"][0]["value"] == (2**64 - 1) ^ (allowed_namespaces | 255)
+    assert mounts["names"] == ["mount", "umount2", "pivot_root"]
+    assert not any("ptrace" in item["names"] for item in profile["syscalls"][-3:])

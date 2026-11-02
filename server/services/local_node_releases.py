@@ -8,13 +8,13 @@ import re
 from functools import lru_cache
 from typing import Any
 
+from server.permissions.roles import DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE
 from tools.cli.release.signature import verify_ecdsa_sha256
 
 _PLATFORMS = {"macos-arm64", "windows-x86_64", "linux-x86_64"}
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _MAX_CATALOG = 256 * 1024
 _MAX_PACKAGE = 4 * 1024 * 1024 * 1024
-DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE = "desktop_local_node:download"
 
 
 def canonical_unsigned_catalog(value: dict[str, Any]) -> bytes:

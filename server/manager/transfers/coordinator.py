@@ -72,11 +72,13 @@ class TransferCoordinator:
         key = str(request.idempotency_key or "").strip()
         if not key:
             raise ValueError("idempotency_key is required")
-        scope = json.dumps([self.manager_id, request.principal.strip(), key],
-                           ensure_ascii=False, separators=(",", ":"))
+        scope_parts = [self.manager_id, request.principal.strip(), key]
+        if request.principal_identity_id:
+            scope_parts.insert(2, request.principal_identity_id)
+        scope = json.dumps(scope_parts, ensure_ascii=False, separators=(",", ":"))
         if request.expires_at <= now:
             raise ValueError("download expiry must be in the future")
-        scoped_key = "download-v2:" + hashlib.sha256(scope.encode()).hexdigest()
+        scoped_key = ("download-v3:" if request.principal_identity_id else "download-v2:") + hashlib.sha256(scope.encode()).hexdigest()
         # An immutable expired transfer cannot issue a fresh ticket. Derive a
         # successor from its ID so concurrent retries converge on one new lease;
         # retain the old context for audit and never extend an old bearer.
@@ -142,6 +144,7 @@ class TransferCoordinator:
             content_type=request.content_type,
             object_kind=request.object_kind,
             object_id=request.object_id,
+            principal_identity_id=getattr(request, "principal_identity_id", ""),
         ), now=now)
         attempt = None
         try:

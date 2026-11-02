@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct ClientReleaseSettingsView: View {
@@ -50,7 +51,7 @@ struct ClientReleaseSettingsView: View {
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 3) {
-                Text("FTClient")
+                Text("TradeResearch")
                     .font(.title2.weight(.semibold))
                 Text("更新客户端，并管理所有人类与 Agent Profiles")
                     .font(.callout)
@@ -143,7 +144,7 @@ struct ClientReleaseSettingsView: View {
         if controller.isWorking {
             return L10n.text("正在检查更新")
         }
-        return L10n.text("FTClient 已是最新状态")
+        return L10n.text("TradeResearch 已是最新状态")
     }
 
     private var statusSubtitle: String {
@@ -188,7 +189,7 @@ struct ClientReleaseSettingsView: View {
 
     private var sourceLabel: String {
         controller.channel == "beta"
-            ? L10n.text("Beta · FactorTester 服务器")
+            ? L10n.text("Beta · TradeResearch 服务器")
             : L10n.text("Main · GitHub")
     }
 
@@ -204,3 +205,5 @@ struct ClientReleaseSettingsView: View {
         }
     }
 }
+
+#endif

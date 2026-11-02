@@ -16,6 +16,15 @@ def test_configuration_editor_selects_schema_and_real_frontend_checks():
     )
 
 
+def test_job_configuration_restore_selects_its_focused_contract_tests():
+    assert selector.select({"server/services/job_configuration_restore.py"}) == (
+        "SCOPED", ["tests/server/test_job_configuration_restore.py"],
+    )
+    mode, targets = selector.select({"server/manager/services/test_authoring.py"})
+    assert mode == "SCOPED"
+    assert "tests/server/test_job_configuration_restore.py" in targets
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=repo, text=True).strip()
 
@@ -26,6 +35,36 @@ def test_known_module_selects_cross_module_consumers():
     assert "tests/cli" in targets
     assert "tests/release" in targets
     assert "tests/server" in targets
+
+
+def test_local_research_publication_selects_focused_client_and_server_contracts():
+    mode, targets = selector.select({"tools/cli/release/research_reporting/local_publication.py"})
+    assert mode == "SCOPED"
+    assert set(targets) == {
+        "tests/release/test_local_sync_baseline.py",
+        "tests/release/test_local_report_attach_manager.py",
+        "tests/server/test_catalog_report_client_sync.py",
+        "tests/release/test_local_research_rpc.py",
+        "tests/server/test_client_local_report_publication.py",
+        "tests/server/test_client_server_research_import.py",
+        "tests/server/test_local_report_publication.py",
+    }
+    mode, targets = selector.select({"server/manager/http/research_catalog_routes.py",
+                                     "server/manager/services/research_couchdb_publication.py"})
+    assert mode == "SCOPED"
+    assert "tests/server/test_federated_local_report.py" in targets
+    assert "tests/server/test_research_catalog_keycloak_session.py" in targets
+    assert "tests/server/test_client_local_report_publication.py" in targets
+    assert "tests/server" not in targets
+    mode, targets = selector.select({"server/manager/services/research_catalog.py",
+                                     "tools/cli/release/research_reporting/local_rpc.py",
+                                     "apple/Sources/Features/Web/LocalResearchBridge.swift"})
+    assert mode == "SCOPED"
+    assert "tests/server/test_research_catalog_keycloak_reads.py" in targets
+    assert "tests/server/test_client_server_research_import.py" in targets
+    assert "tests/server" not in targets and "tests/cli" not in targets
+    assert selector.select({"scripts/test/keycloak_research_grant_smoke.py"}) == (
+        "SCOPED", ["tests/server/test_keycloak_research_stage.py", "tests/server/test_research_catalog_keycloak_reads.py"])
 
 
 def test_skill_change_checks_activation_and_skill_tests():
@@ -431,3 +470,35 @@ def test_shared_factor_benchmarks_and_planning_remain_scoped():
         assert mode == "SCOPED"
         assert targets and all((selector.ROOT / target).is_file() for target in targets)
         assert "tests/server" not in targets and "tests/factors" not in targets
+
+
+def test_report_sync_helpers_select_only_relevant_contracts():
+    for path in ("tools/cli/release/research_reporting/local_auto_sync.py",
+                 "tools/cli/release/research_reporting/local_pull.py",
+                 "tools/cli/release/research_reporting/local_catalog_import.py",
+                 "tools/cli/release/research_reporting/local_server_reports.py",
+                 "tools/cli/release/research_reporting/local_catalog.py",
+                 "tools/cli/release/research_reporting/local_sync_baseline.py"):
+        mode, targets = selector.select({path})
+        assert mode == "SCOPED"
+        assert set(targets) == {"tests/release/test_local_sync_baseline.py",
+                                "tests/release/test_local_report_attach_manager.py",
+                                "tests/release/test_local_research_rpc.py",
+                                "tests/server/test_catalog_report_client_sync.py",
+                                "tests/server/test_client_local_report_publication.py",
+                                "tests/release/test_local_server_reports.py",
+                                "tests/release/test_local_research_catalog.py"}
+
+
+def test_manager_token_migration_avoids_unrelated_test_directories():
+    for path in ("apple/Sources/Networking/ManagerSessionTokenStore.swift",
+                 "apple/Tests/ManagerSessionTokenMigrationTests.swift",
+                 "tests/fixtures/manager_session_token_isolation.swift"):
+        mode, targets = selector.select({path})
+        assert mode == "SCOPED" and set(targets) == {"tests/scripts/test_native_session_restore.py",
+                                                      "tests/release/test_manager_session_token_isolation.py"}
+    for path in (
+                 "apple/Sources/Services/ManagerDeviceKeyStore.swift",
+                 "apple/Tests/ManagerDeviceKeyMigrationTests.swift"):
+        mode, targets = selector.select({path})
+        assert mode == "SCOPED" and targets == ["tests/scripts/test_native_session_restore.py"]

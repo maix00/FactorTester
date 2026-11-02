@@ -1,19 +1,21 @@
 ## 职责 {#responsibility}
 
-Web 负责页面渲染；Swift 负责 macOS 窗口、原生标签页和本地权限。Swift 嵌入与浏览器使用同一 Web 页面，避免维护两套报告渲染器。两种客户端可以有不同的入口和本地能力，但共享业务字段注册、对象引用和权限语义。
+React 负责页面、设置、翻译和报告渲染；Swift 负责原生窗口、设备密钥、连接选择与本机资源桥。桌面与浏览器使用同一 `/app`，不另维护一套 Swift 业务表单。客户端能力可以不同，但业务字段、对象引用和权限语义共用。
 
 ## 导航流程 {#navigation-flow}
 
-Web Shell 将 URL 分类为稳定路由，再懒加载对应模块。路由只加载当前功能组；具体 tab、字段候选、图表和 overlay 在真正打开时加载，并把页面状态保存在对应标签页会话中。
+桌面 Shell 由公共页面注册表创建 Dockview 面板。功能入口复用已有面板，具体对象可作为独立面板或详情 overlay 打开。页面状态与实例绑定，非活动面板保留挂载但隐藏，重新选择时恢复其筛选和草稿。
 
-浏览器中的内部链接交给 Web 标签页管理；Swift 嵌入页面中的对象链接通过桥接交回 Swift，由 Swift 创建或复用自己的标签页。一个功能入口、一个具体对象和一个报告阅读页的去重规则分别处理，不能把所有页面都当成同一个全局 tab。
+移动端使用 Ionic Header、返回栈和功能入口；通知中心与助手保留在 Header。
+共享表格及图表的放大模式与普通页面导航分开，设备方向由设置控制。
+Manager 切换只向桌面/移动原生宿主开放；普通网页使用当前站点，不显示本机连接设置。
 
 ## 规范代码入口 {#canonical-paths}
 
-- Web 路由分类：`server/manager/web/app/navigation.js`
-- Web 路由分派：`server/manager/web/app/route-dispatch.js`
-- Web 标签页：`server/manager/web/app/tabs.js`
-- Swift 模块与标签页：`apple/Sources/Navigation/`
+- 公共页面注册：`web/app/src/registry.ts`
+- 桌面工作区：`web/app/src/desktop-shell.tsx`
+- 移动端导航：`web/app/src/mobile-shell.tsx`
+- 原生连接与研究桥：`apple/Sources/Features/Web/`
 
 ## 不变量 {#invariants}
 

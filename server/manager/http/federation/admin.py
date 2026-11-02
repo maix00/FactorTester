@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import re
+import time
 from urllib.parse import urlsplit
 
 from server.identity.federation_identity_sync import (
@@ -21,11 +26,107 @@ from server.identity.realm_groups import (
     organization_group_path,
 )
 from server.manager.domain.federation import ServiceRoute
+from server.manager.domain.federation.registry import FederationRegistrationConflict
 from server.manager.domain.organization_scope import configured_managed_organizations
 from server.manager.http.responses import json_response
 
 
 class FederationAdminRoutesMixin:
+    def _bind_legacy_internal_manager(self) -> None:
+        """Explicitly review/bind one old registry row; never claim it on heartbeat."""
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return
+        from server.identity.server_admission import current_manager_role, federated_manager_binding
+        if (not bool(getattr(self.state, "public_server", False))
+                or not self._has_secure_ui_transport()
+                or not current_manager_role(session, "admin_console:manage")):
+            json_response(self, {"success": False, "error": "current Keycloak super administrator permission required"}, 403)
+            return
+        try:
+            payload = self._json_body(16 * 1024)
+            if not set(payload) <= {"server_id", "organization_id", "fingerprint", "expected_sha256", "dry_run"}:
+                raise ValueError("unexpected legacy binding field")
+            server_id = str(payload.get("server_id") or "").strip()
+            organization_id = str(payload.get("organization_id") or "").strip()
+            fingerprint = str(payload.get("fingerprint") or "")
+            expected_sha256 = str(payload.get("expected_sha256") or "")
+            dry_run = payload.get("dry_run", True)
+            if (not server_id or len(server_id) > 256 or any(ord(c) < 32 for c in server_id)
+                    or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+                    or type(dry_run) is not bool
+                    or (not dry_run and not re.fullmatch(r"[0-9a-f]{64}", expected_sha256))):
+                raise ValueError("invalid legacy binding review")
+
+            def verify():
+                from server.manager.storage.transfers.node_identities import decode_public_key
+                from server.manager.transfers.node_advertisements import verify_advertisement
+                try:
+                    node = self.state.node_identities.require(server_id)
+                    calculated = hashlib.sha256(decode_public_key(node.public_key)).hexdigest()
+                    existing = self.state.federation_registry.describe(server_id) or {}
+                    advertisement = existing.get("transfer_node") or {}
+                    issued_at = float(advertisement.get("issued_at"))
+                    # Expiration does not remove an offline Manager's claim. Verify
+                    # its original signature at issue time without treating that
+                    # old advertisement as a live route or permitting future data.
+                    if issued_at > time.time() + 5:
+                        return False
+                    verified = verify_advertisement(advertisement, now=issued_at)
+                    return (verified.node_id == server_id
+                            and verified.identity["public_key"] == node.public_key
+                            and hmac.compare_digest(verified.identity["fingerprint"], fingerprint)
+                            and hmac.compare_digest(calculated, fingerprint)
+                            and hmac.compare_digest(node.fingerprint, fingerprint)
+                            and current_manager_role(session, "admin_console:manage")
+                            and federated_manager_binding(server_id, organization_id, fingerprint,
+                                                          use_cache=False))
+                except (KeyError, PermissionError, ValueError, TypeError):
+                    return False
+
+            if not verify():
+                raise PermissionError("Keycloak binding or enrolled node fingerprint is unavailable or mismatched")
+            plan = self.state.federation_registry.legacy_binding_plan(server_id, organization_id)
+            if dry_run:
+                json_response(self, {"success": True, "dry_run": True, "plan": plan},
+                              headers={"Cache-Control": "private, no-store"})
+                return
+            from server.jobs.dispatch.audit import append_audit
+            from server.jobs.repository import JobRepository
+            operation_id = hashlib.sha256(json.dumps(
+                [server_id, organization_id, fingerprint, expected_sha256],
+                separators=(",", ":"), ensure_ascii=False,
+            ).encode()).hexdigest()
+            actor = str(session.get("username") or "")
+            detail = json.dumps({"server_id": server_id, "organization_id": organization_id,
+                                 "fingerprint": fingerprint, "review_sha256": expected_sha256,
+                                 "issuer": session.get("keycloak_issuer"),
+                                 "subject": session.get("keycloak_subject")},
+                                ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+            def audit(phase, _row):
+                append_audit(JobRepository().db_path, action="manager-organization-bind-" + phase,
+                             actor=actor, job_id=operation_id, detail=detail, idempotent=True)
+
+            value = self.state.federation_registry.bind_reviewed_legacy(
+                server_id, organization_id, expected_sha256=expected_sha256,
+                verify=verify, audit=audit,
+            )
+            json_response(self, {"success": True, "dry_run": False, "binding": value},
+                          headers={"Cache-Control": "private, no-store"})
+        except FederationRegistrationConflict as exc:
+            json_response(self, {"success": False, "code": exc.code, "error": str(exc)}, 409)
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+        except (TypeError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+        except Exception as exc:
+            # The audit intent may exist after an interrupted write; retrying
+            # the exact reviewed request idempotently records completion.
+            json_response(self, {"success": False, "code": "binding_or_audit_unavailable",
+                                 "error": type(exc).__name__}, 503)
+
     def _public_identity_sync_verifier_route(self) -> ServiceRoute:
         """Resolve the configured public Manager from its live peer lease."""
         config = self.state.federation_config()
@@ -99,13 +200,20 @@ class FederationAdminRoutesMixin:
         return {organization_group_path(value) for value in organization_ids}
 
     def _identity_sync_admin_context(self) -> tuple[dict[str, object] | None, bool, set[str]]:
+        from server.identity.server_admission import current_administrative_groups
+
         session = self._session()
         if session is None or not self._has_secure_ui_transport():
             return session, False, set()
         is_super = self._has_super_admin_session()
         if is_super:
             return session, True, set()
-        groups = session.get("keycloak_groups") or ()
+        groups = current_administrative_groups(session) or ()
+        # An unexpired token may retain a revoked realm-wide role. Do not pass
+        # that stale grant to downstream scoped-directory authorization.
+        session = {**session, "keycloak_groups": groups,
+                   "keycloak_roles": tuple(role for role in (session.get("keycloak_roles") or ())
+                                           if role != "admin_console:manage")}
         organization_paths = managed_member_group_paths(groups)
         return session, False, organization_paths
 
@@ -405,21 +513,13 @@ class FederationAdminRoutesMixin:
         })
 
     def _has_super_admin_session(self) -> bool:
+        from server.identity.server_admission import current_manager_role
+
         session = self._session()
-        if session:
-            from server.identity.auth_mode import keycloak_enabled
-            if keycloak_enabled():
-                roles = set(session.get("keycloak_roles", ()) or ())
-                capabilities = set(session.get("admin_capabilities", ()) or ())
-                return bool(
-                    self._has_secure_ui_transport()
-                    and ({"admin_console:manage"} <= roles
-                         or {"admin_console:manage"} <= capabilities)
-                )
         return bool(
             self._has_secure_ui_transport()
             and session
-            and str(session.get("role") or "") == "super_admin"
+            and current_manager_role(session, "admin_console:manage")
         )
 
     def _require_super_admin_session(self) -> bool:

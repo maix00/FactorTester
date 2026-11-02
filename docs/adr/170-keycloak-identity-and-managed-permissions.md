@@ -128,3 +128,41 @@ authorization are still required before Keycloak can be called the sole
 authorization authority end to end. The historical identity database is also
 still used for non-authoritative profile/display metadata; it is not the
 permission authority in Keycloak mode.
+
+## 2026-11-02 设备与身份只读盘点
+
+02:50（Asia/Taipei）检查本机暂存 Manager 与公网 Manager 的运行环境。两侧
+Keycloak 中 MaxJJW、testA、testB 均启用，三个账户的稳定身份及旧限定身份
+摘要逐一相同。本机暂存 Manager 未配置 PostgreSQL 控制库，且其 JSON 设备
+登记文件不存在；这不代表其他内网实例没有旧设备。
+
+公网 `remote-main` 的 PostgreSQL 只读事务中，按上述三个账户的精确旧身份
+过滤，设备记录分别为 8、4、2 条，共 14 条；均启用且来源为 `remote-main`。
+当前表不存在旧的 `public_access` 和 `quota_exempt` 列。这个汇总不核验设备
+公钥与 Keycloak 资源/策略的逐条对应，也不验证当前的有效登录授权；不得把
+计数或身份摘要相同当作迁移完成。公网运行版本尚未包含当前设备授权模块，
+需要在切换前完成逐对象权限对账及真实撤销/登录验收。盘点未修改两端数据。
+
+随后使用公网当前配置的 Keycloak Protection API 对上述 14 条启用记录逐一查询
+按当前合同生成的设备资源名；14 条均未找到对应资源。查询只检查资源存在性，
+没有模拟用户令牌作有效决策，也不能推断其他命名空间不存在历史授权。此结论
+要求在切换前完成冻结快照、授权创建及允许/拒绝对照，禁止将其视为迁移完成。
+复核清单摘要同时绑定设备字段和 Keycloak 稳定身份、主体与启用状态，主体变更
+必须重新审核；清单只输出主体证据摘要，不输出主体原文或设备公钥。
+
+已新增受控设备授权 staging 核心：复核摘要绑定 Manager、Keycloak issuer、
+旧记录及主体；写前和每条写入前重新比较快照，已有资源不自动重新授权，写入
+前先落盘意图日志，异常中断不能自动重试。新资源使用 Keycloak create-only
+路径并由策略求值核验，日志不包含用户名、主体或密钥。隔离 Keycloak 实测了
+迁入、所有者与其他用户的真实令牌决策、撤销后的拒绝。新增命令入口可按单个
+主体从已恢复的独立 PostgreSQL 数据库生成审核清单并执行 staging；执行前要求
+设备写入静默、Keycloak 备份校验和和新日志，数据库连接地址只从环境读取。
+它尚不支持其他设备存储，也不验证 Keycloak 备份本身能够恢复；两类数据库的
+实际备份恢复、全部旧权限逐项对账及跨 Manager 授权验收仍是切换前提。
+staging 回执始终不表示切换就绪，尚未在真实服务器执行。
+
+随后在一次性 PostgreSQL 17 和 Keycloak 26.8.1 容器中，用 `pg_dump` 和
+`pg_restore` 恢复测试设备记录，通过命令入口审核并 stage，验证所有者令牌
+允许、其他用户令牌拒绝、撤销后原令牌拒绝。容器已删除；其中 Keycloak 备份
+文件只是校验逻辑的测试夹具，并非 realm 导出或恢复演练，不能视为服务器切换
+前的备份验证。

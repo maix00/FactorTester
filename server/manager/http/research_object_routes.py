@@ -15,6 +15,8 @@ from server.services import (
     research_workspaces,
 )
 from server.services.research_evidence_catalog import (
+    EvidenceApplicabilityConflict,
+    EvidenceApplicabilityRevisionRequired,
     attach_tag,
     capture_job_source,
     create_evidence,
@@ -460,10 +462,17 @@ class ResearchObjectRoutesMixin:
         try:
             data = self._research_object_body(256 * 1024)
             if applicability:
+                evidence_ref = unquote(applicability.group(1))
+                evidence_owner, access = self._evidence_read_context(
+                    evidence_ref=evidence_ref, viewer=owner,
+                )
+                if not access.get("can_manage"):
+                    raise PermissionError("Evidence applicability management is not authorized")
                 value = update_evidence_applicability(
-                    owner=owner,
-                    evidence_ref=unquote(applicability.group(1)),
+                    owner=evidence_owner,
+                    evidence_ref=evidence_ref,
                     applicability=data.get("applicability") or {},
+                    expected_applicability_revision=data.get("expected_applicability_revision"),
                 )
             else:
                 value = update_tag(
@@ -472,7 +481,15 @@ class ResearchObjectRoutesMixin:
                     title_zh=data.get("title_zh"),
                     description_zh=data.get("description_zh"),
                 )
-        except (KeyError, TypeError, ValueError) as exc:
+        except EvidenceApplicabilityConflict:
+            json_response(self, {"success": False, "code": "evidence_applicability_conflict",
+                                 "error": "Evidence applicability changed; refresh before saving"}, 409)
+            return True
+        except EvidenceApplicabilityRevisionRequired as exc:
+            json_response(self, {"success": False, "code": "evidence_applicability_revision_required",
+                                 "error": str(exc)}, 400)
+            return True
+        except (KeyError, PermissionError, TypeError, ValueError) as exc:
             self._research_object_error(exc)
             return True
         key = "evidence" if applicability else "tag"

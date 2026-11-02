@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 class SimplifiedChineseLocalizedTestCase: XCTestCase {
     private var previousLanguageValue: Any?

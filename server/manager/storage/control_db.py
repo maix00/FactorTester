@@ -248,7 +248,7 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     """,
     """
     CREATE TABLE IF NOT EXISTS control_devices (
-        device_id TEXT PRIMARY KEY,
+        device_id TEXT NOT NULL,
         public_key JSONB NOT NULL,
         username TEXT NOT NULL,
         device_name TEXT NOT NULL DEFAULT '',
@@ -260,7 +260,8 @@ CONTROL_SCHEMA: tuple[str, ...] = (
         source_server_id TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        last_seen_at TIMESTAMPTZ
+        last_seen_at TIMESTAMPTZ,
+        PRIMARY KEY (source_server_id, device_id)
     )
     """,
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS client_type TEXT NOT NULL DEFAULT 'unknown'",
@@ -268,9 +269,8 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS enrollment_ip TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS last_seen_ip TEXT NOT NULL DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS control_devices_username ON control_devices(username, enabled)",
-    "DROP INDEX IF EXISTS control_devices_public_username",
-    "ALTER TABLE control_devices DROP COLUMN IF EXISTS public_access",
-    "ALTER TABLE control_devices DROP COLUMN IF EXISTS quota_exempt",
+    # Existing legacy fields remain migration evidence; routine startup must
+    # not drop them before Keycloak parity, backup and cutover verification.
     "CREATE INDEX IF NOT EXISTS control_devices_source ON control_devices(source_server_id, updated_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS control_user_preferences (
@@ -589,8 +589,8 @@ class PostgresControlStore(AccountDomainControlMixin):
         self.ensure_schema()
         with self._connection() as connection:
             existing = connection.execute(
-                "SELECT 1 FROM control_devices WHERE device_id=%s",
-                (str(device_id),),
+                "SELECT 1 FROM control_devices WHERE device_id=%s AND source_server_id=%s",
+                (str(device_id), str(source_server_id)),
             ).fetchone()
             if existing is not None:
                 raise ValueError("device_id is already registered")
@@ -602,7 +602,7 @@ class PostgresControlStore(AccountDomainControlMixin):
                     enabled, source_server_id, updated_at
                 ) VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s, %s,
                           TRUE, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT(device_id) DO NOTHING
+                ON CONFLICT DO NOTHING
                 RETURNING device_id, public_key, username, device_name,
                           client_type, client_name, enrollment_ip, last_seen_ip,
                           enabled, source_server_id,
@@ -622,7 +622,7 @@ class PostgresControlStore(AccountDomainControlMixin):
             raise ValueError("device_id is already registered")
         return self._device_value(row, fallback_username=str(username))
 
-    def device(self, device_id: str) -> dict[str, Any] | None:
+    def device(self, device_id: str, *, source_server_id: str) -> dict[str, Any] | None:
         self.ensure_schema()
         with self._connection() as connection:
             row = connection.execute(
@@ -631,9 +631,9 @@ class PostgresControlStore(AccountDomainControlMixin):
                        client_type, client_name, enrollment_ip, last_seen_ip,
                        enabled, source_server_id,
                        created_at, updated_at, last_seen_at
-                FROM control_devices WHERE device_id=%s
+                FROM control_devices WHERE device_id=%s AND source_server_id=%s
                 """,
-                (str(device_id),),
+                (str(device_id), str(source_server_id)),
             ).fetchone()
         return None if row is None else self._device_value(row)
 
@@ -642,6 +642,7 @@ class PostgresControlStore(AccountDomainControlMixin):
         *,
         username: str = "",
         include_disabled: bool = True,
+        source_server_id: str = "",
     ) -> list[dict[str, Any]]:
         self.ensure_schema()
         predicates = []
@@ -650,6 +651,9 @@ class PostgresControlStore(AccountDomainControlMixin):
         if owner:
             predicates.append("username=%s")
             parameters.append(owner)
+        if source_server_id:
+            predicates.append("source_server_id=%s")
+            parameters.append(str(source_server_id))
         if not include_disabled:
             predicates.append("enabled=TRUE")
         where = " WHERE " + " AND ".join(predicates) if predicates else ""
@@ -667,24 +671,48 @@ class PostgresControlStore(AccountDomainControlMixin):
             ).fetchall()
         return [self._device_value(row) for row in rows]
 
-    def revoke_device(self, device_id: str) -> dict[str, Any] | None:
+    def reenable_device(self, *, device_id: str, username: str, public_key: Mapping[str, Any], source_server_id: str) -> dict[str, Any] | None:
+        """Retry an explicit enrollment only for the exact original binding."""
         self.ensure_schema()
         with self._connection() as connection:
             row = connection.execute(
-                """
+                """UPDATE control_devices SET enabled=TRUE, updated_at=CURRENT_TIMESTAMP
+                   WHERE device_id=%s AND username=%s AND public_key=%s::jsonb
+                     AND source_server_id=%s AND enabled=FALSE
+                   RETURNING device_id, public_key, username, device_name, client_type,
+                             client_name, enrollment_ip, last_seen_ip, enabled,
+                             source_server_id, created_at, updated_at, last_seen_at""",
+                (str(device_id), str(username), json.dumps(dict(public_key), ensure_ascii=False), str(source_server_id)),
+            ).fetchone()
+        return None if row is None else self._device_value(row)
+
+    def revoke_device(self, device_id: str, *, source_server_id: str,
+                      username: str | None = None, public_key: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+        """Revoke only the source Manager's exact binding, including under races."""
+        if not source_server_id or (username is None) != (public_key is None):
+            raise ValueError("device revoke requires a source and complete binding")
+        self.ensure_schema()
+        conditions = "device_id=%s AND source_server_id=%s"
+        params: list[Any] = [str(device_id), str(source_server_id)]
+        if username is not None and public_key is not None:
+            conditions += " AND username=%s AND public_key=%s::jsonb"
+            params.extend((str(username), json.dumps(dict(public_key), ensure_ascii=False)))
+        with self._connection() as connection:
+            row = connection.execute(
+                f"""
                 UPDATE control_devices
                 SET enabled=FALSE, updated_at=CURRENT_TIMESTAMP
-                WHERE device_id=%s
+                WHERE {conditions}
                 RETURNING device_id, public_key, username, device_name,
                           client_type, client_name, enrollment_ip, last_seen_ip,
                           enabled, source_server_id,
                           created_at, updated_at, last_seen_at
                 """,
-                (str(device_id),),
+                tuple(params),
             ).fetchone()
         return None if row is None else self._device_value(row)
 
-    def touch_device(self, device_id: str, *, last_seen_ip: str = "") -> None:
+    def touch_device(self, device_id: str, *, source_server_id: str, last_seen_ip: str = "") -> None:
         self.ensure_schema()
         with self._connection() as connection:
             connection.execute(
@@ -693,16 +721,17 @@ class PostgresControlStore(AccountDomainControlMixin):
                 SET last_seen_at=CURRENT_TIMESTAMP,
                     last_seen_ip=CASE WHEN %s='' THEN last_seen_ip ELSE %s END,
                     updated_at=CURRENT_TIMESTAMP
-                WHERE device_id=%s AND enabled=TRUE
+                WHERE device_id=%s AND source_server_id=%s AND enabled=TRUE
                 """,
                 (
                     str(last_seen_ip or "")[:45],
                     str(last_seen_ip or "")[:45],
                     str(device_id),
+                    str(source_server_id),
                 ),
             )
 
-    def public_device_count(self, *, username: str = "") -> int:
+    def public_device_count(self, *, username: str = "", source_server_id: str = "") -> int:
         self.ensure_schema()
         predicates = ["enabled=TRUE"]
         parameters: list[Any] = []
@@ -710,6 +739,9 @@ class PostgresControlStore(AccountDomainControlMixin):
         if owner:
             predicates.append("username=%s")
             parameters.append(owner)
+        if source_server_id:
+            predicates.append("source_server_id=%s")
+            parameters.append(str(source_server_id))
         with self._connection() as connection:
             row = connection.execute(
                 f"SELECT COUNT(*) AS count FROM control_devices WHERE {' AND '.join(predicates)}",
@@ -717,19 +749,20 @@ class PostgresControlStore(AccountDomainControlMixin):
             ).fetchone()
         return int(_row_value(row, "count", 0, 0))
 
-    def public_device_user_count(self) -> int:
+    def public_device_user_count(self, *, source_server_id: str = "") -> int:
         self.ensure_schema()
         with self._connection() as connection:
             row = connection.execute(
                 """
                 SELECT COUNT(DISTINCT username) AS count
                 FROM control_devices
-                WHERE enabled=TRUE
-                """
+                WHERE enabled=TRUE AND (%s='' OR source_server_id=%s)
+                """,
+                (str(source_server_id), str(source_server_id)),
             ).fetchone()
         return int(_row_value(row, "count", 0, 0))
 
-    def public_device_total_count(self, *, username: str = "") -> int:
+    def public_device_total_count(self, *, username: str = "", source_server_id: str = "") -> int:
         """Count all enabled public allowlist devices."""
         self.ensure_schema()
         predicates = ["enabled=TRUE"]
@@ -738,6 +771,9 @@ class PostgresControlStore(AccountDomainControlMixin):
         if owner:
             predicates.append("username=%s")
             parameters.append(owner)
+        if source_server_id:
+            predicates.append("source_server_id=%s")
+            parameters.append(str(source_server_id))
         with self._connection() as connection:
             row = connection.execute(
                 f"SELECT COUNT(*) AS count FROM control_devices WHERE {' AND '.join(predicates)}",

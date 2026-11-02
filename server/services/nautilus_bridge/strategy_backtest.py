@@ -28,10 +28,26 @@ def _frozen_shared_plan(bindings, refs, products, calendar):
     return spec, {role: output_by_ref[ref] for role, ref in refs.items()}
 
 
-def _compile_frozen_roots(expressions,products,calendar):
+def _compile_frozen_roots(expressions,products,calendar, *, source_freq=DataFreq.MIN1):
     from tools.factors.expr.streaming.rust_incremental import shared_factor_plan_spec
-    spec,_=shared_factor_plan_spec(expressions,products,source_freq=DataFreq.MIN1,session_calendar=calendar)
+    spec,_=shared_factor_plan_spec(expressions,products,source_freq=source_freq,session_calendar=calendar)
     return spec,{ref:i for i,ref in enumerate(expressions)}
+
+
+def _source_frequency(opened):
+    """Use the frozen catalog clocks, never assume that a Bar is one minute."""
+    import pandas as pd
+    from nautilus_trader.model import BarType
+
+    intervals = set()
+    for product, row in opened.items():
+        bar_type = BarType.from_str(str(row[2]['bar_type']))
+        if not bar_type.spec.is_time_aggregated():
+            raise ValueError(f'{product}: factor replay requires a time-aggregated Bar type')
+        intervals.add(int(bar_type.spec.get_interval_ns()))
+    if len(intervals) != 1 or next(iter(intervals)) <= 0:
+        raise ValueError('shared factor replay requires a single positive Bar frequency')
+    return DataFreq(pd.Timedelta(next(iter(intervals)), unit='ns'))
 
 
 def run_strategy_replay(*, input: ReplayInput, strategy_kind: str, factor_bindings,
@@ -75,13 +91,13 @@ def _build_strategy_family_engine(execution_plan, instruments, *, by_strategy=No
 
 
 def run_strategy_family_replay(*,inputs,factor_bindings,factor_refs,family,output_dir,
-    max_bars=8,execution_plan=None,session_calendar=None,batch_minutes=20,trace_path=None):
+    max_bars=8,max_total_bars=None,execution_plan=None,session_calendar=None,batch_minutes=20,trace_path=None):
     """Single-family compatibility view over the one shared runtime."""
     strategy_id=(str(execution_plan.strategy_venue_bindings[0]['strategy_id'])
                  if execution_plan is not None else 'FactorFamily-000')
     result=run_strategy_families_replay(inputs=inputs,strategies=[dict(strategy_id=strategy_id,
         factor_bindings=factor_bindings,factor_refs=factor_refs,family=family)],output_dir=output_dir,
-        max_bars=max_bars,execution_plan=execution_plan,session_calendar=session_calendar,
+        max_bars=max_bars,max_total_bars=max_total_bars,execution_plan=execution_plan,session_calendar=session_calendar,
         batch_minutes=batch_minutes,trace_path=trace_path)
     slots=result['strategy_output_slots'][strategy_id]
     return {**result,'factor_roles':sorted(factor_bindings),
@@ -90,9 +106,10 @@ def run_strategy_family_replay(*,inputs,factor_bindings,factor_refs,family,outpu
 
 
 def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execution_plan=None,
-    session_calendar=None,batch_minutes=20,trace_path=None,inspect_outputs=False):
+    max_total_bars=None,session_calendar=None,batch_minutes=20,trace_path=None,inspect_outputs=False):
     """One Catalog replay and CSE Actor for every compatible native consumer."""
-    from nautilus_trader._libnautilus import attach_factor_family
+    from nautilus_trader import _libnautilus as native
+    attach_factor_family = native.attach_factor_family
     from nautilus_trader.backtest import BacktestEngine
     from nautilus_trader.config import BacktestEngineConfig
     from nautilus_trader.execution import MakerTakerFeeModel
@@ -122,7 +139,13 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
         scopes[identity]=chosen
         consumers.append(dict(strategy_id=native_id,
             rule=_family_rule(strategy['family']),product_indices=[products.index(p) for p in chosen]))
-    spec,slots=_compile_frozen_roots(roots,products,session_calendar)
+    opened={product:_load_input(item) for product,item in inputs.items()}
+    # The node's frozen budget is for the complete input, not per product.
+    # Direct test/helper calls without a total retain their per-product cap.
+    input_cap=max_bars*len(opened) if max_total_bars is None else max_total_bars
+    preflight_catalogs(opened.values(),max_input_bars=input_cap)
+    spec,slots=_compile_frozen_roots(roots,products,session_calendar,
+        source_freq=_source_frequency(opened))
     from alpha.factor.spec import scope_plan_outputs
     requests=[];requested_roles=[]
     for consumer,strategy in zip(consumers,strategies,strict=True):
@@ -130,12 +153,13 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
             requests.append((slots[ref],consumer['product_indices']))
             requested_roles.append((strategy['strategy_id'],role))
     spec,scoped_slots=scope_plan_outputs(spec,requests,len(products))
+    from .warmup import bind_observed_source_clock, require_observed_clock_runtime
+    spec = bind_observed_source_clock(spec, {str(p): row[2] for p, row in opened.items()})
+    require_observed_clock_runtime(spec, native)
     strategy_slots={identity:{} for identity in role_refs}
     for (identity,role),slot in zip(requested_roles,scoped_slots,strict=True):strategy_slots[identity][role]=slot
     for consumer,strategy in zip(consumers,strategies,strict=True):
         consumer['signal_output']=strategy_slots[strategy['strategy_id']]['signal']
-    opened={product:_load_input(item) for product,item in inputs.items()}
-    preflight_catalogs(opened.values(),max_input_bars=max_bars*len(opened))
     warmup=None
     if execution_plan is not None:
         from .warmup import freeze_warmup_settings,resolve_run_warmup
@@ -161,7 +185,7 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
             calendar_json=json.dumps([(x.start_ns,x.end_ns) for x in session_calendar.sessions] if session_calendar else []),
             trace_path=None if trace_path is None else str(trace_path))
         try:
-            replay=replay_catalog_batches(engine,opened.values(),max_input_bars=max_bars*len(opened),batch_minutes=batch_minutes)
+            replay=replay_catalog_batches(engine,opened.values(),max_input_bars=input_cap,batch_minutes=batch_minutes)
         except Exception:
             runtime.raise_if_failed();raise
         runtime.ensure_success()
@@ -192,6 +216,28 @@ def run_strategy_family_run_spec(
             "Nautilus runtime unavailable or version-mismatched: "
             f"found={runtime['version'] or 'missing'} expected={runtime['expected']}"
         )
+
+    # A formal Job must never inherit the convenience replay helper's
+    # synthetic account, zero fees or implicit venue when its frozen contract
+    # is absent. Reject before resolving strategy code or staging market data.
+    run_spec_value = job_spec.get('run_spec') if isinstance(job_spec, dict) else None
+    configuration = run_spec_value.get('configuration') if isinstance(run_spec_value, dict) else None
+    analyses = configuration.get('analyses') if isinstance(configuration, dict) else None
+    backtest = analyses.get('backtest') if isinstance(analyses, dict) else None
+    execution = backtest.get('execution') if isinstance(backtest, dict) else None
+    contract = execution.get('nautilus_contract') if isinstance(execution, dict) else None
+    settings = contract.get('settings') if isinstance(contract, dict) else None
+    if not isinstance(settings, dict):
+        raise ValueError('strategy Job requires frozen Nautilus execution settings')
+    from server.services.nautilus_bridge.config import compile_frozen_execution_plan
+    execution_plan = compile_frozen_execution_plan(
+        settings, feed_kind='bar',
+        adapter_capabilities=frozenset({
+            'native_bar_open_market_orders',
+            'native_bar_volume_consumption',
+            'daily_settlement',
+        }),
+    )
 
     templates=plan.get('strategy_families')
     if templates is None:templates=[plan.get('strategy')]
@@ -226,7 +272,6 @@ def run_strategy_family_run_spec(
         consumers.append(dict(strategy_id=str(template.get('strategy_id') or f'FactorFamily-{i:03}'),
             family=family,factor_bindings=bindings,factor_refs=factor_refs,products=template.get('products') or None))
     catalogs = plan.get("catalog_inputs")
-    run_spec_value = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
     source_adapter = plan.get("source_adapter") or {}
     window = plan.get("run_window") or {}
     staging_requests = plan.get("catalog_staging")
@@ -237,13 +282,26 @@ def run_strategy_family_run_spec(
         if not isinstance(run_spec_value, dict):
             raise ValueError("strategy plan has no product catalogs and no RunSpec")
         staging_requests = staging_requests or catalog_staging_requests(run_spec_value)
+        data_start = str(window.get("start") or "")
+        if execution_plan is not None and execution_plan.factor_warmup.mode == "custom":
+            from server.services.nautilus_bridge.catalog_staging import _ns
+
+            custom_start = execution_plan.factor_warmup.data_start_utc
+            if _ns(custom_start) > _ns(execution_plan.start_utc):
+                raise ValueError("custom warmup starts after the run window")
+            # The portable plan can already require an earlier frozen tape.
+            # Keep it intact: trimming can change periodic scope anchors even
+            # when the remaining bars satisfy a window's nominal history.
+            if _ns(custom_start) < _ns(data_start):
+                data_start = custom_start
         catalogs = stage_run_spec_catalogs(
             staging_requests=staging_requests,
             source_key=str(source_adapter.get("member_key") or ""),
             frequency=str(source_adapter.get("frequency") or ""),
-            start_utc=str(window.get("start") or ""),
+            start_utc=data_start,
             end_utc=str(window.get("end") or ""),
             target_root=Path(output_dir) / "catalogs",
+            max_input_bars=plan.get('max_input_bars'),
         )
         plan = {**plan, "catalog_inputs": catalogs}
     if plan.get("session_calendar") is None:
@@ -265,25 +323,6 @@ def run_strategy_family_run_spec(
         )
         for product, value in catalogs.items()
     }
-    execution_plan = None
-    run_spec = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
-    if isinstance(run_spec, dict):
-        analyses = (run_spec.get("configuration") or {}).get("analyses") or {}
-        backtest = analyses.get("backtest") or {}
-        execution = backtest.get("execution") or {}
-        contract = execution.get("nautilus_contract") or {}
-        settings = contract.get("settings") if isinstance(contract, dict) else None
-        if isinstance(settings, dict):
-            from server.services.nautilus_bridge.config import compile_frozen_execution_plan
-
-            execution_plan = compile_frozen_execution_plan(
-                settings, feed_kind="bar",
-                adapter_capabilities=frozenset({
-                    "native_bar_open_market_orders",
-                    "native_bar_volume_consumption",
-                    "daily_settlement",
-                }),
-            )
     aliases={key:key for key in inputs}
     aliases.update({value.expected_contract_uid:key for key,value in inputs.items()})
     selections=shared.get('product_selections') or {}
@@ -298,7 +337,10 @@ def run_strategy_family_run_spec(
             unknown=set(selected)-set(aliases)
             if unknown:raise ValueError(f'strategy scope has no frozen catalog: {sorted(unknown)}')
             consumer['products']=list(dict.fromkeys(aliases[x] for x in selected))
-    common=dict(inputs=inputs,output_dir=Path(output_dir),max_bars=int(plan.get('max_input_bars') or 8),
+    # A portable plan's node budget bounds the sum across all catalogs.
+    # Do not multiply it by the number of selected products.
+    common=dict(inputs=inputs,output_dir=Path(output_dir),max_bars=8,
+                max_total_bars=plan.get('max_input_bars'),
                 execution_plan=execution_plan,session_calendar=plan.get('session_calendar'))
     if len(consumers)==1 and 'strategy_families' not in plan:
         consumer=consumers[0]

@@ -143,6 +143,36 @@ def test_grouped_ic_scale_aware_horizon_uses_omitted_default_signal_frequency(
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    # Exercise the real admission path with the shared isolated Keycloak
+    # adapter, instead of relying on the retired username-only Flask session.
+    from flask import g, request
+    from tests.server.test_server_admission import Keycloak, ISSUER, ORG, SERVER
+    from server.identity import server_admission as admission
+    from server.identity.realm_groups import organization_group_path
+
+    class LifecycleKeycloak(Keycloak):
+        def _get(self, path):
+            if path == "users/subject-bob":
+                return {"id": "subject-bob", "enabled": True,
+                        "attributes": {"tr_identity_id": ["stable-bob"], "tr_organization_id": [ORG]}}
+            return super()._get(path)
+        def user_group_paths(self, subject):
+            return self.groups if subject == "subject-bob" else super().user_group_paths(subject)
+    provider = LifecycleKeycloak()
+    provider.user["attributes"]["tr_identity_id"] = ["stable-alice"]
+    identity = {"username": "alice", "keycloak_subject": "subject", "keycloak_issuer": ISSUER,
+                "tr_identity_id": "stable-alice", "organization_id": ORG,
+                "keycloak_groups": [organization_group_path(ORG) + "/levels/a"], "keycloak_roles": []}
+    monkeypatch.setattr(admission, "oidc_settings", lambda: {
+        "issuer": ISSUER, "roles_client_id": "tr-manager", "client_id": "tr-manager"})
+    monkeypatch.setattr("server.identity.federation_identity_sync.manager_keycloak_admin_adapter",
+                        lambda: provider)
+    for name in ("PUBLIC_SERVER", "SERVER_ID", "MANAGED_ORGANIZATIONS"):
+        monkeypatch.delenv("TRADERESEARCH_" + name, raising=False)
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "0")
+    monkeypatch.setenv("FACTORTESTER_SERVER_ID", SERVER)
+    monkeypatch.setenv("FACTORTESTER_MANAGED_ORGANIZATIONS", ORG)
+    admission.clear_server_admission_cache()
     # These lifecycle fixtures use synthetic product identities. Real category
     # expansion and membership drift are covered by test_product_scope_snapshot.
     monkeypatch.setattr(
@@ -182,10 +212,20 @@ class {family}(FactorFamily):
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(sft_bp)
+    @app.before_request
+    def _verified_keycloak_fixture():
+        name = request.cookies.get("tr-test-principal", "alice")
+        if name == "bob":
+            g.keycloak_user_session = {**identity, "username": "bob", "keycloak_subject": "subject-bob",
+                                       "tr_identity_id": "stable-bob"}
+        else:
+            g.keycloak_user_session = dict(identity)
+        g.keycloak_access_token = "test-keycloak-token-" + name
     client = app.test_client()
     with client.session_transaction() as session:
         session["username"] = "alice"
-    return client
+    yield client
+    admission.clear_server_admission_cache()
 
 
 def _create_workspace(client):
@@ -1459,14 +1499,12 @@ def test_configuration_snapshot_rejects_wrong_scope_stale_or_deleted(
         "configuration_snapshot_revision": 2,
     }).status_code == 409
 
-    with client.session_transaction() as session:
-        session["username"] = "bob"
+    client.set_cookie("tr-test-principal", "bob")
     assert client.post("/api/runs/preview", json={
         **base,
         "workspace_id": workspace["workspace_id"],
     }).status_code == 404
-    with client.session_transaction() as session:
-        session["username"] = "alice"
+    client.set_cookie("tr-test-principal", "alice")
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         conn.execute(
             "UPDATE research_configuration_snapshots "
@@ -1960,10 +1998,12 @@ def test_view_lifecycle_is_not_a_research_job_api(client) -> None:
 
 
 def test_nautilus_backtest_retry_copies_frozen_execution_plan(client):
+    from tests.server.test_server_admission import ISSUER
     repository = JobRepository()
     job = repository.create(JobRecord(
         job_id="nautilus-retry-source", run_id="run-nautilus",
         owner="alice", workspace_id="workspace-nautilus", kind="backtest",
+        owner_issuer=ISSUER, owner_subject="subject",
         status=JobStatus.SUBMITTED, job_spec={"run_spec": {"run_spec_version": 10}},
         runner_path="server.jobs.dispatch.executors:ProcessRunnerExecutor",
     ))

@@ -1,0 +1,338 @@
+"""Fetch one authorized report branch without overwriting local edits."""
+from __future__ import annotations
+
+import hashlib
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+from urllib.parse import urlencode
+
+from .authoring.tree_bundle import import_report_bundle
+from .authoring.tree_paths import report_tree_paths
+from .authoring.tree_sqlite_index import publish_sqlite_index
+from .authoring.tree_store import atomic_write, load_head, load_node, tree_lock, write_head
+from .authoring.submission_status import require_no_pending
+from .generation import report_workspace_lock
+from .git import commit_report_workspace
+from .local_publication import ensure_publication_table, manager_session, publication_endpoint, publication_query
+from .report_workspace_identity import report_workspace_id_for
+
+
+class LocalReportSyncConflict(ValueError):
+    """Local and remote report histories cannot safely be advanced automatically."""
+
+
+def _workspace_is_clean(root: Path) -> bool:
+    status = subprocess.run(['git', '-C', str(root), 'status', '--porcelain'], capture_output=True, text=True, check=True)
+    return not status.stdout.strip()
+
+
+def _require_clean_workspace(root: Path) -> None:
+    if not _workspace_is_clean(root):
+        raise LocalReportSyncConflict('local report workspace has uncommitted files')
+
+
+def _require_unchanged_assets(root: Path, paths: dict, head: dict) -> None:
+    """Do not discard committed asset edits that did not update the tree."""
+    from .authoring.tree_bundle import read_bundle_asset
+    from .authoring.tree_projection import project_snapshot
+
+    assets = [asset for asset in head['assets'] if asset.get('content_hash')]
+    if not assets:
+        return
+    snapshot = project_snapshot(paths, head)
+    for asset in assets:
+        try:
+            raw, _, _ = read_bundle_asset(snapshot, asset, package_root=root, branch_id='main')
+        except (OSError, ValueError) as exc:
+            raise LocalReportSyncConflict('local report asset is unavailable') from exc
+        if hashlib.sha256(raw).hexdigest() != asset['content_hash']:
+            raise LocalReportSyncConflict('local report asset changed without updating the report')
+
+
+def _assets_changed(root: Path, paths: dict, head: dict) -> bool:
+    try:
+        _require_unchanged_assets(root, paths, head)
+    except LocalReportSyncConflict:
+        return True
+    return False
+
+
+def _content_changed(store, root: Path, paths: dict, head: dict, *, report_id: str,
+                     manager_hash: str, receipt) -> bool:
+    from .local_sync_baseline import content_digest, needs_baseline, read_baseline
+
+    baseline = read_baseline(store, report_id=report_id, manager_hash=manager_hash, receipt=receipt) if receipt else None
+    if baseline is None:
+        return needs_baseline(paths, head)
+    try:
+        return content_digest(root, paths, head) != baseline
+    except (OSError, ValueError):
+        return True
+
+
+def _remote(session, research_id: str, report_id: str, *, metadata_only: bool = False, requires_edit: bool = False, source_kind: str = 'local') -> dict:
+    from .public_research.object_uploads import projection_hash
+    value = session.get(publication_endpoint(source_kind, research_id, report_id), query={
+        **publication_query(source_kind, research_id, report_id), 'branch_ref': 'main',
+        **({'metadata_only': '1'} if metadata_only else {}),
+        **({'requires_edit': '1'} if requires_edit else {})})
+    record, bundle, projection = value.get('publication'), value.get('authoring'), value.get('projection')
+    if (value.get('success') is not True or (requires_edit and value.get('edit_authorized') is not True)
+            or not isinstance(record, dict) or not isinstance(bundle, dict) or (not metadata_only and not isinstance(projection, dict))
+            or record.get('report_id') != report_id or record.get('branch_ref') != 'main'
+            or not re.fullmatch(r'p-[0-9a-f]{64}', str(record.get('publication_id') or ''))
+            or not isinstance(record.get('revision'), str) or not record['revision'] or len(record['revision']) > 256
+            or type(record.get('generation')) is not int or record['generation'] < 0
+            or not re.fullmatch(r'[0-9a-f]{64}', str(record.get('projection_hash') or ''))
+            or (not metadata_only and (projection.get('report_id') != report_id or projection.get('generation') != record['generation']
+                or projection.get('projection_hash') != record['projection_hash'] or projection_hash(projection) != record['projection_hash']))
+            or set(bundle) != {'sha256', 'root_ref', 'generation', 'size_bytes'}
+            or not re.fullmatch(r'[0-9a-f]{64}', str(bundle.get('sha256') or ''))
+            or bundle.get('generation') != record['generation']
+            or type(bundle.get('size_bytes')) is not int or not 0 < bundle['size_bytes'] <= 8 * 1024 * 1024):
+        raise ValueError('remote report snapshot is invalid or not editable')
+    from .authoring.tree_schema import node_reference
+    node_reference(bundle['root_ref'])
+    return {'publication': record, 'authoring': bundle,
+            **({'projection': projection} if not metadata_only else {})}
+
+
+def _copy_files(source: Path, destination: Path, created: list[Path]) -> None:
+    if not source.exists():
+        return
+    for path in source.rglob('*'):
+        if path.is_symlink():
+            raise ValueError('report snapshot contains a symbolic link')
+        if not path.is_file():
+            continue
+        target = destination / path.relative_to(source)
+        for parent in [target, *target.parents]:
+            if parent.is_symlink():
+                raise ValueError('report destination contains a symbolic link')
+            if parent == destination.parent:
+                break
+        data = path.read_bytes()
+        if target.exists():
+            if not target.is_file() or target.read_bytes() != data:
+                raise LocalReportSyncConflict('local report resource differs from remote content')
+        else:
+            created.append(target)
+            atomic_write(target, data)
+
+
+def _recover_pull(store, root: Path, paths: dict, manager_hash: str, report_id: str,
+                  remote: dict, base, local: dict) -> bool:
+    """Finish a verified pull whose Git commit preceded its SQLite receipt."""
+    with store._connect() as db:
+        pending = db.execute('SELECT * FROM report_pull_recovery WHERE report_id=? AND manager_hash=?',
+                             (report_id, manager_hash)).fetchone()
+    if not pending:
+        return False
+    record, bundle = remote['publication'], remote['authoring']
+    if (not base or (base['publication_id'], base['revision'], base['generation'], base['local_root_ref']) !=
+            (pending['publication_id'], pending['base_revision'], pending['base_generation'], pending['base_root_ref'])
+            or (record['publication_id'], record['revision'], record['generation'], record['projection_hash'], bundle['sha256']) !=
+            (pending['publication_id'], pending['revision'], pending['generation'], pending['projection_hash'], pending['bundle_sha256'])
+            or (local['generation'], local['root_ref']) != (pending['generation'], pending['local_root_ref'])):
+        return False
+    status = subprocess.run(['git', '-C', str(root), 'status', '--porcelain'], capture_output=True, text=True, check=True)
+    parent = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD^'], capture_output=True, text=True)
+    message = subprocess.run(['git', '-C', str(root), 'log', '-1', '--format=%s'], capture_output=True, text=True, check=True)
+    if status.stdout.strip() or parent.returncode or parent.stdout.strip() != pending['prior_commit'] or message.stdout.strip() != 'Sync report from Manager':
+        return False
+    if (_assets_changed(root, paths, local)
+            or _content_changed(store, root, paths, local, report_id=report_id,
+                                manager_hash=manager_hash, receipt=pending)):
+        return False
+    with store._connect() as db:
+        changed = db.execute('''UPDATE report_publications SET revision=?, generation=?, projection_hash=?, local_root_ref=?
+            WHERE report_id=? AND manager_hash=? AND publication_id=? AND revision=? AND generation=? AND local_root_ref=?''',
+            (pending['revision'], pending['generation'], pending['projection_hash'], pending['local_root_ref'], report_id,
+             manager_hash, pending['publication_id'], pending['base_revision'], pending['base_generation'], pending['base_root_ref']))
+        if changed.rowcount != 1:
+            raise LocalReportSyncConflict('report synchronization receipt changed during recovery')
+        db.execute('DELETE FROM report_pull_recovery WHERE report_id=? AND manager_hash=?', (report_id, manager_hash))
+    return True
+
+
+def pull_local_report(store, *, binding: dict, manager: dict, profile_id: str,
+                      research_id: str, report_id: str) -> dict:
+    endpoint, session = manager_session(binding, manager)
+    _report, root = store._report_root(profile_id, research_id, report_id)
+    manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
+    lock = store.workspace_root / '.locks' / ('publication-' + report_workspace_id_for(report_id) + '-' + manager_hash[:16])
+    ensure_publication_table(store)
+    with report_workspace_lock(lock):
+        with store._connect() as db:
+            base = db.execute('SELECT * FROM report_publications WHERE report_id=? AND manager_hash=?',
+                              (report_id, manager_hash)).fetchone()
+        source_kind = base['source_kind'] if base else 'local'
+        remote = _remote(session, research_id, report_id, source_kind=source_kind)
+        record, bundle = remote['publication'], remote['authoring']
+        if base and base['publication_id'] != record['publication_id']:
+            raise LocalReportSyncConflict('remote publication identity changed')
+        paths = report_tree_paths(root, 'main')
+        with tree_lock(paths):
+            local = load_head(paths)
+            if local['report_id'] != report_id:
+                raise ValueError('local report identity is invalid')
+            # Recovery updates a local editable snapshot, so recheck write access
+            # just as the authoring attachment endpoint does.
+            with store._connect() as db:
+                has_recovery = db.execute('SELECT 1 FROM report_pull_recovery WHERE report_id=? AND manager_hash=?',
+                                          (report_id, manager_hash)).fetchone() is not None
+            if has_recovery:
+                edit_check = _remote(session, research_id, report_id, metadata_only=True, requires_edit=True, source_kind=source_kind)
+                if edit_check != {'publication': remote['publication'], 'authoring': remote['authoring']}:
+                    raise LocalReportSyncConflict('remote report changed during recovery')
+            if has_recovery and _recover_pull(store, root, paths, manager_hash, report_id, remote, base, local):
+                return {'status': 'updated', 'local_modified': False}
+            if base and base['revision'] == record['revision']:
+                return {'status': 'up_to_date', 'local_modified': (
+                    local['generation'] != base['generation'] or local['root_ref'] != base['local_root_ref']
+                    or not _workspace_is_clean(root) or _assets_changed(root, paths, local)
+                    or _content_changed(store, root, paths, local, report_id=report_id,
+                                        manager_hash=manager_hash, receipt=base))}
+            baseline_ok = bool(base and base['local_root_ref'] and local['generation'] == base['generation'] and local['root_ref'] == base['local_root_ref'])
+            identical = local['generation'] == bundle['generation'] and local['root_ref'] == bundle['root_ref']
+            if has_recovery and not baseline_ok:
+                # A journal whose committed state did not pass recovery must
+                # not fall back to a second download or overwrite local work.
+                raise LocalReportSyncConflict('interrupted pull requires conflict resolution')
+            if not baseline_ok and not identical:
+                raise LocalReportSyncConflict('local report changed since the last confirmed synchronization')
+            require_no_pending(paths, local)
+            # Files outside the immutable tree can contain unsaved work. Check
+            # before fetching an authoring bundle as well as after it arrives.
+            _require_clean_workspace(root)
+            _require_unchanged_assets(root, paths, local)
+            if _content_changed(store, root, paths, local, report_id=report_id,
+                                manager_hash=manager_hash, receipt=base):
+                raise LocalReportSyncConflict('local report resources differ from the confirmed baseline')
+            expected = (local['generation'], local['root_ref'])
+        publication_id, digest = record['publication_id'], bundle['sha256']
+        query = urlencode(publication_query(source_kind, research_id, report_id))
+        url = publication_endpoint(source_kind, research_id, report_id) + f'/{publication_id}/attachments/report_authoring/{digest}'
+        response = session.download(url + ('?' + query if query else ''),
+                                    maximum_bytes=8 * 1024 * 1024)
+        if len(response.content) != bundle['size_bytes'] or hashlib.sha256(response.content).hexdigest() != digest:
+            raise ValueError('remote report bundle checksum or size mismatch')
+        with tempfile.TemporaryDirectory(prefix='report-pull-', dir=store.workspace_root) as temporary:
+            staged_root = Path(temporary) / report_workspace_id_for(report_id)
+            imported = import_report_bundle(payload=response.content, expected_sha256=digest, package_root=staged_root,
+                branch_id='main', report_id=report_id, source_generation=bundle['generation'], source_root_ref=bundle['root_ref'],
+                restore_artifacts=False)
+            staged_head = imported['head']
+            # The Manager validates the projection and authoring bundle
+            # separately. Both must describe the same report before the local
+            # HEAD or its recovery journal can be changed.
+            from .local_projection_validation import bundle_matches_projection
+            if not bundle_matches_projection(package_root=staged_root,
+                    source_manifest=imported['source_manifest'],
+                    remote_projection=remote['projection'], expected_hash=record['projection_hash']):
+                raise LocalReportSyncConflict('report source and published projection differ')
+            if _remote(session, research_id, report_id, source_kind=source_kind) != remote:
+                raise LocalReportSyncConflict('remote report changed during download')
+            target_lock = store.workspace_root / '.locks' / report_workspace_id_for(report_id)
+            with report_workspace_lock(target_lock), tree_lock(paths):
+                current = load_head(paths)
+                if (current['generation'], current['root_ref']) != expected:
+                    raise LocalReportSyncConflict('local report changed during download')
+                require_no_pending(paths, current)
+                _require_clean_workspace(root)
+                _require_unchanged_assets(root, paths, current)
+                if _content_changed(store, root, paths, current, report_id=report_id,
+                                    manager_hash=manager_hash, receipt=base):
+                    raise LocalReportSyncConflict('local report resources changed during download')
+                prior_commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+                from .local_sync_baseline import read_baseline
+                previous_baseline = (read_baseline(store, report_id=report_id, manager_hash=manager_hash,
+                                                   receipt=base) if base else None)
+                # A staged bundle must not modify the shared Job cache before
+                # content, authorization and local-version checks all pass.
+                from .authoring.bundle_job_artifacts import restore_job_artifacts
+                restore_job_artifacts(*imported['deferred_job_artifacts'])
+                registry_before = paths['binding_registry'].read_bytes() if paths['binding_registry'].exists() else None
+                staged_branch = staged_root / 'branches' / 'main'
+                target_branch = root / 'branches' / 'main'
+                created: list[Path] = []
+                head_started = False
+                try:
+                    if base:
+                        with store._connect() as db:
+                            db.execute('''INSERT OR REPLACE INTO report_pull_recovery VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                (report_id, manager_hash, record['publication_id'], record['revision'], staged_head['generation'],
+                                 record['projection_hash'], digest, staged_head['root_ref'], base['revision'], base['generation'],
+                                 base['local_root_ref'], prior_commit))
+                    for name in ('resources', 'assets'):
+                        _copy_files(staged_branch / name, target_branch / name, created)
+                    _copy_files(staged_branch / 'authoring' / 'nodes', target_branch / 'authoring' / 'nodes', created)
+                    new_head = {**staged_head, 'locator_generation': 0}
+                    head_started = True
+                    write_head(paths, new_head)
+                    try:
+                        publish_sqlite_index(paths, load_node(paths, new_head['root_ref']), new_head['generation'])
+                        write_head(paths, {**new_head, 'locator_generation': new_head['generation']})
+                    except (OSError, ValueError):
+                        # HEAD remains authoritative; indexes are rebuildable.
+                        pass
+                    # Verify the copied local content against the independently
+                    # staged, authorized source before recording its baseline.
+                    from .local_sync_baseline import content_digest, write_baseline
+                    final_head = load_head(paths)
+                    staged_paths = report_tree_paths(staged_root, 'main')
+                    expected_content = content_digest(staged_root, staged_paths, final_head)
+                    actual_content = content_digest(root, paths, final_head)
+                    if expected_content != actual_content:
+                        raise LocalReportSyncConflict('local report resources changed while applying the update')
+                    write_baseline(store, report_id=report_id, manager_hash=manager_hash,
+                        receipt={**record, 'generation': final_head['generation'], 'local_root_ref': final_head['root_ref']},
+                        content_sha256=expected_content)
+                    commit_report_workspace(root, message='Sync report from Manager')
+                except Exception:
+                    after = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+                    if after == prior_commit:
+                        staged = subprocess.check_output(['git', '-C', str(root), 'diff', '--cached', '--name-only', '-z']).decode().split('\x00')
+                        allowed = {str(path.relative_to(root)) for path in created}
+                        allowed.update(str(path.relative_to(root)) for path in (paths['head'], paths['binding_registry']))
+                        allowed.add('.gitignore')
+                        changed = [path for path in staged if path]
+                        if not set(changed).issubset(allowed):
+                            raise LocalReportSyncConflict('unrelated staged files appeared during report recovery')
+                        if changed:
+                            subprocess.run(['git', '-C', str(root), 'restore', '--staged', '--', *changed], check=True, capture_output=True)
+                        if head_started:
+                            write_head(paths, current)
+                            if registry_before is None:
+                                paths['binding_registry'].unlink(missing_ok=True)
+                            else:
+                                atomic_write(paths['binding_registry'], registry_before)
+                            publish_sqlite_index(paths, load_node(paths, current['root_ref']), current['generation'])
+                        for path in reversed(created):
+                            path.unlink(missing_ok=True)
+                        from .local_sync_baseline import remove_baseline, write_baseline
+                        if previous_baseline is None:
+                            remove_baseline(store, report_id=report_id, manager_hash=manager_hash)
+                        else:
+                            write_baseline(store, report_id=report_id, manager_hash=manager_hash,
+                                           receipt=base, content_sha256=previous_baseline)
+                        with store._connect() as db:
+                            db.execute('DELETE FROM report_pull_recovery WHERE report_id=? AND manager_hash=?', (report_id, manager_hash))
+                    raise
+        with store._connect() as db:
+            if base:
+                changed = db.execute('''UPDATE report_publications SET revision=?, generation=?, projection_hash=?, local_root_ref=?
+                    WHERE report_id=? AND manager_hash=? AND publication_id=? AND revision=? AND generation=? AND local_root_ref=?''',
+                    (record['revision'], staged_head['generation'], record['projection_hash'], staged_head['root_ref'],
+                     report_id, manager_hash, base['publication_id'], base['revision'], base['generation'], base['local_root_ref']))
+                if changed.rowcount != 1:
+                    raise LocalReportSyncConflict('report synchronization receipt changed during pull')
+            else:
+                db.execute('''INSERT INTO report_publications
+                (report_id, manager_hash, publication_id, revision, generation, projection_hash, local_root_ref)
+                VALUES (?, ?, ?, ?, ?, ?, ?)''', (report_id, manager_hash, record['publication_id'],
+                    record['revision'], staged_head['generation'], record['projection_hash'], staged_head['root_ref']))
+            db.execute('DELETE FROM report_pull_recovery WHERE report_id=? AND manager_hash=?', (report_id, manager_hash))
+        return {'status': 'updated', 'local_modified': False}

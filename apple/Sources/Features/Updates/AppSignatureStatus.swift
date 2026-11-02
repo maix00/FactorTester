@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 struct AppSignatureStatus {
@@ -47,3 +48,5 @@ struct AppSignatureStatus {
         )
     }
 }
+
+#endif

@@ -51,6 +51,7 @@ class ServiceGateway:
         method: str = "GET",
         body: bytes | None = None,
         content_type: str = "application/json",
+        delegated_user_token: str = "",
     ) -> GatewayResponse:
         if port not in self._available_ports():
             raise ValueError("service port is unavailable")
@@ -59,6 +60,13 @@ class ServiceGateway:
             "X-FactorTester-Principal": principal,
             "X-FactorTester-Manager": self._capability_token(),
         }
+        if delegated_user_token:
+            if len(delegated_user_token) > 32768 or any(c in delegated_user_token for c in "\r\n"):
+                raise ValueError("invalid delegated user token")
+            # This gateway only targets an approved loopback service.  The
+            # service independently verifies the caller's Keycloak token;
+            # the Manager capability alone must never manufacture a role.
+            headers["Authorization"] = f"Bearer {delegated_user_token}"
         if body is not None:
             headers["Content-Type"] = content_type
         request = Request(
@@ -92,9 +100,10 @@ class ServiceGateway:
             raise ConnectionError("service port is unavailable") from exc
 
     def json(
-        self, *, port: int, path: str, principal: str,
+        self, *, port: int, path: str, principal: str, delegated_user_token: str = "",
     ) -> dict[str, object]:
-        response = self.request(port=port, path=path, principal=principal)
+        response = self.request(port=port, path=path, principal=principal,
+                                delegated_user_token=delegated_user_token)
         if not 200 <= response.status < 300:
             raise ConnectionError(
                 f"service returned HTTP {response.status}"

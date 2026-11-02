@@ -32,7 +32,7 @@ function Panel(props: IDockviewPanelProps<{ pageId: string; args?: PageArguments
   const [visible, setVisible] = useState(props.api.isVisible);
   useEffect(() => { const subscription = props.api.onDidVisibilityChange((event) => setVisible(event.isVisible)); return () => subscription.dispose(); }, [props.api]);
   return (
-    <div className="tr-tab-layer" data-tab-layer={props.params.pageId} aria-hidden={!visible} inert={!visible}>
+    <div className="tr-tab-layer" data-tab-layer={props.params.pageId} hidden={!visible} aria-hidden={!visible} inert={!visible}>
       <PageInstanceProvider value={{ id: props.api.id, pageId: props.params.pageId, args: props.params.args || {}, mobile: false, active: visible,
         open: (pageId, args) => {
           const page = getPage(pageId); if (!page) return;
@@ -49,7 +49,7 @@ function AgentAssistantPanel(props: IDockviewPanelProps<{ pageId: string }>): Re
     const subscription = props.api.onDidVisibilityChange((event) => setVisible(event.isVisible));
     return () => subscription.dispose();
   }, [props.api]);
-  return <div className="tr-dock-assistant-layer" aria-hidden={!visible} inert={!visible}>
+  return <div className="tr-dock-assistant-layer" hidden={!visible} aria-hidden={!visible} inert={!visible}>
     <AgentAssistant open={visible} presentation="panel" />
   </div>;
 }
@@ -117,7 +117,7 @@ function WorkspaceWatermark({ containerApi }: IWatermarkPanelProps): React.React
     <p>{t("workspace.emptyHint")}</p>
     <div className="tr-workspace-empty-actions">
       <button type="button" onClick={() => openRootPage(containerApi, "research", t("nav.research"))}>{t("workspace.openResearch")}</button>
-      <button type="button" onClick={() => openRootPage(containerApi, "test-bench", t("nav.testBench"))}>{t("workspace.openTestBench")}</button>
+      <button type="button" onClick={() => openRootPage(containerApi, "test-bench", t("nav.test-bench"))}>{t("workspace.openTestBench")}</button>
     </div>
   </div>;
 }
@@ -133,7 +133,15 @@ export function DesktopShell(): React.ReactElement {
   const [active, setActive] = useState(pages[0]?.id ?? "research");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
   const effectiveCollapsed=collapsed || compact;
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(location.search).get("settings") === "account");
+  const closeSettings = (): void => {
+    setSettingsOpen(false);
+    const url = new URL(location.href);
+    if (url.searchParams.get("settings") === "account") {
+      url.searchParams.delete("settings");
+      history.replaceState(history.state, "", url.href);
+    }
+  };
   const [assistantRequested, setAssistantRequested] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
@@ -265,7 +273,7 @@ export function DesktopShell(): React.ReactElement {
   return (
     <AppTheme>
     <DesktopNotificationHost />
-    <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
+    <SettingsOverlay open={settingsOpen} onClose={closeSettings} onResetLayout={resetLayout} />
     <div className={`tr-app-shell${effectiveCollapsed ? " is-collapsed" : ""}${compact ? " is-compact" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label={t("mainNavigation")}>
         <div className="tr-sidebar-header">

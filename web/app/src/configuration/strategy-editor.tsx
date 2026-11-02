@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { request } from "./api.ts";
 import { parseDraft, readPath, writePath, type JSONObject } from "./draft.ts";
 import { FactorPicker } from "../components/library-picker.tsx";
+import { ObjectReference } from "../components/object-reference.tsx";
 import { LibraryCreate } from "../components/library-create.tsx";
 import { NO_DEFAULTS } from "./form-options.ts";
 import type { ConfigurationView } from "./navigation.ts";
@@ -30,12 +31,12 @@ function ReferenceWidget(props: WidgetProps): React.ReactElement {
   const options = [...new Map(rows.map((row) => [reference(row), { value: reference(row), label: String(row.name || row.title || row.factor_alias || row.alias || reference(row)) }])).values()];
   if (props.value && !options.some((item) => item.value === props.value)) options.unshift({ value: props.value, label: props.value });
   if (factor) return <FactorPicker label={props.label} value={props.value} disabled={props.disabled || props.readonly} onSelect={(record) => { props.formContext?.rememberFactor?.(String(record.ref), record); props.onChange(String(record.ref)); }} />;
-  return <><Select id={props.id} aria-label={props.label} value={props.value || undefined} showSearch optionFilterProp="label" style={{ width: "100%" }}
+  return <><div className="tr-reference-select"><Select id={props.id} aria-label={props.label} value={props.value || undefined} showSearch optionFilterProp="label" style={{ width: "100%" }}
     options={options} loading={loading} disabled={props.disabled || props.readonly} onChange={(value: string) => {
       const row = rows.find((item) => reference(item) === value);
       if (factor && row) props.formContext?.rememberFactor?.(value, row);
       props.onChange(value);
-    }} />{error ? <span role="alert">{error}</span> : null}</>;
+    }} />{props.value ? <ObjectReference icon value={{kind:"productGroup",ref:String(props.value),label:options.find(option=>option.value===props.value)?.label || String(props.value)}} /> : null}</div>{error ? <span role="alert">{error}</span> : null}</>;
 }
 
 interface StrategyEditorOptions { scope: string; text: string; onChange: (text: string) => void; view: ConfigurationView; navigate: (view: ConfigurationView) => void }
@@ -161,17 +162,17 @@ export function useStrategyEditor({ scope, text, onChange, view, navigate }: Str
   else if (catalog) content = <div className="tr-config-strategy-catalog"><Button type="primary" onClick={() => setCreating(true)}>{t("editor.newStrategy")}</Button>
     <Input.Search aria-label={t("configuration.strategies")} placeholder={t("configuration.searchStrategies")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
     <Spin spinning={reading || pending > 0}><div className="tr-config-choice-list">{[...templates.filter((item) => !query || `${item.name} ${item.strategy_ref}`.toLowerCase().includes(query.toLowerCase())), ...users].map((item) =>
-      <button type="button" key={item.strategy_ref} disabled={pending > 0} onClick={() => void add(item)}><span><strong>{name(item)}</strong><small>{t(`configuration.scope.${item.library_scope || "user_custom"}`, { defaultValue: item.library_scope || "user" })}</small></span><span className="tr-config-chevron">＋</span></button>)}</div></Spin>
+      <div className="tr-config-choice-row" key={item.strategy_ref}><button type="button" disabled={pending > 0} onClick={() => void add(item)}><span><strong>{name(item)}</strong><small>{t(`configuration.scope.${item.library_scope || "user_custom"}`, { defaultValue: item.library_scope || "user" })}</small></span><span className="tr-config-chevron">＋</span></button><ObjectReference icon value={{kind:item.template_ref ? "strategyFamily" : "strategy",ref:item.template_ref || item.strategy_ref,label:name(item)}} /></div>)}</div></Spin>
     <Pagination size="small" current={page} total={total} pageSize={20} onChange={setPage} hideOnSinglePage />{errors}</div>;
   else if (selected) content = <div className="tr-config-strategy-form">
     <div className="tr-config-inline-row"><label htmlFor="tr-strategy-name">{t("configuration.strategyId")}</label><Input id="tr-strategy-name" value={String(selected.binding.strategy_id || selected.binding.target_strategy_id)} onChange={(event) =>
       onChange(patchStrategy(text, String(selected.binding.binding_id), selected.binding.template_ref ? { strategy_id: event.target.value } : { target_strategy_id: event.target.value }))} /></div>
-    <div className="tr-config-inline-row"><label>{t("configuration.strategy")}</label>{template ? <Select aria-label={t("configuration.strategy")} value={template.template_ref}
+    <div className="tr-config-inline-row"><label>{t("configuration.strategy")}</label>{template ? <div className="tr-reference-select"><Select aria-label={t("configuration.strategy")} value={template.template_ref}
       options={templates.map((item) => ({ value: item.template_ref, label: name(item) }))} onChange={(ref: string) => {
         const next = templates.find((item) => item.template_ref === ref)!;
         const defaults = { ...strategyDefaults(next), ...((selected.binding.factor_bindings as JSONObject) || {}), product_group_ref: selected.binding.product_group_ref };
         onChange(patchStrategy(latest.current.text, String(selected.binding.binding_id), { template_ref: next.template_ref, revision_ref: next.revision_ref, ...templateInputs(next, defaults) }));
-      }} /> : <span>{String((selected.binding.source as JSONObject)?.strategy_ref || selected.binding.template_ref || "")}</span>}</div>
+      }} /><ObjectReference icon value={{kind:"strategyFamily",ref:String(template.template_ref),label:name(template)}} /></div> : <ObjectReference value={{kind:"strategy",ref:String((selected.binding.source as JSONObject)?.strategy_ref || "")}} />}</div>
     {template ? <Form idPrefix={`tr-strategy-${formId}`} key={String(selected.binding.binding_id)} schema={schema as RJSFSchema} formData={values} validator={validator} uiSchema={uiSchema} widgets={{ reference: ReferenceWidget }}
       experimental_defaultFormStateBehavior={NO_DEFAULTS} formContext={{ rememberFactor: (ref: string, row: JSONObject) => factorRows.current.set(ref, row) }}
       onChange={(event) => {

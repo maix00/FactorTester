@@ -133,6 +133,7 @@ def test_execution_api_rejects_invalid_oidc_bearer(transport):
 
 def test_saved_automatic_binding_is_revalidated_even_without_client_hash(transport, monkeypatch):
     from server.modules.single_factor_test import research_jobs, execution_nodes
+    from server.identity import keycloak_authorization as authz
     from server.services.research_run_context import RunRequestError
     _, _, service, binding, _ = transport
     product = _requirement().product_ref
@@ -141,6 +142,9 @@ def test_saved_automatic_binding_is_revalidated_even_without_client_hash(transpo
         'run_spec':{'data_requirements':[asdict(_requirement())],
             'configuration':{'shared':{'product_selections':{'scope':{'paths':[product]}}}}}}
     monkeypatch.setattr(execution_nodes,'node_service',lambda:service)
+    monkeypatch.setattr(authz, 'keycloak_request_identity', lambda: SimpleNamespace(username='alice', token='user-token'))
+    monkeypatch.setattr(authz, 'keycloak_authorized_many', lambda _token, *, permissions, use_cache:
+        {(uri, scope): True for uri, _name, scope in permissions} if use_cache is False else {})
     monkeypatch.setattr(research_jobs,'_prepare_local_research_run_request',lambda *a,**k:prepared)
     with pytest.raises(RunRequestError) as error:
         research_jobs._prepare_research_run_request({},owner='alice')

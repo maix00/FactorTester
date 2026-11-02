@@ -3,6 +3,7 @@ import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {mergeBars} from "./range-data";
 import {WickPrimitive} from "./wick-primitive";
+import {adaptRotatedChartInput} from "./rotated-input";
 
 type Bar = {
   timestamp: number;
@@ -142,6 +143,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     const api = window.LightweightCharts;
     const node = chartNode.current;
     if (!api || !node) return;
+    const stopRotatedInput = adaptRotatedChartInput(node);
     let activeTimeZone = timeZone;
     const formatTime = (time: number) => new Date(Number(time) * 1000)
       .toLocaleString(undefined, activeTimeZone ? {timeZone: activeTimeZone} : undefined);
@@ -505,6 +507,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     });
     return () => {
       revision += 1;
+      stopRotatedInput();
       if (timer) clearTimeout(timer);
       if (loadingTimer) clearTimeout(loadingTimer);
       bandResizeObserver?.disconnect();

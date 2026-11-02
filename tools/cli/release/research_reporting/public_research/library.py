@@ -32,16 +32,15 @@ class PublicResearchLibrary:
         self.storage_server_id = str(storage_server_id or "").strip()
 
     def can_read(self, record: dict[str, Any], viewer_ref: str | None) -> bool:
-        return _can_read(record, viewer_ref) or bool(
-            self.read_authorizer and self.read_authorizer(record, viewer_ref)
-        )
+        # Legacy publication ACLs are migration input only. A missing
+        # authoritative policy adapter must never grant access from them.
+        return bool(self.read_authorizer and self.read_authorizer(record, viewer_ref))
 
     def require_resource_access(self, record, metadata, viewer_ref):
         if metadata.get("purpose") != "report_authoring":
             return
-        if viewer_ref and (viewer_ref == record.get("owner_ref") or (
-            self.authoring_authorizer and self.authoring_authorizer(record, viewer_ref)
-        )):
+        if (self.authoring_authorizer is not None and viewer_ref
+                and self.authoring_authorizer(record, viewer_ref)):
             return
         raise PermissionError("editable report source requires active research membership")
 
@@ -712,18 +711,6 @@ def _record_by_publication_key(
         if str(item.get("publication_key") or item.get("report_id") or "")
         == publication_key
     ), None)
-
-
-def _can_read(record: dict[str, Any], viewer_ref: str | None) -> bool:
-    if viewer_ref == record["owner_ref"]:
-        return True
-    if record.get("visibility") == "public":
-        return True
-    return bool(
-        viewer_ref
-        and record.get("visibility") in {"superiors", "authorized"}
-        and viewer_ref in set(record.get("authorized_users") or [])
-    )
 
 
 def _client_online(record: dict[str, Any]) -> bool:

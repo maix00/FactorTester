@@ -1,5 +1,5 @@
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 #if os(macOS)
 import AppKit
 #endif

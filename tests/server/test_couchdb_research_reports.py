@@ -1,5 +1,6 @@
 import json
 from server.jobs.storage.couchdb_research_reports import document_id, get_research_report
+from tests.server.test_report_document_api import verified_manager_keycloak_session
 
 
 class Fake:
@@ -24,7 +25,7 @@ def test_projection_loads_content_addressed_attachment():
                                 "attachments": {"projection.json": {"name": "x.json"}}})["schema_version"] == 2
 
 
-def test_research_report_conflicts_are_owner_scoped(monkeypatch):
+def test_research_report_conflicts_are_owner_scoped(monkeypatch, verified_manager_keycloak_session):
     from flask import Flask
     from server.modules.single_factor_test import sft_bp
 
@@ -33,7 +34,8 @@ def test_research_report_conflicts_are_owner_scoped(monkeypatch):
         def _request(self, method, path):
             import json
             return 200, json.dumps({"_id": "research-report:p1", "kind": "research_report",
-                                    "publication_id": "p1", "owner_ref": "alice"}).encode()
+                                    "publication_id": "p1", "owner_ref": "alice",
+                                    "keycloak_resource_id": "report-resource"}).encode()
         def conflicts(self, ref): return ["2-a"]
         def resolve_conflicts(self, ref, *, keep_rev): return []
 
@@ -41,6 +43,6 @@ def test_research_report_conflicts_are_owner_scoped(monkeypatch):
     monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
     app = Flask(__name__); app.secret_key = "t"; app.register_blueprint(sft_bp)
     client = app.test_client()
-    with client.session_transaction() as session: session["username"] = "alice"
+    client.set_cookie("ft-manager-session", "keycloak-access-token")
     assert client.get("/api/research-reports/p1/conflicts").get_json()["conflicts"] == ["2-a"]
     assert client.post("/api/research-reports/p1/conflicts/resolve", json={"keep_rev": "2-a"}).status_code == 200

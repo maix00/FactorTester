@@ -1,4 +1,5 @@
 import {chartInteraction} from "./chart-interaction";
+import {adaptRotatedChartInput} from "./rotated-input";
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {mergeBars} from "./range-data";
@@ -74,6 +75,7 @@ function FactorChart({bars, indicators, product, loadRange, controller,
   useEffect(() => {
     const api = library();
     if (!api || !chartNode.current) return;
+    const cleanupRotatedInput = adaptRotatedChartInput(chartNode.current);
     const instance = api.createChart(chartNode.current, {
       autoSize: true, attributionLogo: true,
       layout: {background: {color: "#fff"}, textColor: "#5f6672",
@@ -180,6 +182,7 @@ function FactorChart({bars, indicators, product, loadRange, controller,
       if (timer) clearTimeout(timer);
       instance.timeScale().unsubscribeVisibleTimeRangeChange(onRange);
       instance.remove();
+      cleanupRotatedInput();
       chart.current = null;
       controller.current = null;
     };

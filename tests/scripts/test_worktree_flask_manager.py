@@ -746,6 +746,14 @@ def test_anonymous_server_jobs_are_bounded_to_twenty(
 def test_super_admin_server_jobs_use_permissioned_projection(
     tmp_path, monkeypatch,
 ) -> None:
+    from tests.server.test_server_admission import Keycloak, ISSUER
+    from server.identity import server_admission as admission
+    provider = Keycloak()
+    provider.roles = [{"name": "admin_console:manage"}]
+    admission.clear_server_admission_cache()
+    monkeypatch.setattr(admission, "oidc_settings", lambda: {
+        "issuer": ISSUER, "roles_client_id": "tr-manager", "client_id": "tr-manager"})
+    monkeypatch.setattr("server.identity.federation_identity_sync.manager_keycloak_admin_adapter", lambda: provider)
     state = manager.ManagerState(tmp_path, "python")
     calls = []
     monkeypatch.setattr(
@@ -754,12 +762,14 @@ def test_super_admin_server_jobs_use_permissioned_projection(
         lambda token: {
             "username": "admin@1",
             "role": "super_admin",
+            "keycloak_subject": "subject", "keycloak_issuer": ISSUER,
+            "keycloak_roles": ["admin_console:manage"],
             "capabilities": {"manager": True, "research": True},
         } if token == "admin-token" else None,
     )
 
-    def aggregate_server_jobs(*, principal, cursor, limit):
-        calls.append((principal, cursor, limit))
+    def aggregate_server_jobs(*, principal, cursor, limit, delegated_user_token):
+        calls.append((principal, cursor, limit, delegated_user_token))
         return {
             "public": False,
             "jobs": [{"job_id": "admin-job", "port": 8176}],
@@ -786,7 +796,61 @@ def test_super_admin_server_jobs_use_permissioned_projection(
 
     assert payload["public"] is False
     assert payload["jobs"][0]["job_id"] == "admin-job"
-    assert calls == [("admin@1", "", 100)]
+    assert calls == [("admin@1", "", 100, "admin-token")]
+    admission.clear_server_admission_cache()
+
+
+def test_permissioned_server_jobs_forward_verified_token_to_local_service(tmp_path, monkeypatch):
+    state = manager.ManagerState(tmp_path, "python")
+    calls = []
+    monkeypatch.setattr(state, "ordered_job_service_ports", lambda: [8141])
+
+    def service_json(port, path, principal, *, delegated_user_token):
+        calls.append((port, path, principal, delegated_user_token))
+        return {"jobs": [{"job_id": "job-a", "updated_at": 2}], "total": 35,
+                "has_more": True, "next_cursor": "next"}
+
+    monkeypatch.setattr(state, "service_json", service_json)
+    page = state.aggregate_server_jobs(principal="admin", limit=20,
+                                       delegated_user_token="verified-token")
+    assert calls == [(8141, "/api/jobs?scope=server&limit=20", "admin", "verified-token")]
+    assert page["total"] == 35 and page["has_more"] and page["next_cursor"] == "next"
+
+
+def test_service_gateway_delegates_only_to_approved_loopback(monkeypatch):
+    import io
+    from email.message import Message
+    from server.manager.http import gateway as gateway_module
+
+    requests = []
+
+    class Response(io.BytesIO):
+        status = 200
+        headers = Message()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+
+    def open_request(request, *, timeout):
+        requests.append(request)
+        return Response(b'{"success":true}')
+
+    monkeypatch.setattr(gateway_module, "urlopen", open_request)
+    service = gateway_module.ServiceGateway(available_ports=lambda: [8141],
+                                            capability_token=lambda: "service-capability")
+    assert service.json(port=8141, path="/api/jobs", principal="admin",
+                        delegated_user_token="verified-token")["success"]
+    assert requests[0].full_url == "http://127.0.0.1:8141/api/jobs"
+    assert requests[0].get_header("Authorization") == "Bearer verified-token"
+    with pytest.raises(ValueError):
+        service.json(port=8141, path="/api/jobs", principal="admin",
+                     delegated_user_token="bad\nheader")
+    with pytest.raises(ValueError):
+        service.json(port=9999, path="/api/jobs", principal="admin",
+                     delegated_user_token="verified-token")
 
 
 def test_manager_job_scope_proxy_uses_one_preferred_service(
@@ -2198,7 +2262,7 @@ def test_worktree_api_does_not_leak_filesystem_paths(
     assert payload["worktrees"][0]["instance_id"] == state.instance_id(worktree)
 
 
-def test_loopback_browser_can_submit_same_origin_action(
+def test_loopback_same_origin_does_not_authorize_manager_action(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -2231,10 +2295,11 @@ def test_loopback_browser_can_submit_same_origin_action(
             },
             method="POST",
         )
-        with urlopen(request) as response:
-            assert response.status == 200
+        with pytest.raises(HTTPError) as denied:
+            urlopen(request)
 
-    assert called == [(source, 8141)]
+    assert denied.value.code == 401
+    assert called == []
 
 
 @pytest.mark.parametrize("branch", ["main", "master"])

@@ -513,7 +513,7 @@ def test_beta_stage_keeps_signed_artifacts_without_publishing(
     monkeypatch,
 ) -> None:
     repo = tmp_path / "repo"
-    app_source = repo / "apple/build/Build/Products/Release/FTClient.app"
+    app_source = repo / "apple/build/Build/Products/Release/TradeResearch.app"
     app_source.mkdir(parents=True)
     release_root = tmp_path / "published"
     output = tmp_path / "staged"
@@ -577,7 +577,7 @@ def test_beta_stage_keeps_signed_artifacts_without_publishing(
         stage_only=True,
     )
     assert receipt.publication_state == "staged"
-    assert (output / "FactorTester-Client.dmg").read_bytes() == b"signed dmg"
+    assert (output / "TradeResearch.dmg").read_bytes() == b"signed dmg"
     assert (output / "appcast.xml").is_file()
     assert (output / "beta.json").is_file()
     assert json.loads((output / "release-receipt.json").read_text())["publication_state"] == "staged"
@@ -703,9 +703,9 @@ def test_cli_update_actions_only_dispatch_to_ftclient_sparkle(
     result = app_update_control.dispatch_app_update("download")
 
     assert commands == [
-        ["open", "factortester://app-update?action=download"]
+        ["open", "traderesearch://app-update?action=download"]
     ]
-    assert result["handler"] == "FTClient/Sparkle"
+    assert result["handler"] == "TradeResearch/Sparkle"
 
 
 def test_cli_update_targets_the_current_installed_app(monkeypatch) -> None:
@@ -740,7 +740,7 @@ def test_cli_download_waits_for_a_real_download_state(
 
     def open_update(command, **_kwargs):
         assert command == [
-            "open", "factortester://app-update?action=download"
+            "open", "traderesearch://app-update?action=download"
         ]
         status.write_text(json.dumps({
             "state": "ready",
@@ -793,3 +793,12 @@ def test_shared_signing_identity_is_pinned_by_certificate_fingerprint(
     )
 
     assert publish._shared_signing_certificate() == fingerprint
+
+
+@pytest.mark.parametrize("name,scheme", [("TradeResearch.app", "traderesearch"), ("FTClient.app", "factortester")])
+def test_cli_update_uses_installed_app_compatible_scheme(monkeypatch, name, scheme):
+    commands = []
+    monkeypatch.setattr(app_update_control, "installed_client_app", lambda: Path("/Applications") / name)
+    monkeypatch.setattr(app_update_control.subprocess, "run", lambda command, **_kwargs: commands.append(command))
+    app_update_control.dispatch_app_update("check")
+    assert commands == [["open", "-a", "/Applications/" + name, scheme + "://app-update?action=check"]]

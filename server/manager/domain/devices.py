@@ -71,6 +71,14 @@ def normalise_public_key(value: object) -> dict[str, str]:
     }
 
 
+def device_public_key_digest(value: object) -> str:
+    """Full canonical digest for binding an authorization to one device key."""
+    return hashlib.sha256(json.dumps(
+        normalise_public_key(value), ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
 def _normalise_record(
     value: object,
     *,
@@ -87,6 +95,8 @@ def _normalise_record(
         raise DeviceRegistryError("username is required")
     device_id = normalise_device_id(value.get("device_id"))
     public_key = normalise_public_key(value.get("public_key"))
+    if "enabled" in value and type(value["enabled"]) is not bool:
+        raise DeviceRegistryError("device enabled state must be boolean")
     current = time.time() if now is None else float(now)
     try:
         created_at = float(value.get("created_at") or current)
@@ -113,14 +123,7 @@ def _public_record(value: dict[str, object]) -> dict[str, object]:
         for key, item in value.items()
         if key != "public_key"
     } | {
-        "public_key_fingerprint": hashlib.sha256(
-            json.dumps(
-                value["public_key"],
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()[:16],
+        "public_key_fingerprint": device_public_key_digest(value["public_key"])[:16],
     }
 
 
@@ -189,6 +192,13 @@ class DeviceRegistry:
         self._generation = 0
         self._local: dict[str, dict[str, object]] = {}
         self._sources: dict[str, dict[str, object]] = {}
+        # Retain legacy fields only for migration inventory. They are never
+        # returned as an authorization decision or exposed in device listings.
+        self._legacy_local: dict[str, dict[str, object]] = {}
+        self._legacy_sources: dict[str, dict[str, dict[str, object]]] = {}
+        self._legacy_source_metadata: dict[str, dict[str, object]] = {}
+        self._legacy_root: dict[str, object] = {}
+        self._repair_count = 0
         if self.control_store is None:
             self._load()
 
@@ -203,12 +213,19 @@ class DeviceRegistry:
             "server_id": self.server_id,
             "public_server": self.public_server,
             "device_policy": "public_allowlist_only",
+            # PostgreSQL requires a separate inventory; this in-process JSON
+            # loader cannot say whether its records need migration repair.
+            "migration_repair_required": self._repair_count > 0 if self.control_store is None else None,
+            "migration_repair_count": self._repair_count if self.control_store is None else None,
         }
 
     def _load(self) -> None:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError, json.JSONDecodeError):
+            self._repair_count += 1
             return
         if (
             not isinstance(payload, dict)
@@ -218,70 +235,105 @@ class DeviceRegistry:
                 DEVICE_REGISTRY_SCHEMA_VERSION,
             }
         ):
+            self._repair_count += 1
             return
+        if payload.get("server_id") != self.server_id:
+            # A moved or unbound snapshot is not evidence that its devices
+            # belong to this Manager. Retain it for an explicit migration.
+            self._repair_count += 1
+            return
+        self._legacy_root = {key: value for key, value in payload.items()
+                             if key not in {"schema_version", "server_id", "generation", "devices", "sources"}}
         try:
             self._generation = max(0, int(payload.get("generation") or 0))
         except (TypeError, ValueError):
             self._generation = 0
-        migrated = False
-        local = payload.get("devices") or {}
+            self._repair_count += 1
+        local = payload.get("devices", {})
         if isinstance(local, dict):
             for device_id, value in local.items():
                 try:
-                    if isinstance(value, dict) and any(
-                        key in value for key in ("public_access", "quota_exempt")
-                    ):
-                        migrated = True
                     record = _normalise_record(
                         {**value, "device_id": device_id},
                         source_server_id=self.server_id,
                     )
                 except (TypeError, DeviceRegistryError):
+                    self._repair_count += 1
                     continue
                 self._local[record["device_id"]] = record
-        sources = payload.get("sources") or {}
+                self._legacy_local[record["device_id"]] = {
+                    key: item for key, item in value.items() if key not in record
+                }
+        else:
+            self._repair_count += 1
+        sources = payload.get("sources", {})
         if not isinstance(sources, dict):
-            sources = {}
+            self._repair_count += 1
+            return
         for source_id, value in sources.items():
             if not isinstance(value, dict) or str(source_id) == self.server_id:
+                self._repair_count += 1
                 continue
             try:
                 generation = max(0, int(value.get("generation") or 0))
             except (TypeError, ValueError):
+                self._repair_count += 1
                 continue
             records: dict[str, dict[str, object]] = {}
-            for item in value.get("devices") or []:
+            raw_devices = value.get("devices", [])
+            if not isinstance(raw_devices, list):
+                self._repair_count += 1
+                continue
+            legacy: dict[str, dict[str, object]] = {}
+            for item in raw_devices:
                 try:
-                    if isinstance(item, dict) and any(
-                        key in item for key in ("public_access", "quota_exempt")
-                    ):
-                        migrated = True
                     record = _normalise_record(
                         item, source_server_id=str(source_id),
                     )
                 except (TypeError, DeviceRegistryError):
+                    self._repair_count += 1
+                    continue
+                if record["device_id"] in records:
+                    self._repair_count += 1
                     continue
                 records[record["device_id"]] = record
+                legacy[record["device_id"]] = {key: item for key, item in item.items() if key not in record}
+            self._legacy_sources[str(source_id)] = legacy
+            self._legacy_source_metadata[str(source_id)] = {
+                key: item for key, item in value.items() if key not in {"generation", "devices"}
+            }
             self._sources[str(source_id)] = {
                 "generation": generation,
                 "devices": records,
             }
-        if migrated:
-            self._save()
+        seen: set[tuple[str, str]] = set()
+        for item in self._all_locked():
+            identifier = (str(item["source_server_id"]), str(item["device_id"]))
+            if identifier in seen:
+                self._repair_count += 1
+            seen.add(identifier)
+
+    def _require_writable(self) -> None:
+        if self._repair_count:
+            raise DeviceRegistryError("device directory contains records requiring migration repair")
 
     def _save(self) -> None:
         temporary = self.path.with_name(
             f".{self.path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
         )
         payload = {
+            **self._legacy_root,
             "schema_version": DEVICE_REGISTRY_SCHEMA_VERSION,
             "server_id": self.server_id,
             "generation": self._generation,
-            "devices": self._local,
+            "devices": {identifier: {**self._legacy_local.get(identifier, {}), **record}
+                        for identifier, record in self._local.items()},
             "sources": {
                 source: {
+                    **self._legacy_source_metadata.get(source, {}),
                     "generation": value["generation"],
-                    "devices": list(value["devices"].values()),
+                    "devices": [{**self._legacy_sources.get(source, {}).get(identifier, {}), **record}
+                                for identifier, record in value["devices"].items()],
                 }
                 for source, value in self._sources.items()
             },
@@ -341,35 +393,56 @@ class DeviceRegistry:
             )
             return _public_record(record)
         with self._lock:
-            if any(
-                item.get("device_id") == candidate["device_id"]
-                for item in self._all_locked()
-            ):
+            self._require_writable()
+            if candidate["device_id"] in self._local:
                 raise DeviceRegistryError("device_id is already registered")
             self._local[candidate["device_id"]] = candidate
             self._generation += 1
             self._save()
             return _public_record(candidate)
 
+    def retry_enrollment(self, *, username: str, device_id: str, public_key: object) -> dict[str, object]:
+        """Explicitly re-enable a disabled device only with its original key."""
+        identifier = normalise_device_id(device_id)
+        owner = str(username or "").strip()
+        key = normalise_public_key(public_key)
+        if self.control_store is not None:
+            record = self.control_store.reenable_device(device_id=identifier, username=owner,
+                                                        public_key=key, source_server_id=self.server_id)
+            if record is None:
+                raise DeviceRegistryError("device cannot be re-enrolled with this identity or key")
+            return _public_record(record)
+        with self._lock:
+            self._require_writable()
+            record = self._local.get(identifier)
+            if (record is None or record.get("enabled") or record.get("username") != owner
+                    or record.get("public_key") != key):
+                raise DeviceRegistryError("device cannot be re-enrolled with this identity or key")
+            record = {**record, "enabled": True, "updated_at": time.time()}
+            self._local[identifier] = record
+            self._generation += 1
+            self._save()
+            return _public_record(record)
+
     def public_device_count(self, *, username: str = "") -> int:
         owner = str(username or "").strip()
         if self.control_store is not None:
-            return int(self.control_store.public_device_count(username=owner))
+            return int(self.control_store.public_device_count(username=owner, source_server_id=self.server_id))
         with self._lock:
             return sum(
                 1
-                for item in self._all_locked()
+                for item in self._local.values()
                 if (not owner or item.get("username") == owner)
                 and bool(item.get("enabled"))
             )
 
     def public_user_count(self) -> int:
         if self.control_store is not None:
-            return int(self.control_store.public_device_user_count())
+            return int(self.control_store.public_device_user_count(source_server_id=self.server_id))
         with self._lock:
             return len({
                 str(item.get("username") or "")
-                for item in self._all_locked()
+                for item in self._local.values()
                 if bool(item.get("enabled"))
             } - {""})
 
@@ -379,26 +452,36 @@ class DeviceRegistry:
         if self.control_store is not None:
             reader = getattr(self.control_store, "public_device_total_count", None)
             if callable(reader):
-                return int(reader(username=owner))
+                return int(reader(username=owner, source_server_id=self.server_id))
         with self._lock:
             return sum(
                 1
-                for item in self._all_locked()
+                for item in self._local.values()
                 if (not owner or item.get("username") == owner)
                 and bool(item.get("enabled"))
             )
 
-    def revoke(self, device_id: str) -> dict[str, object]:
+    def revoke(self, device_id: str, *, username: str | None = None,
+               public_key: object | None = None) -> dict[str, object]:
         identifier = normalise_device_id(device_id)
+        if (username is None) != (public_key is None):
+            raise DeviceRegistryError("device revoke requires a complete owner and key binding")
+        owner = str(username).strip() if username is not None else None
+        key = normalise_public_key(public_key) if public_key is not None else None
+        if owner is not None and not owner:
+            raise DeviceRegistryError("device owner is required")
         if self.control_store is not None:
-            record = self.control_store.revoke_device(identifier)
+            record = self.control_store.revoke_device(identifier, source_server_id=self.server_id,
+                                                      username=owner, public_key=key)
             if record is None:
-                raise DeviceRegistryError("device was not found")
+                raise DeviceRegistryError("device binding was not found on this server")
             return _public_record(record)
         with self._lock:
+            self._require_writable()
             record = self._local.get(identifier)
-            if record is None:
-                raise DeviceRegistryError("device was not found on this server")
+            if (record is None or record.get("source_server_id") != self.server_id
+                    or (owner is not None and (record.get("username") != owner or record.get("public_key") != key))):
+                raise DeviceRegistryError("device binding was not found on this server")
             record = {**record, "enabled": False, "updated_at": time.time()}
             self._local[identifier] = record
             self._generation += 1
@@ -434,6 +517,21 @@ class DeviceRegistry:
                 str(item.get("device_id") or ""),
             ),
         )
+
+    def authorization_records(self, *, username: str) -> list[dict[str, object]]:
+        """Return a single owner's key bindings for an internal Keycloak check.
+
+        Public HTTP responses must use ``_public_record`` and never expose the
+        raw public-key material or historical permission fields.
+        """
+        owner = str(username or "").strip()
+        if not owner:
+            raise DeviceRegistryError("a device owner is required")
+        if self.control_store is not None:
+            return self.control_store.list_devices(username=owner, include_disabled=True,
+                                                   source_server_id=self.server_id)
+        with self._lock:
+            return [dict(item) for item in self._local.values() if item.get("username") == owner]
 
     def snapshot(self) -> dict[str, object]:
         if self.control_store is not None:
@@ -473,13 +571,32 @@ class DeviceRegistry:
         if not isinstance(devices, list) or len(devices) > 2000:
             raise DeviceRegistryError("snapshot devices must be a list of at most 2000 records")
         records: dict[str, dict[str, object]] = {}
+        incoming_legacy: dict[str, dict[str, object]] = {}
         for item in devices:
             record = _normalise_record(item, source_server_id=source)
+            if record["device_id"] in records:
+                raise DeviceRegistryError("snapshot contains duplicate device IDs")
             records[record["device_id"]] = record
+            incoming_legacy[record["device_id"]] = {
+                key: item[key] for key in ("public_access", "quota_exempt") if key in item
+            }
         with self._lock:
+            self._require_writable()
             previous = self._sources.get(source)
             if previous is not None and revision < int(previous["generation"]):
                 return False
+            # Never erase pre-cutover fields by accepting a later mirror that
+            # omitted or replaced the corresponding device identity.
+            for identifier, fields in self._legacy_sources.get(source, {}).items():
+                if fields and (identifier not in records or identifier not in previous["devices"]
+                        or any(records[identifier][key] != previous["devices"][identifier][key]
+                               for key in ("username", "public_key"))):
+                    raise DeviceRegistryError("legacy device fields require migration before snapshot replacement")
+                for key, value in fields.items():
+                    if key in incoming_legacy[identifier] and incoming_legacy[identifier][key] != value:
+                        raise DeviceRegistryError("legacy device fields require migration before snapshot replacement")
+                    incoming_legacy[identifier][key] = value
+            self._legacy_sources[source] = incoming_legacy
             self._sources[source] = {
                 "generation": revision,
                 "devices": records,
@@ -499,18 +616,16 @@ class DeviceRegistry:
         identifier = normalise_device_id(device_id)
         key = normalise_public_key(public_key)
         if self.control_store is not None:
-            record = self.control_store.device(identifier)
-            if (
-                record is None
-                or not bool(record.get("enabled"))
-                or record.get("public_key") != key
-            ):
+            record = self.control_store.device(identifier, source_server_id=self.server_id)
+            if (record is None or record.get("source_server_id") != self.server_id
+                    or not bool(record.get("enabled")) or record.get("public_key") != key):
                 raise PermissionError("device is not approved")
             _verify_public_key_signature(
                 key, challenge=bytes(challenge), signature=signature,
             )
             self.control_store.touch_device(
                 identifier,
+                source_server_id=self.server_id,
                 last_seen_ip=last_seen_ip,
             )
             observed = normalise_client_metadata({
@@ -524,6 +639,7 @@ class DeviceRegistry:
             matches = [
                 item for item in self._all_locked()
                 if item.get("device_id") == identifier
+                and item.get("source_server_id") == self.server_id
                 and item.get("enabled")
                 and item.get("public_key") == key
             ]
@@ -539,7 +655,7 @@ class DeviceRegistry:
         if observed:
             with self._lock:
                 local = self._local.get(identifier)
-                if local is not None:
+                if local is not None and not self._repair_count:
                     record = {
                         **local,
                         "last_seen_ip": observed,
@@ -550,6 +666,21 @@ class DeviceRegistry:
                     self._save()
         return dict(record)
 
+    def key_binding(self, *, username: str, device_id: str) -> dict[str, object] | None:
+        """Resolve one device key; its authorization is decided by Keycloak."""
+        identifier = normalise_device_id(device_id)
+        owner = str(username or "").strip()
+        if not owner:
+            return None
+        if self.control_store is not None:
+            row = self.control_store.device(identifier, source_server_id=self.server_id)
+            return dict(row) if row and row.get("username") == owner and row.get("source_server_id") == self.server_id else None
+        with self._lock:
+            matches = [row for row in self._all_locked()
+                       if row.get("device_id") == identifier and row.get("username") == owner
+                       and row.get("source_server_id") == self.server_id]
+        return dict(matches[0]) if len(matches) == 1 else None
+
 
 class DeviceChallengeStore:
     """Short-lived, one-use challenges kept in Manager memory."""
@@ -559,7 +690,7 @@ class DeviceChallengeStore:
         self._lock = threading.RLock()
         self._values: dict[str, tuple[bytes, float]] = {}
         self._device_login_tickets: dict[
-            str, tuple[str, str, str, float]
+            str, tuple[str, str, str, float, str]
         ] = {}
 
     def issue(self) -> tuple[str, bytes]:
@@ -583,7 +714,7 @@ class DeviceChallengeStore:
         return value[0]
 
     def issue_device_login_ticket(
-        self, *, username: str, device_id: str, origin: str,
+        self, *, username: str, device_id: str, origin: str, public_key: object,
     ) -> str:
         """Bind a verified device proof to one subsequent Keycloak OIDC flow."""
         principal = str(username or "").strip()
@@ -602,12 +733,13 @@ class DeviceChallengeStore:
                 self._device_login_tickets.pop(next(iter(self._device_login_tickets)))
             self._device_login_tickets[ticket] = (
                 principal, identifier, trusted_origin, now + self.ttl_seconds,
+                device_public_key_digest(public_key),
             )
         return ticket
 
     def consume_device_login_ticket(
         self, ticket: object, *, origin: str,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str]:
         """Consume one device-to-OIDC binding; reject replay or origin changes."""
         key = str(ticket or "").strip()
         with self._lock:
@@ -618,4 +750,4 @@ class DeviceChallengeStore:
             or not secrets.compare_digest(value[2], str(origin or "").strip().rstrip("/"))
         ):
             raise PermissionError("device login ticket is invalid or expired")
-        return value[0], value[1]
+        return value[0], value[1], value[4]

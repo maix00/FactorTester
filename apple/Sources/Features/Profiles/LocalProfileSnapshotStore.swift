@@ -99,7 +99,7 @@ struct LocalProfileSnapshotStore {
             .appendingPathComponent("Library/Application Support")
         return root.appendingPathComponent("FactorTester/profiles")
         #else
-        return FileManager.default.homeDirectoryForCurrentUser
+        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent(".local/share/factortester/profiles")
         #endif
     }

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from types import SimpleNamespace
 
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting import collaboration as workflow
 from tools.cli.release.research_reporting.report_space import initialize_report_space

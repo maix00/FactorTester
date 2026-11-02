@@ -41,14 +41,16 @@ struct Acceptance {
     static func main() throws {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let applications = root.appendingPathComponent("Applications")
-        let current = applications.appendingPathComponent("FTClient.app")
+        let current = applications.appendingPathComponent("TradeResearch.app")
         let legacy = applications.appendingPathComponent(
             "FactorTester-Client.app"
         )
+        let previous = applications.appendingPathComponent("FTClient.app")
         let receipts = root.appendingPathComponent("receipts")
-        let developmentBuild = root.appendingPathComponent("FTClient.app")
+        let developmentBuild = root.appendingPathComponent("TradeResearch.app")
         try makeApp(current, identifier: "com.gtht.client")
         try makeApp(legacy, identifier: "com.gtht.client")
+        try makeApp(previous, identifier: "com.gtht.client")
         try makeApp(developmentBuild, identifier: "com.gtht.client")
 
         let ignoredDevelopmentBuild = try LegacyAppNameMigration.run(
@@ -67,6 +69,7 @@ struct Acceptance {
         precondition(migrated)
         precondition(FileManager.default.fileExists(atPath: current.path))
         precondition(!FileManager.default.fileExists(atPath: legacy.path))
+        precondition(!FileManager.default.fileExists(atPath: previous.path))
         precondition(
             FileManager.default.fileExists(
                 atPath: receipts.appendingPathComponent(
@@ -82,6 +85,7 @@ struct Acceptance {
         precondition(!repeated)
 
         try makeApp(legacy, identifier: "example.untrusted")
+        try makeApp(previous, identifier: "com.gtht.client")
         do {
             _ = try LegacyAppNameMigration.run(
                 applicationsDirectory: applications,
@@ -91,6 +95,7 @@ struct Acceptance {
             fatalError("identity mismatch was accepted")
         } catch LegacyAppMigrationError.bundleIdentityMismatch {
             precondition(FileManager.default.fileExists(atPath: legacy.path))
+            precondition(FileManager.default.fileExists(atPath: previous.path))
         }
     }
 }

@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, unquote, urlencode
 from urllib.request import Request, urlopen
 
+from server.identity.server_admission import current_manager_role
 from server.manager.http.content_encoding import (
     encode_body,
     encoding_headers,
@@ -80,7 +81,8 @@ class JobProxyRoutesMixin:
                 from server.modules.single_factor_test.execution_nodes import peer_execution_route
                 route = peer_execution_route(self.state, manager)
                 value = self.state.federation_gateway.public_data(route, kind="execution", operation="job",
-                    principal=owner, payload={"job_id": match.group(1), "suffix": suffix})
+                    principal=owner, payload={"job_id": match.group(1), "suffix": suffix},
+                    delegated_user_token=self._bearer_token())
                 json_response(self, value["response"], int(value["status"]))
             else:
                 value = self.state.test_authoring.node_job_operation(job_id=match.group(1), suffix=suffix, owner=owner)
@@ -250,7 +252,7 @@ class JobProxyRoutesMixin:
         if not str(query.get("scope", [""])[0] or "").strip():
             scope = (
                 "server"
-                if session is None or str(session.get("role") or "") == "super_admin"
+                if session is None or current_manager_role(session, "admin_console:manage")
                 else "mine"
             )
             forwarded_path += "&" if "?" in forwarded_path else "?"
@@ -412,7 +414,7 @@ class JobProxyRoutesMixin:
         workspace_push = (
             method == "POST" and suffix == "workspace/user/upload"
         )
-        if workspace_push and str(session.get("role") or "") != "super_admin":
+        if workspace_push and not current_manager_role(session, "admin_console:manage"):
             json_response(self, {
                 "success": False,
                 "error": "super administrator permission required",
@@ -446,7 +448,7 @@ class JobProxyRoutesMixin:
             changing_family = re.fullmatch(r'families/(custom|public)/([^/]+)/(impact|transfer)', suffix)
             if changing_family:
                 if changing_family.group(1) == 'public' or changing_family.group(3) == 'transfer':
-                    if session.get('role') != 'super_admin':
+                    if not current_manager_role(session, 'admin_console:manage'):
                         raise PermissionError('需要超级管理员权限')
                 sync = getattr(getattr(self.state, 'client_state', None), 'account_domain_sync', None)
                 if sync is not None:
@@ -586,7 +588,7 @@ class JobProxyRoutesMixin:
             else str(session["username"])
         )
         workspace_push = False
-        if workspace_push and str(session.get("role") or "") != "super_admin":
+        if workspace_push and not current_manager_role(session, "admin_console:manage"):
             json_response(self, {
                 "success": False,
                 "error": "super administrator permission required",

@@ -16,7 +16,7 @@ struct RootView: View {
             switch state {
             case .checking:
                 ProgressView {
-                    Text(L10n.text("正在寻找 FactorTester 服务器…"))
+                    Text(L10n.text("正在寻找 TradeResearch 服务器…"))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .ready:
@@ -25,7 +25,7 @@ struct RootView: View {
                 ServerSettingsView(isInitialSetup: true) {
                     Task { @MainActor in
                         if let endpoint = managerConfig.baseURL {
-                            await authenticateEnrolledPublicDeviceIfNeeded(
+                            await beginEnrolledDeviceLoginIfNeeded(
                                 at: endpoint
                             )
                         }
@@ -52,7 +52,7 @@ struct RootView: View {
         }
         do {
             _ = try await ManagerNetworkInfoService.shared.fetch(endpoint: endpoint)
-            await authenticateEnrolledPublicDeviceIfNeeded(at: endpoint)
+            await beginEnrolledDeviceLoginIfNeeded(at: endpoint)
             state = .ready
         } catch {
             state = .manual
@@ -60,17 +60,12 @@ struct RootView: View {
     }
 
     @MainActor
-    private func authenticateEnrolledPublicDeviceIfNeeded(at endpoint: URL) async {
-        guard let host = endpoint.host,
-              !ManagerEndpointPolicy.isPrivateNetwork(host),
-              ManagerDeviceKeyStore.load() != nil else {
-            return
+    private func beginEnrolledDeviceLoginIfNeeded(at endpoint: URL) async {
+        guard ManagerDeviceKeyStore.load() != nil else { return }
+        if !ManagerSessionTokenStore.read(for: endpoint).isEmpty,
+           let user = try? await APIClient.shared.me(), user.localResearchIdentity != nil { return }
+        if let handoff = try? await ManagerDeviceAuthenticationService.shared.beginOIDCLogin(endpoint: endpoint) {
+            managerConfig.queueDeviceLogin(handoff, for: endpoint)
         }
-        // A missing or revoked device is non-fatal: the Web shell must still
-        // show its public visitor compliance page. A successful challenge
-        // stores the Manager session before WebView creation.
-        _ = try? await ManagerDeviceAuthenticationService.shared.authenticate(
-            endpoint: endpoint
-        )
     }
 }

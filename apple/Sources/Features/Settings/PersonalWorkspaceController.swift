@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 @MainActor
@@ -56,3 +57,5 @@ final class PersonalWorkspaceController: ObservableObject {
         }
     }
 }
+
+#endif

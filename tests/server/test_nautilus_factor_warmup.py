@@ -1,6 +1,32 @@
 import pytest
 from alpha.factor import warmup_requirements
-from server.services.nautilus_bridge.warmup import freeze_warmup_settings,resolve_run_warmup,warmup_configuration_schema
+from server.services.nautilus_bridge.warmup import bind_observed_source_clock,freeze_warmup_settings,require_observed_clock_runtime,resolve_run_warmup,warmup_configuration_schema
+
+
+def test_observed_clock_binds_frozen_ordinal_only_when_product_clocks_and_phases_match():
+    spec = {'nodes': [{'kind': 'column', 'index': 0},
+                      {'kind': 'signal', 'child': 0, 'observed_period': 30, 'signal_ns': 30}], 'outputs': [1]}
+    a = {'source_ordinal_start': 15, 'selected_count': 4, 'selected_clock_sha256': 'a' * 64}
+    b = {**a, 'source_ordinal_start': 45}
+    bound = bind_observed_source_clock(spec, {'A': a, 'B': b})
+    assert bound['nodes'][1]['source_ordinal'] == 15
+    assert 'source_ordinal' not in spec['nodes'][1]
+    with pytest.raises(ValueError, match='phases differ'):
+        bind_observed_source_clock(spec, {'A': a, 'B': {**b, 'source_ordinal_start': 46}})
+    with pytest.raises(ValueError, match='identical product clocks'):
+        bind_observed_source_clock(spec, {'A': a, 'B': {**b, 'selected_clock_sha256': 'b' * 64}})
+    with pytest.raises(ValueError, match='restage'):
+        bind_observed_source_clock(spec, {'A': {**a, 'source_ordinal_start': None}})
+    assert bind_observed_source_clock({'nodes': [{'kind': 'column'}]}, {}) == {'nodes': [{'kind': 'column'}]}
+
+
+def test_old_native_runtime_cannot_silently_ignore_observed_clock():
+    from types import SimpleNamespace
+    spec = {'nodes': [{'kind': 'signal', 'observed_period': 30}]}
+    with pytest.raises(RuntimeError, match='rebuild the composed extension'):
+        require_observed_clock_runtime(spec, SimpleNamespace())
+    require_observed_clock_runtime(spec, SimpleNamespace(FACTOR_OBSERVED_SOURCE_ORDINAL_VERSION=1))
+    require_observed_clock_runtime({'nodes': [{'kind': 'column'}]}, SimpleNamespace())
 
 
 def test_settings_and_schema_are_shared_and_disabled_is_explicitly_diagnostic():

@@ -32,8 +32,8 @@ def test_control_schema_leaves_identity_and_permissions_to_keycloak() -> None:
     assert "public_key" in schema
     assert "public_access BOOLEAN" not in schema
     assert "quota_exempt BOOLEAN" not in schema
-    assert "DROP COLUMN IF EXISTS public_access" in schema
-    assert "DROP COLUMN IF EXISTS quota_exempt" in schema
+    assert "DROP COLUMN IF EXISTS public_access" not in schema
+    assert "DROP COLUMN IF EXISTS quota_exempt" not in schema
     assert "last_seen_at" in schema
     assert "source_versions" in schema
     assert "control_account_domain_entities" in schema

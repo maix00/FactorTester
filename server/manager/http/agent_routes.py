@@ -49,9 +49,7 @@ class AgentRoutesMixin:
         session = self._agent_session()
         if session is None:
             return None
-        principal = str(session.get("username") or "").strip()
-        role = str(session.get("role") or "")
-        if can_use_agent_assistant(principal, role, session.get("keycloak_roles", ())):
+        if can_use_agent_assistant(session, public_server=bool(getattr(self.state, "public_server", False))):
             return session
         json_response(
             self,
@@ -468,13 +466,12 @@ class AgentRoutesMixin:
                 json_response(self, {"success": True, **result})
                 return True
 
-            force = (
-                bool(payload.get("force"))
-                and str(
-                    session.get("role") or "",
-                )
-                == "super_admin"
-            )
+            force = bool(payload.get("force"))
+            if force:
+                from server.identity.server_admission import current_manager_role
+
+                if not current_manager_role(session, "admin_console:manage"):
+                    raise PermissionError("force release requires current Manager administrator permission")
             result = service.release(
                 principal,
                 str(payload.get("claim_id") or "").strip(),

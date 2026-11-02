@@ -1,6 +1,6 @@
 import CryptoKit
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class ThirdPartyRuntimeTests: XCTestCase {
     func testBundledKaTeXMatchesPinnedManifest() throws {

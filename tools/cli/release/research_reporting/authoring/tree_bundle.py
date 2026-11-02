@@ -13,6 +13,7 @@ import zipfile
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
+from tools.cli.release.bounded_file import read_bounded_file
 
 from .tree_paths import report_tree_paths
 from .tree_hierarchy import validate_parent_child
@@ -29,6 +30,24 @@ from ..public_research.projection import (
 )
 
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
+
+
+def read_bundle_asset(snapshot: dict, asset: dict, *, package_root: Path, branch_id: str) -> tuple[bytes, str, str]:
+    """Resolve an asset using the same precedence as an exported report bundle."""
+    asset_id = hashlib.sha256(asset['asset_ref'].encode()).hexdigest()[:24]
+    root = Path(package_root).resolve()
+    candidates = ([root / asset['local_ref']] if asset.get('local_ref') else []) + [
+        root / 'branches' / branch_id / 'assets' / asset['filename'],
+        root / 'assets' / asset['filename'],
+    ]
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate.is_relative_to(root) and candidate.is_file():
+            return read_bounded_file(candidate, MAX_BUNDLE_BYTES), asset['media_type'], candidate.name
+    resolved = read_local_asset(snapshot, asset_id)
+    if resolved is None:
+        raise ValueError(f"report bundle asset is unavailable: {asset['asset_ref']}")
+    return resolved
 
 
 def export_report_bundle(*, package_root: Path, branch_id: str,
@@ -67,23 +86,7 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
             files[key] = raw
         return {'sha256': key, 'size_bytes': len(raw), 'filename': Path(filename).name}
     for asset in head['assets']:
-        asset_id = hashlib.sha256(asset['asset_ref'].encode()).hexdigest()[:24]
-        resolved = None
-        root = Path(package_root).resolve()
-        candidates = ([root / asset['local_ref']] if asset.get('local_ref') else []) + [
-            root / 'branches' / branch_id / 'assets' / asset['filename'],
-            root / 'assets' / asset['filename'],
-        ]
-        for candidate in candidates:
-            candidate = candidate.resolve()
-            if candidate.is_relative_to(root) and candidate.is_file():
-                resolved = (candidate.read_bytes(), asset['media_type'], candidate.name)
-                break
-        if resolved is None:
-            resolved = read_local_asset(snapshot, asset_id)
-        if resolved is None:
-            raise ValueError(f"report bundle asset is unavailable: {asset['asset_ref']}")
-        raw, _, filename = resolved
+        raw, _, filename = read_bundle_asset(snapshot, asset, package_root=package_root, branch_id=branch_id)
         descriptor = capture(raw, filename)
         if asset.get('content_hash') and asset['content_hash'] != descriptor['sha256']:
             raise ValueError('report bundle asset hash mismatch')
@@ -93,8 +96,8 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
         path = _resolve_local_resource(resources, target)
         if path is None or not path.is_file():
             raise ValueError('report bundle local resource is unavailable')
-        links.append({'target': target, **capture(path.read_bytes(), path.name)})
-    job_artifacts = export_job_artifacts(snapshot, capture)
+        links.append({'target': target, **capture(read_bounded_file(path, MAX_BUNDLE_BYTES), path.name)})
+    job_artifacts = export_job_artifacts(snapshot, capture, maximum_bytes=MAX_BUNDLE_BYTES)
     manifest = {'schema_version': 2, 'source_branch_id': branch_id,
                 'head': head, 'nodes': nodes, 'assets': assets, 'links': links, 'job_artifacts': job_artifacts}
     encoded = canonical_bytes(manifest)
@@ -180,10 +183,18 @@ def validate_report_bundle(*, payload: bytes, expected_sha256: str, report_id: s
 
 def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: Path,
                          branch_id: str, report_id: str, source_generation: int,
-                         source_root_ref: str) -> dict:
+                         source_root_ref: str, restore_artifacts: bool = True) -> dict:
     manifest, files = validate_report_bundle(payload=payload, expected_sha256=expected_sha256,
                                             report_id=report_id, source_generation=source_generation,
                                             source_root_ref=source_root_ref)
+    return _import_validated_report_bundle(manifest=manifest, files=files, expected_sha256=expected_sha256,
+        package_root=package_root, branch_id=branch_id, report_id=report_id, restore_artifacts=restore_artifacts)
+
+
+def _import_validated_report_bundle(*, manifest: dict, files: dict, expected_sha256: str,
+                                    package_root: Path, branch_id: str, report_id: str,
+                                    restore_artifacts: bool) -> dict:
+    """Materialize a bundle already checked by validate_report_bundle."""
     head, nodes = manifest['head'], manifest['nodes']
     asset_map = {item['asset_ref']: item for item in manifest['assets']}
     paths = report_tree_paths(package_root, branch_id)
@@ -191,10 +202,12 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
     with tree_lock(paths):
         if paths['head'].exists():
             if receipt.is_file() and json.loads(receipt.read_text()).get('bundle_sha256') == expected_sha256:
-                return {'paths': paths, 'head': load_head(paths), 'inherited': False}
+                return {'paths': paths, 'head': load_head(paths), 'inherited': False,
+                        'source_manifest': manifest}
             raise ValueError('target branch already exists with another origin')
         ensure_report_workspace_identity(Path(package_root), report_workspace_id=Path(package_root).name, report_id=report_id)
-        restore_job_artifacts(manifest['job_artifacts'], files)
+        if restore_artifacts:
+            restore_job_artifacts(manifest['job_artifacts'], files)
         replacements = {}
         resource_root = Path(package_root).resolve() / 'branches' / branch_id / 'resources'
         for item in manifest['links']:
@@ -232,4 +245,8 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
         atomic_write(receipt, canonical_bytes({'bundle_sha256': expected_sha256,
                      'source_branch_id': manifest['source_branch_id'], 'source_head': head}))
         write_head(paths, target_head)
-        return {'paths': paths, 'head': target_head, 'inherited': True}
+        return {'paths': paths, 'head': target_head, 'inherited': True,
+                'source_manifest': manifest,
+                **({'deferred_job_artifacts': (manifest['job_artifacts'],
+                     {item['sha256']: files[item['sha256']] for item in manifest['job_artifacts']})}
+                   if not restore_artifacts else {})}

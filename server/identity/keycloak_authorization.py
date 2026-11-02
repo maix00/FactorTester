@@ -41,7 +41,7 @@ def _backchannel(settings: dict[str, str]) -> str:
 
 
 def keycloak_authorized(
-    token: str, *, resource_id: str, scope: str,
+    token: str, *, resource_id: str, scope: str, use_cache: bool = True,
 ) -> bool:
     """Evaluate one resource scope using the caller's own Keycloak token.
 
@@ -59,7 +59,7 @@ def keycloak_authorized(
     now = time.monotonic()
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
-        if cached is not None and cached[0] > now:
+        if use_cache and cached is not None and cached[0] > now:
             _CACHE.move_to_end(key)
             return cached[1]
         if cached is not None:
@@ -75,10 +75,11 @@ def keycloak_authorized(
         )
     except Exception as exc:
         raise AuthorizationUnavailable("Keycloak authorization is unavailable") from exc
-    with _CACHE_LOCK:
-        while len(_CACHE) >= _CACHE_LIMIT:
-            _CACHE.popitem(last=False)
-        _CACHE[key] = (time.monotonic() + _CACHE_TTL_SECONDS, bool(allowed))
+    if use_cache:
+        with _CACHE_LOCK:
+            while len(_CACHE) >= _CACHE_LIMIT:
+                _CACHE.popitem(last=False)
+            _CACHE[key] = (time.monotonic() + _CACHE_TTL_SECONDS, bool(allowed))
     return bool(allowed)
 
 
@@ -86,12 +87,14 @@ def keycloak_authorized_many(
     token: str,
     *,
     permissions: list[tuple[str, str, str]],
+    use_cache: bool = True,
 ) -> dict[tuple[str, str], bool]:
     """Batch-check ``(resource URI, resource name, scope)`` with Keycloak.
 
     Results are cached per caller token and resource scope for a short bounded
     interval. Missing resources/scopes are explicit denials; a Keycloak outage
     raises so callers can distinguish unavailable authorization from denial.
+    Mutating operations may bypass the cache to observe revocation promptly.
     """
     if not token:
         return {(str(uri), str(scope)): False for uri, _name, scope in permissions}
@@ -118,7 +121,9 @@ def keycloak_authorized_many(
     with _CACHE_LOCK:
         for uri, name, scope in normalized:
             key = (token_digest, client_id, uri, scope)
-            cached = _CACHE.get(key)
+            if not use_cache:
+                _CACHE.pop(key, None)
+            cached = _CACHE.get(key) if use_cache else None
             if cached is not None and cached[0] > now:
                 _CACHE.move_to_end(key)
                 result[(uri, scope)] = cached[1]
@@ -142,13 +147,14 @@ def keycloak_authorized_many(
             (uri, scope): (uri, scope) in granted
             for uri, _name, scope in missing
         }
-        with _CACHE_LOCK:
-            while len(_CACHE) + len(missing_results) > _CACHE_LIMIT:
-                _CACHE.popitem(last=False)
-            expires = time.monotonic() + _CACHE_TTL_SECONDS
-            for (uri, scope), allowed in missing_results.items():
-                _CACHE[(token_digest, client_id, uri, scope)] = (expires, allowed)
-                result[(uri, scope)] = allowed
+        if use_cache:
+            with _CACHE_LOCK:
+                while len(_CACHE) + len(missing_results) > _CACHE_LIMIT:
+                    _CACHE.popitem(last=False)
+                expires = time.monotonic() + _CACHE_TTL_SECONDS
+                for (uri, scope), allowed in missing_results.items():
+                    _CACHE[(token_digest, client_id, uri, scope)] = (expires, allowed)
+        result.update(missing_results)
     return result
 
 
@@ -231,7 +237,7 @@ def keycloak_authorized_objects(
     *,
     resource_type: str,
     refs: list[tuple[str, object]],
-    scope: str,
+    scope: str, use_cache: bool = True,
 ) -> set[object]:
     """Batch-authorize stable object refs and return caller-provided labels."""
     normalized_scope = str(scope or "").strip()
@@ -252,7 +258,7 @@ def keycloak_authorized_objects(
     allowed: set[object] = set()
     for offset in range(0, len(permissions), 256):
         result = keycloak_authorized_many(
-            token, permissions=permissions[offset:offset + 256],
+            token, permissions=permissions[offset:offset + 256], use_cache=use_cache,
         )
         allowed.update(
             label for uri, label, _name, permission_scope in candidates[offset:offset + 256]
@@ -329,8 +335,39 @@ def _protection_request(settings: dict[str, str], token: str, method: str,
         return response.status, json.loads(raw) if raw else {}, location
 
 
+def protection_token(settings: dict[str, str]) -> str:
+    client = ServiceOIDCClient(_backchannel(settings), settings["realm"], settings["authz_client_id"],
+                               client_secret=settings["authz_client_secret"], timeout=3.0)
+    token = str(client.client_credentials().get("access_token") or "")
+    if not token:
+        raise AuthorizationUnavailable("Keycloak did not issue a Protection API token")
+    return token
+
+
+def lookup_keycloak_resource(settings: dict[str, str], pat: str, resource_type: str,
+                             resource_ref: str, *, request=_protection_request) -> dict:
+    """Resolve one exact resource name/URI, rejecting ambiguity or substitution."""
+    resource_name = keycloak_resource_name(resource_type, resource_ref)
+    resource_uri = keycloak_resource_uri(resource_type, resource_ref)
+    query = urlencode({"name": resource_name, "first": 0, "max": 10, "deep": "true"})
+    _, found, _ = request(settings, pat, "GET", f"resource_set?{query}")
+    rows = found if isinstance(found, list) else found.get("resources", []) if isinstance(found, dict) else []
+    matches = [row for row in rows if isinstance(row, dict) and row.get("name") == resource_name]
+    if len(matches) != 1:
+        raise AuthorizationUnavailable("Keycloak resource is missing or ambiguous")
+    resource_id = str(matches[0].get("_id") or matches[0].get("id") or "")
+    uris = matches[0].get("uris") or ([matches[0].get("uri")] if matches[0].get("uri") else [])
+    if not resource_id or resource_uri not in uris:
+        raise AuthorizationUnavailable("Keycloak resource identity changed")
+    return matches[0]
+
+
 def ensure_keycloak_resource(
     *, resource_type: str, resource_ref: str, owner_subject: str,
+    owner_scopes: tuple[str, ...] | None = None,
+    creation_intent: str | None = None,
+    create_only: bool = False,
+    binding_sha256: str | None = None,
 ) -> str:
     """Idempotently register a user-authorized object in Keycloak.
 
@@ -342,6 +379,17 @@ def ensure_keycloak_resource(
     owner_subject = str(owner_subject or "").strip()
     if not owner_subject or len(owner_subject) > 255:
         raise ValueError("Keycloak resource owner subject is required")
+    if creation_intent is not None and (not isinstance(creation_intent, str)
+            or len(creation_intent) != 64 or any(ch not in "0123456789abcdef" for ch in creation_intent)):
+        raise ValueError("invalid Keycloak resource creation intent")
+    if binding_sha256 is not None and (resource_type != 'research_report' or creation_intent is None
+            or not isinstance(binding_sha256, str) or len(binding_sha256) != 64
+            or any(ch not in '0123456789abcdef' for ch in binding_sha256)):
+        raise ValueError('invalid immutable report binding')
+    selected_scopes = _RESOURCE_SCOPES if owner_scopes is None else tuple(owner_scopes)
+    if (not selected_scopes or len(set(selected_scopes)) != len(selected_scopes)
+            or any(scope not in _RESOURCE_SCOPES for scope in selected_scopes)):
+        raise ValueError("invalid Keycloak resource owner scopes")
     resource_uri = keycloak_resource_uri(resource_type, resource_ref)
     settings = oidc_settings()
     client = ServiceOIDCClient(
@@ -358,15 +406,32 @@ def ensure_keycloak_resource(
     except Exception as exc:
         raise AuthorizationUnavailable("Keycloak resource lookup failed") from exc
     rows = result if isinstance(result, list) else result.get("resources", []) if isinstance(result, dict) else []
+    if creation_intent is not None:
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise AuthorizationUnavailable("invalid Keycloak resource search")
+        matches = [row for row in rows if str(row.get("name") or "") == resource_name]
+        if len(matches) > 1:
+            raise AuthorizationUnavailable("duplicate Keycloak resources")
     if isinstance(rows, list):
         for row in rows:
             if not isinstance(row, dict) or str(row.get("name") or "") != resource_name:
                 continue
+            if create_only:
+                # A retry must evaluate the existing policy, not recreate an
+                # owner policy an administrator may since have revoked.
+                raise AuthorizationUnavailable("Keycloak resource already exists; evaluate its current grants")
             resource_id = str(row.get("_id") or row.get("id") or "").strip()
             if not resource_id:
+                if creation_intent is not None:
+                    raise AuthorizationUnavailable("Keycloak resource has no identity")
                 continue
-            if row.get("attributes", {}).get("traderesearch_owner_subject") != [owner_subject]:
+            attributes = row.get("attributes")
+            if not isinstance(attributes, dict) or attributes.get("traderesearch_owner_subject") != [owner_subject]:
                 raise AuthorizationUnavailable("Keycloak resource is owned by a different subject")
+            if (creation_intent is not None and attributes.get("traderesearch_creation_intent") != [creation_intent]):
+                raise AuthorizationUnavailable("Keycloak resource belongs to another creation intent")
+            if binding_sha256 is not None and attributes.get('traderesearch_research_binding') != [binding_sha256]:
+                raise AuthorizationUnavailable('Keycloak report binding differs')
             uris = row.get("uris") or ([row.get("uri")] if row.get("uri") else [])
             if resource_uri not in {str(uri) for uri in uris if uri}:
                 body = {
@@ -376,9 +441,10 @@ def ensure_keycloak_resource(
                                         "ownerManagedAccess": True,
                     "uris": [resource_uri],
                     "resource_scopes": list(_RESOURCE_SCOPES),
-                    "attributes": {"traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
+                    "attributes": {**attributes, "traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
                         str(resource_ref).encode("utf-8")
-                    ).hexdigest()]},
+                    ).hexdigest()], **({"traderesearch_creation_intent": [creation_intent]}
+                                       if creation_intent is not None else {})},
                 }
                 try:
                     _protection_request(
@@ -397,7 +463,13 @@ def ensure_keycloak_resource(
                 )
                 if resource_uri not in {str(uri) for uri in confirmed_uris if uri}:
                     raise AuthorizationUnavailable("Keycloak resource URI update did not persist")
-            _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject)
+                if (creation_intent is not None and confirmed.get("attributes", {}).get(
+                        "traderesearch_creation_intent") != [creation_intent]):
+                    raise AuthorizationUnavailable("Keycloak creation intent was not confirmed")
+                if (binding_sha256 is not None and confirmed.get('attributes', {}).get(
+                        'traderesearch_research_binding') != [binding_sha256]):
+                    raise AuthorizationUnavailable('Keycloak report binding was not confirmed')
+            _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject, selected_scopes)
             return resource_id
 
     body = {
@@ -408,7 +480,9 @@ def ensure_keycloak_resource(
         "resource_scopes": list(_RESOURCE_SCOPES),
         "attributes": {"traderesearch_owner_subject": [owner_subject], "traderesearch_ref_hash": [hashlib.sha256(
             str(resource_ref).encode("utf-8")
-        ).hexdigest()]},
+        ).hexdigest()], **({"traderesearch_creation_intent": [creation_intent]}
+                           if creation_intent is not None else {}),
+                           **({'traderesearch_research_binding': [binding_sha256]} if binding_sha256 is not None else {})},
     }
     try:
         _, result, location = _protection_request(settings, pat, "POST", "resource_set", body)
@@ -430,7 +504,22 @@ def ensure_keycloak_resource(
                             and str(row.get("name") or "") == resource_name), "")
     if not resource_id:
         raise AuthorizationUnavailable("Keycloak resource registration returned no identity")
-    _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject)
+    if creation_intent is not None:
+        try:
+            _, confirmed, _ = _protection_request(settings, pat, "GET", f"resource_set/{resource_id}")
+        except Exception as exc:
+            raise AuthorizationUnavailable("Keycloak creation intent could not be verified") from exc
+        if not isinstance(confirmed, dict):
+            raise AuthorizationUnavailable("invalid Keycloak resource confirmation")
+        attributes = confirmed.get("attributes")
+        uris = confirmed.get("uris") or ([confirmed.get("uri")] if confirmed.get("uri") else [])
+        if (not isinstance(attributes, dict)
+                or attributes.get("traderesearch_owner_subject") != [owner_subject]
+                or attributes.get("traderesearch_creation_intent") != [creation_intent]
+                or (binding_sha256 is not None and attributes.get('traderesearch_research_binding') != [binding_sha256])
+                or resource_uri not in uris):
+            raise AuthorizationUnavailable("Keycloak creation intent was not confirmed")
+    _ensure_owner_policy(settings, pat, resource_id, resource_name, owner_subject, selected_scopes)
     return resource_id
 
 
@@ -478,7 +567,8 @@ def delete_keycloak_resource(
 
 
 def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
-                         resource_name: str, owner_subject: str) -> None:
+                         resource_name: str, owner_subject: str,
+                         owner_scopes: tuple[str, ...] = _RESOURCE_SCOPES) -> None:
     """Ensure the Keycloak subject owning a private resource can manage it."""
     # Keycloak 26.8 pins Protection API ownership to the resource server.
     # User ownership is expressed by a stable subject attribute and UMA policy.
@@ -506,12 +596,14 @@ def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
                and str(row.get("name") or "") == policy_name]
     if len(matches) > 1:
         raise AuthorizationUnavailable("duplicate Keycloak owner policies")
-    expected_scopes = sorted(_RESOURCE_SCOPES)
+    expected_scopes = sorted(owner_scopes)
     if matches:
         policy = matches[0]
         users = sorted(str(value) for value in policy.get("users", []) if value)
         scopes = sorted(str(value) for value in policy.get("scopes", []) if value)
-        if (len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes:
+        if ((len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes
+                or any(policy.get(key) for key in ("roles", "groups", "clients"))
+                or str(policy.get("logic") or "POSITIVE") != "POSITIVE"):
             raise AuthorizationUnavailable("conflicting Keycloak owner policy")
         return
     body = {
@@ -537,5 +629,7 @@ def _ensure_owner_policy(settings: dict[str, str], token: str, resource_id: str,
         raise AuthorizationUnavailable("Keycloak owner policy was not confirmed")
     users = sorted(str(value) for value in matches[0].get("users", []) if value)
     scopes = sorted(str(value) for value in matches[0].get("scopes", []) if value)
-    if (len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes:
+    if ((len(users) != 1 or users[0] not in owner_labels) or scopes != expected_scopes
+            or any(matches[0].get(key) for key in ("roles", "groups", "clients"))
+            or str(matches[0].get("logic") or "POSITIVE") != "POSITIVE"):
         raise AuthorizationUnavailable("Keycloak owner policy verification failed")

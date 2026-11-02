@@ -9,11 +9,12 @@ import { FactorResults } from "./factor-results.tsx";
 import { seriesArtifact } from "../charts/factor-result.ts";
 import { FrozenRunSpec } from "./frozen-run-spec.tsx";
 import { PropertyGroups } from "./property-groups.tsx";
+import { ObjectReference } from "./object-reference.tsx";
 import { ResultView } from "./result-view.tsx";
 import { TRDataTable } from "./data-table.tsx";
 import { JobHtmlReport } from "./job-html-report.tsx";
 
-export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
+export function JobDetail({ job, readOnly = false }: { job: JobReference; readOnly?:boolean }): React.ReactElement {
   const { t } = useTranslation();
   const instance = usePageInstance();
   const [detail, setDetail] = useState<Record<string, any> | null>(null);
@@ -93,7 +94,7 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
   return <div className="tr-job-page-detail"><div className="tr-job-state"><Tag color={detail.status === "succeeded" ? "green" : detail.status === "failed" ? "red" : "blue"}>{t(`jobs.states.${detail.status}`, { defaultValue: detail.status })}</Tag>
     {percent !== undefined ? <Progress percent={percent} showInfo status={detail.status === "failed" ? "exception" : !terminalStatus(detail.status) ? "active" : "normal"} /> : null}
     {progress?.phase || progress?.message ? <span className="tr-job-phase">{String(progress.phase || progress.message)}</span> : null}
-    {!terminalStatus(detail.status) ? <Button danger onClick={() => { void request(jobURL(job, "/cancel"), { method: "POST" }).then(() => setRefresh((value) => value + 1)).catch((reason) => setError(reason.message)); }}>{t("jobs.cancel")}</Button> : null}</div>
+    {!readOnly && !terminalStatus(detail.status) ? <Button danger onClick={() => { void request(jobURL(job, "/cancel"), { method: "POST" }).then(() => setRefresh((value) => value + 1)).catch((reason) => setError(reason.message)); }}>{t("jobs.cancel")}</Button> : null}</div>
     {detail.error ? <Alert type="error" showIcon message={typeof detail.error === "string" ? detail.error : JSON.stringify(detail.error)} /> : null}
     {outputError ? <Alert type="error" showIcon message={outputError} action={<Button onClick={() => setRefresh(value => value + 1)}>{t("retry")}</Button>} /> : null}
     <Tabs activeKey={activeTab} destroyOnHidden onChange={(key) => { setActiveTab(key); setArtifactPage(1); }} items={[
@@ -103,6 +104,8 @@ export function JobDetail({ job }: { job: JobReference }): React.ReactElement {
         {key:"status",label:t("jobs.status"),value:detail.status,render:value => t(`jobs.states.${value}`,{defaultValue:String(value)})},
         {key:"server",label:t("jobs.server"),value:detail.server_name || detail.server_id || job.server_id},
         {key:"port",label:t("jobs.port"),value:detail.port ?? detail.service_port ?? job.service_port},
+        {key:"owner",label:t("library.owner"),value:detail.owner_username || detail.owner_ref,render:value=><ObjectReference value={{kind:"user",ref:String(value),label:detail.owner_alias || String(value)}} />},
+        {key:"profile",label:t("research.profile"),value:detail.profile_id || detail.profile_ref || detail.profile_key,render:value=><ObjectReference value={{kind:"profile",ref:String(value),profileKey:detail.profile_key,owner:detail.owner_username || detail.owner_ref}} />},
       ]}]} />{detail.result_summary ? <ResultView value={detail.result_summary} /> : null}</> },
       { key: "results", label: t("jobs.results"), children: detail.kind === "backtest" && artifacts.some(item=>item.name==="tearsheet.html") ? <JobHtmlReport job={job} name="tearsheet.html" /> : detail.kind === "factor_evaluation" ? <FactorResults result={result || detail.result_summary} artifactName={seriesArtifact(artifacts, true)} job={job} configuration={detail.configuration || detail.run_spec || detail.job_spec} /> : seriesArtifact(artifacts) ? <Tabs items={[
         { key: "summary", label: t("jobs.overview"), children: <ResultView value={result} /> },

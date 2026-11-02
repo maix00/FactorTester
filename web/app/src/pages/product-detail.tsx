@@ -26,6 +26,7 @@ export function ProductDetailPage(): React.ReactElement {
   const [applied, setApplied] = useState<MarketSettings>({ ...DEFAULT_MARKET_SETTINGS }), [draft, setDraft] = useState<MarketSettings>({ ...DEFAULT_MARKET_SETTINGS });
   const [payload, setPayload] = useState<Row | null>(null), [bars, setBars] = useState<MarketBar[]>([]), [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false), [infoOpen, setInfoOpen] = useState(false), [settingsError, setSettingsError] = useState("");
+  const [chartExpanded, setChartExpanded] = useState(false);
   const [contracts, setContracts] = useState<Row[]>([]), [termAvailable, setTermAvailable] = useState(false), [termError, setTermError] = useState("");
   const [fields, setFields] = useState<unknown>(null), [fieldsError, setFieldsError] = useState("");
   const [page, setPage] = useState(1), [size, setSize] = useState(15), [selectedBand, setSelectedBand] = useState("");
@@ -71,18 +72,20 @@ export function ProductDetailPage(): React.ReactElement {
     if (payload && JSON.stringify(priceRequest(product, contract, draft)) === JSON.stringify(priceRequest(product, contract, applied))) { setApplied(draft); setSettingsOpen(false); return; }
     void load({ ...draft }, true);
   };
+  const chart = <div className="tr-market-frame" aria-busy={loading}>
+    {bars.length ? <MarketChart bars={bars} hasOI={!!payload?.has_oi} zone={zone} bands={bands} selectedBand={selectedBand} onUnavailable={onUnavailable} /> : <div className="tr-market-empty"><Empty description={error || (loading ? t("market.loading") : t("market.noData"))} /></div>}
+    {loading ? <div className="tr-market-loading" role="status"><Spin /><span>{t("market.loading")}</span></div> : null}
+  </div>;
   if (!product) return <FunctionPage title={t("nav.products")}><Empty description={t("empty")} /></FunctionPage>;
   return <FunctionPage title={instance.args.productTitle || contract || product}>
     <div className="tr-product-identity"><span>{product}</span>{contract ? <Tag>{t("market.instrument")}</Tag> : null}</div>
     <section className="tr-market-card" ref={chartCard}>
       <header className="tr-market-toolbar"><div className="tr-market-heading"><h2>{t("market.title")}</h2><span>{zone}</span>{payload ? <Tag>{payload.data_source} · {payload.freq}</Tag> : null}</div>
-        <div className="tr-market-actions"><Tooltip title={t("market.info")}><Button type="text" icon={<InfoCircleOutlined />} aria-label={t("market.info")} disabled={!payload} onClick={() => setInfoOpen(true)} /></Tooltip><Tooltip title={t("market.fullscreen")}><Button type="text" icon={<FullscreenOutlined />} aria-label={t("market.fullscreen")} onClick={() => { void chartCard.current?.requestFullscreen().catch(() => undefined); }} /></Tooltip><Tooltip title={t("market.settings")}><Button type="text" icon={<SettingOutlined />} aria-label={t("market.settings")} onClick={openSettings} /></Tooltip></div>
+        <div className="tr-market-actions"><Tooltip title={t("market.info")}><Button type="text" icon={<InfoCircleOutlined />} aria-label={t("market.info")} disabled={!payload} onClick={() => setInfoOpen(true)} /></Tooltip><Tooltip title={t("market.fullscreen")}><Button type="text" icon={<FullscreenOutlined />} aria-label={t("market.fullscreen")} onClick={() => { if (instance.mobile) setChartExpanded(true); else void chartCard.current?.requestFullscreen().catch(() => undefined); }} /></Tooltip><Tooltip title={t("market.settings")}><Button type="text" icon={<SettingOutlined />} aria-label={t("market.settings")} onClick={openSettings} /></Tooltip></div>
       </header>
-      <div className="tr-market-frame" aria-busy={loading}>
-        {bars.length ? <MarketChart bars={bars} hasOI={!!payload?.has_oi} zone={zone} bands={bands} selectedBand={selectedBand} onUnavailable={onUnavailable} /> : <div className="tr-market-empty"><Empty description={error || (loading ? t("market.loading") : t("market.noData"))} /></div>}
-        {loading ? <div className="tr-market-loading" role="status"><Spin /><span>{t("market.loading")}</span></div> : null}
-      </div>
+      {!chartExpanded ? chart : null}
     </section>
+    {chartExpanded ? <DetailsPanel title={t("market.title")} forceFullscreen landscape onClose={() => setChartExpanded(false)}><div className="tr-chart-fullscreen">{chart}</div></DetailsPanel> : null}
     {termError ? <Alert type="error" message={termError} /> : null}
     {termAvailable ? <section className="tr-product-terms"><h2>{t("market.terms")}</h2><TRDataTable rows={contracts.slice((page - 1) * size, page * size)} rowKey={(row) => row.uid || `${row.contract}:${row.start}:${row.end}`} onRow={(row) => ({ onClick: () => setSelectedBand(String(row.uid || row.contract || `${row.start}:${row.end}`)) })} rowSelection={{ type: "radio", selectedRowKeys: selectedBand ? [selectedBand] : [], onSelect: (row) => setSelectedBand(String(row.uid || row.contract || `${row.start}:${row.end}`)) }} pagination={{ page, pageSize: size, total: contracts.length, onChange: (p, s) => { setPage(p); setSize(s); } }} columns={[
       { title: t("market.identifier"), key: "identifier", render: (_, row) => <button className="tr-table-link" onClick={(event) => { event.stopPropagation(); instance.open("product-detail", { productName: product, contractUid: row.uid || row.contract, productTitle: row.contract || row.uid }); }}>{row.contract || row.uid}</button> },

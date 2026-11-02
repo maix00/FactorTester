@@ -4,6 +4,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.release.update_manifest import create_update_manifest, write_update_manifest
 from tools.cli.release.client_release_targets import build_target_beta_package
 from tools.cli.release.client_release_bundle import inspect_client_release_bundle
@@ -11,11 +13,12 @@ from tools.cli.release.client_release_bundle import inspect_client_release_bundl
 from tests.release.test_update_channel_manifest import _keys
 
 
-def test_target_package_resigns_origin_for_each_manager(tmp_path: Path) -> None:
+@pytest.mark.parametrize("name", ["TradeResearch.dmg", "FactorTester-Client.dmg"])
+def test_target_package_resigns_origin_for_each_manager(tmp_path: Path, name: str) -> None:
     private, public = _keys(tmp_path / "keys")
     release = tmp_path / "release"
     release.mkdir()
-    dmg = release / "FactorTester-Client.dmg"
+    dmg = release / name
     dmg.write_bytes(b"installer")
     digest = sha256(dmg.read_bytes()).hexdigest()
     source_url = f"http://127.0.0.1:7998/api/client/releases/assets/beta/{digest}.dmg"

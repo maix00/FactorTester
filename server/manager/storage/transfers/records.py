@@ -21,6 +21,15 @@ def required(value: object, *, field: str) -> str:
     return result
 
 
+def stable_identity_id(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("transfer stable identity must be a string")
+    result = value.strip()
+    if len(result) > 128 or any(ord(char) < 32 for char in result):
+        raise ValueError("transfer stable identity is invalid")
+    return result
+
+
 def normalize_new(request: NewTransfer, *, now: float) -> NewTransfer:
     try:
         operation = TransferOperation(request.operation)
@@ -70,6 +79,7 @@ def normalize_new(request: NewTransfer, *, now: float) -> NewTransfer:
         content_type=content_type,
         object_kind=object_kind,
         object_id=object_id,
+        principal_identity_id=stable_identity_id(request.principal_identity_id),
     )
 
 
@@ -99,6 +109,9 @@ def transfer_record(row: sqlite3.Row) -> TransferRecord:
             str(row["job_id"]), str(row["artifact_name"]),
         ).value),
         object_id=str(row["object_id"] or ""),
+        principal_identity_id=stable_identity_id(
+            row["principal_identity_id"] if "principal_identity_id" in row.keys() else ""
+        ),
     )
 
 
@@ -124,4 +137,5 @@ def same_request(row: sqlite3.Row, request: NewTransfer) -> bool:
             str(row["job_id"]), str(row["artifact_name"]),
         ).value) == request.object_kind
         and str(row["object_id"] or "") == request.object_id
+        and stable_identity_id(row["principal_identity_id"]) == request.principal_identity_id
     )

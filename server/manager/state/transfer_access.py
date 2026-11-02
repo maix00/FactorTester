@@ -65,6 +65,7 @@ class TransferAccessStateMixin:
         self,
         *,
         principal: str,
+        principal_identity_id: str = "",
         storage_server_id: str,
         object_kind: str,
         object_id: str,
@@ -86,6 +87,7 @@ class TransferAccessStateMixin:
             DownloadRequest(
                 idempotency_key=str(idempotency_key or "").strip(),
                 principal=str(principal or "").strip(),
+                principal_identity_id=str(principal_identity_id or "").strip(),
                 storage_server_id=str(storage_server_id or "").strip(),
                 job_id=str(job_id or "").strip(),
                 artifact_name=str(artifact_name or "").strip(),

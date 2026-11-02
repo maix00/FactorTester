@@ -1031,7 +1031,7 @@ def test_reconcile_does_not_resurrect_deleted_authored_set(monkeypatch, tmp_path
 
 def test_old_pull_cannot_block_successor_of_acknowledged_write(tmp_path):
     local = LocalAccountDomainStore(tmp_path / 'delayed-pull.sqlite')
-    key = dict(principal='alice', entity_type='research_catalog', entity_id='r')
+    key = dict(principal='alice', entity_type='product_group', entity_id='r')
     first = local.upsert_local(**key, manager_id='a', payload={'status': 'reserved'})
     sent = local.pending()[0]
     successor = local.upsert_local(**key, manager_id='a', payload={'status': 'active'})
@@ -1047,4 +1047,4 @@ def test_old_pull_cannot_block_successor_of_acknowledged_write(tmp_path):
     # A genuinely newer remote edit still conflicts and preserves local work.
     assert local.apply_remote({**key, 'payload': {'status': 'peer edit'},
                                'revision': 11}) == 'conflict'
-    assert local.get_entity('alice', 'research_catalog', 'r')['payload'] == {'status': 'active'}
+    assert local.get_entity('alice', 'product_group', 'r')['payload'] == {'status': 'active'}

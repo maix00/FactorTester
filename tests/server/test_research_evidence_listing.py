@@ -3,6 +3,7 @@ from __future__ import annotations
 import settings as Settings
 from server.services.research_evidence_catalog import (
     create_evidence,
+    get_composed_evidence,
     list_evidence_page,
     list_research_evidence_page,
     put_source_capture,
@@ -82,10 +83,12 @@ def test_applicability_is_mutable_without_changing_evidence_identity(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(tmp_path / "catalog.db"))
     _evidence(0)
     original = list_evidence_page(owner="alice")["items"][0]
+    revision = get_composed_evidence(owner="alice", evidence_ref=original["evidence_ref"])["applicability_revision"]
 
     updated = update_evidence_applicability(
         owner="alice",
         evidence_ref=original["evidence_ref"],
+        expected_applicability_revision=revision,
         applicability={
             "contract_hash": "c" * 64,
             "methodology_hash": "d" * 64,

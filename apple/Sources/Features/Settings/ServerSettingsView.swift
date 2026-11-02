@@ -24,9 +24,9 @@ struct ServerSettingsView: View {
     var body: some View {
         SettingsPageShell(
             title: SettingsDisplayText(
-                isInitialSetup ? "连接 FactorTester" : "服务器"
+                isInitialSetup ? "连接 TradeResearch" : "服务器"
             ),
-            subtitle: "配置 Manager；具体 FactorTester 服务端口由 Manager 发现",
+            subtitle: "配置 Manager；具体 TradeResearch 服务端口由 Manager 发现",
             systemImage: "server.rack"
         ) {
             SettingsSectionCard("Manager") {
@@ -125,7 +125,7 @@ struct ServerSettingsView: View {
                 .disabled(testing || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
-            SettingsSectionCard("FactorTester 服务端口") {
+            SettingsSectionCard("TradeResearch 服务端口") {
                 SettingsRow(
                     title: "服务端口",
                     description: "可填写固定端口；留空时由 Manager 自动选择可用端口"
@@ -208,7 +208,7 @@ struct ServerSettingsView: View {
                 return
             }
             do {
-                let result = try await ManagerDeviceAuthenticationService.shared.authenticate(
+                let handoff = try await ManagerDeviceAuthenticationService.shared.beginOIDCLogin(
                     endpoint: target
                 )
                 config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
@@ -218,11 +218,8 @@ struct ServerSettingsView: View {
                     port: managerPort
                 )
                 originManagerEndpoint = target
-                await refreshDeviceAudit()
-                testResult = "✓ " + L10n.format(
-                    "已通过原生设备密钥认证：%@",
-                    result.username
-                )
+                managerConfig.queueDeviceLogin(handoff, for: target)
+                testResult = "✓ " + L10n.text("已连接；请在主页按需登录")
                 if isInitialSetup, onConfigured == nil { dismiss() }
             } catch {
                 testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)

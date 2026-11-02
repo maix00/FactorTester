@@ -1,4 +1,5 @@
 """Authorized control-plane projection and explicit node input selection."""
+import json
 import os
 from flask import jsonify
 
@@ -16,12 +17,39 @@ def node_service():
     return ExecutionNodeService(JobRepository(), manager_id=manager_id)
 
 
+def execution_node_resource_ref(manager_id, node_id):
+    """Stable per-Manager node identity shared by registration and UMA checks."""
+    values = [str(manager_id or "").strip(), str(node_id or "").strip()]
+    if any(not value or len(value) > 256 for value in values):
+        raise ValueError("execution node Manager and node IDs are required")
+    return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
+
+
 def visible_targets(owner):
-    # Do not expose another user's installations through global target metadata.
+    # A Manager-level grant does not authorize use of all its execution nodes.
+    from server.identity.keycloak_authorization import (
+        AuthorizationUnavailable, keycloak_authorized_objects, keycloak_request_identity,
+    )
     from traderesearch_data.execution import offer_from_dict
+    identity = keycloak_request_identity()
+    if identity is None or identity.username != owner:
+        raise AuthorizationUnavailable("verified Keycloak execution identity is required")
+    service = node_service()
+    rows = service.directory()
+    candidates = []
+    for row in rows:
+        target = row.get("capabilities", {}).get("execution_target") or {}
+        if target.get("manager_id") != service.manager_id:
+            raise ValueError("execution node belongs to a different Manager")
+        node_id = str(target.get("node_id") or "").strip()
+        candidates.append((execution_node_resource_ref(service.manager_id, node_id), node_id))
+    allowed = keycloak_authorized_objects(identity.token, resource_type="execution_node",
+        refs=candidates, scope="use", use_cache=False)
     values = []
-    for row in node_service().directory():
+    for row in rows:
         capabilities = row["capabilities"]
+        if str(capabilities["execution_target"].get("node_id") or "") not in allowed:
+            continue
         offers = [offer for offer in capabilities["offers"]
                   if offer["installation"]["owner"] in {"platform", owner}]
         values.append({"route_id": row["deployment_id"], "service_port": row["service_port"],
@@ -98,8 +126,13 @@ def bind_prepared_execution(prepared, selection):
 
 @sft_bp.get("/api/test-authoring/execution-targets")
 def execution_targets():
-    return jsonify({"success": True, "manager_id": node_service().manager_id,
-                    "targets": visible_targets(require_user())})
+    from server.identity.keycloak_authorization import AuthorizationUnavailable
+    try:
+        return jsonify({"success": True, "manager_id": node_service().manager_id,
+                        "targets": visible_targets(require_user())})
+    except AuthorizationUnavailable:
+        return jsonify({"success": False, "code": "keycloak_authorization_unavailable",
+                        "error": "execution node authorization is unavailable"}), 503
 
 
 def peer_execution_route(state, manager_id):

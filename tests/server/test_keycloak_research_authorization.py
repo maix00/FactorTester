@@ -1,0 +1,378 @@
+import sqlite3
+
+import pytest
+
+from server.identity.keycloak_authorization import AuthorizationUnavailable, keycloak_resource_uri
+from server.identity.keycloak_research import (
+    KeycloakResearchAuthorization,
+    KeycloakResearchGrantManager,
+    ResearchRequestIdentity,
+    legacy_authorization_snapshot_sha256,
+    profile_resource_ref,
+    resolve_keycloak_research_member,
+    verified_research_request,
+)
+
+
+def _identity(viewer):
+    if viewer != "alice":
+        return None
+    return ResearchRequestIdentity("verified-token", "https://issuer", "subject-a", "alice", "identity-a")
+
+
+def test_member_lookup_requires_exact_effective_name_and_unique_stable_identity(monkeypatch):
+    from server.identity import federation_identity_sync
+    row = {"id": "subject-a", "username": "canonical", "enabled": True,
+           "attributes": {"tr_identity_id": ["identity-a"], "legacy_username": ["Alice"]}}
+    class Directory:
+        def user_representation(self, _name):
+            return None
+        def _page(self, _path, *, max_items):
+            return [row]
+        def user_by_identity_id(self, _stable):
+            return row
+    monkeypatch.setattr(federation_identity_sync, "manager_keycloak_admin_adapter", Directory)
+    assert resolve_keycloak_research_member("Alice") == {"identity_id": "identity-a", "subject": "subject-a"}
+    with pytest.raises(LookupError, match="missing or ambiguous"):
+        resolve_keycloak_research_member("Alic")
+    class Duplicate(Directory):
+        def _page(self, _path, *, max_items):
+            return [row, {**row, "id": "other-subject"}]
+    monkeypatch.setattr(federation_identity_sync, "manager_keycloak_admin_adapter", Duplicate)
+    with pytest.raises(LookupError, match="missing or ambiguous"):
+        resolve_keycloak_research_member("Alice")
+
+
+def test_member_lookup_accepts_keycloak_login_name_with_distinct_legacy_name(monkeypatch):
+    from server.identity import federation_identity_sync
+    row = {"id": "subject-a", "username": "alice", "enabled": True,
+           "attributes": {"tr_identity_id": ["identity-a"],
+                          "legacy_username": ["org@Alice@legacy"]}}
+    class Directory:
+        def user_representation(self, name):
+            return row if name.casefold() == 'alice' else None
+        def _page(self, _path, *, max_items):
+            return [row]
+        def user_by_identity_id(self, stable):
+            return row if stable == 'identity-a' else None
+    monkeypatch.setattr(federation_identity_sync, 'manager_keycloak_admin_adapter', Directory)
+    expected = {"identity_id": "identity-a", "subject": "subject-a"}
+    assert resolve_keycloak_research_member('Alice') == expected
+    assert resolve_keycloak_research_member('org@Alice@legacy') == expected
+    with pytest.raises(LookupError, match='missing or ambiguous'):
+        resolve_keycloak_research_member('ali')
+
+    class Collision(Directory):
+        def _page(self, _path, *, max_items):
+            return [{"id": "subject-b", "username": "other", "enabled": True,
+                     "attributes": {"tr_identity_id": ["identity-b"],
+                                    "legacy_username": ["Alice"]}}]
+    monkeypatch.setattr(federation_identity_sync, 'manager_keycloak_admin_adapter', Collision)
+    with pytest.raises(LookupError, match='missing or ambiguous'):
+        resolve_keycloak_research_member('Alice')
+
+
+def test_failed_new_research_registration_cleans_up_only_the_checked_owner():
+    removed = []
+    def fail_create(**_kwargs):
+        raise AuthorizationUnavailable("owner policy registration failed")
+    manager = KeycloakResearchGrantManager(identity_provider=_identity,
+        settings_provider=lambda: {}, token_provider=lambda _s: "pat",
+        request=lambda *_args: (200, [], ""), ensure_resource=fail_create,
+        delete_resource=lambda **kwargs: removed.append(kwargs))
+    with pytest.raises(AuthorizationUnavailable):
+        manager.create_research_resource(actor="alice", research_id="research:random")
+    assert removed == [{"resource_type": "research", "resource_ref": "research:random",
+                        "owner_subject": "subject-a"}]
+
+
+def test_new_research_preflight_outage_is_unavailable_and_does_not_create_or_cleanup():
+    def offline(*_args):
+        raise ConnectionError("offline")
+    manager = KeycloakResearchGrantManager(identity_provider=_identity,
+        settings_provider=lambda: {}, token_provider=lambda _s: "pat", request=offline,
+        ensure_resource=lambda **_kwargs: pytest.fail("must not create after failed preflight"),
+        delete_resource=lambda **_kwargs: pytest.fail("must not delete an unverified resource"))
+    with pytest.raises(AuthorizationUnavailable, match="registration is unavailable"):
+        manager.create_research_resource(actor="alice", research_id="research:random")
+
+
+def test_report_registration_requires_verified_research_and_report_authority():
+    calls, allowed = [], {("research", "share"), ("research_report", "manage")}
+    def decision(_token, *, resource_type, resource_ref, scope):
+        calls.append((resource_type, resource_ref, scope))
+        return (resource_type, scope) in allowed
+    resources = []
+    manager = KeycloakResearchGrantManager(identity_provider=_identity, may_share=decision,
+        settings_provider=lambda: {}, token_provider=lambda _s: "pat", clear_cache=lambda: None,
+        request=lambda *_args: (200, [{"_id": "r", "name": authz_name,
+            "uris": [keycloak_resource_uri("research_report", "report")],
+            "attributes": {"traderesearch_owner_subject": ["subject-a"]}}], ""),
+        ensure_resource=lambda **kwargs: resources.append(kwargs) or "r")
+    from server.identity.keycloak_authorization import keycloak_resource_name
+    authz_name = keycloak_resource_name("research_report", "report")
+    manager.ensure_new_report_resource(actor="alice", research_id="research", report_id="report",
+                                       creation_intent="a" * 64)
+    assert resources == [{"resource_type": "research_report", "resource_ref": "report",
+                          "owner_subject": "subject-a", "creation_intent": "a" * 64}]
+    manager.require_report_resource(actor="alice", research_id="research", report_id="report")
+    assert ("research_report", "report", "manage") in calls
+    allowed.remove(("research_report", "manage"))
+    with pytest.raises(PermissionError, match="report management"):
+        manager.require_report_resource(actor="alice", research_id="research", report_id="report")
+    allowed.remove(("research", "share"))
+    with pytest.raises(PermissionError, match="Research sharing"):
+        manager.ensure_new_report_resource(actor="alice", research_id="research", report_id="other",
+                                           creation_intent="b" * 64)
+    with pytest.raises(PermissionError, match="Research sharing"):
+        manager.report_registration_identity(actor="mallory", research_id="research")
+    assert len(resources) == 1
+
+
+def test_keycloak_decisions_have_no_owner_or_username_bypass():
+    calls = []
+    provider = KeycloakResearchAuthorization(identity_provider=_identity,
+        authorize_many=lambda token, *, permissions: calls.append((token, permissions)) or {})
+    assert not provider.research_access(research_id="r", status="active", viewer="mallory")["can_view"]
+    assert calls == []
+    assert not provider.research_access(research_id="r", status="active", viewer="alice")["can_manage"]
+    assert calls[0][0] == "verified-token"
+
+
+def test_research_and_report_scopes_preserve_inherited_download():
+    research_uri = keycloak_resource_uri("research", "r")
+    report_uri = keycloak_resource_uri("research_report", "p")
+    def authorize(_token, *, permissions):
+        allowed = {(research_uri, "read"), (research_uri, "use"), (report_uri, "read")}
+        return {(uri, scope): (uri, scope) in allowed for uri, _name, scope in permissions}
+    provider = KeycloakResearchAuthorization(identity_provider=_identity, authorize_many=authorize)
+    research = provider.research_access(research_id="r", status="active", viewer="alice")
+    assert research["can_view"] and research["can_download"] and not research["can_manage"]
+    direct = provider.report_access(report_id="p", viewer="alice")
+    assert direct["can_view"] and not direct["can_download"]
+    inherited = provider.report_access(report_id="p", viewer="alice", inherited=research)
+    assert inherited["can_view"] and inherited["can_download"]
+    assert not provider.research_access(research_id="r", status="archived", viewer="alice")["can_view"]
+
+
+def test_research_and_report_permissions_are_fresh_on_each_decision(monkeypatch):
+    from server.identity import keycloak_research as module
+    calls = []
+    granted = {"value": True}
+    def live_authorize(_token, *, permissions, use_cache):
+        calls.append(use_cache)
+        return {(uri, scope): granted["value"] for uri, _name, scope in permissions}
+    monkeypatch.setattr(module, "keycloak_authorized_many", live_authorize)
+    provider = module.KeycloakResearchAuthorization(identity_provider=_identity, authorize_many=live_authorize)
+    assert provider.research_access(research_id="r", status="active", viewer="alice")["can_view"]
+    assert provider.report_access(report_id="p", viewer="alice")["can_view"]
+    granted["value"] = False
+    assert not provider.research_access(research_id="r", status="active", viewer="alice")["can_view"]
+    assert not provider.report_access(report_id="p", viewer="alice")["can_view"]
+    assert calls == [False, False, False, False]
+
+
+def test_profile_writing_is_per_stable_identity_and_exact_profile():
+    ref = profile_resource_ref("r", "identity-a", "work")
+    uri = keycloak_resource_uri("research_profile", ref)
+    provider = KeycloakResearchAuthorization(identity_provider=_identity,
+        authorize_many=lambda _token, *, permissions: {(u, s): u == uri and s == "write" for u, _n, s in permissions})
+    assert provider.may_write_profile(research_id="r", viewer="alice", profile_ref="work")
+    assert not provider.may_write_profile(research_id="r", viewer="alice", profile_ref="other")
+    assert not provider.may_write_profile(research_id="r", viewer="mallory", profile_ref="work")
+    assert profile_resource_ref("r", "identity-a", "work") != profile_resource_ref("r", "identity-b", "work")
+
+
+def test_profile_membership_is_batched_and_cannot_use_another_users_profile():
+    calls = []
+    first = keycloak_resource_uri("research_profile", profile_resource_ref("r", "identity-a", "one"))
+    def authorize(_token, *, permissions):
+        calls.append(len(permissions))
+        return {(uri, scope): uri == first for uri, _name, scope in permissions}
+    provider = KeycloakResearchAuthorization(identity_provider=_identity, authorize_many=authorize)
+    profiles = [("r", "one"), ("r", "two"), *(("r", str(i)) for i in range(128))]
+    result = provider.profile_membership_access_many(viewer="alice", profiles=profiles)
+    assert result[("r", "one")] == {"can_view": True, "can_download": True}
+    assert result[("r", "two")] == {"can_view": False, "can_download": False}
+    assert calls == [256, 4]
+    assert not provider.profile_membership_access_many(viewer="mallory", profiles=[("r", "one")])[("r", "one")]["can_view"]
+
+
+def test_checks_are_batched_and_authorization_outage_is_not_a_denial():
+    calls = []
+    def authorize(_token, *, permissions):
+        calls.append(len(permissions))
+        return {(u, s): True for u, _n, s in permissions}
+    provider = KeycloakResearchAuthorization(identity_provider=_identity, authorize_many=authorize)
+    assert len(provider.decisions("alice", [("research", str(i), ("read",)) for i in range(600)])) == 600
+    assert calls == [256, 256, 88]
+    calls.clear()
+    listed = provider.research_access_many(viewer="alice", researches=[(str(i), "active") for i in range(100)])
+    assert len(listed) == 100 and all(item["can_view"] for item in listed.values())
+    assert calls == [256, 44]
+    def unavailable(*_args, **_kwargs):
+        raise ConnectionError("identity service unavailable")
+    provider = KeycloakResearchAuthorization(identity_provider=_identity, authorize_many=unavailable)
+    with pytest.raises(ConnectionError):
+        provider.research_access(research_id="r", status="active", viewer="alice")
+
+
+def test_legacy_snapshot_is_stable_and_detects_authorization_changes(tmp_path):
+    path = tmp_path / "catalog.sqlite"
+    with sqlite3.connect(path) as db:
+        db.executescript('''
+        CREATE TABLE research_catalog_researches(research_id, owner_ref, status, visibility, authorized_users_json);
+        CREATE TABLE research_catalog_reports(report_id, research_id, owner_ref, status, visibility, authorized_users_json);
+        CREATE TABLE research_catalog_memberships(research_id, principal_ref, profile_ref, role, status);
+        CREATE TABLE research_catalog_share_links(link_id, target_kind, research_id, report_id, owner_ref, token_hash, mode, expires_at, redeemed_by, redeemed_at, revoked_at);
+        INSERT INTO research_catalog_researches VALUES ('r', 'a', 'active', 'private', '[]');
+        ''')
+    before = path.read_bytes()
+    first = legacy_authorization_snapshot_sha256(path)
+    assert first == legacy_authorization_snapshot_sha256(path)
+    assert path.read_bytes() == before
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE research_catalog_researches SET authorized_users_json='[\"b\"]'")
+    assert legacy_authorization_snapshot_sha256(path) != first
+
+
+def test_independent_keycloak_grants_can_be_updated_and_revoked():
+    from urllib.parse import parse_qs, urlsplit
+    from server.identity.keycloak_authorization import keycloak_resource_name
+
+    resource_name = keycloak_resource_name("research", "r")
+    resource_uri = keycloak_resource_uri("research", "r")
+    policies = {}
+    next_id = 0
+    def request(_settings, _token, method, path, payload=None):
+        nonlocal next_id
+        if path.startswith("resource_set?"):
+            assert parse_qs(urlsplit(path).query)["name"] == [resource_name]
+            return 200, [{"_id": "resource", "name": resource_name, "uris": [resource_uri]}], ""
+        if path.startswith("uma-policy?"):
+            return 200, list(policies.values()), ""
+        if method == "POST" and path == "uma-policy/resource":
+            next_id += 1
+            policy_id = str(next_id)
+            policies[policy_id] = {**payload, "id": policy_id}
+            return 201, {}, ""
+        policy_id = path.rsplit("/", 1)[1]
+        if method == "PUT":
+            policies[policy_id] = {**payload, "id": policy_id}
+        elif method == "DELETE":
+            del policies[policy_id]
+        else:
+            pytest.fail(f"unexpected call: {method} {path}")
+        return 204, {}, ""
+    invalidations = []
+    manager = KeycloakResearchGrantManager(identity_provider=_identity,
+        may_share=lambda token, **_: token == "verified-token",
+        settings_provider=lambda: {}, token_provider=lambda _: "protection-token", request=request,
+        user_provider=lambda subject: {"id": subject, "username": "bob", "enabled": True,
+                                      "attributes": {"tr_identity_id": ["identity-b"]}},
+        user_by_identity=lambda stable: {"id": "subject-b", "username": "bob", "enabled": True,
+                                         "attributes": {"tr_identity_id": [stable]}},
+        clear_cache=lambda: invalidations.append(True))
+    common = {"actor": "alice", "resource_type": "research", "resource_ref": "r",
+              "identity_id": "identity-b", "subject": "subject-b"}
+    assert manager.set_user_grant(**common, source="explicit", scopes=["read"])
+    assert manager.set_user_grant(**common, source="profile:work", scopes=["read", "use"])
+    assert not manager.set_user_grant(**common, source="explicit", scopes=["read"])
+    assert manager.set_user_grant(**common, source="explicit", scopes=["read", "use"])
+    explicit = next(policy for policy in policies.values() if '"source":"explicit"' in policy["description"])
+    with pytest.raises(AuthorizationUnavailable, match="migration grant conflicts"):
+        manager._reconcile_user_grant(resource_type="research", resource_ref="r", source="explicit",
+                                      identity_id="identity-b", subject="subject-b", scopes=["read"],
+                                      require_identical=True)
+    assert sorted(explicit["scopes"]) == ["read", "use"]
+    assert manager.list_user_grants(actor="alice", resource_type="research", resource_ref="r") == [
+        {"identity_id": "identity-b", "subject": "subject-b", "username": "bob", "enabled": True,
+         "scopes": ["read", "use"]}]
+    explicit["roles"] = ["unrelated-role"]
+    with pytest.raises(AuthorizationUnavailable, match="conflicts"):
+        manager.set_user_grant(**common, source="explicit", scopes=[])
+    del explicit["roles"]
+    explicit["condition"] = "script-unrelated.js"
+    with pytest.raises(AuthorizationUnavailable, match="conflicts"):
+        manager.set_user_grant(**common, source="explicit", scopes=[])
+    del explicit["condition"]
+    assert manager.set_user_grant(**common, source="explicit", scopes=[])
+    hierarchy = {"resource_type": "research", "resource_ref": "r"}
+    assert manager._reconcile_hierarchy_grant(**hierarchy, enabled=True)
+    assert not manager._reconcile_hierarchy_grant(**hierarchy, enabled=True, require_identical=True)
+    policy = next(row for row in policies.values() if row.get("condition"))
+    assert policy["scopes"] == ["read", "use"] and not policy.get("users")
+    assert manager.list_user_grants(actor="alice", resource_type="research", resource_ref="r") == []
+    with pytest.raises(AuthorizationUnavailable, match="would remove"):
+        manager._reconcile_hierarchy_grant(**hierarchy, enabled=False, require_identical=True)
+    policy["users"] = ["subject-b"]
+    with pytest.raises(AuthorizationUnavailable, match="conflicts"):
+        manager._reconcile_hierarchy_grant(**hierarchy, enabled=True)
+    del policy["users"]
+    assert manager._reconcile_hierarchy_grant(**hierarchy, enabled=False)
+    assert not manager._reconcile_hierarchy_grant(**hierarchy, enabled=False)
+    assert len(policies) == 1
+    assert sorted(next(iter(policies.values()))["scopes"]) == ["read", "use"]
+    assert len(invalidations) == 15  # includes rejected mixed-condition calls and hierarchy create/revoke
+
+
+def test_user_grants_require_verified_share_permission_and_cannot_delegate_admin():
+    calls = []
+    manager = KeycloakResearchGrantManager(identity_provider=_identity,
+        may_share=lambda *_args, **_kwargs: False,
+        user_provider=lambda *_: calls.append("lookup"))
+    common = {"actor": "alice", "resource_type": "research", "resource_ref": "r", "source": "explicit",
+              "identity_id": "identity-b", "subject": "subject-b"}
+    with pytest.raises(ValueError, match="cannot delegate"):
+        manager.set_user_grant(**common, scopes=["manage"])
+    with pytest.raises(PermissionError):
+        manager.set_user_grant(**common, scopes=["read"])
+    assert calls == []
+
+
+def test_user_grant_rejects_mismatched_stable_identity_before_writing():
+    calls = []
+    manager = KeycloakResearchGrantManager(identity_provider=_identity,
+        may_share=lambda *_args, **_kwargs: True,
+        user_provider=lambda subject: {"id": subject, "username": "bob", "enabled": True,
+                                      "attributes": {"tr_identity_id": ["another-identity"]}},
+        request=lambda *_args, **_kwargs: calls.append("write"),
+        clear_cache=lambda: None)
+    with pytest.raises(LookupError):
+        manager.set_user_grant(actor="alice", resource_type="research", resource_ref="r", source="explicit",
+                               identity_id="identity-b", subject="subject-b", scopes=["read"])
+    assert calls == []
+
+
+def test_profile_resource_does_not_automatically_grant_its_owner_write():
+    from server.identity.keycloak_authorization import keycloak_resource_name
+    calls = []
+    def request(_settings, _token, method, path, payload=None):
+        assert method == "GET" and path.startswith("resource_set?")
+        return 200, [{"_id": "r-id", "name": keycloak_resource_name("research", "r"),
+                      "uris": [keycloak_resource_uri("research", "r")],
+                      "attributes": {"traderesearch_owner_subject": ["subject-owner"]}}], ""
+    manager = KeycloakResearchGrantManager(identity_provider=_identity,
+        may_share=lambda *_args, **_kwargs: True, settings_provider=lambda: {},
+        token_provider=lambda _: "pat", request=request,
+        ensure_resource=lambda **kwargs: calls.append(kwargs) or "profile-id",
+        clear_cache=lambda: None)
+    assert manager.ensure_profile_resource(actor="alice", research_id="r", identity_id="identity-b",
+                                           profile_ref="work") == "profile-id"
+    assert calls == [{"resource_type": "research_profile",
+                      "resource_ref": profile_resource_ref("r", "identity-b", "work"),
+                      "owner_subject": "subject-owner", "owner_scopes": ("share",)}]
+
+
+def test_research_identity_uses_only_the_verified_request_context():
+    from server.identity.request_context import bind_verified_identity, identity_request
+    identity = {"username": "alice", "keycloak_issuer": "https://issuer",
+                "keycloak_subject": "subject-a", "tr_identity_id": "identity-a"}
+    with identity_request():
+        assert verified_research_request("alice") is None
+        bind_verified_identity("real-token", identity)
+        request = verified_research_request("alice")
+        assert request and request.subject == "subject-a" and request.identity_id == "identity-a"
+        assert "real-token" not in repr(request)
+        assert verified_research_request("mallory") is None
+    assert verified_research_request("alice") is None

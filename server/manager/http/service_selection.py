@@ -47,9 +47,11 @@ class ServiceSelectionRoutesMixin:
 
     def _has_manager_ui_session(self) -> bool:
         session = self.state.session(self._bearer_token())
+        from server.identity.server_admission import current_manager_role
+
         return bool(
             self._has_secure_ui_transport() and session
-            and session["capabilities"]["manager"]
+            and current_manager_role(session, "admin_console:manage")
         )
 
     def _has_api_authorization(self) -> bool:

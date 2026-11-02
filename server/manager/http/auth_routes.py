@@ -95,35 +95,29 @@ class AuthenticationRoutesMixin:
             sys.stderr.write(f"[manager] Keycloak callback rejected: {type(exc).__name__}\n")
             self._send_redirect("/app?auth_error=invalid", cookie=self._oidc_state_cookie(clear=True))
             return
-        from server.identity.user_session import may_login_public_server
-        if (
-            bool(getattr(self.state, "public_server", False))
-            and not may_login_public_server(session)
-        ):
-            self._send_redirect("/app?auth_error=public_login_denied", cookie=[
+        from server.identity.server_admission import server_admission
+        permitted, reason = server_admission(session, state=self.state)
+        if not permitted:
+            self._send_redirect(f"/app?auth_error={reason}", cookie=[
                 self._session_cookie("", clear=True),
                 self._oidc_state_cookie(clear=True),
             ])
             return
         if device_ticket:
             try:
-                username, device_id = self.state.device_challenges.consume_device_login_ticket(
+                username, device_id, key_digest = self.state.device_challenges.consume_device_login_ticket(
                     device_ticket, origin=self._request_origin(),
                 )
                 if str(session.get("username") or "") != username:
                     raise PermissionError("device owner does not match Keycloak identity")
-                active_device = next(
-                    (
-                        item for item in self.state.device_registry.list(
-                            username=username, include_disabled=True,
-                        )
-                        if str(item.get("device_id") or "") == device_id
-                        and bool(item.get("enabled"))
-                    ),
-                    None,
-                )
-                if active_device is None:
-                    raise PermissionError("device was revoked during sign-in")
+                from server.manager.domain.devices import device_public_key_digest
+                from server.identity.keycloak_device import may_use_device
+                binding = self.state.device_registry.key_binding(username=username, device_id=device_id)
+                if (binding is None or not binding.get("enabled")
+                        or device_public_key_digest(binding.get("public_key")) != key_digest
+                        or not may_use_device(token=token, session=session, server_id=self.state.server_id,
+                                              device_id=device_id, public_key=binding.get("public_key"))):
+                    raise PermissionError("Keycloak did not authorize the verified device")
             except (ControlDatabaseError, OSError, RuntimeError, TypeError, ValueError, PermissionError) as exc:
                 sys.stderr.write(f"[manager] device OIDC binding rejected: {type(exc).__name__}\n")
                 self._send_redirect("/app?auth_error=device", cookie=[

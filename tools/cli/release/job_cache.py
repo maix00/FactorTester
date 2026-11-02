@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import time
-from typing import Any
+from typing import Any, Iterator
+from tools.cli.local_paths import documents_root
 
 
 _JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -18,13 +20,30 @@ _MANIFEST = ".artifacts.json"
 
 
 def default_job_cache_root() -> Path:
-    configured = os.environ.get(_ROOT_ENV)
+    configured = os.environ.get("TRADERESEARCH_JOB_CACHE_ROOT") or os.environ.get(_ROOT_ENV)
     root = (
         Path(configured).expanduser()
         if configured
-        else Path.home() / "Documents" / "FactorTester" / "jobs"
+        else documents_root() / "jobs"
     )
     return root.resolve()
+
+
+@contextmanager
+def job_cache_write_lock(job_id: str) -> Iterator[None]:
+    """Serialize artifact publication for one Job across client processes."""
+    from tools.cli.release.research_reporting.generation import _lock, _unlock
+
+    directory = _job_directory(job_id)
+    lock_path = directory / ".artifacts.lock"
+    if directory.is_symlink() or lock_path.is_symlink():
+        raise ValueError("Job cache lock cannot be a symlink")
+    with lock_path.open("a+b") as handle:
+        _lock(handle)
+        try:
+            yield
+        finally:
+            _unlock(handle)
 
 
 def cache_job_artifact(
@@ -32,6 +51,18 @@ def cache_job_artifact(
     raw: bytes, server_url: str,
 ) -> dict[str, Any]:
     """Atomically persist one remote artifact under ``jobs/<job_id>``."""
+    with job_cache_write_lock(job_id):
+        return _cache_job_artifact_locked(
+            job_id=job_id, name=name, filename=filename, content_type=content_type,
+            raw=raw, server_url=server_url,
+        )
+
+
+def _cache_job_artifact_locked(
+    *, job_id: str, name: str, filename: str, content_type: str,
+    raw: bytes, server_url: str,
+) -> dict[str, Any]:
+    """Write while the caller holds this Job's cache lock."""
     directory = _job_directory(job_id)
     safe_name = _filename(filename)
     digest = hashlib.sha256(raw).hexdigest()
@@ -54,7 +85,8 @@ def cache_job_artifact(
 
 
 def cached_job_artifact(
-    *, job_id: str, name: str, expected_hash: str = "",
+    *, job_id: str, name: str, expected_hash: str = "", maximum_bytes: int | None = None,
+    include_content: bool = True,
 ) -> dict[str, Any] | None:
     """Return verified cached bytes only when their server hash still matches."""
     directory = _job_directory(job_id, create=False)
@@ -69,9 +101,25 @@ def cached_job_artifact(
         return None
     filename = _filename(str(item.get("file_name") or ""))
     path = directory / filename
-    if not path.is_file() or _digest_path(path) != digest:
+    if not path.is_file():
         return None
-    return {"path": path, "raw": path.read_bytes(), **item}
+    try:
+        if not include_content:
+            if maximum_bytes is not None and path.stat().st_size > maximum_bytes:
+                raise ValueError('file exceeds size limit')
+            if _digest_path(path) != digest:
+                return None
+            return {"path": path, **item}
+        if maximum_bytes is None:
+            raw = path.read_bytes()
+        else:
+            from tools.cli.release.bounded_file import read_bounded_file
+            raw = read_bounded_file(path, maximum_bytes)
+    except OSError:
+        return None
+    if hashlib.sha256(raw).hexdigest() != digest:
+        return None
+    return {"path": path, "raw": raw, **item}
 
 
 def job_cache_directory(job_id: str) -> Path:
@@ -80,7 +128,7 @@ def job_cache_directory(job_id: str) -> Path:
 
 
 def _job_directory(job_id: str, *, create: bool = True) -> Path:
-    if not _JOB_ID.fullmatch(str(job_id)):
+    if str(job_id) in {".", ".."} or not _JOB_ID.fullmatch(str(job_id)):
         raise ValueError("job_id is invalid for the local artifact cache")
     directory = default_job_cache_root() / str(job_id)
     if create:
@@ -121,4 +169,5 @@ def _filename(value: str) -> str:
 
 
 def _digest_path(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()

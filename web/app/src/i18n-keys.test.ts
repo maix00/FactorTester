@@ -23,7 +23,7 @@ test("literal translation keys exist in both languages", async () => {
   const keys = new Set<string>();
   for (const path of files(join(process.cwd(), "src"))) {
     const text = readFileSync(path, "utf8");
-    for (const match of text.matchAll(/\bt\("([a-zA-Z0-9_.]+)"/g)) keys.add(match[1]);
+    for (const match of text.matchAll(/\bt\("([a-zA-Z0-9_.-]+)"/g)) keys.add(match[1]);
   }
   const has = (value: object, key: string): boolean => {
     const found = key.split(".").reduce<unknown>((current, part) => (
@@ -35,5 +35,17 @@ test("literal translation keys exist in both languages", async () => {
   };
   for (const language of ["zh", "en"] as const) {
     for (const key of keys) assert.ok(has(resources[language].common, key), `${language}:${key}`);
+  }
+});
+
+test("every registered page has a navigation label in both languages", async () => {
+  const [{ resources }, { BUILTIN_PAGES }] = await Promise.all([
+    import("./i18n.ts"), import("./registry.ts"),
+  ]);
+  for (const language of ["zh", "en"] as const) {
+    const nav = resources[language].common.nav as Record<string, string>;
+    for (const page of BUILTIN_PAGES) {
+      assert.ok(nav[page.id], `${language}:nav.${page.id}`);
+    }
   }
 });

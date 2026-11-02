@@ -133,29 +133,31 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     )
     compose = _compose()["services"]["factortester-public"]
     args = compose["build"]["args"]
+    installer = (ROOT / "deploy/docker/factortester-server/install-agent-tools.sh").read_text()
 
     assert "nodejs" not in dockerfile
     assert "npm install" not in dockerfile
     assert "ARG CODEX_VERSION=0.147.0" in dockerfile
     assert "ARG CODEX_NPM_REGISTRY=https://registry.npmjs.org" in dockerfile
-    assert "codex-${CODEX_VERSION}-${codex_platform}.tgz" in dockerfile
-    assert "codex_sha512=" in dockerfile
-    assert "Codex platform package integrity check failed" in dockerfile
-    assert 'test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"' in dockerfile
+    assert "codex-${CODEX_VERSION}-${codex_platform}.tgz" in installer
+    assert "codex_sha512=" in installer
+    assert "Codex platform package integrity check failed" in installer
+    assert 'test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"' in installer
+    assert "COPY deploy/docker/factortester-server/install-agent-tools.sh" in dockerfile
     assert "COPY tools tools" in dockerfile
-    assert "AS factortester-cli-builder" in dockerfile
+    assert "AS traderesearch-cli-builder" in dockerfile
     assert "AS factortester-public-deps" in dockerfile
-    assert "FROM factortester-public-deps AS factortester-cli-builder" in dockerfile
+    assert "FROM factortester-public-deps AS traderesearch-cli-builder" in dockerfile
     assert "FROM factortester-public-deps AS factortester-public" in dockerfile
     assert "COPY tools/cli /runtime/tools/cli" in dockerfile
     cli_builder_stage = dockerfile.split(
-        "FROM factortester-public-deps AS factortester-cli-builder", 1
+        "FROM factortester-public-deps AS traderesearch-cli-builder", 1
     )[1].split("FROM factortester-public-deps AS factortester-public", 1)[0]
     assert "pip install" not in cli_builder_stage
     assert "python -m compileall -q -b /runtime" in dockerfile
     assert "find /runtime -type f -name '*.py' -delete" in dockerfile
-    assert "COPY --from=factortester-cli-builder /runtime" in dockerfile
-    assert "COPY deploy/docker/factortester-public/factortester-cli" in dockerfile
+    assert "COPY --from=traderesearch-cli-builder /runtime" in dockerfile
+    assert "COPY deploy/docker/factortester-public/traderesearch-cli" in dockerfile
     runtime_stage = dockerfile.split(
         "FROM factortester-public-deps AS factortester-public", 1
     )[1]
@@ -163,10 +165,14 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     assert "pyinstaller==" not in runtime_stage
     assert "binutils" not in runtime_stage
     assert "/opt/factortester/app" not in (
-        DEPLOYMENT / "factortester-cli"
+        DEPLOYMENT / "traderesearch-cli"
     ).read_text(encoding="utf-8")
-    assert "rm -f /usr/local/bin/factortester-manager" in dockerfile
-    assert "test -x /usr/local/bin/factortester" in dockerfile
+    assert "test -x /usr/local/bin/traderesearch" in dockerfile
+    assert "test ! -e /usr/local/bin/factortester;" in dockerfile
+    assert "test ! -e /usr/local/bin/factortester-manager;" in dockerfile
+    assert 'traderesearch --help >/tmp/traderesearch-help' in dockerfile
+    dockerignore = (DEPLOYMENT / "FactorTester.Dockerfile.dockerignore").read_text()
+    assert "!deploy/docker/factortester-public/traderesearch-cli" in dockerignore
     assert args["CODEX_VERSION"] == "${FACTORTESTER_CODEX_VERSION:-0.147.0}"
     assert args["CODEX_NPM_REGISTRY"] == (
         "${FACTORTESTER_CODEX_NPM_REGISTRY:-https://registry.npmjs.org}"
@@ -180,6 +186,7 @@ def test_public_agent_image_installs_cc_switch_from_verified_local_archives() ->
     dockerignore = (DEPLOYMENT / "FactorTester.Dockerfile.dockerignore").read_text(
         encoding="utf-8",
     )
+    installer = (ROOT / "deploy/docker/factortester-server/install-agent-tools.sh").read_text()
     archives = {
         "cc-switch-cli-linux-x64-musl-v5.10.2.tar.gz": (
             "8065c5bae9eda270747c1766cefbb2091d9625655dbf409ad7764eb47c0a8635"
@@ -196,7 +203,7 @@ def test_public_agent_image_installs_cc_switch_from_verified_local_archives() ->
         assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected_digest
         assert f"!deploy/docker/factortester-public/{name}" in dockerignore
         assert f"COPY deploy/docker/factortester-public/{name}" in dockerfile
-        assert expected_digest in dockerfile
+        assert expected_digest in installer
 
 
 def test_public_agent_uses_codex_secure_container_profile() -> None:
@@ -697,7 +704,7 @@ def test_nautilus_builder_scripts_use_the_local_submodule_entrypoint() -> None:
 
 def test_native_updates_preserve_unrelated_tool_dependency_layers() -> None:
     dockerfile=(DEPLOYMENT / "FactorTester.Dockerfile").read_text()
-    deps=dockerfile.split("FROM factortester-public-deps AS factortester-cli-builder")[0]
+    deps=dockerfile.split("FROM factortester-public-deps AS traderesearch-cli-builder")[0]
     assert "NAUTILUS_VENDOR_REVISION" not in deps
     native=dockerfile.index("COPY --from=native-wheels")
     assert dockerfile.index("COPY deploy/docker/factortester-public/mihomo-linux") < native

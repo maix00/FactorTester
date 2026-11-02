@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { Alert, Button, Form, Input, Modal, Select, Space } from "antd";
+import React, { useEffect, useRef, useState } from "react";
+import { Button, Form, Input, Modal, Select, Space } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
+import { notify } from "../notifications/core.ts";
 
 type ProtocolDetail = { protocol: string; label?: string };
 type RuntimeCapability = {
@@ -37,8 +38,7 @@ export function AgentModelSetupModal({
   const [form] = Form.useForm<ProviderDraft>();
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [testResult, setTestResult] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [error, setError] = useState("");
+  const inFlight = useRef(false);
   const runtime = Form.useWatch("agent_runtime", form);
   const selectedCapability = capabilities.find((item) => item.runtime === runtime) || capabilities[0];
   const protocols = selectedCapability?.protocols || [];
@@ -57,8 +57,6 @@ export function AgentModelSetupModal({
       network_route: "direct",
       token: "",
     });
-    setTestResult(null);
-    setError("");
   }, [capabilities, form, open]);
 
   useEffect(() => {
@@ -80,11 +78,11 @@ export function AgentModelSetupModal({
   });
 
   const testConnection = async (): Promise<void> => {
-    setError("");
-    setTestResult(null);
+    if (inFlight.current) return;
+    inFlight.current = true;
     let values: ProviderDraft;
     try { values = await form.validateFields(); }
-    catch { return; }
+    catch { inFlight.current = false; return; }
     setTesting(true);
     try {
       const result = await request("/api/client/agent-models/test", {
@@ -93,25 +91,25 @@ export function AgentModelSetupModal({
       const tested = result.test || {};
       const details = [tested.default_model, Number.isFinite(tested.latency_ms) ? `${tested.latency_ms} ms` : ""]
         .filter(Boolean).join(" · ");
-      setTestResult({ type: "success", text: details ? `${t("assistant.connectionSuccess")} · ${details}` : t("assistant.connectionSuccess") });
+      notify({code:"assistant.model.test.success",type:"success",message:t("assistant.connectionSuccess"),description:details});
     } catch (cause) {
-      setTestResult({ type: "error", text: cause instanceof Error ? cause.message : String(cause) });
-    } finally { setTesting(false); }
+      notify({code:"assistant.model.test.failed",type:"error",message:t("assistant.connectionFailed"),description:cause instanceof Error ? cause.message : String(cause)});
+    } finally { inFlight.current = false; setTesting(false); }
   };
 
   const save = async (values: ProviderDraft): Promise<void> => {
-    setSaving(true);
-    setError("");
+    if (inFlight.current) return;
+    inFlight.current = true; setSaving(true);
     try {
       const result = await request("/api/client/agent-models", {
         method: "POST", body: JSON.stringify(payload(values)),
       });
       const provider = result.provider as Provider | undefined;
       if (!provider?.provider_id) throw new Error(t("assistant.modelSaveFailed"));
-      onSaved(provider.provider_id);
+      notify({code:"assistant.model.save.success",type:"success",message:t("operations.saved")}); onSaved(provider.provider_id);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally { setSaving(false); }
+      notify({code:"assistant.model.save.failed",type:"error",message:t("assistant.modelSaveFailed"),description:cause instanceof Error ? cause.message : String(cause)});
+    } finally { inFlight.current = false; setSaving(false); }
   };
 
   return <Modal
@@ -152,13 +150,11 @@ export function AgentModelSetupModal({
           label: t(`assistant.networkRoutes.${item.network_route}`, { defaultValue: item.label }),
         }))} />
       </Form.Item>
-      {testResult ? <Alert className="tr-agent-model-test-result" type={testResult.type} showIcon message={testResult.text} /> : null}
-      {error ? <Alert className="tr-agent-model-test-result" type="error" showIcon message={error} /> : null}
       <div className="tr-agent-model-setup-actions">
-        <Button onClick={() => void testConnection()} loading={testing}>{t("assistant.testModelConnection")}</Button>
+        <Button onClick={() => void testConnection()} loading={testing} disabled={saving}>{t("assistant.testModelConnection")}</Button>
         <Space>
           <Button onClick={onCancel}>{t("configuration.cancel")}</Button>
-          <Button type="primary" htmlType="submit" loading={saving}>{t("assistant.saveModel")}</Button>
+          <Button type="primary" htmlType="submit" loading={saving} disabled={testing}>{t("assistant.saveModel")}</Button>
         </Space>
       </div>
     </Form>

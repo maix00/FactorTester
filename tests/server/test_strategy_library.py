@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from server.services import configuration_strategies
 from server.services.strategy_bindings import compile_configuration_strategies
 from server.services.strategy_library import StrategyLibraryService
 from server.services.strategy_source_inspection import inspect_source
+from server.identity.keycloak_authorization import keycloak_resource_uri
+from server.identity.request_context import bind_verified_identity, identity_request
 
 
 SOURCE = """from tools.testers.backtest.engines.native.strategy import Strategy
@@ -22,6 +25,47 @@ class Demo(Strategy):
 SOURCE_V2 = SOURCE.replace("return None", "return {'changed': True}")
 
 
+class TestKeycloak:
+    """In-memory external policy server; metadata never grants access."""
+
+    __test__ = False
+
+    def __init__(self):
+        self.permissions = {}
+
+    @contextmanager
+    def as_user(self, name):
+        with identity_request():
+            bind_verified_identity("token:" + name, {
+                "username": name, "keycloak_subject": "subject:" + name,
+                "keycloak_issuer": "https://identity.example/realms/trade",
+            })
+            yield
+
+    def ensure(self, *, resource_type, resource_ref, owner_subject):
+        uri = keycloak_resource_uri(resource_type, resource_ref)
+        self.permissions[(uri, owner_subject)] = {"read", "write", "delete", "share"}
+
+    def grant_read(self, strategy_ref, username):
+        uri = keycloak_resource_uri("strategy", strategy_ref)
+        self.permissions.setdefault((uri, "subject:" + username), set()).add("read")
+
+    def authorize(self, token, *, permissions):
+        assert token.startswith("token:")
+        subject = "subject:" + token.removeprefix("token:")
+        return {(uri, scope): scope in self.permissions.get((uri, subject), set())
+                for uri, _name, scope in permissions}
+
+
+@pytest.fixture(autouse=True)
+def kc(monkeypatch):
+    kc = TestKeycloak()
+    monkeypatch.setattr("server.identity.keycloak_authorization.ensure_keycloak_resource", kc.ensure)
+    monkeypatch.setattr("server.identity.keycloak_authorization.keycloak_authorized_many", kc.authorize)
+    with kc.as_user("alice"):
+        yield kc
+
+
 def library(tmp_path: Path) -> StrategyLibraryService:
     return StrategyLibraryService(tmp_path / "manager.sqlite", account_provider=lambda: [])
 
@@ -32,15 +76,20 @@ def create_strategy(
     owner: str = "alice",
     source: str = SOURCE,
     visibility: str = "private",
+    kc: TestKeycloak | None = None,
 ) -> dict:
+    payload = {
+        "name": "Demo strategy",
+        "description": "A test actor",
+        "visibility": visibility,
+        "entrypoint": "Demo",
+        "source_code": source,
+    }
+    if kc is not None:
+        with kc.as_user(owner):
+            return service.create(payload, principal=owner)["strategy"]
     return service.create(
-        {
-            "name": "Demo strategy",
-            "description": "A test actor",
-            "visibility": visibility,
-            "entrypoint": "Demo",
-            "source_code": source,
-        },
+        payload,
         principal=owner,
     )["strategy"]
 
@@ -74,25 +123,37 @@ class Child(Base):
     assert inspection["effective_hooks"][1]["declared_on"] == "Base"
 
 
-def test_library_scopes_and_immutable_revisions(tmp_path: Path) -> None:
+def test_library_scopes_and_immutable_revisions(tmp_path: Path, kc: TestKeycloak) -> None:
     service = StrategyLibraryService(
         tmp_path / "manager.sqlite",
-        account_provider=lambda: [{"username": "bob", "parent_username": "alice"}],
+        account_provider=lambda: [{"username": "bob", "parent_username": "alice"},
+                                  {"username": "charlie", "parent_username": "bob"}],
     )
     strategy = create_strategy(service)
-    create_strategy(service, owner="bob", source=SOURCE_V2)
+    bobs_strategy = create_strategy(service, owner="bob", source=SOURCE_V2, kc=kc)
+    charlies_strategy = create_strategy(service, owner="charlie", kc=kc)
+    kc.grant_read(bobs_strategy["strategy_ref"], "alice")
     assert strategy["library_scope"] == "user_custom"
     assert strategy["library_kind"] == "nautilus_strategy_source"
     assert service.list(principal="alice", scope="mine")["total"] == 1
     assert service.list(principal="alice", scope="subordinates")["total"] == 1
-    assert service.list(principal="bob", scope="shared")["total"] == 0
+    kc.grant_read(charlies_strategy["strategy_ref"], "alice")
+    descendants = service.list(principal="alice", scope="subordinates")
+    assert {item["strategy_ref"] for item in descendants["items"]} == {
+        bobs_strategy["strategy_ref"], charlies_strategy["strategy_ref"],
+    }
+    with kc.as_user("bob"):
+        assert service.list(principal="bob", scope="shared")["total"] == 0
 
     metadata_update = service.update(
         strategy["strategy_ref"], {"visibility": "shared"}, principal="alice",
     )
     assert "source_code" not in metadata_update["strategy"]["current_revision"]
-    service.grant(strategy["strategy_ref"], "bob", principal="alice")
-    assert service.list(principal="bob", scope="shared")["total"] == 1
+    with kc.as_user("bob"):
+        assert service.list(principal="bob", scope="shared")["total"] == 0
+    kc.grant_read(strategy["strategy_ref"], "bob")
+    with kc.as_user("bob"):
+        assert service.list(principal="bob", scope="shared")["total"] == 1
     old_revision = strategy["current_revision"]["revision_ref"]
     updated = service.update(
         strategy["strategy_ref"],
@@ -101,9 +162,10 @@ def test_library_scopes_and_immutable_revisions(tmp_path: Path) -> None:
     )["strategy"]
     assert updated["current_revision"]["revision_ref"] != old_revision
     assert len(updated["revisions"]) == 2
-    assert service.get_revision(
-        strategy["strategy_ref"], old_revision, principal="bob", include_source=True,
-    )["revision"]["source_code"] == SOURCE
+    with kc.as_user("bob"):
+        assert service.get_revision(
+            strategy["strategy_ref"], old_revision, principal="bob", include_source=True,
+        )["revision"]["source_code"] == SOURCE
 
 
 def test_strategy_reads_can_omit_source_and_updates_are_atomic(tmp_path: Path) -> None:
@@ -138,11 +200,13 @@ def test_strategy_reads_can_omit_source_and_updates_are_atomic(tmp_path: Path) -
     assert unchanged["current_revision"]["revision_ref"] == current_ref
 
 
-def test_library_list_pages_visible_rows_at_the_database_boundary(tmp_path: Path) -> None:
+def test_library_list_pages_visible_rows_at_the_database_boundary(tmp_path: Path, kc: TestKeycloak) -> None:
     service = library(tmp_path)
     mine = create_strategy(service)
-    public = create_strategy(service, owner="bob", visibility="public")
-    create_strategy(service, owner="carol")
+    public = create_strategy(service, owner="bob", visibility="public", kc=kc)
+    create_strategy(service, owner="carol", kc=kc)
+    assert service.list(principal="alice", scope="all")["total"] == 1
+    kc.grant_read(public["strategy_ref"], "alice")
 
     first_page = service.list(principal="alice", scope="all", page=1, limit=1)
     second_page = service.list(principal="alice", scope="all", page=2, limit=1)
@@ -203,7 +267,7 @@ def test_library_binding_freezes_the_selected_revision(tmp_path: Path) -> None:
     assert normalized["source"].startswith("profile:strategies/frozen/")
 
 
-def test_configuration_library_binding_validates_access_and_hash(tmp_path: Path) -> None:
+def test_configuration_library_binding_validates_access_and_hash(tmp_path: Path, kc: TestKeycloak) -> None:
     service = library(tmp_path)
     strategy = create_strategy(service)
     revision = strategy["current_revision"]
@@ -233,7 +297,7 @@ def test_configuration_library_binding_validates_access_and_hash(tmp_path: Path)
         )
     assert configuration_strategies.view(rejected)["bindings"] == []
 
-    with pytest.raises(PermissionError):
+    with kc.as_user("bob"), pytest.raises(PermissionError):
         configuration_strategies.add_library(
             {"shared": {}, "analyses": {"backtest": {}}},
             strategy_ref=strategy["strategy_ref"],
@@ -254,14 +318,14 @@ def test_configuration_library_binding_validates_access_and_hash(tmp_path: Path)
         )
 
 
-def test_test_authoring_put_rejects_inaccessible_library_revision(tmp_path: Path) -> None:
+def test_test_authoring_put_rejects_inaccessible_library_revision(tmp_path: Path, kc: TestKeycloak) -> None:
     service = library(tmp_path)
     strategy = create_strategy(service, owner="alice")
     revision = strategy["current_revision"]["revision_ref"]
     authoring = test_authoring.TestAuthoringService()
     authoring.strategy_library = service
 
-    with pytest.raises(test_authoring.TestAuthoringError) as error:
+    with kc.as_user("bob"), pytest.raises(test_authoring.TestAuthoringError) as error:
         authoring.write(
             "PUT",
             "/api/test-authoring/workspaces/workspace-one/configuration",

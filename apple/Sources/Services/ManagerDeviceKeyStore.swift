@@ -39,10 +39,14 @@ enum ManagerDeviceKeyStoreError: LocalizedError {
 /// Keychain/Secure Enclave storage used by the Swift client instead of
 /// browser IndexedDB. The server receives only `publicKey` and signatures.
 enum ManagerDeviceKeyStore {
-    private static let keyTagPrefix = "com.gtht.factortester.device-key."
-    private static let metadataService = "com.gtht.factortester.device"
+    private static let enrollmentLock = NSLock()
+    private static let keyTagPrefix = "com.gtht.traderesearch.device-key."
+    private static let legacyKeyTagPrefix = "com.gtht.factortester.device-key."
+    private static let metadataService = "com.gtht.traderesearch.device"
+    private static let legacyMetadataService = "com.gtht.factortester.device"
     private static let metadataAccount = "current"
-    private static let currentDeviceIDKey = "factortester.manager.device.id"
+    private static let currentDeviceIDKey = "traderesearch.manager.device.id"
+    private static let legacyDeviceIDKey = "factortester.manager.device.id"
 
     static func create(
         deviceID: String = UUID().uuidString,
@@ -69,7 +73,12 @@ enum ManagerDeviceKeyStore {
             publicKey: jwk,
             secureEnclave: secureEnclave
         )
-        try saveMetadata(credential)
+        do {
+            try saveMetadata(credential)
+        } catch {
+            deleteKey(tag: tag)
+            throw error
+        }
         UserDefaults.standard.set(deviceID, forKey: currentDeviceIDKey)
         return credential
     }
@@ -79,9 +88,38 @@ enum ManagerDeviceKeyStore {
               let credential = try? JSONDecoder().decode(
                 ManagerDeviceCredential.self, from: data
               ) else { return nil }
-        let tag = Data((keyTagPrefix + credential.deviceID).utf8)
-        guard loadKey(tag: tag) != nil else { return nil }
+        guard resolveKey(credential: credential) != nil else { return nil }
+        UserDefaults.standard.set(credential.deviceID, forKey: currentDeviceIDKey)
+        UserDefaults.standard.removeObject(forKey: legacyDeviceIDKey)
         return credential
+    }
+
+    /// Never replace a locked, corrupt, or previously registered identity.
+    static func ensureForEnrollment(username: String) throws -> ManagerDeviceCredential {
+        enrollmentLock.lock()
+        defer { enrollmentLock.unlock() }
+        let owner = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty else { throw ManagerDeviceKeyStoreError.keyUnavailable }
+        if let credential = load() {
+            guard credential.username.isEmpty || credential.username == owner else {
+                throw ManagerDeviceKeyStoreError.keyCreationFailed("Conflicting Keychain device identity")
+            }
+            return credential
+        }
+        for service in [metadataService, legacyMetadataService] {
+            let query: [CFString: Any] = [kSecClass: kSecClassGenericPassword,
+                kSecAttrService: service, kSecAttrAccount: metadataAccount,
+                kSecReturnAttributes: true, kSecMatchLimit: kSecMatchLimitOne]
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecItemNotFound else {
+                throw ManagerDeviceKeyStoreError.keyUnavailable
+            }
+        }
+        guard UserDefaults.standard.string(forKey: currentDeviceIDKey) == nil,
+              UserDefaults.standard.string(forKey: legacyDeviceIDKey) == nil else {
+            throw ManagerDeviceKeyStoreError.keyUnavailable
+        }
+        return try create(username: owner)
     }
 
     static func updateUsername(_ username: String) throws {
@@ -101,8 +139,7 @@ enum ManagerDeviceKeyStore {
         guard let credential = load() else {
             throw ManagerDeviceKeyStoreError.keyUnavailable
         }
-        let tag = Data((keyTagPrefix + credential.deviceID).utf8)
-        guard let privateKey = loadKey(tag: tag) else {
+        guard let privateKey = resolveKey(credential: credential) else {
             throw ManagerDeviceKeyStoreError.keyUnavailable
         }
         var error: Unmanaged<CFError>?
@@ -122,11 +159,50 @@ enum ManagerDeviceKeyStore {
     static func delete() {
         guard let credential = loadMetadata() else {
             UserDefaults.standard.removeObject(forKey: currentDeviceIDKey)
+            UserDefaults.standard.removeObject(forKey: legacyDeviceIDKey)
             return
         }
-        deleteKey(tag: Data((keyTagPrefix + credential.deviceID).utf8))
+        // Do not delete a colliding key belonging to a different public identity.
+        for prefix in [keyTagPrefix, legacyKeyTagPrefix] {
+            let tag = Data((prefix + credential.deviceID).utf8)
+            if let key = loadKey(tag: tag), matches(key: key, publicKey: credential.publicKey) {
+                deleteKey(tag: tag)
+            }
+        }
         deleteMetadata()
         UserDefaults.standard.removeObject(forKey: currentDeviceIDKey)
+        UserDefaults.standard.removeObject(forKey: legacyDeviceIDKey)
+    }
+
+    private static func resolveKey(credential: ManagerDeviceCredential) -> SecKey? {
+        let current = Data((keyTagPrefix + credential.deviceID).utf8)
+        let legacy = Data((legacyKeyTagPrefix + credential.deviceID).utf8)
+        return migrateKey(currentTag: current, legacyTag: legacy, publicKey: credential.publicKey)
+    }
+
+    /// Move the Keychain tag in place; a Secure Enclave private key is never
+    /// exported or regenerated. Failure leaves the verified old key usable.
+    static func migrateKey(currentTag: Data, legacyTag: Data, publicKey: [String: String]) -> SecKey? {
+        if let current = loadKey(tag: currentTag) {
+            return matches(key: current, publicKey: publicKey) ? current : nil
+        }
+        guard let legacy = loadKey(tag: legacyTag), matches(key: legacy, publicKey: publicKey) else { return nil }
+        let query: [CFString: Any] = [kSecClass: kSecClassKey, kSecAttrKeyClass: kSecAttrKeyClassPrivate,
+            kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrApplicationTag: legacyTag]
+        let status = SecItemUpdate(query as CFDictionary, [kSecAttrApplicationTag: currentTag] as CFDictionary)
+        if status == errSecSuccess || status == errSecItemNotFound || status == errSecDuplicateItem {
+            if let current = loadKey(tag: currentTag), matches(key: current, publicKey: publicKey) { return current }
+        }
+        // A failed retag must never cause a different key to be substituted.
+        if let unchanged = loadKey(tag: legacyTag), matches(key: unchanged, publicKey: publicKey) { return unchanged }
+        // The original SecKey remains valid for this operation if a successful
+        // retag cannot immediately be queried. Keep its identity unchanged.
+        return status == errSecSuccess ? legacy : nil
+    }
+
+    private static func matches(key: SecKey, publicKey: [String: String]) -> Bool {
+        guard let publicPart = SecKeyCopyPublicKey(key), let jwk = try? publicJWK(for: publicPart) else { return false }
+        return jwk == publicKey
     }
 
     private static func makeKey(tag: Data, secureEnclave: Bool) throws -> SecKey {
@@ -163,6 +239,7 @@ enum ManagerDeviceKeyStore {
     private static func loadKey(tag: Data) -> SecKey? {
         let query: [CFString: Any] = [
             kSecClass: kSecClassKey,
+            kSecAttrKeyClass: kSecAttrKeyClassPrivate,
             kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrApplicationTag: tag,
             kSecReturnRef: true,
@@ -181,12 +258,13 @@ enum ManagerDeviceKeyStore {
     private static func deleteKey(tag: Data) {
         SecItemDelete([
             kSecClass: kSecClassKey,
+            kSecAttrKeyClass: kSecAttrKeyClassPrivate,
             kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrApplicationTag: tag,
         ] as CFDictionary)
     }
 
-    private static func publicJWK(for key: SecKey) throws -> [String: String] {
+    static func publicJWK(for key: SecKey) throws -> [String: String] {
         var error: Unmanaged<CFError>?
         guard let data = SecKeyCopyExternalRepresentation(key, &error) as Data?,
               data.count == 65, data.first == 0x04 else {
@@ -200,9 +278,10 @@ enum ManagerDeviceKeyStore {
         ]
     }
 
-    private static func p1363Signature(fromDER der: Data) throws -> Data {
+    static func p1363Signature(fromDER der: Data) throws -> Data {
         let bytes = [UInt8](der)
-        guard bytes.count > 6, bytes[0] == 0x30 else {
+        guard bytes.count > 6, bytes[0] == 0x30,
+              Int(bytes[1]) == bytes.count - 2 else {
             throw ManagerDeviceKeyStoreError.signingFailed("invalid DER signature")
         }
         var index = 2
@@ -218,14 +297,16 @@ enum ManagerDeviceKeyStore {
             throw ManagerDeviceKeyStoreError.signingFailed("invalid DER signature")
         }
         let sLength = Int(bytes[index + 1]); index += 2
-        guard index + sLength <= bytes.count else {
+        guard index + sLength == bytes.count else {
             throw ManagerDeviceKeyStoreError.signingFailed("invalid DER signature")
         }
         let s = Array(bytes[index..<(index + sLength)])
-        guard r.count <= 33, s.count <= 33,
-              !r.isEmpty, !s.isEmpty,
-              (r.count == 32 || (r.count == 33 && r[0] == 0)),
-              (s.count == 32 || (s.count == 33 && s[0] == 0)) else {
+        func validInteger(_ value: [UInt8]) -> Bool {
+            guard !value.isEmpty, value.count <= 33, value[0] & 0x80 == 0 else { return false }
+            if value.count > 1 && value[0] == 0 && value[1] & 0x80 == 0 { return false }
+            return value.count <= 32 || (value[0] == 0 && value[1] & 0x80 != 0)
+        }
+        guard validInteger(r), validInteger(s) else {
             throw ManagerDeviceKeyStoreError.signingFailed("invalid DER signature")
         }
         return Data(integer: r, width: 32) + Data(integer: s, width: 32)
@@ -243,44 +324,91 @@ enum ManagerDeviceKeyStore {
         return try? JSONDecoder().decode(ManagerDeviceCredential.self, from: data)
     }
 
-    private static func readMetadata() -> Data? {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: metadataService,
-            kSecAttrAccount: metadataAccount,
-            kSecReturnData: true,
-            kSecMatchLimit: kSecMatchLimitOne,
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
-            return nil
+    /// The same generic-password migration is also exercised with isolated
+    /// test service/account names; the real device entry is never needed.
+    static func readMetadata(service: String = metadataService, legacy: String = legacyMetadataService,
+                             account: String = metadataAccount) -> Data? {
+        func item(_ name: String) -> [CFString: Any] {
+            [kSecClass: kSecClassGenericPassword, kSecAttrService: name, kSecAttrAccount: account]
         }
-        return result as? Data
+        func read(_ name: String) -> (OSStatus, Data?) {
+            var query = item(name)
+            query[kSecReturnData] = true
+            query[kSecMatchLimit] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            return (status, result as? Data)
+        }
+        let current = read(service)
+        if current.0 == errSecSuccess, let currentData = current.1 {
+            let previous = read(legacy)
+            if previous.0 == errSecSuccess, let previousData = previous.1 {
+                guard let a = try? JSONDecoder().decode(ManagerDeviceCredential.self, from: currentData),
+                      let b = try? JSONDecoder().decode(ManagerDeviceCredential.self, from: previousData),
+                      a.deviceID == b.deviceID, a.publicKey == b.publicKey else { return nil }
+            } else if previous.0 != errSecItemNotFound { return nil }
+            return currentData
+        }
+        guard current.0 == errSecItemNotFound else { return nil }
+        let result = SecItemUpdate(item(legacy) as CFDictionary,
+            [kSecAttrService: service, kSecAttrLabel: service] as CFDictionary)
+        if result == errSecSuccess || result == errSecDuplicateItem { return read(service).1 }
+        return read(legacy).1
     }
 
     private static func saveMetadata(_ credential: ManagerDeviceCredential) throws {
         let data = try JSONEncoder().encode(credential)
-        let base: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: metadataService,
-            kSecAttrAccount: metadataAccount,
-        ]
-        SecItemDelete(base as CFDictionary)
-        var item = base
-        item[kSecValueData] = data
-        item[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else {
+        // Refuse to overwrite either namespace if it identifies another device.
+        for service in [metadataService, legacyMetadataService] {
+            let query: [CFString: Any] = [kSecClass: kSecClassGenericPassword,
+                kSecAttrService: service, kSecAttrAccount: metadataAccount,
+                kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
+            var value: CFTypeRef?
+            let existingStatus = SecItemCopyMatching(query as CFDictionary, &value)
+            if existingStatus == errSecItemNotFound { continue }
+            guard existingStatus == errSecSuccess, let bytes = value as? Data,
+                  let existing = try? JSONDecoder().decode(ManagerDeviceCredential.self, from: bytes),
+                  existing.deviceID == credential.deviceID, existing.publicKey == credential.publicKey else {
+                throw ManagerDeviceKeyStoreError.keyCreationFailed("Conflicting Keychain device identity")
+            }
+        }
+        let base: [CFString: Any] = [kSecClass: kSecClassGenericPassword,
+            kSecAttrService: metadataService, kSecAttrAccount: metadataAccount]
+        var status = SecItemUpdate(base as CFDictionary, [kSecValueData: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var item = base
+            item[kSecValueData] = data
+            item[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            item[kSecAttrLabel] = metadataService
+            status = SecItemAdd(item as CFDictionary, nil)
+            if status == errSecDuplicateItem {
+                status = SecItemUpdate(base as CFDictionary, [kSecValueData: data] as CFDictionary)
+            }
+        }
+        guard status == errSecSuccess else {
             throw ManagerDeviceKeyStoreError.keyCreationFailed("Keychain metadata write failed")
+        }
+        // An unrelated pre-existing legacy device must not be removed.
+        let legacyQuery: [CFString: Any] = [kSecClass: kSecClassGenericPassword,
+            kSecAttrService: legacyMetadataService, kSecAttrAccount: metadataAccount,
+            kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
+        var previous: CFTypeRef?
+        if SecItemCopyMatching(legacyQuery as CFDictionary, &previous) == errSecSuccess,
+           let previousData = previous as? Data,
+           let old = try? JSONDecoder().decode(ManagerDeviceCredential.self, from: previousData),
+           old.deviceID == credential.deviceID, old.publicKey == credential.publicKey {
+            SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: legacyMetadataService,
+                           kSecAttrAccount: metadataAccount] as CFDictionary)
         }
     }
 
     private static func deleteMetadata() {
-        SecItemDelete([
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: metadataService,
-            kSecAttrAccount: metadataAccount,
-        ] as CFDictionary)
+        for service in [metadataService, legacyMetadataService] {
+            SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: service,
+                           kSecAttrAccount: metadataAccount] as CFDictionary)
+        }
     }
+
 }
 
 private extension Data {

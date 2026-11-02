@@ -20,11 +20,13 @@ def transfer_context_payload(
     transfer: TransferRecord,
     attempt: TransferAttemptRecord,
 ) -> dict[str, object]:
+    version = 2 if transfer.principal_identity_id else 1
     return {
-        "schema_version": 1,
+        "schema_version": version,
         "transfer": {
             field.name: getattr(transfer, field.name)
             for field in fields(transfer)
+            if version == 2 or field.name != "principal_identity_id"
         } | {
             "operation": transfer.operation.value,
             "status": transfer.status.value,
@@ -47,12 +49,20 @@ def transfer_context_payload(
 def parse_transfer_context(
     payload: dict[str, object],
 ) -> tuple[TransferRecord, TransferAttemptRecord]:
-    if payload.get("schema_version") != 1:
+    version = payload.get("schema_version")
+    if type(version) is not int or version not in {1, 2}:
         raise ValueError("unsupported transfer context schema")
     transfer_value = payload.get("transfer")
     attempt_value = payload.get("attempt")
     if not isinstance(transfer_value, dict) or not isinstance(attempt_value, dict):
         raise ValueError("transfer context requires transfer and Attempt objects")
+    if version == 1 and "principal_identity_id" in transfer_value:
+        raise ValueError("legacy transfer context cannot claim a stable identity")
+    if version == 2:
+        from server.manager.storage.transfers.records import stable_identity_id
+        raw_identity = transfer_value.get("principal_identity_id")
+        if not isinstance(raw_identity, str) or not raw_identity or stable_identity_id(raw_identity) != raw_identity:
+            raise ValueError("transfer context stable identity is invalid")
     try:
         transfer = TransferRecord(
             **transfer_value | {

@@ -35,6 +35,21 @@ def _signature(private_key: ec.EllipticCurvePrivateKey, message: bytes) -> str:
     return _b64url(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
 
 
+def test_retry_requires_same_owner_and_key(tmp_path):
+    key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    other_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='local')
+    registry.enroll(username='alice', device_id='device-opaque-123456', public_key=key)
+    registry.revoke('device-opaque-123456')
+    with pytest.raises(ValueError):
+        registry.retry_enrollment(username='alice', device_id='device-opaque-123456', public_key=other_key)
+    with pytest.raises(ValueError):
+        registry.retry_enrollment(username='bob', device_id='device-opaque-123456', public_key=key)
+    assert registry.retry_enrollment(username='alice', device_id='device-opaque-123456', public_key=key)['enabled']
+    with pytest.raises(ValueError):
+        registry.retry_enrollment(username='alice', device_id='device-opaque-123456', public_key=key)
+
+
 def test_device_registry_keeps_only_minimal_client_and_ip_audit_metadata(tmp_path) -> None:
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_key = _jwk(private_key.public_key())
@@ -88,7 +103,7 @@ def test_device_registry_keeps_only_minimal_client_and_ip_audit_metadata(tmp_pat
         )
 
 
-def test_existing_device_snapshot_is_migrated_to_allowlist_policy(tmp_path) -> None:
+def test_legacy_device_fields_are_preserved_until_reviewed_migration(tmp_path) -> None:
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_key = _jwk(private_key.public_key())
     path = tmp_path / "devices.json"
@@ -109,15 +124,139 @@ def test_existing_device_snapshot_is_migrated_to_allowlist_policy(tmp_path) -> N
         "sources": {},
     }), encoding="utf-8")
 
+    original = path.read_bytes()
     registry = DeviceRegistry(path, server_id="public-main", public_server=True)
+    assert path.read_bytes() == original  # Reading must not rewrite migration evidence.
     record = registry.list(username="alice@default")[0]
 
     assert "public_access" not in record
     assert "quota_exempt" not in record
     persisted = json.loads(path.read_text(encoding="utf-8"))
     migrated = persisted["devices"]["device-legacy-123456"]
-    assert "public_access" not in migrated
-    assert "quota_exempt" not in migrated
+    assert migrated["public_access"] is False
+    assert migrated["quota_exempt"] is False
+    registry.enroll(username='alice@default', device_id='device-second-123456', public_key=public_key)
+    persisted = json.loads(path.read_text(encoding='utf-8'))
+    assert persisted['devices']['device-legacy-123456']['public_access'] is False
+    assert persisted['devices']['device-legacy-123456']['quota_exempt'] is False
+    assert 'device-second-123456' in persisted['devices']
+
+
+def test_invalid_legacy_record_is_reported_without_overwrite(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    path = tmp_path / 'devices.json'
+    path.write_text(json.dumps({'schema_version': 3, 'server_id': 'local', 'generation': 0,
+        'devices': {'device-good-123456': {'username': 'alice', 'public_key': public_key, 'enabled': True},
+                    'device-bad-1234567': {'username': 'bob', 'public_key': public_key, 'enabled': 'false'}},
+        'sources': {}}))
+    original = path.read_bytes()
+    registry = DeviceRegistry(path, server_id='local')
+    assert registry.backend_status()['migration_repair_count'] == 1
+    assert len(registry.list()) == 1  # malformed state is never interpreted as enabled
+    with pytest.raises(ValueError, match='migration repair'):
+        registry.enroll(username='alice', device_id='device-new-1234567', public_key=public_key)
+    with pytest.raises(ValueError, match='migration repair'):
+        registry.revoke('device-good-123456')
+    assert registry.verify(device_id='device-good-123456', public_key=public_key,
+        challenge=b'challenge', signature=_signature(private_key, b'challenge'),
+        last_seen_ip='203.0.113.9')['username'] == 'alice'
+    assert path.read_bytes() == original
+
+
+def test_other_manager_snapshot_is_not_rebound_or_overwritten(tmp_path) -> None:
+    public_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    path = tmp_path / 'devices.json'
+    path.write_text(json.dumps({'schema_version': 3, 'server_id': 'public', 'generation': 0,
+        'devices': {'device-good-123456': {'username': 'alice', 'public_key': public_key, 'enabled': True}},
+        'sources': {}}))
+    original = path.read_bytes()
+    registry = DeviceRegistry(path, server_id='local')
+    assert registry.backend_status()['migration_repair_required'] is True
+    assert registry.list() == []
+    with pytest.raises(ValueError, match='migration repair'):
+        registry.enroll(username='alice', device_id='device-new-1234567', public_key=public_key)
+    assert path.read_bytes() == original
+
+
+def test_mirror_update_cannot_discard_unmigrated_device_fields(tmp_path) -> None:
+    public_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    path = tmp_path / 'devices.json'
+    device = {'device_id': 'device-peer-123456', 'username': 'alice', 'public_key': public_key,
+              'enabled': True, 'public_access': False}
+    path.write_text(json.dumps({'schema_version': 3, 'server_id': 'local', 'generation': 0,
+                                'devices': {}, 'sources': {'peer': {'generation': 1, 'devices': [device]}}}))
+    registry = DeviceRegistry(path, server_id='local')
+    with pytest.raises(ValueError, match='legacy device fields'):
+        registry.apply_snapshot(source_server_id='peer', generation=2, devices=[])
+    assert json.loads(path.read_text())['sources']['peer']['devices'][0]['public_access'] is False
+    assert registry.apply_snapshot(source_server_id='peer', generation=2, devices=[device])
+    assert json.loads(path.read_text())['sources']['peer']['devices'][0]['public_access'] is False
+    with pytest.raises(ValueError, match='duplicate device IDs'):
+        registry.apply_snapshot(source_server_id='peer', generation=3, devices=[device, device])
+    assert registry.apply_snapshot(source_server_id='other', generation=1, devices=[device])
+    changed = {**device, 'public_access': True}
+    with pytest.raises(ValueError, match='legacy device fields'):
+        registry.apply_snapshot(source_server_id='peer', generation=3, devices=[changed])
+    assert json.loads(path.read_text())['sources']['peer']['generation'] == 2
+
+
+def test_new_mirror_preserves_legacy_fields_for_migration(tmp_path) -> None:
+    public_key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='local')
+    device = {'device_id': 'device-peer-123456', 'username': 'alice', 'public_key': public_key,
+              'enabled': True, 'public_access': False}
+    assert registry.apply_snapshot(source_server_id='peer', generation=1, devices=[device])
+    stored = json.loads((tmp_path / 'devices.json').read_text())
+    assert stored['sources']['peer']['devices'][0]['public_access'] is False
+
+
+def test_mirrored_device_cannot_be_revoked_or_used_as_local_binding(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='local')
+    device = {'device_id': 'device-peer-123456', 'username': 'alice',
+              'public_key': public_key, 'enabled': True}
+    assert registry.apply_snapshot(source_server_id='peer', generation=1, devices=[device])
+    assert registry.key_binding(username='alice', device_id=device['device_id']) is None
+    with pytest.raises(PermissionError, match='not approved'):
+        registry.verify(device_id=device['device_id'], public_key=public_key,
+                        challenge=b'challenge', signature=_signature(private_key, b'challenge'))
+    with pytest.raises(ValueError, match='not found on this server'):
+        registry.revoke(device['device_id'], username='alice', public_key=public_key)
+    assert registry.list(username='alice')[0]['enabled'] is True
+
+
+def test_same_device_can_be_registered_independently_per_manager(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    path = tmp_path / 'devices.json'
+    registry = DeviceRegistry(path, server_id='local')
+    device = {'device_id': 'device-shared-123456', 'username': 'alice',
+              'public_key': public_key, 'enabled': True}
+    registry.apply_snapshot(source_server_id='peer', generation=1, devices=[device])
+    registry.enroll(username='alice', device_id=device['device_id'], public_key=public_key)
+    registry = DeviceRegistry(path, server_id='local')
+    assert registry.backend_status()['migration_repair_count'] == 0
+    assert len(registry.list(username='alice')) == 2
+    assert len(registry.authorization_records(username='alice')) == 1
+    assert registry.authorization_records(username='alice')[0]['source_server_id'] == 'local'
+    assert registry.public_device_total_count(username='alice') == 1
+    registry.revoke(device['device_id'], username='alice', public_key=public_key)
+    by_source = {row['source_server_id']: row for row in registry.list(username='alice')}
+    assert not by_source['local']['enabled'] and by_source['peer']['enabled']
+
+
+def test_revoke_requires_unchanged_owner_and_key(tmp_path) -> None:
+    key = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    other = _jwk(ec.generate_private_key(ec.SECP256R1()).public_key())
+    registry = DeviceRegistry(tmp_path / 'devices.json', server_id='local')
+    registry.enroll(username='alice', device_id='device-local-123456', public_key=key)
+    for owner, candidate in [('bob', key), ('alice', other)]:
+        with pytest.raises(ValueError, match='binding was not found'):
+            registry.revoke('device-local-123456', username=owner, public_key=candidate)
+    assert registry.list(username='alice')[0]['enabled'] is True
+    assert registry.revoke('device-local-123456', username='alice', public_key=key)['enabled'] is False
 
 
 def test_public_server_accepts_all_allowlisted_devices(tmp_path) -> None:
@@ -191,7 +330,10 @@ def test_device_client_description_discards_raw_user_agent() -> None:
     }
     assert native == {
         "client_type": "swift",
-        "client_name": "FactorTester Swift 1",
+        "client_name": "TradeResearch Swift 1",
+    }
+    assert describe_client(user_agent="TradeResearch-Swift/1", client_hint="mobile") == {
+        "client_type": "mobile", "client_name": "TradeResearch Mobile 1",
     }
     assert observed_ip("2001:db8::1") == "2001:db8::1"
     assert observed_ip("not-an-ip") == ""

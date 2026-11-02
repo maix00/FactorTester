@@ -231,7 +231,7 @@ def profile_workspace_guidance(profile_id: str) -> None:
     click.echo("  2. 合并 download 到 upload，并解决冲突")
     click.echo(f"  3. 合并已提交的 {branch} 到 upload，并解决冲突")
     click.echo("  4. 将 upload 写回数据库因子库")
-    click.echo("FactorTester 不提供另一套 Profile Git 命令。")
+    click.echo("TradeResearch 不提供另一套 Profile Git 命令。")
 
 
 def _resolve_factor_from_catalog(

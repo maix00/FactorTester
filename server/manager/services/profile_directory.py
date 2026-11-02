@@ -28,15 +28,11 @@ PROFILE_DIRECTORY_PRINCIPAL = "__profile_directory__"
 
 
 def _verified_request_username() -> str:
-    try:
-        from flask import g, has_request_context
-
-        if not has_request_context():
-            return ""
-        identity = getattr(g, "keycloak_user_session", None)
-        return str(identity.get("username") or "").strip() if isinstance(identity, dict) else ""
-    except ImportError:
-        return ""
+    # The Manager uses request-local ContextVars; the execution service uses
+    # Flask g. Both are populated only after verifying this exact token.
+    from server.identity.keycloak_authorization import keycloak_request_identity
+    identity = keycloak_request_identity()
+    return str(identity.username).strip() if identity is not None else ""
 
 
 class ProfileDirectoryError(ValueError):

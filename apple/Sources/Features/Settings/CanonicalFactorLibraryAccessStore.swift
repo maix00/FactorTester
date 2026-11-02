@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 enum CanonicalFactorLibraryAccessStore {
@@ -9,7 +10,7 @@ enum CanonicalFactorLibraryAccessStore {
     }
 
     static func defaultRootPath(for principal: String) -> String {
-        defaultRootURL(for: principal).path
+        (try? defaultRootURL(for: principal).path) ?? ""
     }
 
     @discardableResult
@@ -17,7 +18,7 @@ enum CanonicalFactorLibraryAccessStore {
         guard isValidPrincipal(principal) else {
             throw WorkspaceAccessError.required
         }
-        let root = defaultRootURL(for: principal)
+        let root = try defaultRootURL(for: principal)
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: root.appendingPathComponent("custom_factors", isDirectory: true),
@@ -54,9 +55,9 @@ enum CanonicalFactorLibraryAccessStore {
         UserDefaults.standard.set(normalized.path, forKey: pathKey)
     }
 
-    private static func defaultRootURL(for principal: String) -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester/users", isDirectory: true)
+    private static func defaultRootURL(for principal: String) throws -> URL {
+        try LocalDocumentsRoot.resolve()
+            .appendingPathComponent("users", isDirectory: true)
             .appendingPathComponent(principal, isDirectory: true)
             .appendingPathComponent("personal-workspace/factor-library", isDirectory: true)
             .standardizedFileURL
@@ -82,13 +83,16 @@ enum CanonicalFactorLibraryAccessStore {
             relativeTo: nil,
             bookmarkDataIsStale: &stale
         ).standardizedFileURL
-        guard target.standardizedFileURL.path == root.path
-            || target.standardizedFileURL.path.hasPrefix(root.path + "/") else {
-            throw WorkspaceAccessError.required
-        }
         let started = root.startAccessingSecurityScopedResource()
         guard started else { throw WorkspaceAccessError.required }
         defer { root.stopAccessingSecurityScopedResource() }
+        let targetPath = LocalDocumentsRoot.resolvedLocation(target).path
+        let rootPath = LocalDocumentsRoot.resolvedLocation(root).path
+        guard targetPath == rootPath || targetPath.hasPrefix(rootPath + "/") else {
+            throw WorkspaceAccessError.required
+        }
         return try await operation()
     }
 }
+
+#endif

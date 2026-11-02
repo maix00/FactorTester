@@ -1,0 +1,11 @@
+# Apply with compose.yaml only after backing up Keycloak and reviewing mappings.
+# The artifact contains reviewed code only, never user directory data or grants.
+services:
+  keycloak:
+    environment:
+      KC_FEATURES: scripts
+    volumes:
+      - type: bind
+        source: ${TR_IDENTITY_POLICY_JAR:?build and checksum the reviewed Keycloak policy JAR}
+        target: /opt/keycloak/providers/tr-research-policies.jar
+        read_only: true

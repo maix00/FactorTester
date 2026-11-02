@@ -29,6 +29,11 @@ def test_schema_rejects_derived_test_settings_as_agent_writable_fields() -> None
         validate_document(schema, {"local_settings": {"start_date": "2024-01-01"}})
 
 
+def test_read_only_page_cannot_be_validated_for_agent_write() -> None:
+    with pytest.raises(ValueError, match="read-only"):
+        validate_document({"type": "object", "readOnly": True}, {})
+
+
 def test_json_schema_constraints_reject_incomplete_registered_values() -> None:
     schema = {
         "type": "object",
@@ -407,8 +412,18 @@ def test_workspace_targets_are_explicit_and_close_removes_pending():
                              document={}, tab_id="b")
 
 
-def test_research_profile_workspace_scope_uses_membership():
+def test_research_profile_workspace_scope_uses_membership(monkeypatch, tmp_path):
     from server.manager.http.page_assistance_routes import PageAssistanceRoutesMixin
+    from server.identity import keycloak_research
+    import sqlite3
+
+    database = tmp_path / "profiles.sqlite"
+    sqlite3.connect(database).close()
+    monkeypatch.setattr(keycloak_research, "verified_research_request", lambda _principal: object())
+    class Authorizer:
+        def research_access_many(self, *, viewer, researches):
+            return {ref: {"can_view": ref == "r1"} for ref, _status in researches}
+    monkeypatch.setattr(keycloak_research, "KeycloakResearchAuthorization", Authorizer)
 
     class Routes(PageAssistanceRoutesMixin):
         def _profile(self, principal, profile_id):
@@ -417,9 +432,14 @@ def test_research_profile_workspace_scope_uses_membership():
         def _research_catalog_service(self):
             return self
 
-        def list_members(self, research_id, *, viewer):
-            assert viewer == "owner"
-            return [{"profile_ref": "profile:bound"}] if research_id == "r1" else []
+        db_path = database
+        _profile_authorizer = object()
+        def research_statuses(self, refs):
+            return {ref: "active" for ref in refs}
+        def _profile_pairs(self, _db, _principal):
+            return {("r1", "profile:bound"): 1}
+        def _profile_membership_access(self, _principal, pairs):
+            return {ref: {"can_view": True} for ref, _profile in pairs}
 
     routes = Routes()
     workspace = {"active_tab_id": "outside", "tabs": [
@@ -428,7 +448,8 @@ def test_research_profile_workspace_scope_uses_membership():
         {"tab_id": "outside", "research_id": ""},
         {"tab_id": "other", "research_id": "r2"},
     ]}
-    assert routes._assistance_visible_workspace("owner", "self", workspace) == workspace
+    self_view = routes._assistance_visible_workspace("owner", "self", workspace)
+    assert [tab["tab_id"] for tab in self_view["tabs"]] == ["folder", "child", "outside"]
     scoped = routes._assistance_visible_workspace("owner", "bound", workspace)
     assert [tab["tab_id"] for tab in scoped["tabs"]] == ["folder", "child"]
     assert routes._assistance_visible_workspace("owner", "unbound", workspace)["tabs"] == []

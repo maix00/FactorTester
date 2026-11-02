@@ -103,6 +103,18 @@ def _keycloak_roles_for_account(account: object) -> set[str]:
         return set()
 
 
+def _has_current_keycloak_role(account: object, role: str) -> bool:
+    """Check sensitive roles against Keycloak for the verified request owner."""
+    identity = _verified_keycloak_request_identity()
+    if not isinstance(identity, dict) or not _account_principal(account):
+        return False
+    if _account_principal(account) != str(identity.get("username") or "").strip():
+        return False
+    from server.identity.server_admission import current_manager_role
+
+    return current_manager_role(identity, role)
+
+
 def _keycloak_groups_for_account(account: object) -> set[str]:
     try:
         identity = _verified_keycloak_request_identity()
@@ -113,6 +125,17 @@ def _keycloak_groups_for_account(account: object) -> set[str]:
         return {str(path) for path in identity.get("keycloak_groups", ()) if path}
     except Exception:
         return set()
+
+
+def _current_admin_groups_for_account(account: object) -> tuple[str, ...]:
+    identity = _verified_keycloak_request_identity()
+    if not isinstance(identity, dict) or not _account_principal(account):
+        return ()
+    if _account_principal(account) != str(identity.get("username") or "").strip():
+        return ()
+    from server.identity.server_admission import current_administrative_groups
+
+    return current_administrative_groups(identity) or ()
 
 
 def _role_for_keycloak_roles(roles: set[str], groups: set[str] | None = None) -> str:
@@ -147,34 +170,33 @@ def _project_keycloak_account_authority(account: dict | None) -> dict | None:
 
 
 def is_super_admin_account(account: dict | None) -> bool:
-    return "admin_console:manage" in _keycloak_roles_for_account(account)
+    return _has_current_keycloak_role(account, "admin_console:manage")
 
 
 def is_org_admin_account(account: dict | None) -> bool:
-    keycloak_roles = _keycloak_roles_for_account(account)
-    groups = _keycloak_groups_for_account(account)
-    return _role_for_keycloak_roles(keycloak_roles, groups) in {
-        ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN,
-    }
+    if is_super_admin_account(account):
+        return True
+    groups = _current_admin_groups_for_account(account)
+    return _role_for_keycloak_roles(set(), set(groups)) == ROLE_ORG_ADMIN
 
 
 def is_level_admin_account(account: dict | None) -> bool:
-    keycloak_roles = _keycloak_roles_for_account(account)
-    groups = _keycloak_groups_for_account(account)
-    return _role_for_keycloak_roles(keycloak_roles, groups) in {
-        ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN,
+    if is_super_admin_account(account):
+        return True
+    groups = _current_admin_groups_for_account(account)
+    return _role_for_keycloak_roles(set(), set(groups)) in {
+        ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN,
     }
 
 
 def is_any_admin_account(account: dict | None) -> bool:
-    keycloak_roles = _keycloak_roles_for_account(account)
     # These helpers gate Manager-wide entitlements and operations. Scoped
     # administrators are authorized by Keycloak against the target object.
-    return "admin_console:manage" in keycloak_roles
+    return _has_current_keycloak_role(account, "admin_console:manage")
 
 
 def is_developer_account(account: dict | None) -> bool:
-    return "factor:develop" in _keycloak_roles_for_account(account)
+    return _has_current_keycloak_role(account, "factor:develop")
 
 
 def direct_subordinate_accounts_for(username: str | None) -> list:

@@ -1,0 +1,297 @@
+import hashlib
+import io
+import json
+import zipfile
+from types import SimpleNamespace
+
+import pytest
+
+from tools.cli.release.research_reporting import local_catalog_import
+from tools.cli.release.research_reporting.authoring.tree_bundle import bundle_from_snapshot
+from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
+from tools.cli.release.research_reporting.authoring.tree_projection import project_snapshot
+from tools.cli.release.research_reporting.authoring.tree_store import load_head, tree_lock
+from tools.cli.release.research_reporting.local_publication import ensure_publication_table
+from tools.cli.release.research_reporting.local_pull import LocalReportSyncConflict
+from tools.cli.release.research_reporting.local_rpc import LocalResearchRPC
+from tools.cli.release.research_reporting.public_research.object_uploads import detach_object_bytes
+from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+
+
+@pytest.fixture
+def report(tmp_path, monkeypatch):
+    rpc = LocalResearchRPC(tmp_path, issuer='https://id.test/realm', identity_id='stable',
+                           profiles=[{'profile_id': 'self', 'display_name': 'Self'}])
+    research = rpc.request({'action': 'create', 'profile_id': 'self', 'title': 'Research',
+                            'description': '', 'operation_id': 'research'})['research']
+    row = rpc.request({'action': 'create_report', 'profile_id': 'self', 'research_id': research['research_id'],
+                       'title': 'Report', 'operation_id': 'report'})['report']
+    store = rpc.store
+    ensure_publication_table(store)
+    existing, root = store._report_root('self', research['research_id'], row['report_id'])
+    paths = report_tree_paths(root, 'main')
+    with tree_lock(paths):
+        head = load_head(paths)
+        snapshot = project_snapshot(paths, head)
+        data = bundle_from_snapshot(snapshot, package_root=root, branch_id='main')
+        projection, _ = detach_object_bytes(build_upload_projection(snapshot))
+    record = {'report_id': row['report_id'], 'publication_id': 'p-' + 'a' * 64, 'revision': 'revision',
+              'generation': head['generation'], 'projection_hash': projection['projection_hash'],
+              'owner_ref': 'alice', 'title': 'Report'}
+    bundle = {'generation': head['generation'], 'root_ref': head['root_ref'],
+              'size_bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+    metadata = {'publication': record, 'authoring': bundle}
+    identity = {'username': 'alice', 'keycloak_issuer': 'https://id.test/realm',
+                'keycloak_subject': 'subject', 'tr_identity_id': 'stable'}
+    class Session:
+        def get(self, path):
+            assert path == '/api/session'
+            return identity
+        def download(self, _path, *, maximum_bytes):
+            assert maximum_bytes == 8 * 1024 * 1024
+            return SimpleNamespace(content=data)
+    owner_metadata = {'research_title': 'Research', 'revision': 'owner-revision'}
+    monkeypatch.setattr(local_catalog_import, '_remote', lambda *_args, **_kwargs: metadata)
+    monkeypatch.setattr(local_catalog_import, '_owner_metadata', lambda *_args: owner_metadata)
+    return dict(store=store, root=root, existing=existing, metadata=metadata,
+                remote={**metadata, 'projection': projection}, owner_metadata=owner_metadata,
+                session=Session(), identity=identity, research_id=research['research_id'],
+                report_id=row['report_id'], manager_hash=hashlib.sha256(b'https://manager-b.test').hexdigest())
+
+
+def test_attaches_identical_second_manager_without_rewriting_report(report):
+    result = local_catalog_import._attach_identical_shared_report(**report)
+    assert result['status'] == 'attached'
+    with report['store']._connect() as db:
+        receipt = db.execute('SELECT * FROM report_publications WHERE report_id=? AND manager_hash=?',
+                             (report['report_id'], report['manager_hash'])).fetchone()
+    assert receipt['revision'] == 'revision' and receipt['source_kind'] == 'local'
+    assert receipt['local_root_ref'] == report['metadata']['authoring']['root_ref']
+
+
+def test_rejects_different_source_bytes_without_creating_receipt(report):
+    changed = {**report['remote'], 'authoring': {**report['remote']['authoring'], 'sha256': 'f' * 64}}
+    report['remote'] = changed
+    with pytest.raises(LocalReportSyncConflict, match='source bytes differ'):
+        local_catalog_import._attach_identical_shared_report(**report)
+    with report['store']._connect() as db:
+        assert db.execute('SELECT count(*) FROM report_publications').fetchone()[0] == 0
+
+
+def test_equivalent_imported_head_can_attach_after_validating_remote_bundle(report):
+    from tools.cli.release.research_reporting.authoring.tree_schema import canonical_bytes
+    original = report['session'].download('', maximum_bytes=8 * 1024 * 1024).content
+    with zipfile.ZipFile(io.BytesIO(original)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        objects = [(name, archive.read(name)) for name in archive.namelist() if name != 'manifest.json']
+    manifest['head']['changed_node_ids'] = [] if manifest['head']['changed_node_ids'] else ['root']
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as archive:
+        for name, content in [('manifest.json', canonical_bytes(manifest)), *objects]:
+            archive.writestr(zipfile.ZipInfo(name), content)
+    data = output.getvalue()
+    assert data != original
+    bundle = {**report['metadata']['authoring'], 'sha256': hashlib.sha256(data).hexdigest(), 'size_bytes': len(data)}
+    report['metadata']['authoring'] = bundle
+    report['remote']['authoring'] = bundle
+    report['session'].download = lambda _path, maximum_bytes: SimpleNamespace(content=data)
+    assert local_catalog_import._attach_identical_shared_report(**report)['status'] == 'attached'
+
+
+def test_denied_when_session_changes_before_receipt(report):
+    report['session'].get = lambda _path: {**report['identity'], 'keycloak_subject': 'other'}
+    with pytest.raises(PermissionError, match='authorization or version changed'):
+        local_catalog_import._attach_identical_shared_report(**report)
+    with report['store']._connect() as db:
+        assert db.execute('SELECT count(*) FROM report_publications').fetchone()[0] == 0
+
+
+def test_local_edit_during_authorization_recheck_cannot_create_stale_receipt(report, monkeypatch):
+    version = report['metadata']['authoring']
+    def change_then_confirm(*_args, **_kwargs):
+        report['store'].add_report_component(profile_id='self', research_id=report['research_id'],
+            report_id=report['report_id'], component_id='concurrent', kind='chapter', parent_id='',
+            title='Concurrent edit', body='', generation=version['generation'], root_ref=version['root_ref'])
+        return report['metadata']
+    monkeypatch.setattr(local_catalog_import, '_remote', change_then_confirm)
+    with pytest.raises(LocalReportSyncConflict, match='changed during attachment'):
+        local_catalog_import._attach_identical_shared_report(**report)
+    with report['store']._connect() as db:
+        assert db.execute('SELECT count(*) FROM report_publications').fetchone()[0] == 0
+
+
+def _prepare_baseline_recovery(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    from tools.cli.release.research_reporting.local_sync_baseline import read_baseline
+    record = report['metadata']['publication']
+    with report['store']._connect() as db:
+        db.execute('''INSERT INTO report_publications (report_id,manager_hash,publication_id,revision,
+            generation,projection_hash,local_root_ref,source_kind) VALUES (?,?,?,?,?,?,?,?)''',
+            (report['report_id'], report['manager_hash'], record['publication_id'], record['revision'],
+             record['generation'], record['projection_hash'], report['metadata']['authoring']['root_ref'], 'local'))
+        row = dict(db.execute('SELECT * FROM report_publications WHERE report_id=?', (report['report_id'],)).fetchone())
+    row['research_id'] = report['research_id']
+    paths = report_tree_paths(report['root'], 'main')
+    with tree_lock(paths):
+        head = load_head(paths)
+    monkeypatch.setattr(local_auto_sync, '_remote', lambda *_args, **kwargs:
+                        report['metadata'] if kwargs.get('metadata_only') else report['remote'])
+    def recover():
+        return local_auto_sync._restore_missing_baseline(report['store'], root=report['root'], paths=paths,
+            head=head, row=row, snapshot=report['metadata'], session=report['session'],
+            binding={'issuer': 'https://id.test/realm', 'identity_id': 'stable'}, manager={'subject': 'subject'})
+    def current_baseline():
+        return read_baseline(report['store'], report_id=report['report_id'],
+                             manager_hash=report['manager_hash'], receipt=row)
+    return recover, current_baseline
+
+
+def test_legacy_baseline_recovery_rechecks_edit_permission(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    recover, current_baseline = _prepare_baseline_recovery(report, monkeypatch)
+    def remote(*_args, **kwargs):
+        if kwargs.get('requires_edit'):
+            raise PermissionError('edit revoked')
+        return report['remote']
+    monkeypatch.setattr(local_auto_sync, '_remote', remote)
+    with pytest.raises(PermissionError, match='edit revoked'):
+        recover()
+    assert current_baseline() is None
+
+
+def test_legacy_baseline_recovery_rejects_concurrent_local_edit(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    recover, current_baseline = _prepare_baseline_recovery(report, monkeypatch)
+    def remote(*_args, **kwargs):
+        if kwargs.get('requires_edit'):
+            version = report['metadata']['authoring']
+            report['store'].add_report_component(profile_id='self', research_id=report['research_id'],
+                report_id=report['report_id'], component_id='concurrent', kind='chapter', parent_id='',
+                title='Concurrent', body='', generation=version['generation'], root_ref=version['root_ref'])
+            return report['metadata']
+        return report['remote']
+    monkeypatch.setattr(local_auto_sync, '_remote', remote)
+    with pytest.raises(LocalReportSyncConflict, match='changed during baseline recovery'):
+        recover()
+    assert current_baseline() is None
+
+
+def test_discovery_queue_attaches_existing_report_to_second_manager(report, monkeypatch):
+    from tools.cli.release.research_reporting.local_server_reports import sync_server_reports
+    endpoint = 'https://manager-b.test'
+    manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
+    store = report['store']
+    with store._connect() as db:
+        db.execute('''INSERT INTO server_report_pending
+            (research_id,report_id,manager_hash,profile_id,source_kind) VALUES (?,?,?,?,?)''',
+            (report['research_id'], report['report_id'], manager_hash, 'self', 'local'))
+    monkeypatch.setattr(local_catalog_import, 'manager_session', lambda *_args: (endpoint, report['session']))
+    monkeypatch.setattr(local_catalog_import, '_remote', lambda *_args, **kwargs:
+                        report['metadata'] if kwargs.get('metadata_only') else report['remote'])
+    results, more, errors = sync_server_reports(store, binding={}, manager={}, profile_id='self', limit=4,
+                                                endpoint=endpoint, session=report['session'])
+    assert [row['status'] for row in results] == ['attached']
+    assert not more and errors == []
+    with store._connect() as db:
+        assert db.execute('SELECT count(*) FROM server_report_pending').fetchone()[0] == 0
+        receipt = db.execute('SELECT * FROM report_publications WHERE manager_hash=?', (manager_hash,)).fetchone()
+    assert receipt['revision'] == 'revision'
+
+
+def _prepare_concurrent_convergence(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    endpoint = 'https://manager-b.test'
+    manager_hash = hashlib.sha256(endpoint.encode()).hexdigest()
+    manager = {'endpoint': endpoint, 'subject': 'subject', 'token': '', 'certificate_pem': '', 'cookies': []}
+    binding = {'issuer': 'https://id.test/realm', 'identity_id': 'stable'}
+    with report['store']._connect() as db:
+        db.execute('''INSERT INTO report_publications
+            (report_id,manager_hash,publication_id,revision,generation,projection_hash,local_root_ref,source_kind)
+            VALUES (?,?,?,?,?,?,?,?)''', (report['report_id'], manager_hash,
+            report['metadata']['publication']['publication_id'], 'previous', 999, 'f' * 64, 'old-root', 'local'))
+    def get(path, *, query=None):
+        if path == '/api/session':
+            return report['identity']
+        assert path == '/api/research/owned-local-report-sync'
+        return {'success': True, 'reports': [], 'next_cursor': None}
+    report['session'].get = get
+    monkeypatch.setattr(local_auto_sync, 'manager_session', lambda *_args: (endpoint, report['session']))
+    monkeypatch.setattr(local_auto_sync, '_remote', lambda *_args, **kwargs:
+        report['metadata'] if kwargs.get('metadata_only') else report['remote'])
+    return lambda: local_auto_sync.sync_published_reports(report['store'], binding=binding, manager=manager,
+        profile_id='self', after_report_id='', limit=4)
+
+
+def test_convergence_verifies_complete_authoring_before_advancing_receipt(report, monkeypatch):
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    result = sync()
+    assert result['reports'][0]['status'] == 'unchanged'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'revision'
+
+
+def test_convergence_rejects_different_authoring_even_when_projection_and_root_match(report, monkeypatch):
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    bundle = {**report['metadata']['authoring'], 'sha256': 'f' * 64}
+    report['metadata']['authoring'] = bundle
+    report['remote']['authoring'] = bundle
+    result = sync()
+    assert result['reports'][0]['status'] == 'conflict'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'
+
+
+def test_convergence_rejects_valid_hidden_authoring_asset_not_in_projection(report, monkeypatch):
+    from tools.cli.release.research_reporting.authoring.tree_schema import canonical_bytes
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    original = report['session'].download('', maximum_bytes=8 * 1024 * 1024).content
+    with zipfile.ZipFile(io.BytesIO(original)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        objects = [(name, archive.read(name)) for name in archive.namelist() if name != 'manifest.json']
+    raw = b'private editable source'
+    digest = hashlib.sha256(raw).hexdigest()
+    manifest['head']['assets'].append({'asset_ref': 'asset:private', 'media_type': 'application/octet-stream',
+        'filename': 'private.bin', 'caption': '', 'alt_text': '', 'content_hash': digest})
+    manifest['assets'].append({'asset_ref': 'asset:private', 'sha256': digest,
+                               'size_bytes': len(raw), 'filename': 'private.bin'})
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as archive:
+        for name, content in [('manifest.json', canonical_bytes(manifest)), *objects, (f'objects/{digest}', raw)]:
+            archive.writestr(zipfile.ZipInfo(name), content)
+    data = output.getvalue()
+    bundle = {**report['metadata']['authoring'], 'sha256': hashlib.sha256(data).hexdigest(), 'size_bytes': len(data)}
+    report['metadata']['authoring'] = bundle
+    report['remote']['authoring'] = bundle
+    report['session'].download = lambda _path, maximum_bytes: SimpleNamespace(content=data)
+    assert sync()['reports'][0]['status'] == 'conflict'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'
+
+
+def test_convergence_does_not_advance_after_edit_authorization_is_revoked(report, monkeypatch):
+    from tools.cli.release.research_reporting import local_auto_sync
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    def remote(*_args, **kwargs):
+        if kwargs.get('requires_edit'):
+            raise PermissionError('edit revoked')
+        return report['metadata'] if kwargs.get('metadata_only') else report['remote']
+    monkeypatch.setattr(local_auto_sync, '_remote', remote)
+    assert sync()['reports'][0]['status'] == 'denied'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'
+
+
+def test_convergence_does_not_advance_after_local_edit(report, monkeypatch):
+    sync = _prepare_concurrent_convergence(report, monkeypatch)
+    original = local_catalog_import.verify_equivalent_authoring
+    def verify_and_edit(*args, **kwargs):
+        digest = original(*args, **kwargs)
+        version = report['metadata']['authoring']
+        report['store'].add_report_component(profile_id='self', research_id=report['research_id'],
+            report_id=report['report_id'], component_id='concurrent', kind='chapter', parent_id='',
+            title='Concurrent edit', body='', generation=version['generation'], root_ref=version['root_ref'])
+        return digest
+    monkeypatch.setattr(local_catalog_import, 'verify_equivalent_authoring', verify_and_edit)
+    assert sync()['reports'][0]['status'] == 'conflict'
+    with report['store']._connect() as db:
+        assert db.execute('SELECT revision FROM report_publications').fetchone()['revision'] == 'previous'

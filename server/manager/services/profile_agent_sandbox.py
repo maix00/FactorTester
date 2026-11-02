@@ -146,7 +146,7 @@ class ProfileAgentSandbox:
             "/etc/ld.so.cache",
             "/usr/local/bin/codex",
             "/usr/local/bin/codex-code-mode-host",
-            "/usr/local/bin/factortester",
+            "/usr/local/bin/traderesearch",
         ):
             if Path(path).exists():
                 command.extend(["--ro-bind", path, path])

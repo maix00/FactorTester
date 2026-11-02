@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.error import URLError
 from urllib.parse import urlparse
 
+from server.identity.keycloak_authorization import AuthorizationUnavailable
 from server.manager.data_plane.destination import (
     receive_destination,
     receive_local_upload,
@@ -71,6 +72,8 @@ class _DataPlaneHandler(BaseHTTPRequestHandler):
             json_error(self, 503, str(exc), code=exc.code)
         except (BrokenPipeError, ConnectionResetError):
             return
+        except AuthorizationUnavailable as exc:
+            json_error(self, 503, str(exc), code="authorization_unavailable")
         except RuntimeError as exc:
             json_error(self, 500, str(exc))
         finally:

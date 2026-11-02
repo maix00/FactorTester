@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
@@ -106,7 +107,10 @@ class _FakeReleaseHandler(ClientReleaseRoutesMixin):
         return
 
 
-def test_local_node_download_requires_keycloak_role_and_reports_missing_package(tmp_path: Path) -> None:
+def test_local_node_download_requires_keycloak_role_and_reports_missing_package(tmp_path: Path, monkeypatch) -> None:
+    from server.identity import server_admission
+    monkeypatch.setattr(server_admission, "current_manager_role",
+                        lambda session, role: role in session.get("keycloak_roles", ()))
     handler = _FakeReleaseHandler(tmp_path)
     handler.path = "/api/local-node/releases?platform=windows-x86_64"
     handled = handler._serve_client_release("/api/local-node/releases")
@@ -123,6 +127,31 @@ def test_local_node_download_requires_keycloak_role_and_reports_missing_package(
         "available": False, "platform": "windows-x86_64",
         "reason": "not-published",
     }
+
+
+def test_local_node_download_rejects_revoked_role_in_old_token(tmp_path: Path, monkeypatch) -> None:
+    from server.identity import server_admission
+    monkeypatch.setattr(server_admission, "current_manager_role", lambda *_args: False)
+    handler = _FakeReleaseHandler(tmp_path, roles=("desktop_local_node:download",))
+    handler.path = "/api/local-node/releases?platform=windows-x86_64"
+    assert handler._serve_client_release("/api/local-node/releases")
+    assert handler._status == 403
+
+
+def test_release_upload_rejects_revoked_admin_in_old_token(tmp_path: Path, monkeypatch) -> None:
+    from server.identity import server_admission
+    monkeypatch.setattr(server_admission, "current_manager_role", lambda *_args: False)
+    handler = _FakeReleaseHandler(tmp_path)
+    handler._session = lambda: {
+        "username": "alice", "capabilities": {"manager": True},
+        "keycloak_roles": ("admin_console:manage",),
+    }
+    handler._is_loopback_client = lambda: False
+    handler._has_capability = lambda: False
+    assert handler._issue_client_release_upload_access(
+        urlparse("/api/client/releases/beta/upload-access"),
+    )
+    assert handler._status == 403
 
 
 @pytest.mark.parametrize("path", [

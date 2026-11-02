@@ -1,12 +1,16 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 /// Open a local profile workspace folder in Finder, revealing its contents.
 func revealWorkspace(_ path: String) {
     guard !path.isEmpty else { return }
     let url = URL(fileURLWithPath: path, isDirectory: true)
     guard FileManager.default.fileExists(atPath: url.path) else { return }
+    #if os(macOS)
     NSWorkspace.shared.activateFileViewerSelecting([url])
+    #endif
 }
 
 struct ProfileOverviewSection: View {

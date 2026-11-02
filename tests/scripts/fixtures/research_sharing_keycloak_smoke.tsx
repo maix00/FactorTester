@@ -1,0 +1,14 @@
+import React from "../../../web/app/node_modules/react/index.js";
+import {createRoot} from "../../../web/app/node_modules/react-dom/client.js";
+import {AuthGate} from "../../../web/app/src/auth.tsx";
+import {ResearchCreate} from "../../../web/app/src/components/research-create.tsx";
+import {ResearchSharing} from "../../../web/app/src/components/research-sharing.tsx";
+import {ResearchShareRedeemer} from "../../../web/app/src/components/research-share-redeemer.tsx";
+import {captureResearchShare} from "../../../web/app/src/research-share-intent.ts";
+import {bindNotificationSink} from "../../../web/app/src/notifications/core.ts";
+import "../../../web/app/src/i18n.ts";
+import "../../../web/app/src/shell.css";
+(window as any).notices=[];
+bindNotificationSink((notice,done)=>{(window as any).notices.push(notice);done();});
+captureResearchShare();
+createRoot(document.getElementById('root')!).render(<AuthGate>{(window as any).testCreate ? <ResearchCreate onClose={()=>{}} onCreated={value=>{(window as any).created=value}}/> : <ResearchSharing target={{researchId:(window as any).researchId}}/>}<ResearchShareRedeemer/></AuthGate>);

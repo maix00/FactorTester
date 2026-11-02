@@ -5,6 +5,28 @@ import pytest
 from server.manager.http import write_routes
 
 
+@pytest.mark.parametrize('endpoint', ['sync', 'publish', 'settings'])
+@pytest.mark.parametrize('session', [None, {'username': 'alice'}])
+def test_public_research_write_fails_closed_without_current_role(monkeypatch, endpoint, session):
+    responses, body_reads = [], []
+    class Handler(write_routes.WriteRoutesMixin):
+        path = '/api/research-publications/' + endpoint
+        state = SimpleNamespace(public_server=True)
+        def _session(self): return session
+        def _public_login_gate(self, *a, **kw): return True
+        def _is_local_ftclient(self): return True
+        def _json_body(self, *a): body_reads.append(True); return {}
+        def __getattr__(self, name):
+            if name.startswith('_'): return lambda *a, **kw: False
+            raise AttributeError(name)
+    monkeypatch.setattr('server.identity.server_admission.current_manager_role', lambda *_: False)
+    monkeypatch.setattr(write_routes, 'json_response', lambda _h, payload, code=200: responses.append((code, payload)))
+    Handler().do_POST()
+    assert responses[0][0] == 403
+    assert responses[0][1]['code'] == 'public_server_login_required'
+    assert not body_reads
+
+
 @pytest.mark.parametrize("claimed_owner, status", [(None, 200), ("alice", 200), ("bob", 403)])
 def test_loopback_agent_publication_uses_authenticated_owner(monkeypatch, claimed_owner, status):
     received = []

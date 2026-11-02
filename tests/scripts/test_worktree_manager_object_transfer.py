@@ -271,7 +271,7 @@ def test_profile_workspace_origin_adapter_resolves_safe_file_and_rejects_symlink
 
 
 def test_manager_object_ticket_and_7997_upload_promote_research_attachment(
-    tmp_path,
+    tmp_path, monkeypatch,
 ) -> None:
     raw = b"attachment streamed through the object data plane"
     digest = hashlib.sha256(raw).hexdigest()
@@ -282,9 +282,10 @@ def test_manager_object_ticket_and_7997_upload_promote_research_attachment(
         state_root=tmp_path / "manager-state",
     )
     token = "user-token"
-    state._sessions[state._token_hash(token)] = (
-        "alice", "user", float("inf"),
-    )
+    monkeypatch.setattr(state, "session", lambda supplied: {
+        "username": "alice", "keycloak_subject": "alice-subject",
+        "keycloak_issuer": "https://identity.example/realms/trade", "tr_identity_id": "alice-stable-id",
+    } if supplied == token else None)
     receipt = state.public_research.sync({
         "report_id": "report-route",
         "owner_ref": "alice",
@@ -374,6 +375,7 @@ def test_manager_object_ticket_and_7997_upload_promote_research_attachment(
                 "publication_id": receipt["publication_id"],
                 "object_kind": "research_attachment",
                 "object_id": f"attachment:sha256:{digest}",
+                "principal_identity_id": "forged-client-identity",
             }).encode(),
             method="POST",
             headers={
@@ -383,6 +385,7 @@ def test_manager_object_ticket_and_7997_upload_promote_research_attachment(
         )
         with urlopen(download_request) as response:
             download = json.loads(response.read())
+        assert state.transfer_store.require(download["access"]["transfer_id"]).principal_identity_id == "alice-stable-id"
         with urlopen(Request(
             download["access"]["url"],
             headers={

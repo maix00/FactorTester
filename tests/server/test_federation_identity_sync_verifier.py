@@ -4,6 +4,7 @@ import io
 import json
 import time
 from unittest.mock import Mock
+import pytest
 
 from server.identity.federation_identity_sync import (
     identity_sync_disable_signature,
@@ -18,6 +19,15 @@ from server.manager.http.federation import sync as sync_routes
 from server.manager.http.federation.admin import FederationAdminRoutesMixin
 from server.manager.http.federation.sync import FederationSyncRoutesMixin
 from server.manager.http.peer_handler import PeerControlHandler
+
+
+@pytest.fixture(autouse=True)
+def _current_admin_groups(monkeypatch):
+    # This suite isolates the public decision and sync-policy flow.
+    monkeypatch.setattr(
+        "server.identity.server_admission.current_administrative_groups",
+        lambda session: tuple(session.get("keycloak_groups") or ()),
+    )
 
 
 class _Response(io.BytesIO):
@@ -376,6 +386,7 @@ def test_gateway_sends_peer_proof_without_sending_peer_secret():
 def test_private_peer_control_dispatches_sync_disable_verification_route():
     handler = Mock()
     handler.path = "/api/federation/identity-sync/check-disable"
+    handler._dispatch_execution_node.return_value = False
 
     PeerControlHandler.do_POST(handler)
 

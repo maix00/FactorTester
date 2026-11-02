@@ -90,6 +90,15 @@ struct TestJobArtifact: Identifiable, Hashable {
     }
 }
 
+/// Metadata for an attachment of a job report, whose identity is its name
+/// within that report (rather than an artifact identifier).
+struct TestJobReportAttachment: Identifiable, Hashable {
+    let name: String
+    let contentType: String
+    let length: Int
+    var id: String { name }
+}
+
 struct TestJobOutputDeclaration: Identifiable, Hashable {
     let id: String
     let name: String
