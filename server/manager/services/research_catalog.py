@@ -1690,7 +1690,10 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         return {"schema": "tr-research-keycloak-sharing-v1",
                 "authority": "keycloak" if self._research_authorizer is not None else "unavailable",
                 "share_links": available,
-                "explicit_grants": available and callable(self._profile_identity_resolver),
+                "explicit_grants": self._research_authorizer is not None
+                    and callable(self._profile_identity_resolver)
+                    and all(callable(getattr(manager, name, None)) for name in
+                            ("require_resource_share", "list_user_grants", "set_user_grant")),
                 "create_research": self._research_authorizer is not None and all(
                     callable(getattr(manager, name, None)) for name in
                     ("create_research_resource", "set_profile_membership", "delete_resource"))}
@@ -1703,9 +1706,15 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         if not self.keycloak_sharing_capabilities()["share_links"]:
             raise KeycloakResearchSharingUnavailable("Keycloak Research sharing is not enabled")
 
+    def require_keycloak_grants(self) -> None:
+        if not self.keycloak_sharing_capabilities()["explicit_grants"]:
+            raise KeycloakResearchSharingUnavailable("Keycloak Research grants are not enabled")
+
     def keycloak_target_sharing_capabilities(self, research_id: str, *, actor: str,
                                             target_kind: str = "research", report_id: str = "") -> dict[str, Any]:
-        self.require_keycloak_sharing()
+        capabilities = self.keycloak_sharing_capabilities()
+        if not (capabilities["explicit_grants"] or capabilities["share_links"]):
+            raise KeycloakResearchSharingUnavailable("Keycloak Research sharing is not enabled")
         research = self._research_row(research_id)
         access = self._research_access(research, actor)
         if not access.get("can_view"):
@@ -1718,8 +1727,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
             can_share = False
         return {"schema": "tr-research-keycloak-target-sharing-v1", "authority": "keycloak",
                 "target_kind": target_kind, "research_id": research_id, "report_id": report_id,
-                "can_manage_grants": can_share and callable(self._profile_identity_resolver),
-                "can_manage_links": can_share and bool(access.get("can_manage"))}
+                "can_manage_grants": can_share and capabilities["explicit_grants"],
+                "can_manage_links": can_share and capabilities["share_links"] and bool(access.get("can_manage"))}
 
     def list_explicit_grants(self, research_id: str, *, actor: str,
                              target_kind: str = "research", report_id: str = "") -> list[dict[str, Any]]:

@@ -14,6 +14,7 @@ from scripts.migrations.keycloak_research_stage import (
     _Journal, _read_private_json, _write_private_json, build_plan, stage_plan,
 )
 from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.legacy_research_fixture import seed_share_link
 
 
 ISSUER = "https://identity.invalid/realms/test"
@@ -39,7 +40,7 @@ def legacy(tmp_path):
     archived = catalog.create_research(owner_ref="alice", title="archived")["research_id"]
     live_link = catalog.create_research(owner_ref="alice", title="link")["research_id"]
     catalog.update_research(archived, actor="alice", status="archived")
-    catalog.create_share_link(target_kind="research", research_id=live_link, actor="alice", mode="one_time")
+    seed_share_link(path, research_id=live_link, actor="alice")
     with sqlite3.connect(path) as db:
         db.execute("UPDATE research_catalog_researches SET owner_ref='ghost' WHERE research_id=?", (unknown,))
         db.execute("UPDATE research_catalog_memberships SET principal_ref='ghost' WHERE research_id=?", (unknown,))
@@ -99,6 +100,9 @@ class StagedKeycloak:
                     allowed.update(granted)
             result.update({(kind, ref, scope): scope in allowed for scope in scopes})
         return result
+    def require_resource_share(self, **_kwargs):
+        pass
+
     def require_link_issuer_share(self, *, identity_id, subject, research_id, resource_type, resource_ref):
         assert self.directory.users[identity_id]['id'] == subject
         decisions = self.evaluate(identity_id, candidates=[('research', research_id, ('read', 'manage')),
@@ -160,9 +164,11 @@ def test_redeemed_and_unused_links_keep_exact_keycloak_identities(tmp_path):
     path = tmp_path / 'research.sqlite'
     catalog = ResearchCatalog(path)
     research = catalog.create_research(owner_ref='alice', title='Links')['research_id']
-    used = catalog.create_share_link(target_kind='research', research_id=research, actor='alice', mode='one_time')
-    unused = catalog.create_share_link(target_kind='research', research_id=research, actor='alice', mode='one_time')
-    catalog.redeem_share_link(used['token'], actor='bob')
+    used = seed_share_link(path, research_id=research, actor='alice', redeemed_by='bob')
+    unused = seed_share_link(path, research_id=research, actor='alice')
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE research_catalog_researches SET authorized_users_json=? WHERE research_id=?",
+                   ('["bob"]', research))
     backup = tmp_path / 'backup.sqlite'; _backup(path, backup)
     reviewed = build_plan(path, ACCOUNTS, issuer=ISSUER)
     directory = Directory(); keycloak = StagedKeycloak(directory); journal = []
@@ -187,7 +193,7 @@ def test_redeemed_and_unused_links_keep_exact_keycloak_identities(tmp_path):
 
 def test_link_binding_conflict_rolls_back_all_new_bindings(legacy):
     path, backup, ids = legacy
-    ResearchCatalog(path).create_share_link(target_kind='research', research_id=ids['live_link'], actor='alice', mode='one_time')
+    seed_share_link(path, research_id=ids['live_link'], actor='alice')
     _backup(path, backup)
     reviewed = build_plan(path, ACCOUNTS, issuer=ISSUER, now=1)
     links = next(item for item in reviewed['groups'] if item['research_id'] == ids['live_link'])['links']

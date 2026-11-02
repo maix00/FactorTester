@@ -38,9 +38,12 @@ def exercise(*, sandbox, realm, settings, sessions, users, manager, issuer, **_u
         path, backup = Path(root) / 'legacy.sqlite', Path(root) / 'backup.sqlite'
         old = ResearchCatalog(path)
         research = old.create_research(owner_ref='owner', title='Migration')['research_id']
-        used = old.create_share_link(target_kind='research', research_id=research, actor='owner', mode='one_time')
-        unused = old.create_share_link(target_kind='research', research_id=research, actor='owner', mode='one_time')
-        old.redeem_share_link(used['token'], actor='member')
+        from scripts.test.legacy_research_fixture import seed_share_link
+        used = seed_share_link(path, research_id=research, actor='owner', redeemed_by='member')
+        unused = seed_share_link(path, research_id=research, actor='owner')
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE research_catalog_researches SET authorized_users_json=? WHERE research_id=?",
+                       ('["member"]', research))
         with sqlite3.connect(path) as source, sqlite3.connect(backup) as target:
             source.backup(target)
         plan = build_plan(path, accounts, issuer=issuer)

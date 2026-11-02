@@ -222,11 +222,11 @@ def test_keycloak_only_routes_fail_closed_even_after_capability_check(tmp_path, 
     handler = Handler()
     handler._get_research_catalog_routes(SimpleNamespace(path="/api/research/capabilities/keycloak-sharing", query=""))
     assert responses[-1][0]["capabilities"] == {"schema": "tr-research-keycloak-sharing-v1",
-        "authority": "keycloak", "share_links": True, "explicit_grants": True, "create_research": True}
+        "authority": "keycloak", "share_links": True, "explicit_grants": False, "create_research": True}
     handler._get_research_catalog_routes(SimpleNamespace(
         path=f"/api/research/{research}/keycloak-sharing-capabilities", query=""))
     assert responses[-1][0]["capabilities"]["can_manage_links"] is True
-    assert responses[-1][0]["capabilities"]["can_manage_grants"] is True
+    assert responses[-1][0]["capabilities"]["can_manage_grants"] is False
     manager.issuer_authorized = False
     handler._get_research_catalog_routes(SimpleNamespace(
         path=f"/api/research/{research}/keycloak-sharing-capabilities", query=""))

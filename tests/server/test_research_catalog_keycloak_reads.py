@@ -91,9 +91,9 @@ def test_strict_catalog_batches_research_and_report_scopes_and_propagates_outage
 def test_strict_catalog_does_not_write_legacy_share_grants(tmp_path):
     catalog, public, _private, permissions, _calls = _fixture(tmp_path)
     _grant(permissions, "research", public, "read", "manage")
-    with pytest.raises(RuntimeError, match="Keycloak grant migration"):
+    with pytest.raises(RuntimeError, match="Keycloak Research sharing is not enabled"):
         catalog.create_share_link(target_kind="research", research_id=public, actor="alice")
-    with pytest.raises(RuntimeError, match="Keycloak grant migration"):
+    with pytest.raises(RuntimeError, match="Keycloak Research sharing is not enabled"):
         catalog.redeem_share_link("old-token", actor="alice")
 
 
@@ -161,10 +161,6 @@ def test_explicit_grants_route_uses_manager_session_and_reports_keycloak_outage(
         def list_user_grants(self, **_kwargs):
             raise AuthorizationUnavailable("identity offline")
     manager = Manager()
-    manager.identity_provider = lambda: None
-    manager.user_by_identity = lambda _identity: None
-    manager.require_link_issuer_share = lambda **_kwargs: None
-    manager._reconcile_user_grant = lambda **_kwargs: None
     catalog._profile_grant_manager = manager
     catalog._profile_identity_resolver = lambda _name: {"identity_id": "stable-bob", "subject": "subject-bob"}
     class Handler(routes.ResearchCatalogRoutesMixin):

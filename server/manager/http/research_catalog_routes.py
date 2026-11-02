@@ -405,7 +405,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
                         report_id=str(query.get("report_id", [""])[0]))}
                 elif child == "keycloak-grants":
-                    service.require_keycloak_sharing()
+                    service.require_keycloak_grants()
                     payload = {"grants": service.list_explicit_grants(
                         research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
                         report_id=str(query.get("report_id", [""])[0]))}
@@ -630,7 +630,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {"success": True, "share_link": value}, 201)
                 return True
             if child == "keycloak-grants":
-                service.require_keycloak_sharing()
+                service.require_keycloak_grants()
                 value = service.set_explicit_grant(research_id, actor=actor,
                     principal_ref=data.get("principal_ref"), scopes=data.get("scopes"),
                     target_kind=str(data.get("target_kind") or "research"),
