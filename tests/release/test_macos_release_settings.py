@@ -43,9 +43,10 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert 'case "download"' in controller
     assert "ClientWebShellView()" in root
     assert "ClientWebShellToolbar" not in web_shell
-    assert ".toolbar" in web_shell
-    assert "showingServerSettings" in web_shell
-    assert "ServerSettingsView" in web_shell
+    assert ".toolbar" not in web_shell
+    assert "showingServerSettings" not in web_shell
+    assert "ServerSettingsView" not in web_shell
+    assert 'deviceLoginPath ?? "/app"' in web_shell
     web_page = (SOURCES / "Features" / "Web" / "WebPageView.swift").read_text(
         encoding="utf-8"
     )
@@ -377,8 +378,9 @@ def test_macos_tabs_and_account_center_use_real_routes() -> None:
     assert "isPinnedLauncher" in navigation
     assert "case profile(id: String)" in navigation
     assert "case web(path: String)" in navigation
-    assert "/api/account/password" in api
-    assert "AccountSettingsView()" in account
+    assert "/api/account/password" not in api
+    assert "/auth/login" not in api and "/auth/register" not in api
+    assert "/app?settings=account" in account
     assert ".products" not in account
     assert ".factorLibrary" not in account
     assert '"127.0.0.1"' in config
@@ -407,9 +409,8 @@ def test_macos_web_shell_exposes_profiles_account_and_bounded_research() -> None
     sections = (profile_root / "ProfileWorkspaceSections.swift").read_text(
         encoding="utf-8"
     )
-    login = (SOURCES / "Features" / "Auth" / "LoginView.swift").read_text(
-        encoding="utf-8"
-    )
+    assert not (SOURCES / "Features" / "Auth" / "LoginView.swift").exists()
+    assert not (SOURCES / "Services" / "SessionCredentialStore.swift").exists()
     server = (
         SOURCES / "Features" / "Settings" / "ServerSettingsView.swift"
     ).read_text(encoding="utf-8")
@@ -435,7 +436,6 @@ def test_macos_web_shell_exposes_profiles_account_and_bounded_research() -> None
     for label in ("实时过程", "Trial Plans", "Evidence"):
         assert label not in workspace
     assert "ResearchGraph" not in sections
-    assert "Form {" not in login
     assert "Form {" not in server
     assert "SettingsEditableText" in server
     assert "managerPort = \"7998\"" in server
@@ -455,7 +455,8 @@ def test_macos_web_shell_exposes_profiles_account_and_bounded_research() -> None
     )
     assert "LocalProfilesView()" not in settings_hub
     assert "open(.profiles)" in settings_hub
-    assert "case session, register, password" in account
+    assert "/app?settings=account" in account
+    assert "SecureField" not in account
     assert "case language" not in account
 
 

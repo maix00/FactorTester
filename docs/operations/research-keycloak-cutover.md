@@ -4,6 +4,12 @@
 
 ## 可变上下级的迁移进展（2026-11-02）
 
+桌面认证入口同步清理：移除旧 Swift 登录/注册/密码维护、Keychain 密码保存和重放，
+以及 Manager CLI 的原生密码调用。原生研究桥只接受当前 Manager 校验过的 Keycloak 身份；
+Manager 切换和失权清空沿用同一代次边界。原生账户旧导航进入 React 账户设置，移动端有
+账户→设置→主页面返回路径。保留的旧密码条目清理器只有删除操作，无密码读取或授权作用；
+它不删除当前设备证明密钥或 Manager 会话凭据。这些客户端源码改动尚未发布。
+
 `superiors` 改为 Keycloak 原生 UMA 的 deployed-script `condition`，脚本源码在
 `deploy/docker/keycloak/policies/research-superiors.js`；不修改 Keycloak 核心，不改变
 资源服务器的全局 decisionStrategy。它读取管理员维护的实时稳定身份父链，

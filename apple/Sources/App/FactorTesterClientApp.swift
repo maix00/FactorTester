@@ -114,8 +114,12 @@ struct FactorTesterClientApp: App {
             .onOpenURL { url in
                 updates.handleUpdateCommand(url)
             }
+            .task {
+                if AppRuntimePolicy.shouldLoadUserState() { RetiredPasswordCredentials.remove() }
+            }
             #if os(macOS)
             .task {
+                guard AppRuntimePolicy.shouldLoadUserState() else { return }
                 Task { await updates.checkAtLaunch() }
                 do {
                     try await BundledRuntimeActivator.run()

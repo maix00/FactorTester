@@ -2,21 +2,12 @@ import Foundation
 import Combine
 import CryptoKit
 
-enum ManagerDeviceSessionRestore: Equatable {
-    case notRequired
-    case authenticated(username: String)
-    case requiresWebLogin
-}
-
-/// 全局登录态 —— 包装 `/api/me`、`/login`、`/logout`，供整个 App 观察。
+/// Native mirror of the selected Manager's verified Keycloak Web session.
+/// Login, account creation and password changes belong to the Web/Keycloak flow.
 @MainActor
 final class SessionStore: ObservableObject {
     typealias ClientSessionBridge = @MainActor (String) async -> Bool
-    typealias CredentialLoader = () -> SavedSessionCredentials?
-    typealias CredentialSaver = (String, String) -> Bool
-    typealias ManagerDeviceSessionRestorer = (
-        String
-    ) async throws -> ManagerDeviceSessionRestore
+    typealias ClientSessionClearer = @MainActor (URL?) async -> Void
 
     @Published private(set) var user: UserInfo?
     @Published private(set) var isManagerLoggedIn = false
@@ -24,143 +15,95 @@ final class SessionStore: ObservableObject {
     @Published var lastError: String?
 
     private let api: any SessionAPI
-    private let managerAPI: any ManagerSessionAPI
     private let bridgeOverride: ClientSessionBridge?
-    private let credentialLoader: CredentialLoader
-    private let credentialSaver: CredentialSaver
+    private let clearClientSession: ClientSessionClearer
+    private let clearNativeSession: ClientSessionClearer
     private let managerTokenReader: (URL?) -> String
-    private let managerDeviceSessionRestorer: ManagerDeviceSessionRestorer
-    private var restoreTask: Task<Bool, Never>?
     private let cliSessionBridge = ClientSessionBridgeCoordinator()
-    // An in-flight refresh must not restore a session after logout or a
-    // newer login. Updates after suspension check this generation.
     private var authenticationGeneration: UInt64 = 0
 
-    init(
-        api: any SessionAPI = APIClient.shared,
-        managerAPI: any ManagerSessionAPI = ManagerCLIClient.shared,
-        bridge: ClientSessionBridge? = nil,
-        credentialLoader: @escaping CredentialLoader = SessionCredentialStore.load,
-        credentialSaver: @escaping CredentialSaver = SessionCredentialStore.save,
-        managerTokenReader: ((URL?) -> String)? = nil,
-        managerDeviceSessionRestorer: @escaping ManagerDeviceSessionRestorer =
-            SessionStore.restoreConfiguredPublicManagerDeviceSession
-    ) {
+    init(api: any SessionAPI = APIClient.shared,
+         bridge: ClientSessionBridge? = nil,
+         managerTokenReader: ((URL?) -> String)? = nil,
+         clearClientSession: ClientSessionClearer? = nil,
+         clearNativeSession: ClientSessionClearer? = nil) {
         self.api = api
-        self.managerAPI = managerAPI
         bridgeOverride = bridge
-        self.credentialLoader = credentialLoader
-        self.credentialSaver = credentialSaver
         self.managerTokenReader = managerTokenReader ?? (bridge == nil
             ? { ManagerSessionTokenStore.read(for: $0) } : { _ in "" })
-        self.managerDeviceSessionRestorer = managerDeviceSessionRestorer
+        self.clearClientSession = clearClientSession ?? (bridge == nil ? { endpoint in
+            guard let endpoint else { return }
+            _ = try? await ReleaseCommand.runObject([
+                "client", "profile", "clear-ui-session", "--server-url", endpoint.absoluteString,
+            ], executable: ClientCLIResolution.executable())
+        } : { _ in })
+        self.clearNativeSession = clearNativeSession ?? (bridge == nil ? { endpoint in
+            guard let endpoint else { return }
+            ManagerSessionTokenStore.remove(for: endpoint)
+            await WebSessionCookieSynchronizer.clearManagerSession(for: endpoint, webView: nil)
+        } : { _ in })
     }
 
-    var isLoggedIn: Bool { user?.isLoggedIn ?? false }
+    var isLoggedIn: Bool { user?.localResearchIdentity != nil }
     var role: String? { user?.role }
 
-    /// 将原生 UI 的登录 Cookie 同步到 CLI，使设置页的 CLI 操作复用同一登录态
     func refreshCLIClientSession() async -> Bool {
-        guard let principalRef = user?.username, !principalRef.isEmpty else {
-            return false
-        }
-        return await bridgeClientSession(
-            principalRef: principalRef,
-            reportError: false
-        )
+        guard isLoggedIn, let principal = user?.username else { return false }
+        return await bridgeClientSession(principalRef: principal, reportError: false)
     }
 
-    /// 启动 / 设置变更后刷新当前登录态。
+    /// A transport failure retains the selected Manager's known identity;
+    /// an explicit denial clears it. Neither path retries a stored password.
     @discardableResult
     func refresh() async -> Bool {
         let generation = authenticationGeneration
+        let endpoint = ManagerConfig.shared.baseURL
         do {
-            let refreshed = try await api.me()
-            guard generation == authenticationGeneration else { return false }
-            // Some server versions answer `/api/me` with HTTP 200 and an
-            // empty identity after a restart instead of returning 401.  It
-            // is still an expired cookie, so try the Keychain credentials
-            // before exposing a logged-out screen.
-            guard refreshed.isLoggedIn else {
-                if await restoreSavedSessionWithRetry() { return generation == authenticationGeneration }
-                guard generation == authenticationGeneration else { return false }
-                user = refreshed
-                isManagerLoggedIn = false
+            let candidate = try await api.me()
+            guard generation == authenticationGeneration, endpoint == ManagerConfig.shared.baseURL else { return false }
+            guard candidate.localResearchIdentity != nil else {
+                authenticationGeneration &+= 1
+                clearAuthentication()
                 return false
             }
-            var confirmed = refreshed
-            if !confirmed.keepLogin {
-                do {
-                    confirmed = try await confirmPersistentSession()
-                    guard generation == authenticationGeneration else { return false }
-                } catch {
-                    guard generation == authenticationGeneration else { return false }
-                    if await restoreSavedSessionWithRetry() { return generation == authenticationGeneration }
-                    guard generation == authenticationGeneration else { return false }
-                    lastError = L10n.format(
-                        "登录会话未能持久化：%@",
-                        error.localizedDescription
-                    )
-                    clearAuthentication()
-                    return false
-                }
-            }
-            user = confirmed
-            #if os(macOS)
-            try? CanonicalFactorLibraryAccessStore.ensureDefault(
-                for: confirmed.username ?? ""
-            )
-            #endif
-            _ = await bridgeClientSession(
-                principalRef: confirmed.username ?? "",
-                reportError: false
-            )
-            guard generation == authenticationGeneration else { return false }
-            await refreshManagerSession()
-            guard generation == authenticationGeneration else { return false }
-            if !refreshed.isLoggedIn { isManagerLoggedIn = false }
-            return refreshed.isLoggedIn
-        } catch let error as APIError {
-            guard generation == authenticationGeneration else { return false }
-            if case .unauthorized = error {
-                if await restoreSavedSessionWithRetry() { return generation == authenticationGeneration }
-                guard generation == authenticationGeneration else { return false }
-                user = nil
-                isManagerLoggedIn = false
-            } else {
-                lastError = error.localizedDescription
-            }
-            return isLoggedIn
+            if user?.localResearchIdentity != candidate.localResearchIdentity { authenticationGeneration &+= 1 }
+            let ticket = authenticationGeneration
+            user = candidate
+            isManagerLoggedIn = true
+            lastError = nil
+            _ = await bridgeClientSession(principalRef: candidate.username ?? "", reportError: false, deduplicate: true)
+            return ticket == authenticationGeneration && endpoint == ManagerConfig.shared.baseURL && isLoggedIn
         } catch {
-            guard generation == authenticationGeneration else { return false }
-            // 网络抖动、服务器升级或详情接口故障不应被解释成登出。
-            lastError = error.localizedDescription
+            guard generation == authenticationGeneration, endpoint == ManagerConfig.shared.baseURL else { return false }
+            if case APIError.unauthorized = error {
+                authenticationGeneration &+= 1
+                clearAuthentication()
+            } else { lastError = error.localizedDescription }
             return isLoggedIn
         }
     }
 
-    /// Confirm the WebView's imported Manager session without retrying saved
-    /// passwords. This is used before giving Web content local data access.
+    /// Confirm an imported Web session before allowing access to local data.
+    /// Concurrent handshakes for the same verified identity can share it.
     @discardableResult
     func confirmWebIdentity() async -> Bool {
         let generation = authenticationGeneration
         let endpoint = ManagerConfig.shared.baseURL
         do {
             let candidate = try await api.me()
-            guard endpoint == ManagerConfig.shared.baseURL,
-                  let identity = candidate.localResearchIdentity else { return false }
-            // Another simultaneous Web handshake can have confirmed the same
-            // identity while this request was in flight. Logout/account change
-            // still fails closed because it clears or changes the identity.
-            if generation != authenticationGeneration {
-                return user?.localResearchIdentity == identity
+            guard endpoint == ManagerConfig.shared.baseURL else { return false }
+            guard let identity = candidate.localResearchIdentity else {
+                if generation == authenticationGeneration {
+                    authenticationGeneration &+= 1
+                    clearAuthentication()
+                }
+                return false
             }
-            if user?.localResearchIdentity != identity {
-                authenticationGeneration &+= 1
-                restoreTask?.cancel()
-                restoreTask = nil
-            }
+            if generation != authenticationGeneration { return user?.localResearchIdentity == identity }
+            if user?.localResearchIdentity != identity { authenticationGeneration &+= 1 }
             user = candidate
+            isManagerLoggedIn = true
+            lastError = nil
             #if os(macOS)
             if let username = candidate.username, !username.isEmpty {
                 let ticket = authenticationGeneration
@@ -173,6 +116,11 @@ final class SessionStore: ObservableObject {
             #endif
             return true
         } catch {
+            if generation == authenticationGeneration, endpoint == ManagerConfig.shared.baseURL,
+               case APIError.unauthorized = error {
+                authenticationGeneration &+= 1
+                clearAuthentication()
+            }
             return false
         }
     }
@@ -187,8 +135,6 @@ final class SessionStore: ObservableObject {
                   expected.matchesVerifiedSameRealmIdentity(actual) else { return false }
         }
         authenticationGeneration &+= 1
-        restoreTask?.cancel()
-        restoreTask = nil
         isWorking = false
         clearAuthentication()
         user = candidate
@@ -203,8 +149,6 @@ final class SessionStore: ObservableObject {
         authenticationGeneration &+= 1
         let generation = authenticationGeneration
         let target = ManagerConfig.shared.baseURL
-        restoreTask?.cancel()
-        restoreTask = nil
         isWorking = false
         clearAuthentication()
         guard let expected = expectedIdentity else { return false }
@@ -226,37 +170,6 @@ final class SessionStore: ObservableObject {
     private func clearAuthentication() {
         user = nil
         isManagerLoggedIn = false
-    }
-
-    func login(username: String, password: String) async -> Bool {
-        authenticationGeneration &+= 1
-        restoreTask?.cancel()
-        restoreTask = nil
-        let generation = authenticationGeneration
-        isWorking = true; lastError = nil
-        defer { if generation == authenticationGeneration { isWorking = false } }
-        do {
-            let resp = try await api.login(
-                username: username,
-                password: password
-            )
-            guard generation == authenticationGeneration else { return false }
-            if resp.success {
-                return await completeAuthentication(
-                    principalRef: resp.username ?? username,
-                    username: username,
-                    password: password,
-                    generation: generation
-                )
-            } else {
-                lastError = resp.error ?? L10n.text("登录失败")
-                return false
-            }
-        } catch {
-            guard generation == authenticationGeneration else { return false }
-            lastError = (error as? APIError)?.errorDescription ?? error.localizedDescription
-            return false
-        }
     }
 
     private func bridgeClientSession(
@@ -291,7 +204,8 @@ final class SessionStore: ObservableObject {
             lastError = L10n.text("尚未配置服务器地址，请先在设置中填写。")
             return false
         }
-        let cookies = (HTTPCookieStorage.shared.cookies ?? []).map { cookie in
+        let cookies = (ManagerConfig.shared.baseURL.flatMap { HTTPCookieStorage.shared.cookies(for: $0) } ?? [])
+            .filter { $0.name == "ft-manager-session" }.map { cookie in
             var value: [String: Any] = [
                 "name": cookie.name,
                 "value": cookie.value,
@@ -326,311 +240,17 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    func register(username: String, password: String, organizationId: String) async -> Bool {
-        authenticationGeneration &+= 1
-        restoreTask?.cancel()
-        restoreTask = nil
-        let generation = authenticationGeneration
-        isWorking = true; lastError = nil
-        defer { if generation == authenticationGeneration { isWorking = false } }
-        do {
-            let resp = try await api.register(
-                username: username,
-                password: password,
-                organizationId: organizationId
-            )
-            guard generation == authenticationGeneration else { return false }
-            if resp.success {
-                return await completeAuthentication(
-                    principalRef: resp.username ?? username,
-                    username: username,
-                    password: password,
-                    generation: generation
-                )
-            } else {
-                lastError = resp.error ?? L10n.text("注册失败")
-                return false
-            }
-        } catch {
-            guard generation == authenticationGeneration else { return false }
-            lastError = (error as? APIError)?.errorDescription ?? error.localizedDescription
-            return false
-        }
-    }
-
-    private func completeAuthentication(
-        principalRef: String,
-        username: String,
-        password: String,
-        generation: UInt64
-    ) async -> Bool {
-        do {
-            let confirmed = try await confirmPersistentSession()
-            guard generation == authenticationGeneration else { return false }
-            user = confirmed
-            #if os(macOS)
-            try? CanonicalFactorLibraryAccessStore.ensureDefault(
-                for: confirmed.username ?? principalRef
-            )
-            #endif
-        } catch {
-            guard generation == authenticationGeneration else { return false }
-            clearAuthentication()
-            lastError = L10n.format(
-                "登录状态未能持久化：%@",
-                error.localizedDescription
-            )
-            return false
-        }
-        let credentialsPersisted = saveCredentials(
-            username: username,
-            password: password
-        )
-        do {
-            try await managerAPI.login(username: username, password: password)
-            guard generation == authenticationGeneration else { return false }
-            isManagerLoggedIn = true
-        } catch {
-            guard generation == authenticationGeneration else { return false }
-            isManagerLoggedIn = false
-            // Manager 是所有客户端模块的统一入口；暂时不可用不能反向使
-            // 已成功的业务端口登录失效，页面会明确显示入口不可用。
-            lastError = L10n.format(
-                "Manager 暂时不可用，主登录仍保持有效：%@",
-                error.localizedDescription
-            )
-        }
-        if !credentialsPersisted && lastError == nil {
-            lastError = L10n.text(
-                "登录成功，但本机凭证未能保存；重启后可能需要重新登录"
-            )
-        }
-        _ = await bridgeClientSession(
-            principalRef: principalRef,
-            reportError: false
-        )
-        return generation == authenticationGeneration
-    }
-
-    private func confirmPersistentSession() async throws -> UserInfo {
-        var persistenceError: Error?
-        do {
-            try await api.setKeepLogin(true)
-        } catch {
-            persistenceError = error
-        }
-        let confirmed = try await api.me()
-        guard confirmed.isLoggedIn, confirmed.keepLogin else {
-            if let persistenceError { throw persistenceError }
-            throw APIError.server(
-                L10n.text("服务器未确认保持登录状态")
-            )
-        }
-        return confirmed
-    }
-
-    @discardableResult
-    private func saveCredentials(username: String, password: String) -> Bool {
-        credentialSaver(username, password)
-    }
-
-    private func restoreSavedSessionWithRetry() async -> Bool {
-        if let restoreTask {
-            return await restoreTask.value
-        }
-        let generation = authenticationGeneration
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return false }
-            return await self.performRestoreSavedSessionWithRetry()
-        }
-        restoreTask = task
-        let restored = await task.value
-        if generation == authenticationGeneration { restoreTask = nil }
-        return generation == authenticationGeneration && restored
-    }
-
-    private func performRestoreSavedSessionWithRetry() async -> Bool {
-        let generation = authenticationGeneration
-        guard !Task.isCancelled else { return false }
-        if await restoreSavedSessionAttempt() { return generation == authenticationGeneration }
-        guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-        guard credentialLoader() != nil else { return false }
-        for delay in [500_000_000, 1_000_000_000] {
-            do { try await Task.sleep(nanoseconds: UInt64(delay)) } catch { return false }
-            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-            if await restoreSavedSessionAttempt() { return generation == authenticationGeneration }
-            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-            guard credentialLoader() != nil else {
-                return false
-            }
-        }
-        return false
-    }
-
-    private func restoreSavedSessionAttempt() async -> Bool {
-        let generation = authenticationGeneration
-        guard !Task.isCancelled else { return false }
-        guard let credentials = credentialLoader() else {
-            return false
-        }
-        do {
-            let response = try await api.login(
-                username: credentials.username,
-                password: credentials.password
-            )
-            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-            guard response.success else {
-                SessionCredentialStore.clear()
-                clearAuthentication()
-                return false
-            }
-            let confirmed = try await confirmPersistentSession()
-            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-            user = confirmed
-            #if os(macOS)
-            try? CanonicalFactorLibraryAccessStore.ensureDefault(
-                for: confirmed.username ?? credentials.username
-            )
-            #endif
-            await refreshManagerSession(credentials: credentials)
-            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-            let bridged = await bridgeClientSession(
-                principalRef: response.username ?? credentials.username
-            )
-            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-            if !bridged { lastError = nil }
-            return true
-        } catch let error as APIError {
-            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-            if case .unauthorized = error {
-                SessionCredentialStore.clear()
-                clearAuthentication()
-            } else {
-                lastError = error.localizedDescription
-            }
-            return false
-        } catch {
-            guard generation == authenticationGeneration, !Task.isCancelled else { return false }
-            lastError = error.localizedDescription
-            return false
-        }
-    }
-
-    /// Manager sessions expire independently from the long-lived service
-    /// session. Refresh the unified gateway for every authenticated user so
-    /// embedded Manager pages do not disagree with the native account state.
-    private func refreshManagerSession(
-        credentials: SavedSessionCredentials? = nil
-    ) async {
-        let generation = authenticationGeneration
-        let expectedUsername = user?.username ?? ""
-        do {
-            if try await managerAPI.restoreSession() {
-                guard generation == authenticationGeneration else { return }
-                isManagerLoggedIn = true
-                return
-            }
-        } catch {
-            // Missing or expired Manager sessions are repaired below.  The
-            // public path uses only the bound device; private LAN may use the
-            // app credential already used to restore the service session.
-        }
-        guard generation == authenticationGeneration else { return }
-        do {
-            let restored = try await managerDeviceSessionRestorer(expectedUsername)
-            guard generation == authenticationGeneration else { return }
-            switch restored {
-            case .authenticated(let username):
-                guard !expectedUsername.isEmpty, username == expectedUsername else {
-                    isManagerLoggedIn = false
-                    lastError = L10n.text(
-                        "当前设备绑定的用户与已登录用户不一致，已拒绝切换账号。"
-                    )
-                    return
-                }
-                isManagerLoggedIn = true
-                return
-            case .notRequired:
-                break
-            case .requiresWebLogin:
-                isManagerLoggedIn = false
-                return
-            }
-        } catch {
-            guard generation == authenticationGeneration else { return }
-            // Public Managers accept only the approved device identity.  A
-            // failed or revoked device must never fall back to a password.
-            isManagerLoggedIn = false
-            lastError = (error as? APIError)?.errorDescription
-                ?? error.localizedDescription
-            return
-        }
-        guard let credentials = credentials ?? credentialLoader() else {
-            isManagerLoggedIn = false
-            return
-        }
-        do {
-            try await managerAPI.login(
-                username: credentials.username,
-                password: credentials.password
-            )
-            guard generation == authenticationGeneration else { return }
-            isManagerLoggedIn = true
-        } catch {
-            guard generation == authenticationGeneration else { return }
-            isManagerLoggedIn = false
-        }
-    }
-
-    private static func restoreConfiguredPublicManagerDeviceSession(
-        expectedUsername: String
-    ) async throws -> ManagerDeviceSessionRestore {
-        guard ManagerConfig.shared.baseURL != nil else { return .notRequired }
-        // Device proof starts an OIDC browser flow; it cannot restore a
-        // Manager session until the Keycloak callback has succeeded.
-        return .requiresWebLogin
-    }
-
     func logout() async {
         authenticationGeneration &+= 1
-        restoreTask?.cancel()
-        restoreTask = nil
-        isWorking = false
-        SessionCredentialStore.clear()
-        user = nil
-        isManagerLoggedIn = false
-        let api = api
-        let managerAPI = managerAPI
-        let serverURL = ManagerConfig.shared.baseURL?.absoluteString
-        let executable = ClientCLIResolution.executable()
         let ticket = authenticationGeneration
-        await cliSessionBridge.invalidateAndClear {
-            if let serverURL {
-                _ = try? await ReleaseCommand.runObject([
-                    "client", "profile", "clear-ui-session",
-                    "--server-url", serverURL,
-                ], executable: executable)
-            }
-        }
-        guard ticket == authenticationGeneration else { return }
+        let endpoint = ManagerConfig.shared.baseURL
+        isWorking = false
+        clearAuthentication()
+        let clear = clearClientSession
+        await cliSessionBridge.invalidateAndClear { await clear(endpoint) }
+        guard ticket == authenticationGeneration, endpoint == ManagerConfig.shared.baseURL else { return }
         try? await api.logout()
-        guard ticket == authenticationGeneration else { return }
-        await managerAPI.logout()
-    }
-
-    func updateSavedPassword(_ password: String) {
-        guard let username = user?.username else { return }
-        if !saveCredentials(username: username, password: password) {
-            lastError = L10n.text("本机凭证未能保存")
-        }
-    }
-
-    func setKeepLogin(_ keep: Bool) async {
-        do {
-            try await api.setKeepLogin(keep)
-            _ = await refresh()
-        } catch {
-            lastError = error.localizedDescription
-        }
+        guard ticket == authenticationGeneration, endpoint == ManagerConfig.shared.baseURL else { return }
+        await clearNativeSession(endpoint)
     }
 }

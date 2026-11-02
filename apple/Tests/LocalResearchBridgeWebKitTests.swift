@@ -27,7 +27,7 @@ final class LocalResearchBridgeWebKitTests: XCTestCase, WKNavigationDelegate {
             "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "stable-alice"]
         let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
         let api = LocalResearchSessionAPI(user: user)
-        let store = SessionStore(api: api, managerAPI: LocalResearchManagerAPI(), bridge: { _ in true }, credentialLoader: { nil })
+        let store = SessionStore(api: api, bridge: { _ in true })
         let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
         let controller = WKUserContentController()
         var runnerCalled = false
@@ -93,15 +93,8 @@ private final class LocalResearchSessionAPI: SessionAPI {
     var user: UserInfo
     init(user: UserInfo) { self.user = user }
     func me() async throws -> UserInfo { user }
-    func login(username: String, password: String) async throws -> AuthResponse { throw APIError.unauthorized("no") }
-    func register(username: String, password: String, organizationId: String) async throws -> AuthResponse { throw APIError.unauthorized("no") }
     func logout() async throws {}
-    func setKeepLogin(_ keep: Bool) async throws {}
 }
 
-private final class LocalResearchManagerAPI: ManagerSessionAPI {
-    func login(username: String, password: String) async throws {}
-    func restoreSession() async throws -> Bool { false }
-    func logout() async {}
-}
+
 #endif

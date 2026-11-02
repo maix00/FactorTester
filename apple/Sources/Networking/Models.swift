@@ -16,7 +16,7 @@ struct LocalResearchIdentity: Equatable {
     }
 }
 
-/// 与 Manager `/api/session`、`/auth/login`、`/auth/register` 的 JSON 契约对应。
+/// Verified Manager `/api/session` projection; authentication stays in Keycloak.
 struct UserInfo: Codable, Equatable {
     var username: String?
     var alias: String?
@@ -103,31 +103,6 @@ struct UserInfo: Codable, Equatable {
     /// 是否可进入「用户与机构管理」（与前端 renderUserArea 的角色判断一致）。
     var canManageUsers: Bool {
         ["super_admin", "org_admin", "level_admin"].contains(role ?? "")
-    }
-}
-
-struct Organization: Codable, Identifiable, Hashable {
-    let id: String
-    let name: String
-}
-
-struct OrganizationsResponse: Codable {
-    let success: Bool
-    let organizations: [Organization]?
-}
-
-/// 登录 / 注册响应（成功时也携带用户信息）。
-struct AuthResponse: Codable {
-    let success: Bool
-    let error: String?
-    let username: String?
-    let alias: String?
-    let role: String?
-    let isAdmin: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case success, error, username, alias, role
-        case isAdmin = "is_admin"
     }
 }
 

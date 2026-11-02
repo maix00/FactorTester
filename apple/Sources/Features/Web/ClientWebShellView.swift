@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The main FTClient surface. The Web app owns the home page, feature entry,
+/// The main TradeResearch surface. The Web app owns the home page, feature entry,
 /// sidebar, opened tabs, and the unified settings entry; Swift remains
-/// responsible for Keychain-backed authentication and local client services.
+/// responsible for endpoint-scoped session/device keys and local services.
 struct ClientWebShellView: View {
     @EnvironmentObject private var releaseController: ClientReleaseController
     @EnvironmentObject private var session: SessionStore

@@ -2,14 +2,7 @@ import Foundation
 
 protocol SessionAPI {
     func me() async throws -> UserInfo
-    func login(username: String, password: String) async throws -> AuthResponse
-    func register(
-        username: String,
-        password: String,
-        organizationId: String
-    ) async throws -> AuthResponse
     func logout() async throws
-    func setKeepLogin(_ keep: Bool) async throws
 }
 
 /// 与后端通信的单例。
@@ -62,14 +55,10 @@ final class APIClient: NSObject {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
+        req.setValue("TradeResearch-Swift/1", forHTTPHeaderField: "User-Agent")
         req.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
-        if path != "/auth/login", path != "/auth/register" {
-            let token = ManagerSessionTokenStore.read(for: ManagerConfig.shared.baseURL)
-            if !token.isEmpty {
-                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            }
-        }
+        let token = ManagerSessionTokenStore.read(for: ManagerConfig.shared.baseURL)
+        if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let json {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: json)
@@ -121,52 +110,8 @@ final class APIClient: NSObject {
         return user
     }
 
-    func login(username: String, password: String) async throws -> AuthResponse {
-        let data = try await request(path: "/auth/login", method: "POST",
-                                     json: [
-                                        "username": username,
-                                        "password": password,
-                                        "keep_login": true,
-                                     ])
-        return try decoder.decode(AuthResponse.self, from: data)
-    }
-
-    func register(username: String, password: String, organizationId: String) async throws -> AuthResponse {
-        let data = try await request(path: "/auth/register", method: "POST",
-                                     json: ["username": username, "password": password,
-                                            "organization_id": organizationId,
-                                            "keep_login": true])
-        return try decoder.decode(AuthResponse.self, from: data)
-    }
-
     func logout() async throws {
         _ = try await request(path: "/auth/logout", method: "POST")
-    }
-
-    func setKeepLogin(_ keep: Bool) async throws {
-        if keep {
-            _ = try await me()
-        } else {
-            throw APIError.server(L10n.text("Manager 不支持临时会话；如需结束会话，请退出登录。"))
-        }
-    }
-
-    func changePassword(currentPassword: String, newPassword: String) async throws -> ActionResponse {
-        let data = try await request(
-            path: "/api/account/password",
-            method: "POST",
-            json: [
-                "current_password": currentPassword,
-                "new_password": newPassword,
-            ]
-        )
-        return try decoder.decode(ActionResponse.self, from: data)
-    }
-
-    func organizations() async throws -> [Organization] {
-        let data = try await request(path: "/api/organizations")
-        let resp = try decoder.decode(OrganizationsResponse.self, from: data)
-        return resp.organizations ?? []
     }
 
     // ── 共享模块注册表 ──────────────────────────────────────────────────────
@@ -178,7 +123,7 @@ final class APIClient: NSObject {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
+        req.setValue("TradeResearch-Swift/1", forHTTPHeaderField: "User-Agent")
         let token = ManagerSessionTokenStore.read(for: ManagerConfig.shared.baseURL)
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

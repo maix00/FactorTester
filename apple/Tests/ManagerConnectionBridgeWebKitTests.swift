@@ -21,7 +21,7 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
                                     "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
         let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
         let api = ManagerBridgeTestAPI(user: user)
-        let session = SessionStore(api: api, managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
+        let session = SessionStore(api: api, bridge: { _ in true })
         let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
         var applied: URL?
         var targetUnavailable = true
@@ -104,7 +104,7 @@ server.serve_forever()
         let value: [String: Any] = ["username": "alice", "keep_login": true,
                                     "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
         let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
-        let session = SessionStore(api: ManagerBridgeTestAPI(user: user), managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
+        let session = SessionStore(api: ManagerBridgeTestAPI(user: user), bridge: { _ in true })
         let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
         var applied: URL?
         let content = WKUserContentController()
@@ -152,7 +152,7 @@ server.serve_forever()
         let value: [String: Any] = ["username": "alice", "keep_login": true,
                                     "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
         let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
-        let session = SessionStore(api: ManagerBridgeTestAPI(user: user), managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
+        let session = SessionStore(api: ManagerBridgeTestAPI(user: user), bridge: { _ in true })
         let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
         let target = try XCTUnwrap(URL(string: "https://test-manager.invalid:54321"))
         let cookie = try XCTUnwrap(HTTPCookie(properties: [.domain: "test-manager.invalid", .path: "/",
@@ -187,7 +187,7 @@ server.serve_forever()
                                     "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
         let user = try JSONDecoder().decode(UserInfo.self, from: JSONSerialization.data(withJSONObject: value))
         let api = ManagerBridgeTestAPI(user: user)
-        let session = SessionStore(api: api, managerAPI: ManagerBridgeTestManager(), bridge: { _ in true }, credentialLoader: { nil })
+        let session = SessionStore(api: api, bridge: { _ in true })
         let endpoint = try XCTUnwrap(ManagerConfig.shared.baseURL)
         var applied: URL?
         var resumeProbe: CheckedContinuation<ManagerConnectionBridge.ProbeResult, Never>?
@@ -227,13 +227,5 @@ private final class ManagerBridgeTestAPI: SessionAPI {
     var user: UserInfo
     init(user: UserInfo) { self.user = user }
     func me() async throws -> UserInfo { user }
-    func login(username: String, password: String) async throws -> AuthResponse { throw APIError.unauthorized("no") }
-    func register(username: String, password: String, organizationId: String) async throws -> AuthResponse { throw APIError.unauthorized("no") }
     func logout() async throws {}
-    func setKeepLogin(_ keep: Bool) async throws {}
-}
-private final class ManagerBridgeTestManager: ManagerSessionAPI {
-    func login(username: String, password: String) async throws {}
-    func restoreSession() async throws -> Bool { false }
-    func logout() async {}
 }

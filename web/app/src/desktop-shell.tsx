@@ -133,7 +133,15 @@ export function DesktopShell(): React.ReactElement {
   const [active, setActive] = useState(pages[0]?.id ?? "research");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
   const effectiveCollapsed=collapsed || compact;
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(location.search).get("settings") === "account");
+  const closeSettings = (): void => {
+    setSettingsOpen(false);
+    const url = new URL(location.href);
+    if (url.searchParams.get("settings") === "account") {
+      url.searchParams.delete("settings");
+      history.replaceState(history.state, "", url.href);
+    }
+  };
   const [assistantRequested, setAssistantRequested] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
@@ -265,7 +273,7 @@ export function DesktopShell(): React.ReactElement {
   return (
     <AppTheme>
     <DesktopNotificationHost />
-    <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
+    <SettingsOverlay open={settingsOpen} onClose={closeSettings} onResetLayout={resetLayout} />
     <div className={`tr-app-shell${effectiveCollapsed ? " is-collapsed" : ""}${compact ? " is-compact" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label={t("mainNavigation")}>
         <div className="tr-sidebar-header">

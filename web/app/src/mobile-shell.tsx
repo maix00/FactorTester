@@ -22,16 +22,25 @@ export function MobileShell(): React.ReactElement {
 
 function MobileWorkspace(): React.ReactElement {
   const { t } = useTranslation();
-  const [entries, setEntries] = useState<Entry[]>(() => tabs.map((page) => ({ id: newPageInstanceId(page.id), pageId: page.id, args: {}, root: true })));
-  const [active, setActive] = useState(entries[0].id);
-  const [setting, setSetting] = useState<MobileSettingSection | null>(null);
+  const initialAccount = new URLSearchParams(location.search).get("settings") === "account";
+  const [entries, setEntries] = useState<Entry[]>(() => [
+    ...tabs.map((page) => ({ id: newPageInstanceId(page.id), pageId: page.id, args: {}, root: true })),
+    ...(initialAccount ? [{id: newPageInstanceId("settings"), pageId: "settings", args: {}}] : []),
+  ]);
+  const [active, setActive] = useState(() => initialAccount ? entries[entries.length - 1].id : entries[0].id);
+  const [setting, setSetting] = useState<MobileSettingSection | null>(initialAccount ? "account" : null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const assistantHistoryId = useRef(newPageInstanceId("assistant"));
   const assistantClosing = useRef(false);
   const refs = useRef(entries); refs.current = entries;
   const current = entries.find((item) => item.id === active) || entries[0];
   useEffect(() => {
-    history.replaceState({ ...history.state, trPage: active }, "", location.href);
+    if (initialAccount) {
+      const url = new URL(location.href); url.searchParams.delete("settings");
+      history.replaceState({trPage: entries[0].id}, "", url.href);
+      history.pushState({trPage: active}, "", url.href);
+      history.pushState({trPage: active, trSettings: "account"}, "", url.href);
+    } else history.replaceState({ ...history.state, trPage: active }, "", location.href);
     const onPop = (event: PopStateEvent): void => {
       const known = refs.current.find((item) => item.id === event.state?.trPage);
       if (known) setActive(known.id);
