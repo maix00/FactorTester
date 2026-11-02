@@ -131,8 +131,13 @@ body { margin: 0; }
 .tr-mobile-workspace { padding: 18px 16px; }
 .tr-mobile-workspace header h1 { margin: 0; font-size: 20px; }
 .tr-mobile-workspace header p { margin: 4px 0 14px; color: var(--muted); font-size: 12px; }
-/* iOS zooms the entire viewport when focusing controls below 16px. */
-.tr-mobile-shell input, .tr-mobile-shell textarea, .tr-mobile-shell select { font-size: 16px; }
+/* iOS zooms on focus below 16px. Include portals (drawers, dialogs and
+   dropdowns), and override library rules on their internal search inputs. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]), textarea, select {
+    font-size: 16px !important;
+  }
+}
 .tr-mobile-open-list { display: grid; gap: 8px; }
 .tr-mobile-open-row { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); text-decoration: none; }
 .tr-mobile-open-row:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }

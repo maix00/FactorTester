@@ -89,6 +89,32 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
                 page.get_by_text('Topology article').wait_for()
                 assert header.locator('ion-title').inner_text().strip() == '技术文档'
                 page.screenshot(path='/tmp/tr-mobile-docs-return.png')
+                header.get_by_role('button', name='返回').click()
+                page.get_by_role('button', name='alice').click()
+                page.get_by_role('menuitem', name='设置').click()
+                page.get_by_role('button', name='语言').click()
+                language = page.get_by_role('combobox', name='语言')
+                language.wait_for(state='attached')
+                assert language.evaluate('(element) => getComputedStyle(element).fontSize') == '16px'
+                language.click(force=True)
+                page.get_by_text('English', exact=True).wait_for(state='visible')
+                assert header.get_by_role('button', name='返回').is_visible()
+                # Ant Design renders dialogs outside the mobile shell. The
+                # focusable elements there need the same iOS protection.
+                sizes = page.evaluate('''() => {
+                  const container=document.createElement('div');
+                  container.innerHTML='<input style="font-size:12px"><textarea style="font-size:12px"></textarea><select style="font-size:12px"><option>A</option></select>';
+                  document.body.append(container);
+                  const result=Array.from(container.children, node => getComputedStyle(node).fontSize);
+                  container.remove(); return result;
+                }''')
+                assert sizes == ['16px', '16px', '16px']
+                page.set_viewport_size({'width': 1024, 'height': 844})
+                desktop_size = page.evaluate('''() => {
+                  const field=document.createElement('input'); field.style.fontSize='12px';
+                  document.body.append(field); const size=getComputedStyle(field).fontSize; field.remove(); return size;
+                }''')
+                assert desktop_size == '12px'
             finally:
                 browser.close()
     finally:
