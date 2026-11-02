@@ -117,3 +117,15 @@ Keycloak 资源创建时冻结研究和报告的绑定；第二个 Manager 可�
 迁移前后的七种决策及资源策略一致，撤销的分享权限没有被恢复。测试使用的
 Keycloak 备份是校验流程夹具，不是实际 realm 恢复演练；真实服务器尚未运行
 此迁移，也未完成历史权限的全量对账。
+
+### 浏览器会话续期
+
+浏览器将 Keycloak refresh token 保存在同源 HttpOnly、SameSite=Lax Cookie；
+HTTPS 使用 Secure。Manager 在 access token 到期前 30 秒按需兑换，
+刷新后的 access token 仍经过 Keycloak 验证及机构/公网准入判断。
+未验证的 JWT 到期字段仅用于调度续期，不能授权。显式 Bearer 请求不使用浏览器续期凭据。
+
+并发兑换按刷新凭据合并，结果最多缓存 10 秒、256 项；缓存只消除
+旋转竞态，不替代身份或对象授权。HTTP keep-alive 的每个请求清空临时状态。
+认证服务短暂故障返回可重试的 503，不删除 Cookie；无有效登录返回 401，
+不误称为设备认证失败。注销清除访问和刷新 Cookie，并使用 Keycloak 注销入口。

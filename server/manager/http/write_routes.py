@@ -211,7 +211,8 @@ class WriteRoutesMixin:
                 json_response(self, {
                     "success": True,
                     **({"logout_url": logout_target} if logout_target else {}),
-                }, headers={"Set-Cookie": self._session_cookie("", clear=True)})
+                }, headers={"Set-Cookie": [self._session_cookie("", clear=True),
+                                           self._refresh_cookie("")]})
                 return
             token = self._bearer_token()
             if self.state.session_principal(token) is None:
