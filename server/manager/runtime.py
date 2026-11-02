@@ -561,6 +561,8 @@ class Handler(
 
     def handle_one_request(self) -> None:
         from server.identity.request_context import identity_request
+        for key in ('_browser_access_token', '_oidc_response_cookies', '_oidc_temporarily_unavailable'):
+            self.__dict__.pop(key, None)
         with identity_request():
             super().handle_one_request()
 
@@ -574,6 +576,9 @@ class Handler(
         EOF-delimited HTTP/1.0 behaviour.
         """
         headers = b"".join(getattr(self, "_headers_buffer", ())).lower()
+        if b'ft-manager-session=; max-age=0' not in headers:
+            for cookie in getattr(self, '_oidc_response_cookies', ()):
+                self.send_header('Set-Cookie', cookie)
         if b"content-length:" not in headers and b"transfer-encoding:" not in headers:
             self.send_header("Connection", "close")
             self.close_connection = True

@@ -84,10 +84,12 @@ class AuthenticationRoutesMixin:
             token, session, next_path, device_ticket = finish_login(
                 state=str(query.get("state", [""])[0]),
                 code=str(query.get("code", [""])[0]),
+                include_refresh=True,
             )
         except PermissionError:
             self._send_redirect("/app?auth_error=unverified", cookie=(
                 self._session_cookie("", clear=True),
+                self._refresh_cookie(""),
                 self._oidc_state_cookie(clear=True),
             ))
             return
@@ -95,11 +97,13 @@ class AuthenticationRoutesMixin:
             sys.stderr.write(f"[manager] Keycloak callback rejected: {type(exc).__name__}\n")
             self._send_redirect("/app?auth_error=invalid", cookie=self._oidc_state_cookie(clear=True))
             return
+        refresh = session.pop('_browser_refresh', {})
         from server.identity.server_admission import server_admission
         permitted, reason = server_admission(session, state=self.state)
         if not permitted:
             self._send_redirect(f"/app?auth_error={reason}", cookie=[
                 self._session_cookie("", clear=True),
+                self._refresh_cookie(""),
                 self._oidc_state_cookie(clear=True),
             ])
             return
@@ -122,6 +126,7 @@ class AuthenticationRoutesMixin:
                 sys.stderr.write(f"[manager] device OIDC binding rejected: {type(exc).__name__}\n")
                 self._send_redirect("/app?auth_error=device", cookie=[
                     self._session_cookie("", clear=True),
+                    self._refresh_cookie(""),
                     self._oidc_state_cookie(clear=True),
                 ])
                 return
@@ -135,8 +140,16 @@ class AuthenticationRoutesMixin:
             lifetime = MANAGER_SESSION_TTL_SECONDS
         self._send_redirect(
             next_path,
-            cookie=[self._session_cookie(token, max_age=lifetime), self._oidc_state_cookie(clear=True)],
+            cookie=[self._session_cookie(token, max_age=lifetime), self._oidc_state_cookie(clear=True),
+                    self._refresh_cookie(str(refresh.get('refresh_token') or ''),
+                                         max_age=int(refresh.get('refresh_expires_in') or 0))],
         )
+
+    def _refresh_cookie(self, token: str, *, max_age: int = 0) -> str:
+        secure = ' Secure;' if self._is_secure_transport() else ''
+        lifetime = max(0, min(int(max_age), MANAGER_SESSION_TTL_SECONDS)) if token else 0
+        return (f'tr-oidc-refresh={token}; Max-Age={lifetime}; HttpOnly; '
+                f'SameSite=Lax;{secure} Path=/')
 
     def _oidc_state_cookie(self, *, clear: bool) -> str:
         secure = " Secure;" if self._is_secure_transport() else ""
