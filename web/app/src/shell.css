@@ -935,3 +935,5 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 
 .tr-factor-parameter-input { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 10px; }
 @media(max-width: 760px) { .tr-factor-parameter-input { grid-template-columns: 1fr; } }
+
+.tr-family-source { overflow: auto; max-height: 60dvh; padding: 16px; border: 1px solid var(--line); border-radius: 8px; margin-top: 16px; }

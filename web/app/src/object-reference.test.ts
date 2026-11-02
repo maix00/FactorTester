@@ -64,3 +64,13 @@ test("owner labels use owner metadata and never the containing object's alias", 
   assert.deepEqual(referenceForField("owner_ref","Org@testB@123",{alias:"Factor name"}),
     {kind:"user",ref:"Org@testB@123"});
 });
+
+
+test("historical family heads require explicit source identity and full revision",()=>{
+ const rows=[{family_ref:'new-head',factor_family_alias:'Alpha',owner_username:'alice'}],version='a'.repeat(64);
+ assert.equal(matchingFamily(rows,'old-head','alice',{alias:'Alpha',version}),rows[0]);
+ assert.equal(matchingFamily(rows,'old-head',undefined,{alias:'Alpha',version}),null);
+ assert.equal(matchingFamily(rows,'old-head','alice',{alias:'Alpha',version:'short'}),null);
+ assert.equal(matchingFamily([...rows,...rows],'old-head','alice',{alias:'Alpha',version}),null);
+ assert.deepEqual(referenceForField('factor_family_ref','old-head',{family_owner_username:'alice',factor_family_alias:'Alpha',family_formula_fingerprint:version}),{kind:'factorFamily',ref:'old-head',owner:'alice',familyAlias:'Alpha',versionRef:version});
+});
