@@ -126,3 +126,11 @@ def test_local_base_reuse_always_refreshes_pinned_alpha_before_cli_and_agent() -
     assert "--no-deps --force-reinstall /tmp/alpha-wheels/*.whl" in alpha_install
     assert "FROM manager-runtime AS traderesearch-local-cli-builder" in consumers
     assert "FROM manager-runtime AS traderesearch-local-manager" in consumers
+
+
+def test_local_build_context_excludes_nested_native_and_python_outputs() -> None:
+    patterns = (DEPLOYMENT / "FactorTester.Dockerfile.dockerignore").read_text().splitlines()
+    include = patterns.index("!vendor/py-alpha-lib/**")
+    for pattern in ("**/target", "**/__pycache__", "**/*.so", "**/*.dylib"):
+        assert patterns.index(pattern) > include
+    assert "!deploy/docker/factortester-server/install-agent-tools.sh" in patterns
