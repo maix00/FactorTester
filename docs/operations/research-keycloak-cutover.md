@@ -70,3 +70,7 @@ Manager 与 7997 数据面共用 Keycloak Research 授权工厂；发布投影�
 旧分享链接的本地 ACL 创建、领取和列表代码已删除；创建、领取、撤销均要求 Keycloak 分享能力。报告 HEAD 提交不再自动上传到 Manager，原 notify 模块已删除；显式 CouchDB 发布及已有同步收据仍由客户端同步路径负责。
 
 2026-11-02 补充验收：旧链接演练直接构造历史 SQL 快照，不再调用已删除的生产旧 API。`python -m scripts.test.keycloak_research_link_migration_smoke` 在临时真实 Keycloak 上通过：2 个链接完成绑定、42 个 scope 决策对账。容器由演练自动清理。此结果只证明隔离迁移路径，不代表内网或公网真实业务数据已切换。直接用户授权与分享链接现分别检测所需能力，缺少链接功能不会阻断 Keycloak 用户授权。
+
+本机签名 macOS 宿主验收：`apple/scripts/test-macos-signed.sh -disableAutomaticPackageResolution -only-testing:FactorTester-ClientTests/ManagerConnectionBridgeWebKitTests -only-testing:FactorTester-ClientTests/LocalResearchBridgeWebKitTests -quiet`，xcresult 证明 7 passed、0 failed、0 skipped。此为宿主 WebKit 桥测试，不是人工视觉验收。
+
+`python -m scripts.test.research_publication_keycloak_couch_smoke` 使用临时真实 Manager HTTP、Keycloak、CouchDB，通过单报告及附件、可编辑源码往返、桌面导入、两客户端同步、自动发现、新设备发现及双向同步、已提交资源修改保护、收敛恢复、同一 token 撤销分享/读取/公网准入、撤权后重试拒绝，以及共享 realm 下两 Manager 客户端中转同步。独立 realm 未覆盖；真实内网/公网部署未覆盖。临时容器自动清理。Browser 调用返回 `Local browser use is disabled in Work settings`，所以本轮没有声称页面视觉验收通过。
