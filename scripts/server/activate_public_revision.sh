@@ -171,6 +171,7 @@ else
   echo "FACTORTESTER_PUBLIC_CACHE_FROM=factortester-public:$old_revision" \
     | sudo tee -a "$next_env" >/dev/null
 fi
+nautilus_revision="$(git -C "$release_path" rev-parse HEAD:vendor/nautilus_trader)"
 cache_plan="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
   FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision" \
   TR_PUBLIC_PYTHON_SOURCE_ROOT="$release_root/$old_revision" \
@@ -181,7 +182,6 @@ cache_plan="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
 # must not reserve another build's disk/RAM or restart the native builder.
 reuse_status=0
 python_deps_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["identity"])' <<< "$cache_plan")"
-nautilus_revision="$(git -C "$release_path" rev-parse HEAD:vendor/nautilus_trader)"
 python3 "$release_path/scripts/server/public_prebuilt_image.py" \
   --image "factortester-public:$revision" --revision "$revision" \
   --nautilus-revision "$nautilus_revision" --python-deps-id "$python_deps_id" || reuse_status=$?
