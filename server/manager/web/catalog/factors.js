@@ -24,12 +24,16 @@
     ));
   }
 
-  async function ensureEditor() {
-    if (window.FTFactorEditor?.render || !window.FTStaticLoader?.loadGroups) return;
-    await window.FTStaticLoader.loadGroups(["factor-catalog-editor"]);
+  function openReactEditor(context, section, targetRef, mode) {
+    const query = new URLSearchParams({page: "factors", section, mode});
+    if (targetRef) query.set("object_ref", targetRef);
+    const owner = new URLSearchParams(globalThis.location.search).get("owner_username");
+    if (owner) query.set("owner_username", owner);
+    globalThis.location.assign(`/app?${query}`);
   }
 
   async function factorDetail(context, targetRef, mode = "view", options = {}) {
+    if (mode === "create" || mode === "edit") return openReactEditor(context, "factors", targetRef, mode);
     context.activeNav("factors");
     // A factor created inline in the test editor already carries its complete
     // view model.  Do not make a catalog round-trip just to render that
@@ -98,13 +102,13 @@
       }
     }
     if (!catalog().isCurrent(context)) return;
-    if (mode === "create" || mode === "edit") await ensureEditor();
     return window.FTFactorDetails.factorDetail(
       context, data, targetRef, mode, catalog().nativeRequest, options,
     );
   }
 
   async function familyDetail(context, targetRef, mode = "view", options = {}) {
+    if (mode === "create" || mode === "edit") return openReactEditor(context, "families", targetRef, mode);
     context.activeNav("factors");
     // A factor family created inline in the test editor already carries its
     // complete view model; render it read-only without a catalog round-trip.
@@ -122,7 +126,6 @@
       data = await catalog().load(context, {refresh: true, library: true});
     }
     if (!catalog().isCurrent(context)) return;
-    if (mode === "create" || mode === "edit") await ensureEditor();
     return window.FTFactorDetails.familyDetail(
       context, data, targetRef, mode, options,
     );

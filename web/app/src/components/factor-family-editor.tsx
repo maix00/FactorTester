@@ -8,7 +8,7 @@ import {FactorDetail} from "./factor-detail.tsx";
 import {DetailsCancelButton} from "./details-panel.tsx";
 type Row=Record<string,any>;
 /** Source edits are explicit operations; the directory never executes family source. */
-export function FactorFamilyEditor({family,onSaved,onCancel}:{family?:Row;onSaved:(row:Row)=>void;onCancel:()=>void}):React.ReactElement {
+export function FactorFamilyEditor({family,onSaved,onCancel,initialSource="custom"}:{initialSource?:"custom"|"public";family?:Row;onSaved:(row:Row)=>void;onCancel:()=>void}):React.ReactElement {
  const {t}=useTranslation(),[form]=Form.useForm();
  const [loading,setLoading]=useState(!!family),[busy,setBusy]=useState(false),[allowed,setAllowed]=useState(!family);
  const {session}=useAuth();
@@ -45,7 +45,7 @@ export function FactorFamilyEditor({family,onSaved,onCancel}:{family?:Row;onSave
   }catch(reason){setInspection(null);notify({code:"family.source.invalid",type:"error",message:reason instanceof Error?reason.message:t("editor.validationFailed")});}
   finally{mutation.current=false;setBusy(false);}
  };
- return <Spin spinning={loading}><Form form={form} layout="vertical" requiredMark={false} initialValues={{source_kind:"custom"}} disabled={busy||loading} onValuesChange={()=>setInspection(null)} onFinish={save}>
+ return <Spin spinning={loading}><Form form={form} layout="vertical" requiredMark={false} initialValues={{source_kind:session?.role==="super_admin"?initialSource:"custom"}} disabled={busy||loading} onValuesChange={()=>setInspection(null)} onFinish={save}>
   {!family&&session?.role==="super_admin"?<Form.Item name="source_kind" label={t("library.visibility")}><Select aria-label={t("library.visibility")} options={[{value:"custom",label:t("library.scopes.mine")},{value:"public",label:t("library.scopes.public")}]} /></Form.Item>:null}
   <Form.Item name="chinese_name" label={t("editor.name")}><Input aria-label={t("editor.name")} maxLength={256}/></Form.Item>
   <Form.Item name="description" label={t("library.description")}><Input.TextArea aria-label={t("library.description")} autoSize={{minRows:2,maxRows:5}}/></Form.Item>
