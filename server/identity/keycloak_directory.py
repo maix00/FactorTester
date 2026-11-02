@@ -65,14 +65,14 @@ def _role(identity: object, groups: tuple[str, ...]) -> str:
     return scoped if scoped in {"org_admin", "level_admin"} else "user"
 
 
-def _cached_group_tree_members(adapter: object, path: str) -> tuple[dict[str, Any], ...]:
+def _cached_group_tree_members(adapter: object, path: str, *, use_cache: bool = True) -> tuple[dict[str, Any], ...]:
     base_url = str(getattr(adapter, "base_url", "") or "")
     realm = str(getattr(adapter, "realm", "") or "")
     key = (f"{base_url}/realms/{realm}", path)
     now = time.monotonic()
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
-        if cached is not None and cached[0] > now:
+        if use_cache and cached is not None and cached[0] > now:
             _CACHE.move_to_end(key)
             return cached[1]
         if cached is not None:
@@ -86,11 +86,12 @@ def _cached_group_tree_members(adapter: object, path: str) -> tuple[dict[str, An
         _project(identity) for identity in rows
         if str(getattr(identity, "username", "") or "").strip()
     )
-    with _CACHE_LOCK:
-        _CACHE[key] = (time.monotonic() + _CACHE_TTL, projected)
-        _CACHE.move_to_end(key)
-        while len(_CACHE) > _CACHE_LIMIT:
-            _CACHE.popitem(last=False)
+    if use_cache:
+        with _CACHE_LOCK:
+            _CACHE[key] = (time.monotonic() + _CACHE_TTL, projected)
+            _CACHE.move_to_end(key)
+            while len(_CACHE) > _CACHE_LIMIT:
+                _CACHE.popitem(last=False)
     return projected
 
 
@@ -113,41 +114,39 @@ def managed_users_for_verified_request(
     try:
         from flask import g, has_request_context
 
-        if not has_request_context():
-            return []
-        identity = getattr(g, "keycloak_user_session", None)
+        flask_request = has_request_context()
+        if flask_request:
+            identity = getattr(g, "keycloak_user_session", None)
+            request_cache = getattr(g, "tr_managed_user_directory", None)
+        else:
+            from server.identity.request_context import current_verified_identity
+
+            verified = current_verified_identity()
+            identity = verified[1] if verified else None
+            request_cache = None
         if (not isinstance(identity, dict)
                 or str(identity.get("username") or "").strip() != selected_principal):
             return []
-        request_cache = getattr(g, "tr_managed_user_directory", None)
-        if isinstance(request_cache, dict) and selected_principal in request_cache:
-            cached_users = request_cache[selected_principal]
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        from server.identity.server_admission import current_administrative_groups, current_manager_role
+        groups = current_administrative_groups(identity)
+        if groups is None:
+            raise AuthorizationUnavailable("current Keycloak administration scope is unavailable")
+        roles = ("admin_console:manage",) if current_manager_role(identity, "admin_console:manage") else ()
+        if not roles and not managed_member_group_paths(groups):
+            return []
+        cache_key = (selected_principal, tuple(groups), roles, selected_max_users)
+        if isinstance(request_cache, dict) and cache_key in request_cache:
+            cached_users = request_cache[cache_key]
             return [row for row in cached_users
                     if include_self or str(row.get("username") or "") != selected_principal]
-        groups = identity.get("keycloak_groups", ())
-        roles = identity.get("keycloak_roles", ())
-        first = users_in_admin_scope(
-            groups=groups, roles=roles, limit=min(200, selected_max_users), offset=0,
-        )
-        users = list(first["users"])
-        total = int(first.get("total") or 0)
-        offset = len(users)
-        while offset < total and offset < selected_max_users:
-            page = users_in_admin_scope(
-                groups=groups, roles=roles,
-                limit=min(200, selected_max_users - offset), offset=offset,
-            )
-            next_users = list(page["users"])
-            if not next_users:
-                raise RuntimeError("Keycloak directory pagination made no progress")
-            users.extend(next_users)
-            offset += len(next_users)
-        if offset < total:
-            raise RuntimeError("Keycloak managed directory exceeds its configured limit")
-        if not isinstance(request_cache, dict):
-            request_cache = {}
-            g.tr_managed_user_directory = request_cache
-        request_cache[selected_principal] = tuple(users)
+        users = _users_in_admin_scope(groups=groups, roles=roles,
+                                      max_users=selected_max_users, use_cache=False)
+        if flask_request:
+            if not isinstance(request_cache, dict):
+                request_cache = {}
+                g.tr_managed_user_directory = request_cache
+            request_cache[cache_key] = tuple(users)
         return [row for row in users
                 if include_self or str(row.get("username") or "") != selected_principal]
     except ImportError:
@@ -193,7 +192,7 @@ def users_in_admin_scope(
 
 def managed_users_for_claims(
     *, groups: object, roles: object, adapter: object | None = None,
-    max_users: int = 20_000,
+    max_users: int = 20_000, use_cache: bool = True,
 ) -> list[dict[str, Any]]:
     """Return the bounded active directory beneath verified Keycloak claims.
 
@@ -210,13 +209,13 @@ def managed_users_for_claims(
         raise ValueError("managed directory limit is outside the allowed range")
     return _users_in_admin_scope(
         groups=groups, roles=roles, adapter=adapter,
-        max_users=selected_max,
+        max_users=selected_max, use_cache=use_cache,
     )
 
 
 def _users_in_admin_scope(
     *, groups: object, roles: object, adapter: object | None = None,
-    max_users: int = 20_000,
+    max_users: int = 20_000, use_cache: bool = True,
 ) -> list[dict[str, Any]]:
     role_set = {str(value) for value in roles or ()}
     if "admin_console:manage" in role_set:
@@ -229,7 +228,7 @@ def _users_in_admin_scope(
     source = adapter or manager_keycloak_admin_adapter()
     identities: dict[str, dict[str, Any]] = {}
     for path in paths:
-        for row in _cached_group_tree_members(source, path):
+        for row in _cached_group_tree_members(source, path, use_cache=use_cache):
             username = str(row.get("username") or "").strip()
             if not username:
                 continue

@@ -40,7 +40,9 @@ def test_native_replay_receives_frozen_bounds_without_python_queries():
     engine = SimpleNamespace(run_catalogs=run_catalogs,
                              get_result=lambda: SimpleNamespace(iterations=8))
     result = replay_catalog_batches(engine, [opened(catalog)], max_input_bars=8, batch_minutes=3)
-    assert result == {"bars": 8, "batch_count": 3, "max_batch_bars": 3}
+    assert (result["bars"], result["batch_count"], result["max_batch_bars"]) == (8, 3, 3)
+    assert result["settlements"] == 0
+    assert len(result["source_inputs"]) == 1
     assert len(calls) == 1
     assert calls[0]["start"] == catalog.bars[0].ts_init
     assert calls[0]["end"] == catalog.bars[-1].ts_init
@@ -100,7 +102,9 @@ def test_native_two_product_timestamp_group_and_hard_cap(tmp_path, cap):
         else:
             result = replay_catalog_batches(engine, rows, max_input_bars=16,
                                              batch_minutes=1, max_batch_bars=cap)
-            assert result == {"bars": 16, "batch_count": 8, "max_batch_bars": 2}
+            assert (result["bars"], result["batch_count"], result["max_batch_bars"]) == (16, 8, 2)
+            assert result["settlements"] == 0
+            assert len(result["source_inputs"]) == 2
             assert engine.get_result().iterations == 16
     finally:
         engine.dispose()

@@ -34,7 +34,7 @@ class UserSessionVerifier:
         self._cache = {}
         self._lock = threading.Lock()
 
-    def session(self, token: str):
+    def session(self, token: str, *, use_cache: bool = True, fail_on_unavailable: bool = False):
         import hashlib
         if not token or len(token) > 32768:
             return None
@@ -42,13 +42,25 @@ class UserSessionVerifier:
         now = time.time()
         with self._lock:
             cached = self._cache.get(key)
-            if cached and cached[0] > now:
+            if use_cache and cached and cached[0] > now:
                 return dict(cached[1])
+
+        def forget_cached_session():
+            # A live check must not leave an already known revoked session
+            # usable through the ordinary short-lived cache.
+            with self._lock:
+                self._cache.pop(key, None)
+
         try:
             claims = self.client.introspect(token)
-        except Exception:
+        except Exception as exc:
+            forget_cached_session()
+            if fail_on_unavailable:
+                from server.identity.keycloak_authorization import AuthorizationUnavailable
+                raise AuthorizationUnavailable("Keycloak session verification is unavailable") from exc
             return None
         if not isinstance(claims, dict):
+            forget_cached_session()
             return None
         audience = claims.get('aud', [])
         if isinstance(audience, str):
@@ -59,6 +71,7 @@ class UserSessionVerifier:
                 or (self.audience not in audience and authorized_party != self.audience)
                 or expires <= now
                 or not claims.get('sub') or not claims.get('preferred_username')):
+            forget_cached_session()
             return None
         access = claims.get('resource_access', {})
         client_access = access.get(self.roles_client_id, {}) if isinstance(access, dict) else {}
@@ -66,6 +79,7 @@ class UserSessionVerifier:
         roles = tuple(sorted({r for r in roles if isinstance(r, str)})) if isinstance(roles, list) else ()
         groups = normalize_group_claim(claims.get("groups"))
         if groups is None:
+            forget_cached_session()
             return None
         role = (
             "super_admin" if "admin_console:manage" in roles
@@ -110,10 +124,11 @@ class UserSessionVerifier:
                 'research': True,
             },
         }
-        with self._lock:
-            if len(self._cache) >= 256:
-                self._cache.clear()
-            self._cache[key] = (min(expires, now + 5), value)
+        if use_cache:
+            with self._lock:
+                if len(self._cache) >= 256:
+                    self._cache.clear()
+                self._cache[key] = (min(expires, now + 5), value)
         return dict(value)
 
 
@@ -265,7 +280,7 @@ def oidc_settings() -> dict[str, str]:
     }
 
 
-def keycloak_session(token: str):
+def keycloak_session(token: str, *, use_cache: bool = True, fail_on_unavailable: bool = False):
     import os
     try:
         settings = oidc_settings()
@@ -283,6 +298,9 @@ def keycloak_session(token: str):
                 settings["backchannel_base_url"],
                 settings["client_secret"],
             )
-        return verifier.session(token)
-    except (KeyError, OSError, ValueError, TypeError):
+        return verifier.session(token, use_cache=use_cache, fail_on_unavailable=fail_on_unavailable)
+    except (KeyError, OSError, ValueError, TypeError) as exc:
+        if fail_on_unavailable:
+            from server.identity.keycloak_authorization import AuthorizationUnavailable
+            raise AuthorizationUnavailable("Keycloak session configuration is unavailable") from exc
         return None

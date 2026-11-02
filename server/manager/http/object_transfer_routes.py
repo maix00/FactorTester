@@ -198,6 +198,10 @@ class ObjectTransferRoutesMixin:
                 self.headers.get("Idempotency-Key")
                 or f"research-download:{object_kind}:{object_id}:{expected_sha256}"
             ).strip()
+            # A Research transfer binds the stable ID from the verified
+            # Manager session; it is never accepted from the request body.
+            stable_identity = (str(session.get("tr_identity_id") or "").strip()
+                               if session is not None and object_kind in _RESEARCH_KINDS else "")
             access = self._rewrite_client_data_access(
                 self.state.prepare_object_download(
                     principal=attachment_owner if object_kind == TransferObjectKind.PROFILE_WORKSPACE.value
@@ -213,6 +217,7 @@ class ObjectTransferRoutesMixin:
                         or metadata.get("media_type")
                         or "application/octet-stream"
                     ),
+                    **({"principal_identity_id": stable_identity} if stable_identity else {}),
                 )
             )
         except NodeUnavailable as exc:

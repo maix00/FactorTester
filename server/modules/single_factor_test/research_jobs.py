@@ -717,14 +717,27 @@ def _validate_mounted_run_windows(prepared: dict) -> None:
 def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     context = data.get(MANAGER_RUN_CONTEXT_KEY)
     if context is not None:
-        prepared = load_manager_run_context(context, owner=owner)
+        # Only the verified peer adapter sets this request-local value; the
+        # RunSpec keeps its original source identity and frozen references.
+        from flask import g
+        source_owner = str(getattr(g, "tr_federated_source_username", "") or owner)
+        prepared = load_manager_run_context(context, owner=source_owner)
     else:
         prepared = _prepare_local_research_run_request(data, owner=owner)
     selected_execution = prepared.get("execution_selection") or data.get("execution_selection")
     if selected_execution:
         from server.modules.single_factor_test.execution_nodes import bind_prepared_execution
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
         try:
-            prepared["execution_binding"] = bind_prepared_execution(prepared, selected_execution)
+            # The frozen context retains its source-realm owner. Node and
+            # Bundle access, however, must be evaluated for the authenticated
+            # target-realm account, which may have a different username.
+            # Only adapt the lookup input; do not rewrite the frozen RunSpec.
+            target_prepared = {**prepared, "owner": owner} if context is not None else prepared
+            prepared["execution_binding"] = bind_prepared_execution(target_prepared, selected_execution)
+        except AuthorizationUnavailable as exc:
+            raise _RunRequestError(str(exc), status_code=503,
+                details={"code": "keycloak_authorization_unavailable"}) from exc
         except (KeyError, TypeError, ValueError, PermissionError) as exc:
             raise _RunRequestError(str(exc), status_code=422) from exc
         from server.jobs.assurance import canonical_hash

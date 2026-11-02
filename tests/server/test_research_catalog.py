@@ -7,7 +7,7 @@ from urllib.parse import quote
 import pytest
 
 from server.manager.http import research_catalog_routes, research_object_routes
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 def test_research_catalog_keeps_research_and_profile_workspaces_distinct(tmp_path):
@@ -45,7 +45,7 @@ def test_research_catalog_keeps_research_and_profile_workspaces_distinct(tmp_pat
     }
 
 
-def test_existing_research_is_backfilled_with_owner_self_profile(tmp_path):
+def test_catalog_reopen_does_not_recreate_removed_membership_or_workspace(tmp_path):
     db_path = tmp_path / "research.sqlite"
     catalog = ResearchCatalog(db_path)
     research = catalog.create_research(owner_ref="alice", title="旧研究")
@@ -62,12 +62,26 @@ def test_existing_research_is_backfilled_with_owner_self_profile(tmp_path):
     restored = ResearchCatalog(db_path)
     members = restored.list_members(research["research_id"], viewer="alice")
     workspaces = restored.list_workspaces(research["research_id"], viewer="alice")
-    assert [(item["principal_ref"], item["profile_ref"]) for item in members] == [
-        ("alice", "self"),
-    ]
-    assert [(item["principal_ref"], item["profile_ref"]) for item in workspaces] == [
-        ("alice", "self"),
-    ]
+    assert members == []
+    assert workspaces == []
+
+
+def test_schema_checks_do_not_rewrite_historical_acl_or_membership(tmp_path):
+    path = tmp_path / "research.sqlite"
+    catalog = ResearchCatalog(path)
+    research = catalog.create_research(owner_ref="alice", title="History")
+    ref = research["research_id"]
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE research_catalog_memberships SET status='revoked', updated_at=1 WHERE research_id=?", (ref,))
+        db.execute("UPDATE research_catalog_workspaces SET status='archived', updated_at=1 WHERE research_id=?", (ref,))
+        db.execute("INSERT INTO research_catalog_migrations VALUES ('old-publication', 'publication', 'p', 'alice', ?, 'completed', '', 1, 1)", (ref,))
+        before = {table: db.execute("SELECT * FROM " + table).fetchall() for table in
+                  ('research_catalog_researches', 'research_catalog_memberships', 'research_catalog_workspaces', 'research_catalog_migrations')}
+    for _ in range(2):
+        ResearchCatalog(path).list_researches(viewer="alice")
+    with sqlite3.connect(path) as db:
+        after = {table: db.execute("SELECT * FROM " + table).fetchall() for table in before}
+    assert after == before
 
 
 def test_report_binding_and_its_research_drive_evidence_access(tmp_path):
@@ -230,51 +244,16 @@ def test_owner_can_remove_report_and_profile_from_research(tmp_path):
     assert catalog.list_researches(viewer="alice") == []
 
 
-def test_share_links_grant_target_without_exposing_plain_token(tmp_path):
+def test_share_link_operations_require_keycloak(tmp_path):
+    from server.manager.services.research_catalog import KeycloakResearchSharingUnavailable, ResearchCatalog
     catalog = ResearchCatalog(tmp_path / "research.sqlite")
-    research = catalog.create_research(owner_ref="alice", title="研究")
-    report = catalog.register_report(
-        research["research_id"], actor="alice", report_id="report-one",
-    )
-    link = catalog.create_share_link(
-        target_kind="report", research_id=research["research_id"],
-        report_id=report["report_id"], actor="alice", mode="one_time",
-    )
-    grant = catalog.redeem_share_link(link["token"], actor="bob")
-    assert grant["report_id"] == report["report_id"]
-    assert catalog.list_reports_for_scope(viewer="bob", scope="shared")[0][
-        "access"
-    ]["can_download"] is False
-    with pytest.raises(PermissionError, match="already been redeemed"):
-        catalog.redeem_share_link(link["token"], actor="carol")
-    assert link["token"] not in (tmp_path / "research.sqlite").read_bytes().decode(
-        "utf-8", errors="ignore",
-    )
-
-
-def test_permanent_share_link_can_be_redeemed_by_multiple_users(tmp_path):
-    catalog = ResearchCatalog(tmp_path / "research.sqlite")
-    research = catalog.create_research(owner_ref="alice", title="研究")
-    link = catalog.create_share_link(
-        target_kind="research", research_id=research["research_id"],
-        actor="alice", mode="permanent",
-    )
-    catalog.redeem_share_link(link["token"], actor="bob")
-    catalog.redeem_share_link(link["token"], actor="carol")
-    assert catalog.get_research_summary(
-        research["research_id"], viewer="bob",
-    )["access"]["can_download"] is True
-    assert catalog.get_research_summary(
-        research["research_id"], viewer="carol",
-    )["access"]["can_download"] is True
-    listed = catalog.list_share_links(research["research_id"], actor="alice")
-    assert listed[0]["link_id"] == link["link_id"]
-    revoked = catalog.revoke_share_link(
-        research["research_id"], link["link_id"], actor="alice",
-    )
-    assert revoked["revoked_at"] > 0
-    with pytest.raises(KeyError, match="share link not found"):
-        catalog.redeem_share_link(link["token"], actor="dave")
+    for action in (
+        lambda: catalog.create_share_link(target_kind="research", research_id="r", actor="alice"),
+        lambda: catalog.redeem_share_link("token", actor="bob"),
+        lambda: catalog.revoke_share_link("r", "link", actor="alice"),
+    ):
+        with pytest.raises(KeycloakResearchSharingUnavailable):
+            action()
 
 
 def test_report_migration_is_explicit_and_idempotent(tmp_path):

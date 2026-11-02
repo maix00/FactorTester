@@ -20,7 +20,11 @@ struct PriceChartView: View {
             HStack {
                 Text("价格查看器").font(.headline)
                 Spacer()
+                #if os(macOS)
                 Toggle("Volume", isOn: $showVolume).toggleStyle(.checkbox)
+                #else
+                Toggle("Volume", isOn: $showVolume).toggleStyle(.switch)
+                #endif
             }
             GeometryReader { geometry in
                 let budget = PriceBarViewportSampler.barBudget(

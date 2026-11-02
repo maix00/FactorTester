@@ -22,7 +22,7 @@ from server.manager.storage.transfers.schema_telemetry import (
 )
 
 
-TRANSFER_SCHEMA_VERSION = 9
+TRANSFER_SCHEMA_VERSION = 10
 
 
 def _ensure_current_tables(connection: sqlite3.Connection) -> None:

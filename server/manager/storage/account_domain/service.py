@@ -101,27 +101,24 @@ class AccountDomainSyncService:
                 page = self.pull(principal=owner, limit=limit)
                 pulled = {**page,
                           'applied': pulled.get('applied', 0) + page.get('applied', 0),
-                          'conflicts': pulled.get('conflicts', 0) + page.get('conflicts', 0)}
+                          'conflicts': pulled.get('conflicts', 0) + page.get('conflicts', 0),
+                          'retired': pulled.get('retired', 0) + page.get('retired', 0)}
         # After pulling factor_source manifests, localize version history for any
         # source whose bytes are already present locally.  A receiver that never
         # authored the source still records its formula versions, so
         # factor_family_formula_versions converges across servers (body is pulled
         # lazily over the data plane; the fingerprint arrives via outbox).
         versioned = self.materialize_factor_source_versions(owner)
-        from .research_sync import materialize_pending_researches
-        research_materialized = materialize_pending_researches(self)
-        # A pull can rebase a disjoint research edit into a new pending CAS.
         final_state = self.local.sync_state(principal=owner)
         return {
             "status": "incomplete" if (final_state.get("pending") or flushed.get("pending") or flushed.get("offline") or flushed.get("blocked") or flushed.get("conflicts")
                                         or pulled.get("offline") or pulled.get("has_more")
-                                        or pulled.get("conflicts")) else "synced",
+                                        or pulled.get("conflicts") or pulled.get("retired")) else "synced",
             "principal": owner,
             "reconciled": reconciled,
             "flushed": flushed,
             "pulled": pulled,
             "versioned": versioned,
-            "research_materialized": research_materialized,
         }
 
     def materialize_factor_source_versions(self, principal: str = "") -> int:
@@ -180,55 +177,57 @@ class AccountDomainSyncService:
         return count
 
     def flush(self, *, principal: str = "", limit: int = 100) -> dict[str, Any]:
-        pending = self.local.pending(principal=principal, limit=limit)
+        target = max(1, min(int(limit), 1000))
+        pending = self.local.pending(principal=principal, limit=target)
         if not pending:
             return {"sent": 0, "conflicts": 0, **self.local.sync_state(principal=principal)}
         if self.control_store is None:
             return {"sent": 0, "pending": len(pending), "conflicts": 0, "offline": True}
         sent = conflicts = 0
-        for item in pending:
-            try:
-                outbound = item
-                if item["entity_type"] == "factor_param_config":
-                    from .factor_sync import compact_factor_config_payload
-                    outbound = {
-                        **item,
-                        "payload": compact_factor_config_payload(item["payload"]),
-                    }
-                receipt = self.control_store.push_account_domain_entity(
-                    principal=outbound["principal"],
-                    entity_type=outbound["entity_type"],
-                    entity_id=outbound["entity_id"],
-                    payload=outbound["payload"],
-                    deleted=outbound["deleted"],
-                    base_revision=outbound["base_revision"],
-                    origin_manager_id=self.manager_id,
-                    operation_id=outbound["operation_id"],
-                )
-                if str(receipt.get("status") or "") == "conflict":
-                    if self.local.record_push_conflict(item, receipt):
-                        continue
-                    conflicts += 1
-                    self.local.mark_attempt(item["operation_id"], "remote revision conflict")
+        seen: set[str] = set()
+        scan_budget = min(5000, max(1000, target * 10))
+        while pending and len(seen) < scan_budget and sent + conflicts < target:
+            for item in pending:
+                operation = item["operation_id"]
+                if operation in seen:
                     continue
-                self.local.acknowledge(
-                    item["operation_id"], revision=int(receipt.get("revision") or 0), sent_item=outbound,
-                )
-                sent += 1
-            except (TypeError, ValueError) as exc:
-                # A malformed entity must not starve unrelated valid writes.
-                # Preserve the rejected operation for repair and keep sending
-                # the remainder of this bounded batch.
-                self.local.mark_attempt(item["operation_id"], str(exc))
-                continue
-            except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError) as exc:
-                self.local.mark_attempt(item["operation_id"], str(exc))
-                return {
-                    "sent": sent,
-                    "pending": len(pending) - sent,
-                    "conflicts": conflicts,
-                    "offline": True,
-                }
+                seen.add(operation)
+                try:
+                    if item["entity_type"] == "research_catalog":
+                        self.local.mark_research_sync_review([operation])
+                        continue
+                    outbound = item
+                    if item["entity_type"] == "factor_param_config":
+                        from .factor_sync import compact_factor_config_payload
+                        outbound = {**item, "payload": compact_factor_config_payload(item["payload"])}
+                    receipt = self.control_store.push_account_domain_entity(
+                        principal=outbound["principal"], entity_type=outbound["entity_type"],
+                        entity_id=outbound["entity_id"], payload=outbound["payload"],
+                        deleted=outbound["deleted"], base_revision=outbound["base_revision"],
+                        origin_manager_id=self.manager_id, operation_id=outbound["operation_id"],
+                    )
+                    if str(receipt.get("status") or "") == "conflict":
+                        if self.local.record_push_conflict(item, receipt):
+                            continue
+                        conflicts += 1
+                        self.local.mark_attempt(operation, "remote revision conflict")
+                        continue
+                    self.local.acknowledge(operation, revision=int(receipt.get("revision") or 0), sent_item=outbound)
+                    sent += 1
+                except (TypeError, ValueError) as exc:
+                    # Preserve malformed rows without starving unrelated writes.
+                    self.local.mark_attempt(operation, str(exc))
+                except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError) as exc:
+                    self.local.mark_attempt(operation, str(exc))
+                    return {"sent": sent, "conflicts": conflicts, "offline": True,
+                            **self.local.sync_state(principal=principal)}
+                if sent + conflicts >= target or len(seen) >= scan_budget:
+                    break
+            if sent + conflicts >= target or len(seen) >= scan_budget:
+                break
+            batch_size = min(1000, target - sent - conflicts + len(seen))
+            pending = [item for item in self.local.pending(principal=principal, limit=batch_size)
+                       if item['operation_id'] not in seen]
         return {"sent": sent, "conflicts": conflicts, **self.local.sync_state(principal=principal)}
 
     def pull(self, *, principal: str, limit: int = 100) -> dict[str, Any]:
@@ -244,18 +243,15 @@ class AccountDomainSyncService:
             )
         except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
             return {"applied": 0, "conflicts": 0, "offline": True}
-        applied = conflicts = 0
+        applied = conflicts = retired = 0
         maximum = after
         for row in response.get("entities") or []:
             if not isinstance(row, dict):
                 continue
             maximum = max(maximum, int(row.get("revision") or 0))
             state = self.local.apply_remote(row)
-            if row.get('entity_type') == 'research_catalog' and state == 'applied':
-                from .research_sync import materialize_research
-                current = self.local.get_entity(row['principal'], row['entity_type'], row['entity_id'])
-                if current is not None:
-                    materialize_research(self.local.path, current)
+            if state == "retired":
+                retired += 1
             if row.get('entity_type') in {'strategy', 'strategy_revision'} and state != 'conflict':
                 from .strategy_sync import materialize_strategy
                 current = self.local.get_entity(row['principal'], row['entity_type'], row['entity_id'])
@@ -266,7 +262,7 @@ class AccountDomainSyncService:
             elif state == "conflict":
                 conflicts += 1
         self.local.advance_cursor(scope, max(maximum, int(response.get("next_revision") or maximum)))
-        return {"applied": applied, "conflicts": conflicts, "next_revision": maximum,
+        return {"applied": applied, "conflicts": conflicts, "retired": retired, "next_revision": maximum,
                 "has_more": len(response.get("entities") or []) >= limit}
 
     def entities(
@@ -415,8 +411,6 @@ class AccountDomainSyncService:
         count += backfill_factor_versions(self, owner)
         from .strategy_sync import backfill_strategies
         count += backfill_strategies(self, owner)
-        from .research_sync import backfill_researches
-        count += backfill_researches(self, owner)
         if count:
             self.flush(principal=owner)
         return count

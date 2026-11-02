@@ -190,6 +190,9 @@ def test_chunked_source_tracks_rolls_and_rejects_nonmonotonic_rows(tmp_path):
             "open_price": 102.935, "highest_price": 102.935,
             "lowest_price": 102.895, "close_price": 102.9,
             "volume": 1314.0, "open_interest": 189821.0,
+            # The daily settlement can be retrospectively backfilled into
+            # every minute; it is not available merely because the row has it.
+            "settlement_price": 103.2,
         })
     path = tmp_path / "T.CFE.parquet"
     pq.write_table(pa.Table.from_pylist(rows), path, row_group_size=1)
@@ -197,7 +200,20 @@ def test_chunked_source_tracks_rolls_and_rejects_nonmonotonic_rows(tmp_path):
     assert [type(event) for event in events] == [MarketBar, MarketBar, RollMarker, MarketBar]
     assert events[2].from_contract_uid == "CFFEX|F|T|2403"
     assert events[2].to_contract_uid == "CFFEX|F|T|2406"
+    assert events[2].effective_at_ns == events[3].clock.interval_open_ns
+    assert events[2].observed_at_ns == events[3].clock.available_at_ns
+    assert events[2].observed_at_ns > events[2].effective_at_ns
+    selected = list(iter_minute_bars(path, batch_size=1, continuous_product="T.CFE",
+                                    start_ns=events[3].clock.interval_end_ns))
+    assert selected == events[2:]
     assert events[0].clock.raw_unit == "ms"
+    assert all(event.settlement_price is None for event in events if isinstance(event, MarketBar))
+    # The ordinal counts all preceding rows; a different contract in that
+    # prefix would make the selected contract's sampling phase incorrect.
+    with pytest.raises(ValueError, match="different contract identity"):
+        list(iter_minute_bars(path, batch_size=1,
+            start_ns=events[3].clock.interval_end_ns,
+            expected_contract_uid="CFFEX|F|T|2406"))
     rows[2]["trade_time"] = rows[1]["trade_time"]
     rows[2]["trade_timestamp"] = rows[1]["trade_timestamp"]
     pq.write_table(pa.Table.from_pylist(rows), path)

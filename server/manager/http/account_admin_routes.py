@@ -100,9 +100,12 @@ class AccountAdministrationRoutesMixin:
 
         from server.identity.keycloak_directory import users_in_admin_scope
 
-        session = self._session()
+        session, is_super, managed_paths = self._identity_sync_admin_context()
         if session is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
+            return
+        if not is_super and not managed_paths:
+            json_response(self, {"success": False, "error": "Keycloak identity administration permission required"}, 403)
             return
         query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
         try:

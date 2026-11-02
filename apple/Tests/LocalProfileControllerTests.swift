@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 @MainActor
 final class LocalProfileControllerTests: XCTestCase {

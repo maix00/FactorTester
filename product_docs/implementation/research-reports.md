@@ -4,9 +4,9 @@
 
 ## 存储与发布 {#storage-publishing}
 
-authoring 后端维护当前可写树与提交事务；发布生成只读投影。SQLite 保存节点、定位与提交收据，避免大量小 JSON 文件成为权威存储。Git 记录报告工作区中需要审计的材料。
+authoring 后端维护当前可写树与提交事务；发布生成只读投影。本机报告使用内容寻址的树节点和 HEAD，SQLite 索引用于定位并可重建，Git 记录工作区变更。
 
-研究报告列表属于研究入口或具体 Research 页面；某份报告打开后才建立去重的独立标签页，并挂在对应 Research 之下。报告页面应恢复阅读位置和当前章节，但不能借此把 Research 嵌套到另一个 Research。
+研究入口和具体 Research 均可列出报告；列表的名称、所属研究和研究身份可以打开相应详情。电脑客户端的本机报告与 Manager 报告通过位置列区分。
 
 客户端创建的研究内容与服务器 Profile Agent 创建的内容共享同一结构化 authoring 和发布协议。共享/公开时只发布允许的投影：报告可读不等于文件可下载，Research 的共享范围才决定关联 Evidence/Artifact 的下载范围。
 
@@ -14,8 +14,9 @@ authoring 后端维护当前可写树与提交事务；发布生成只读投影�
 
 - 报告 authoring：`tools/cli/release/research_reporting/authoring/`
 - 报告展示服务：`server/services/research_report_presentations.py`
-- Manager 报告读取：`server/manager/http/server_research_routes.py`、`server/manager/http/client_research_routes.py`、`server/manager/http/public_research_routes.py`
-- Web 报告渲染：`server/manager/web/report/`
+- 本机目录与原生桥：`tools/cli/release/research_reporting/local_catalog.py`、`apple/Sources/Features/Web/LocalResearchBridge.swift`
+- Manager 报告与授权：`server/manager/http/research_catalog_routes.py`、`server/manager/services/research_couchdb_publication.py`
+- React 报告页面：`web/app/src/pages/research.tsx`、`web/app/src/components/local-research-page.tsx`
 
 ## 边界 {#boundaries}
 

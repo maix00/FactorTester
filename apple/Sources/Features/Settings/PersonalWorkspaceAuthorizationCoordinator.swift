@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Combine
 import Foundation
@@ -50,7 +51,7 @@ final class PersonalWorkspaceAuthorizationCoordinator: ObservableObject {
 enum PersonalWorkspaceAuthorizationPanel {
     static func present(suggestedRoot: URL) throws -> Bool {
         let panel = NSOpenPanel()
-        panel.title = L10n.text("选择 FactorTester 用户目录")
+        panel.title = L10n.text("选择 TradeResearch 用户目录")
         panel.message = L10n.text(
             "请选择当前用户目录，用于读取本地中文研究报告。"
         )
@@ -66,3 +67,5 @@ enum PersonalWorkspaceAuthorizationPanel {
         return true
     }
 }
+
+#endif

@@ -18,6 +18,10 @@ from .submission_gate import (
 from .submission_finalize import mark_submission_published
 
 
+class ReportVersionConflict(ValueError):
+    """The caller's report version no longer matches the current tree."""
+
+
 def mutate(
     paths: dict[str, Path],
     change: Callable[
@@ -70,7 +74,7 @@ def mutate_batch(
             previous.get(key) != expected_head.get(key)
             for key in ("report_id", "generation", "root_ref")
         ):
-            raise ValueError("report target version changed; rebuild the copy preview")
+            raise ReportVersionConflict("report target version changed; rebuild the copy preview")
         validate_publish_lease(paths, previous, submission)
         head = deepcopy(previous)
         root = load_node(paths, previous["root_ref"])

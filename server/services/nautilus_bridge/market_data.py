@@ -150,10 +150,22 @@ class MarketBar:
 
 @dataclass(frozen=True)
 class RollMarker:
+    """An observed change in a source's continuous-contract mapping.
+
+    ``effective_at_ns`` describes the first mapped interval, while
+    ``observed_at_ns`` is when that completed bar made the mapping observable.
+    Neither establishes when the underlying selection was announced; a
+    strategy must not execute based on this observation before it is available.
+    """
     continuous_product: str
     from_contract_uid: str
     to_contract_uid: str
     effective_at_ns: int
+    observed_at_ns: int
+
+    def __post_init__(self) -> None:
+        if self.observed_at_ns < self.effective_at_ns:
+            raise ValueError("roll observation precedes its effective interval")
 
 
 def _decimal(value: object, column: str, *, optional: bool = False) -> Decimal | None:
@@ -172,12 +184,17 @@ def iter_minute_bars(
     path: str | Path, *, raw_unit: SourceTimeUnit = "validated",
     batch_size: int = 2048, start_ns: int | None = None, end_ns: int | None = None,
     continuous_product: str | None = None,
+    expected_contract_uid: str | None = None,
 ) -> Iterator[MarketBar | RollMarker]:
     """Read small Arrow batches; emit exact unadjusted bars and roll boundaries.
 
     This avoids a second full pandas/NumPy market matrix.  Its caller must
     likewise use a bounded catalog/write pipeline; ``BacktestEngine.add_data``
     may retain a full list and is not a memory-bounded consumer.
+
+    Do not infer the availability of daily settlement from a minute row: some
+    historical sources backfill a day's final settlement into every minute.
+    Settlement needs a separately timed, authoritative event.
     """
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
@@ -203,17 +220,23 @@ def iter_minute_bars(
     ):
         for row in batch.to_pylist():
             row_number += 1
+            uid = str(row["contract_uid"] or "")
             clock = minute_clock(row["trade_time"], int(row["trade_timestamp"]), raw_unit=raw_unit)
             if previous_time is not None and clock.interval_end_ns <= previous_time:
                 raise ValueError(f"out-of-order or duplicate bar at source row {row_number}")
             previous_time = clock.interval_end_ns
-            if start_ns is not None and clock.interval_end_ns < start_ns:
-                continue
             if end_ns is not None and clock.interval_end_ns > end_ns:
                 return
-            uid = str(row["contract_uid"] or "")
+            if expected_contract_uid is not None and uid != expected_contract_uid:
+                raise ValueError(f"source row {row_number} has a different contract identity")
+            if start_ns is not None and clock.interval_end_ns < start_ns:
+                # Retain only the previous mapping so a change on the first
+                # selected bar is not silently lost. No pre-window bar is emitted.
+                previous_uid = uid
+                continue
             if continuous_product and previous_uid and uid != previous_uid:
-                yield RollMarker(continuous_product, previous_uid, uid, clock.interval_open_ns)
+                yield RollMarker(continuous_product, previous_uid, uid,
+                                 clock.interval_open_ns, clock.available_at_ns)
             previous_uid = uid
             yield MarketBar(
                 contract_uid=uid, instrument_code=str(row["instrument_id"] or ""),

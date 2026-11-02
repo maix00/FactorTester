@@ -71,7 +71,8 @@ def main() -> int:
                 identity = keycloak_session(token)
                 raise SystemExit(f"Manager session verification failed (HTTP {response.status}, browser_http={browser_status}, cookie_present={has_session}, token_bytes={len(token)}, introspection_valid={identity is not None}, public_allowed={may_login_public_server(identity)})")
             session = response.json()
-            if (session.get("username") != username or not session.get("keycloak_subject")
+            expected_principal = os.environ.get("KEYCLOAK_EXPECTED_PRINCIPAL", username)
+            if (session.get("username") != expected_principal or not session.get("keycloak_subject")
                     or not session.get("keycloak_issuer") or session.get("visitor_login")):
                 raise SystemExit("Manager returned no matching Keycloak user session")
             expected_role = os.environ.get("KEYCLOAK_EXPECTED_ROLE")
@@ -86,6 +87,46 @@ def main() -> int:
                 checks.append("administrator_directory")
             else:
                 checks.append("administrator_denied")
+            expectations_path = os.environ.get('KEYCLOAK_RESEARCH_EXPECTATIONS')
+            if expectations_path:
+                # A separately reviewed migration allow-set, not an owner-name
+                # heuristic. List reads may schedule the normal lazy refresh.
+                from scripts.migrations.keycloak_research_stage import _read_private_json
+                expected = _read_private_json(expectations_path)
+                if (not isinstance(expected, dict) or expected.get('schema') != 'tr-research-browser-parity-v1'
+                        or expected.get('identity_id') != session.get('tr_identity_id')):
+                    raise SystemExit('Research expectations belong to another identity')
+                for endpoint, field, ref_key, expected_key in (
+                    ('/api/research?scope=all', 'researches', 'research_id', 'research_refs'),
+                    ('/api/research/reports?scope=all', 'reports', 'report_id', 'report_refs'),
+                ):
+                    wanted = expected.get(expected_key)
+                    if (not isinstance(wanted, list) or any(not isinstance(ref, str) or not ref for ref in wanted)
+                            or len(set(wanted)) != len(wanted)):
+                        raise SystemExit('Invalid reviewed Research allow-set')
+                    response = context.request.get(manager + endpoint)
+                    if response.status != 200:
+                        raise SystemExit(f'Research list failed (HTTP {response.status})')
+                    rows = response.json().get(field)
+                    if not isinstance(rows, list) or any(not isinstance(row, dict) or not row.get(ref_key) for row in rows):
+                        raise SystemExit('Research list omitted identities')
+                    refs = [row[ref_key] for row in rows]
+                    if len(set(refs)) != len(refs) or set(refs) != set(wanted):
+                        raise SystemExit(f'Research allow-set mismatch (list={field}, missing={len(set(wanted)-set(refs))}, unexpected={len(set(refs)-set(wanted))})')
+                    checks.append(f'{field}_ref_set_verified:{len(refs)}')
+                page.locator('.tr-module-nav button').filter(has_text=re.compile(r'^(研究|Research)$')).click()
+                page.locator('.tr-research-page .ant-table-tbody').wait_for()
+                page.locator('.tr-research-page .ant-spin-spinning').wait_for(state='hidden')
+                leaked = page.locator('.tr-tab-layer[aria-hidden="true"] button, .tr-tab-layer[aria-hidden="true"] input').evaluate_all('''nodes => nodes.some(node => {
+                    const style=getComputedStyle(node),rect=node.getBoundingClientRect();
+                    return rect.width>0 && rect.height>0 && style.visibility!=='hidden' && style.display!=='none';
+                })''')
+                if leaked:
+                    raise SystemExit('Inactive Dockview controls overlap the Research page')
+                screenshot = os.environ.get('KEYCLOAK_RESEARCH_SCREENSHOT')
+                if screenshot:
+                    page.screenshot(path=screenshot)
+                checks.append('react_research_table')
             for variable, expected in [('KEYCLOAK_ALLOWED_USER_ID', 200),
                                        ('KEYCLOAK_DENIED_USER_ID', 403)]:
                 target = os.environ.get(variable)
@@ -111,6 +152,28 @@ def main() -> int:
                     if keycloak_authorized(token, resource_id=resource_id, scope="read") != expected:
                         raise SystemExit("Keycloak object ownership boundary failed")
                     checks.append("object_allowed" if expected else "object_denied")
+            inventory_path = os.environ.get("KEYCLOAK_RESOURCE_INVENTORY")
+            if inventory_path:
+                # This owner-only check detects accidentally public resources;
+                # it does not represent historical sharing/hierarchy parity.
+                from pathlib import Path
+                from collections import defaultdict
+                from server.identity.keycloak_authorization import keycloak_authorized_objects
+                inventory = json.loads(Path(inventory_path).read_text())
+                by_type = defaultdict(list)
+                expected = set()
+                for index, resource in enumerate(inventory):
+                    by_type[resource["resource_type"]].append((resource["resource_ref"], index))
+                    if resource["owner_subject"] == session["keycloak_subject"]:
+                        expected.add(index)
+                token = next(c["value"] for c in context.cookies(manager) if c["name"] == "ft-manager-session")
+                actual = set()
+                for resource_type, refs in by_type.items():
+                    actual.update(keycloak_authorized_objects(
+                        token, resource_type=resource_type, refs=refs, scope="read"))
+                if actual != expected:
+                    raise SystemExit(f"Existing object permission mismatch (missing={len(expected-actual)}, unexpected={len(actual-expected)})")
+                checks.append(f"owner_only_inventory_verified:{len(inventory)}")
             logout = context.request.post(manager + "/auth/logout", headers={"Origin": manager})
             if logout.status != 200:
                 raise SystemExit(f"Manager logout failed (HTTP {logout.status})")
@@ -131,4 +194,7 @@ if __name__ == "__main__":
     except Exception as exc:
         # Playwright exceptions can contain authorization URLs and cookies.
         # Keep only a safe failure category in the public acceptance output.
-        raise SystemExit(f"Browser acceptance failed: {type(exc).__name__}") from None
+        cause = exc.__cause__
+        status = getattr(cause, "code", None)
+        suffix = f" (upstream HTTP {status})" if isinstance(status, int) else ""
+        raise SystemExit(f"Browser acceptance failed: {type(exc).__name__}{suffix}") from None

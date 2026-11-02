@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct ClientSettingsHub: View {
@@ -79,7 +80,7 @@ private struct ClientAdapterSettingsView: View {
     var body: some View {
         SettingsPageShell(
             title: "本地适配器",
-            subtitle: "启动并打开安装在本机的 FactorTester 组件",
+            subtitle: "启动并打开安装在本机的 TradeResearch 组件",
             systemImage: "shippingbox.and.arrow.backward"
         ) {
             SettingsSectionCard("本地适配器") {
@@ -129,7 +130,7 @@ private struct SettingsLanguageView: View {
     var body: some View {
         SettingsPageShell(
             title: "语言",
-            subtitle: "选择 FTClient 的界面语言",
+            subtitle: "选择 TradeResearch 的界面语言",
             systemImage: "globe"
         ) {
             SettingsSectionCard("界面语言") {
@@ -155,3 +156,5 @@ private struct SettingsLanguageView: View {
         }
     }
 }
+
+#endif

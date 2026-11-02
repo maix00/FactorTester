@@ -7,12 +7,18 @@ container_root="${3:-${FACTORTESTER_REMOTE_CONTAINER_ROOT:-/opt/factortester-con
 production_env="${4:-${FACTORTESTER_REMOTE_PUBLIC_ENV:-/etc/factortester-container/public.env}}"
 release_retention="${5:-${FACTORTESTER_PUBLIC_RELEASE_RETENTION:-3}}"
 native_build_id="${6:-}"
+prepare_only="${7:-0}"
 release_root="$container_root/releases"
 release_path="$release_root/$revision"
 next_env="$production_env.next-$revision"
 rollback_env="$production_env.before-$revision"
 deployment_log="$git_root/deployments.log"
 publish_lock="$git_root/.publish.lock"
+
+[[ "$prepare_only" == "0" || "$prepare_only" == "1" ]] || {
+  echo "prepare-only must be 0 or 1" >&2
+  exit 2
+}
 
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || {
   echo "revision must be a full Git SHA" >&2
@@ -165,9 +171,27 @@ else
   echo "FACTORTESTER_PUBLIC_CACHE_FROM=factortester-public:$old_revision" \
     | sudo tee -a "$next_env" >/dev/null
 fi
-bash "$release_path/scripts/server/check_public_build_capacity.sh"
+cache_plan="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  TR_PUBLIC_PYTHON_SOURCE_ROOT="$release_root/$old_revision" \
+  TR_PUBLIC_PYTHON_SOURCE_IMAGE="$current_image" \
+  TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
+  bash "$public_script" python-cache-plan)"
+snapshot_mib="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["snapshot_mib"])' <<< "$cache_plan")"
+sudo bash "$release_path/scripts/server/check_public_build_capacity.sh" \
+  --cache-root "$container_root/python-deps-cache" --snapshot-mib "$snapshot_mib"
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  TR_PUBLIC_PYTHON_SOURCE_ROOT="$release_root/$old_revision" \
+  TR_PUBLIC_PYTHON_SOURCE_IMAGE="$current_image" \
+  TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
   bash "$public_script" build factortester-public
+if [[ "$prepare_only" == "1" ]]; then
+  # The new immutable source/image is available for reviewed migration jobs.
+  # Keep the running application and its configuration untouched. Activation
+  # repeats the version/cache checks and obtains a new backup before stopping it.
+  printf '{"status":"prepared","revision":"%s","native_build_id":"%s","application_activated":false}\n' \
+    "$revision" "$native_build_id"
+  exit 0
+fi
 postgres_before="$(
   sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
     bash "$public_script" container-id postgresql-control
@@ -300,6 +324,11 @@ postgres_after="$(sudo docker inspect --format '{{.Id}}' "$postgres_after")"
 
 switched=0
 trap - ERR INT TERM
+if ! sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+  TR_PUBLIC_PYTHON_CACHE_ROOT="$container_root/python-deps-cache" \
+  bash "$public_script" python-cache-promote; then
+  echo "Warning: Python dependency cache promotion failed; the verified application remains online" >&2
+fi
 if ! sudo rm -f "$next_env"; then
   echo "Warning: candidate release configuration was retained" >&2
 fi

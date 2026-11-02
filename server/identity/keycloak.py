@@ -7,6 +7,7 @@ interface so a fake adapter can drive permission tests without Keycloak.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import urllib.error
 from typing import Any, Protocol
 
 
@@ -743,6 +744,28 @@ def oidc_logout_url(
     )
 
 
+def _missing_uma_resource(exc, resource_format: str, candidates: set[str]) -> str | None:
+    """Recognize only Keycloak's exact missing-resource error for this request."""
+    import json
+
+    if exc.code != 400 or resource_format not in {"uri", "id"}:
+        return None
+    try:
+        raw = exc.read(16 * 1024 + 1)
+        if len(raw) > 16 * 1024:
+            return None
+        payload = json.loads(raw)
+    except (OSError, TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("error") != "invalid_resource":
+        return None
+    description = payload.get("error_description")
+    for resource in candidates:
+        if description == f"Resource with {resource_format} [{resource}] does not exist.":
+            return resource
+    return None
+
+
 class ServiceOIDCClient(OIDCClient):
     """Keycloak service grants and introspection; no local JWT verifier."""
     def _token(self, form: dict) -> dict:
@@ -770,6 +793,14 @@ class ServiceOIDCClient(OIDCClient):
             "client_id": self.client_id, "subject_token": token,
             "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
             "audience": audience, **({"scope": scope} if scope else {})})
+
+    def jwt_authorization_grant(self, assertion: str, *, scope: str = "") -> dict:
+        """Exchange an IdP-trusted, audience-bound JWT for a local token."""
+        if not isinstance(assertion, str) or not assertion or len(assertion) > 32768:
+            raise ValueError("JWT authorization assertion is invalid")
+        return self._token({"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "client_id": self.client_id, "assertion": assertion,
+            **({"scope": scope} if scope else {})})
 
     def authorize(self, token: str, *, audience: str, resource_id: str,
                   scope: str, timeout: float | None = None) -> bool:
@@ -808,7 +839,7 @@ class ServiceOIDCClient(OIDCClient):
             with FederationTransport().open(request, timeout=timeout or self.timeout) as response:
                 raw = response.read(16 * 1024 + 1)
         except HTTPError as exc:
-            if exc.code in {400, 401, 403}:
+            if exc.code == 403 or _missing_uma_resource(exc, "id", {resource_id}):
                 return False
             raise
         if len(raw) > 16 * 1024:
@@ -860,38 +891,46 @@ class ServiceOIDCClient(OIDCClient):
         granted: set[tuple[str, str]] = set()
         for offset in range(0, len(normalized), 64):
             batch = normalized[offset:offset + 64]
-            names_by_resource = {resource_name: resource for resource, resource_name, _ in batch}
-            form: list[tuple[str, str]] = [
-                ("grant_type", "urn:ietf:params:oauth:grant-type:uma-ticket"),
-                ("audience", audience),
-                ("permission_resource_format", resource_format),
-                ("permission_resource_matching_uri", "false"),
-                ("response_include_resource_name", "true"),
-                ("response_mode", "permissions"),
-            ]
-            form.extend(
-                ("permission", f"{resource}#{scope}")
-                for resource, _name, scope in batch
-            )
-            request = Request(
-                f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/token",
-                data=urllib.parse.urlencode(form).encode(),
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Authorization": f"Bearer {token}",
-                },
-                method="POST",
-            )
-            try:
-                with FederationTransport().open(request, timeout=timeout or self.timeout) as response:
-                    raw = response.read(64 * 1024 + 1)
-            except HTTPError as exc:
-                if exc.code == 403:
-                    # All requested permissions in this batch were denied.
-                    continue
-                if exc.code == 401:
-                    return set()
-                raise
+            # Keycloak rejects a whole UMA request when any one requested URI
+            # is absent. Remove only the exact URI identified by a verified
+            # invalid_resource response; at least one distinct URI disappears
+            # each retry, so a 64-permission batch cannot retry unboundedly.
+            while batch:
+                names_by_resource = {resource_name: resource for resource, resource_name, _ in batch}
+                form: list[tuple[str, str]] = [
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:uma-ticket"),
+                    ("audience", audience),
+                    ("permission_resource_format", resource_format),
+                    ("permission_resource_matching_uri", "false"),
+                    ("response_include_resource_name", "true"),
+                    ("response_mode", "permissions"),
+                ]
+                form.extend(("permission", f"{resource}#{scope}")
+                            for resource, _name, scope in batch)
+                request = Request(
+                    f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/token",
+                    data=urllib.parse.urlencode(form).encode(),
+                    headers={"Content-Type": "application/x-www-form-urlencoded",
+                             "Authorization": f"Bearer {token}"},
+                    method="POST",
+                )
+                try:
+                    with FederationTransport().open(request, timeout=timeout or self.timeout) as response:
+                        raw = response.read(64 * 1024 + 1)
+                    break
+                except HTTPError as exc:
+                    if exc.code == 403:
+                        # All remaining permissions in this batch were denied.
+                        batch = []
+                        break
+                    missing = _missing_uma_resource(
+                        exc, resource_format, {resource for resource, _name, _scope in batch},
+                    )
+                    if missing is None:
+                        raise
+                    batch = [item for item in batch if item[0] != missing]
+            if not batch:
+                continue
             if len(raw) > 64 * 1024:
                 raise ValueError("Keycloak authorization response exceeds budget")
             rows = json.loads(raw)

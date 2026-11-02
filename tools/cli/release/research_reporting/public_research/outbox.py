@@ -105,25 +105,6 @@ class PublicResearchOutbox:
             })
         return operation_id
 
-    def enqueue_revoke(self, *, publication_id: str) -> str:
-        publication_id = _required(publication_id, "publication_id")
-        operation_id = _operation_id("revoke", publication_id, "")
-        operation_dir = self.root / operation_id
-        with self._locked():
-            operation_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            atomic_json(operation_dir / "manifest.json", {
-                "schema_version": SCHEMA_VERSION,
-                "operation_id": operation_id,
-                "kind": "revoke",
-                "state": "pending",
-                "publication_id": publication_id,
-                "attempts": 0,
-                "created_at": time.time(),
-                "updated_at": time.time(),
-                "last_error": "",
-            })
-        return operation_id
-
     def pending(self) -> list[dict[str, Any]]:
         """Return pending manifests without reading report or object bytes."""
         if not self.root.is_dir():

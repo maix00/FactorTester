@@ -42,12 +42,15 @@ def describe_client(
     if not _CLIENT_HINT_RE.fullmatch(hint):
         hint = ""
 
-    native = re.search(r"FactorTester-Swift/([0-9.]+)", agent)
+    native = re.search(r"(?:FactorTester|TradeResearch)-Swift/([0-9.]+)", agent)
+    if hint == "mobile":
+        version = native.group(1) if native else ""
+        return {"client_type": "mobile", "client_name": f"TradeResearch Mobile {version}".strip()}
     if hint == "swift" or native:
         version = native.group(1) if native else ""
         return {
             "client_type": "swift",
-            "client_name": f"FactorTester Swift {version}".strip(),
+            "client_name": f"TradeResearch Swift {version}".strip(),
         }
 
     for pattern, label in _CLIENT_PATTERNS:

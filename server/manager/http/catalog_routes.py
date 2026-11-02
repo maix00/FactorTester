@@ -6,6 +6,7 @@ import re
 import sys
 from urllib.parse import parse_qs, unquote
 
+from server.identity.server_admission import current_manager_role
 from server.manager.http.product_library_routes import (
     PRODUCT_LIBRARY_PREFIX,
     product_library_page,
@@ -965,7 +966,7 @@ class CatalogRoutesMixin:
                     new_category_id=payload.get("id"),
                     is_super_admin=(
                         session is not None
-                        and str(session.get("role") or "") == "super_admin"
+                        and current_manager_role(session, "admin_console:manage")
                     ),
                 )
                 if category is None:
@@ -1145,7 +1146,8 @@ class CatalogRoutesMixin:
         try:
             if method == "POST" and parsed.path == "/api/test-authoring/execution-plan/resolve":
                 from server.manager.services.execution_plan_resolution import resolve
-                value = resolve(self.state, owner=principal, request=self._json_body(1024*1024))
+                value = resolve(self.state, owner=principal, request=self._json_body(1024*1024),
+                                delegated_user_token=self._bearer_token())
                 json_response(self, value)
                 return True
             selected_manager = parse_qs(parsed.query).get("server_id", [self.state.server_id])[0]
@@ -1154,18 +1156,20 @@ class CatalogRoutesMixin:
                 from server.modules.single_factor_test.execution_nodes import peer_execution_route
                 route = peer_execution_route(self.state, selected_manager)
                 if method == "GET":
-                    value = self.state.federation_gateway.public_data(route, kind="execution", operation="targets", principal=principal)
+                    value = self.state.federation_gateway.public_data(route, kind="execution", operation="targets",
+                        principal=principal, delegated_user_token=self._bearer_token())
                 else:
                     from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
                     payload = self._json_body(1024*1024)
                     payload.pop(MANAGER_RUN_CONTEXT_KEY, None)
-                    directory = self.state.federation_gateway.public_data(route, kind="execution", operation="targets", principal=principal)
+                    directory = self.state.federation_gateway.public_data(route, kind="execution", operation="targets",
+                        principal=principal, delegated_user_token=self._bearer_token())
                     payload["_execution_capability_directory"] = directory["targets"]
                     payload[MANAGER_RUN_CONTEXT_KEY] = self.state.test_authoring.prepare_run_context(
                         payload, owner=principal, strategy_library=self.state.test_authoring.strategy_library)
                     value = self.state.federation_gateway.public_data(route, kind="execution",
                         operation="preview" if parsed.path.endswith("preview") else "submit",
-                        principal=principal, payload={"request": payload})
+                        principal=principal, payload={"request": payload}, delegated_user_token=self._bearer_token())
                     json_response(self, value["response"], int(value["status"]))
                     return True
                 json_response(self, {"success": True, **value})

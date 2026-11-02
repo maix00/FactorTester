@@ -92,8 +92,8 @@ def _insert_transfer(connection, value: TransferRecord) -> None:
             request_owner_manager_id, source_server_id, destination_server_id,
             storage_server_id, job_id, artifact_name, expected_size,
             expected_sha256, content_type, attempt, created_at, updated_at,
-            expires_at, object_kind, object_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            expires_at, object_kind, object_id, principal_identity_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             value.transfer_id, value.idempotency_key, value.operation.value,
@@ -104,6 +104,7 @@ def _insert_transfer(connection, value: TransferRecord) -> None:
             value.attempt, value.created_at, value.updated_at,
             value.expires_at,
             value.object_kind, value.object_id,
+            value.principal_identity_id,
         ),
     )
 
@@ -148,6 +149,7 @@ def _same_transfer(row, value: TransferRecord) -> bool:
         and float(row["expires_at"]) == value.expires_at
         and str(row["object_kind"] or "job_artifact") == value.object_kind
         and str(row["object_id"] or "") == value.object_id
+        and str(row["principal_identity_id"] or "") == value.principal_identity_id
     )
 
 

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+
 from server.manager.http import agent_routes
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_profiles import AgentProfileService
@@ -27,6 +28,16 @@ from server.manager.storage.profile_runtime_store import (
 
 PRINCIPAL = "GTHT@MaxJJW@1234"
 PROFILE_ID = "profile-main"
+
+
+@pytest.fixture(autouse=True)
+def _stub_live_agent_role_for_runtime_tests(monkeypatch):
+    """Runtime tests use a stub; separate integration tests exercise Keycloak."""
+    from server.identity import server_admission
+    monkeypatch.setattr(
+        server_admission, "current_manager_role",
+        lambda session, role: role in session.get("keycloak_roles", ()),
+    )
 
 
 def test_provider_token_is_encrypted_and_server_urls_are_restricted(tmp_path):
@@ -618,7 +629,7 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
         payload={
             "label": "provider",
@@ -641,7 +652,7 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
     )
     assert listing._get_agent_routes(urlparse("/api/client/agent-models")) is True
@@ -674,7 +685,7 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
     )
     provider_id = response["provider"]["provider_id"]
@@ -733,6 +744,41 @@ def test_agent_routes_deny_all_agent_operations_without_assistant_permission(
     assert _route_payload(runtime)["code"] == "permission_denied"
 
 
+def test_agent_route_denies_a_revoked_role_even_if_token_still_has_it(tmp_path, monkeypatch):
+    from server.identity import server_admission
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    monkeypatch.setattr(server_admission, "current_manager_role", lambda *_args: False)
+    handler = _AgentRouteHandler(service, session={
+        "username": PRINCIPAL, "keycloak_roles": ("agent_assistant:internal:use",),
+    })
+    assert handler._get_agent_routes(urlparse("/api/client/agent-models")) is True
+    assert handler.response_status == 403
+    assert _route_payload(handler)["code"] == "permission_denied"
+
+
+def test_force_release_rejects_revoked_admin_even_when_assistant_is_allowed(tmp_path, monkeypatch):
+    from server.identity import server_admission
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    monkeypatch.setattr(server_admission, "current_manager_role",
+                        lambda _session, role: role == "agent_assistant:internal:use")
+    handler = _AgentRouteHandler(service, session={
+        "username": PRINCIPAL, "role": "super_admin",
+        "keycloak_roles": ("agent_assistant:internal:use", "admin_console:manage"),
+    }, payload={"claim_id": "claim", "force": True})
+    assert handler._post_agent_routes(urlparse("/api/client/profile-claims/release"))
+    assert handler.response_status == 403
+
+
 def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path, monkeypatch):
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
@@ -745,7 +791,7 @@ def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path, mon
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
         payload={
             "label": "provider",
@@ -797,7 +843,7 @@ def test_agent_provider_listing_never_contacts_upstream_providers(
         service,
         session={
             "username": PRINCIPAL, "role": "user",
-            "keycloak_roles": ("agent_assistant:use",),
+            "keycloak_roles": ("agent_assistant:internal:use",),
         },
     )
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import os
 
-from flask import Flask, request, session
+from flask import Flask, g, request, session
 
 from server.manager.http.visitor_access import (
     VISITOR_PRINCIPAL_PREFIX,
@@ -50,5 +50,8 @@ def install_manager_gateway_auth(app: Flask) -> None:
         # account database a second identity authority or scan every account
         # on each proxied request.
         if len(owner) <= 256 and not any(ord(char) < 32 for char in owner):
+            # Do not trust a previously persisted Flask session on subsequent
+            # requests: the Manager capability must be verified each time.
+            g.manager_gateway_principal = owner
             session["username"] = owner
             session["manager_gateway"] = True

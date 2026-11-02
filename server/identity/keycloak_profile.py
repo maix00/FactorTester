@@ -1,13 +1,17 @@
 """Admin-owned identity attributes and their OIDC claim mappings.
 
-Realm Groups/roles remain the authority for permissions. These attributes
-only carry stable object-owner and directory references through login.
+Keycloak remains the authority for permissions. These attributes carry stable
+owner/directory references; the deployed Keycloak Research hierarchy policy
+reads current admin-owned parent attributes. Manager must not authorize from
+the parent reference copied into an older login token.
 """
 from __future__ import annotations
 
+from server.permissions.roles import DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE
+
 MANAGER_ROLES = (
     'admin_console:read', 'admin_console:manage', 'public_server:login',
-    'factor:develop', 'agent_assistant:use',
+    'factor:develop', 'agent_assistant:public:use', 'agent_assistant:internal:use', DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE,
 )
 
 

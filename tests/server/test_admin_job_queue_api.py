@@ -19,6 +19,10 @@ def _client(monkeypatch, tmp_path, *, role: str):
         "server.identity.keycloak_authorization.keycloak_request_credentials",
         lambda: ("test-token", "subject-root", "root"),
     )
+    monkeypatch.setattr(
+        "server.identity.server_admission.current_manager_role",
+        lambda identity, name: role == "super_admin" and name in identity.get("keycloak_roles", ()),
+    )
     app = Flask(__name__)
     app.secret_key = "test"
 
@@ -28,6 +32,10 @@ def _client(monkeypatch, tmp_path, *, role: str):
             "username": "root",
             "keycloak_roles": ("admin_console:manage",) if role == "super_admin" else (),
         }
+        monkeypatch.setattr(
+            "server.services.session_runtime._keycloak_request_session",
+            lambda: g.keycloak_user_session,
+        )
 
     app.register_blueprint(admin_bp)
     client = app.test_client()
@@ -60,6 +68,8 @@ def _create_job(repository: JobRepository, *, job_id: str, owner: str, updated_a
         job_id=job_id,
         run_id=f"run-{job_id}",
         owner=owner,
+        owner_issuer="https://identity.example/realms/test",
+        owner_subject=f"subject:{owner}",
         workspace_id=f"workspace-{owner}",
         kind="backtest",
         status=JobStatus.SUBMITTED,
@@ -113,6 +123,18 @@ def test_super_admin_can_read_a_bounded_global_job_summary(tmp_path, monkeypatch
     assert "/Users/" not in serialized
     assert "source_revision" not in serialized
     assert "runner_path" not in serialized
+
+
+def test_revoked_admin_cannot_read_global_jobs_with_old_token(tmp_path, monkeypatch):
+    client = _client(monkeypatch, tmp_path, role="super_admin")
+    allowed = {"current": True}
+    monkeypatch.setattr(
+        "server.identity.server_admission.current_manager_role",
+        lambda identity, name: allowed["current"] and name in identity.get("keycloak_roles", ()),
+    )
+    assert client.get("/admin/api/jobs").status_code == 200
+    allowed["current"] = False
+    assert client.get("/admin/api/jobs").status_code == 403
 
 
 @pytest.mark.parametrize("role", ["user", "developer", "level_admin", "org_admin"])

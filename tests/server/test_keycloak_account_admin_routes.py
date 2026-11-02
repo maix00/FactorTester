@@ -124,6 +124,9 @@ def test_admin_identity_directory_uses_keycloak_projection_and_limits_fields(mon
                 ],
             }
 
+        def _identity_sync_admin_context(self):
+            return self._session(), False, {"/traderesearch/organizations/org-x"}
+
     def directory(**kwargs):
         assert kwargs["groups"] == Handler()._session()["keycloak_groups"]
         assert kwargs["roles"] == ()

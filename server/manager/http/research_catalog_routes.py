@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import re
 from typing import Any
 from urllib.parse import parse_qs, unquote
 
 from server.manager.http.responses import json_response
 from .research_branch_routes import ResearchBranchRoutesMixin
+from cryptography.fernet import Fernet, InvalidToken
+
+# Opaque, process-local cursors cannot reveal IDs of denied rows. A Manager
+# restart invalidates them; clients restart their scan without deleting data.
+_OWNED_SYNC_CURSOR = Fernet(Fernet.generate_key())
 
 
 class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
@@ -18,6 +26,14 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         if service is None:
             raise RuntimeError("Research catalog is unavailable")
         return service
+
+    def _research_couch_service(self, *, local=False):
+        from server.manager.services.research_couchdb_publication import ResearchCouchPublicationService, report_store_from_environment
+        store = report_store_from_environment()
+        if local:
+            from server.manager.services.local_report_publication import LocalReportPublicationService
+            return LocalReportPublicationService(state=self.state, store=store)
+        return ResearchCouchPublicationService(state=self.state, catalog=self._research_catalog_service(), store=store)
 
     def _refresh_research_catalog(self, principal: str) -> None:
         client = getattr(self.state, "client_state", None)
@@ -38,15 +54,26 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         return value
 
     def _research_catalog_error(self, exc: Exception) -> None:
-        if isinstance(exc, PermissionError):
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        from server.manager.services.research_catalog import (
+            KeycloakResearchCreationUnavailable, KeycloakResearchSharingUnavailable,
+        )
+        code = None
+        if isinstance(exc, KeycloakResearchCreationUnavailable):
+            status, code = 409, "keycloak_research_creation_unavailable"
+        elif isinstance(exc, KeycloakResearchSharingUnavailable):
+            status, code = 409, "keycloak_sharing_unavailable"
+        elif isinstance(exc, AuthorizationUnavailable):
+            status = 503
+        elif isinstance(exc, PermissionError):
             status = 403
-        elif isinstance(exc, KeyError):
+        elif isinstance(exc, LookupError):
             status = 404
         elif isinstance(exc, (TypeError, ValueError)):
             status = 400
         else:
             status = 500
-        json_response(self, {"success": False, "error": str(exc)}, status)
+        json_response(self, {"success": False, "error": str(exc), **({"code": code} if code else {})}, status)
 
     def _get_research_catalog_routes(self, parsed) -> bool:
         if not self._is_research_catalog_path(parsed.path):
@@ -55,15 +82,210 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         if session is None:
             return True
         viewer = str(session["username"])
-        self._refresh_research_catalog(viewer)
-        service = self._research_catalog_service()
+        publication = re.fullmatch(
+            r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication"
+            r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource|report_authoring)/([^/]+))?)?",
+            parsed.path,
+        )
+        local_publication = re.fullmatch(
+            r"/api/research/local-report-publication"
+            r"(?:/(p-[0-9a-f]{64})(?:/attachments/(research_asset|research_attachment|research_local_resource|report_authoring)/([^/]+))?)?",
+            parsed.path,
+        )
+        local_grants = parsed.path == '/api/research/local-report-publication/grants'
+        local_discovery = parsed.path == '/api/research/owned-local-report-sync'
+        if publication is None and local_publication is None and not local_grants and not local_discovery and parsed.path not in {'/api/research/owned-sync', '/api/research/owned-report-sync'}:
+            self._refresh_research_catalog(viewer)
+        service = None if local_publication or local_grants or local_discovery else self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
-            if self._get_report_branch_route(parsed, viewer):
+            if local_discovery:
+                if set(query) - {'cursor', 'limit'} or any(len(query.get(key, [])) > 1 for key in ('cursor', 'limit')):
+                    raise ValueError('invalid local Report synchronization query')
+                stable_id = str(session.get('tr_identity_id') or '')
+                if not stable_id:
+                    raise PermissionError('verified stable identity is required')
+                token = query.get('cursor', [''])[0]
+                if len(token) > 2048:
+                    raise ValueError('invalid local Report synchronization cursor')
+                after = ''
+                if token:
+                    try:
+                        cursor = json.loads(_OWNED_SYNC_CURSOR.decrypt(token.encode('ascii'), ttl=3600))
+                        if (not isinstance(cursor, dict) or set(cursor) != {'kind', 'identity_id', 'manager_id', 'report_id'}
+                                or cursor['kind'] != 'owned-local-report' or cursor['identity_id'] != stable_id
+                                or cursor['manager_id'] != self.state.server_id
+                                or not re.fullmatch(r'report:v1:[A-Za-z0-9_-]{24,128}', cursor['report_id'])):
+                            raise ValueError('invalid cursor identity')
+                        after = cursor['report_id']
+                    except (InvalidToken, UnicodeError, ValueError, KeyError, TypeError):
+                        raise ValueError('invalid local Report synchronization cursor') from None
+                payload = self._research_couch_service(local=True).owned_page(session=session, after=after,
+                    limit=int(query.get('limit', ['50'])[0]))
+                cursor = payload.pop('next_cursor')
+                payload['next_cursor'] = (_OWNED_SYNC_CURSOR.encrypt(json.dumps({'kind': 'owned-local-report',
+                    'identity_id': stable_id, 'manager_id': self.state.server_id, 'report_id': cursor},
+                    separators=(',', ':')).encode()).decode('ascii') if cursor else None)
+                json_response(self, {'success': True, **payload})
                 return True
-            if parsed.path == "/api/research":
+            if local_grants:
+                if len(query.get('research_id', [])) != 1 or len(query.get('report_id', [])) != 1:
+                    raise ValueError('Research and Report references are required')
+                value = self._research_couch_service(local=True).list_grants(session=session,
+                    research_id=query['research_id'][0], report_id=query['report_id'][0])
+                json_response(self, {'success': True, 'grants': value})
+                return True
+            if publication or local_publication:
+                if publication:
+                    research_id, report_id, publication_ref = unquote(publication.group(1)), unquote(publication.group(2)), publication.group(3)
+                    kind, object_id = publication.group(4), publication.group(5)
+                else:
+                    if len(query.get('research_id', [])) != 1 or len(query.get('report_id', [])) != 1:
+                        raise ValueError('Research and Report references are required')
+                    research_id, report_id = query['research_id'][0], query['report_id'][0]
+                    publication_ref, kind, object_id = local_publication.group(1), local_publication.group(2), local_publication.group(3)
+                attachment = (kind + '/' + unquote(object_id)) if kind else ''
+                if query.get('metadata_only', ['0']) not in (['0'], ['1']):
+                    raise ValueError('invalid report metadata option')
+                metadata_only = query.get('metadata_only') == ['1']
+                if query.get('requires_publish', ['0']) not in (['0'], ['1']):
+                    raise ValueError('invalid report authorization option')
+                requires_publish = query.get('requires_publish') == ['1']
+                if query.get('requires_edit', ['0']) not in (['0'], ['1']):
+                    raise ValueError('invalid report authorization option')
+                requires_edit = query.get('requires_edit') == ['1']
+                if query.get('owner_metadata', ['0']) not in (['0'], ['1']):
+                    raise ValueError('invalid owner metadata option')
+                owner_metadata = query.get('owner_metadata') == ['1']
+                if owner_metadata and (not local_publication or not metadata_only or attachment):
+                    raise ValueError('owner metadata requires local report metadata')
+                if metadata_only and attachment:
+                    raise ValueError('metadata is not an attachment')
+                if (requires_publish or requires_edit) and not metadata_only:
+                    raise ValueError('authorization preflight requires metadata')
+                if len(query.get('server_id', [])) > 1:
+                    raise ValueError('only one report server may be selected')
+                server_id = str(query.get('server_id', [''])[0] or '').strip()
+                if owner_metadata and server_id and server_id not in {'local', self.state.server_id}:
+                    raise ValueError('remote owner metadata is not available through this route')
+                branch_ref = '' if publication_ref else str(query.get('branch_ref', [''])[0])
+                if local_publication and server_id and server_id not in {'local', self.state.server_id}:
+                    from server.identity.server_admission import server_admission
+                    from server.modules.single_factor_test.execution_nodes import peer_execution_route
+                    route = peer_execution_route(self.state, server_id)
+                    value = self.state.federation_gateway.public_data(route, kind='shared-report', operation='read',
+                        principal=viewer, delegated_user_token=self._bearer_token(), payload={
+                            'research_id': research_id, 'report_id': report_id,
+                            'publication_ref': publication_ref or '', 'branch_ref': branch_ref, 'attachment': attachment,
+                            'metadata_only': metadata_only, 'requires_publish': requires_publish, 'requires_edit': requires_edit})
+                    if not server_admission(session, state=self.state, use_cache=False)[0]:
+                        raise PermissionError('current Manager access is not authorized')
+                    if attachment:
+                        try:
+                            raw = base64.b64decode(value['content_base64'], validate=True)
+                        except (KeyError, TypeError, ValueError, binascii.Error):
+                            raise ValueError('peer report attachment is invalid') from None
+                        if len(raw) > 8 * 1024 * 1024:
+                            raise ValueError('peer report attachment exceeds its limit')
+                        from server.jobs.storage.couchdb_research_publication import _SAFE_MEDIA
+                        media = str(value.get('content_type') or '').lower()
+                        value = {'content': raw, 'content_type': media if media in _SAFE_MEDIA else 'application/octet-stream'}
+                    else:
+                        record, projected = value.get('publication'), value.get('projection')
+                        if (not isinstance(record, dict) or (not metadata_only and not isinstance(projected, dict))
+                                or (requires_edit and value.get('edit_authorized') is not True)
+                                or (requires_publish and value.get('publish_authorized') is not True)
+                                or record.get('report_id') != report_id or (not metadata_only and projected.get('report_id') != report_id)
+                                or record.get('storage_server_id') != server_id
+                                or (publication_ref and record.get('publication_id') != publication_ref)
+                                or (branch_ref and record.get('branch_ref') != branch_ref)):
+                            raise PermissionError('peer report identity does not match')
+                        value = {'publication': record, **({'projection': projected} if not metadata_only else {}),
+                                 **({'authoring': value['authoring']} if 'authoring' in value else {}),
+                                 **({'edit_authorized': True} if requires_edit else {}),
+                                 **({'publish_authorized': True} if requires_publish else {})}
+                else:
+                    value = self._research_couch_service(local=bool(local_publication)).read(session=session,
+                        research_id=research_id, report_id=report_id,
+                        publication_ref=publication_ref or '', branch_ref=branch_ref, attachment=attachment,
+                        **({'metadata_only': True} if metadata_only else {}),
+                        **({'requires_publish': True} if requires_publish else {}),
+                        **({'requires_edit': True} if requires_edit else {}))
+                    if owner_metadata:
+                        value['owner_metadata'] = self._research_couch_service(local=True).owner_metadata(
+                            session=session, research_id=research_id, report_id=report_id)
+                if attachment:
+                    raw, content_type = value['content'], value['content_type']
+                    self.send_response(200)
+                    self.send_header('Content-Type', content_type)
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.send_header('Cache-Control', 'private, no-store')
+                    self.send_header('Content-Disposition', 'attachment' if content_type == 'application/octet-stream' else 'inline')
+                    self.send_header('Content-Length', str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return True
+                payload = value
+            elif self._get_report_branch_route(parsed, viewer):
+                return True
+            elif parsed.path == "/api/research/capabilities/keycloak-sharing":
+                payload = {"capabilities": service.keycloak_sharing_capabilities()}
+            elif parsed.path == "/api/research/owned-sync":
+                if any(len(query.get(key, [])) > 1 for key in ('cursor', 'limit')) or set(query) - {'cursor', 'limit'}:
+                    raise ValueError('invalid owned Research synchronization query')
+                stable_id = str(session.get('tr_identity_id') or '')
+                if not stable_id:
+                    raise PermissionError('verified stable identity is required')
+                token = query.get('cursor', [''])[0]
+                if len(token) > 2048:
+                    raise ValueError('invalid owned Research synchronization cursor')
+                if token:
+                    try:
+                        cursor = json.loads(_OWNED_SYNC_CURSOR.decrypt(token.encode('ascii'), ttl=3600))
+                        if not isinstance(cursor, dict) or set(cursor) != {'identity_id', 'updated_at', 'research_id'} or cursor['identity_id'] != stable_id:
+                            raise ValueError('invalid cursor identity')
+                        after_time, after_ref = cursor['updated_at'], cursor['research_id']
+                    except (InvalidToken, UnicodeError, ValueError, KeyError, TypeError):
+                        raise ValueError('invalid owned Research synchronization cursor') from None
+                else:
+                    after_time, after_ref = 0, ''
+                payload = service.owned_sync_page(viewer=viewer, after_time=after_time,
+                    after_ref=after_ref, limit=int(query.get('limit', ['50'])[0]))
+                cursor = payload.pop('next_cursor')
+                payload['next_cursor'] = (_OWNED_SYNC_CURSOR.encrypt(json.dumps({
+                    'identity_id': stable_id, **cursor}, separators=(',', ':')).encode()).decode('ascii') if cursor else None)
+            elif parsed.path == "/api/research/owned-report-sync":
+                if (set(query) - {'research_id', 'cursor', 'limit'} or len(query.get('research_id', [])) != 1
+                        or any(len(query.get(key, [])) > 1 for key in ('cursor', 'limit'))):
+                    raise ValueError('invalid owned Report synchronization query')
+                stable_id, research_id = str(session.get('tr_identity_id') or ''), query['research_id'][0]
+                if not stable_id:
+                    raise PermissionError('verified stable identity is required')
+                token = query.get('cursor', [''])[0]
+                if len(token) > 2048:
+                    raise ValueError('invalid owned Report synchronization cursor')
+                after_ref = ''
+                if token:
+                    try:
+                        cursor = json.loads(_OWNED_SYNC_CURSOR.decrypt(token.encode('ascii'), ttl=3600))
+                        if (not isinstance(cursor, dict) or set(cursor) != {'identity_id', 'research_id', 'report_id'}
+                                or cursor['identity_id'] != stable_id or cursor['research_id'] != research_id):
+                            raise ValueError('invalid cursor identity')
+                        after_ref = cursor['report_id']
+                    except (InvalidToken, UnicodeError, ValueError, KeyError, TypeError):
+                        raise ValueError('invalid owned Report synchronization cursor') from None
+                payload = service.owned_report_sync_page(viewer=viewer, research_id=research_id, after_ref=after_ref,
+                    limit=int(query.get('limit', ['50'])[0]))
+                cursor = payload.pop('next_cursor')
+                payload['next_cursor'] = (_OWNED_SYNC_CURSOR.encrypt(json.dumps({'identity_id': stable_id,
+                    'research_id': research_id, 'report_id': cursor}, separators=(',', ':')).encode()).decode('ascii')
+                    if cursor else None)
+            elif parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
-                subordinate_refs = self._research_catalog_subordinate_refs(viewer)
+                subordinate_refs = (
+                    self._research_catalog_subordinate_refs(viewer)
+                    if scope == "subordinates" else []
+                )
                 value = service.list_researches(
                     viewer=viewer,
                     include_archived=query.get("include_archived") == ["1"],
@@ -73,22 +295,18 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 payload = {"researches": value, "items": value, "scope": scope}
             elif parsed.path == "/api/research/principals":
                 needle = str(query.get("q", [""])[0]).strip().casefold()
-                relation = str(query.get("relation", [""])[0]).strip()
-                superior_refs = set(
-                    self._research_catalog_superior_refs(viewer)
-                    if relation == "superiors" else []
-                )
-                from server.identity.keycloak_directory import managed_users_for_verified_request
-
+                if set(query) - {"q"}:
+                    raise ValueError("legacy Research relation filters are not supported")
+                try:
+                    candidates = self._subordinate_users(session)
+                except PermissionError:
+                    # A non-administrator has no managed directory scope.
+                    candidates = []
                 values = []
-                candidates = managed_users_for_verified_request(
-                    viewer, include_self=True,
-                )
                 for item in candidates:
                     username = str(item.get("username") or "").strip()
                     if (
                         not username or username == viewer
-                        or (relation == "superiors" and username not in superior_refs)
                         or (needle and needle not in username.casefold())
                     ):
                         continue
@@ -100,7 +318,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     viewer=viewer,
                     include_archived=query.get("include_archived") == ["1"],
                     scope=scope,
-                    subordinate_refs=self._research_catalog_subordinate_refs(viewer),
+                    subordinate_refs=(self._research_catalog_subordinate_refs(viewer)
+                                      if scope == "subordinates" else []),
                 )
                 value = self._research_catalog_publication_branches(value, viewer)
                 payload = {
@@ -176,15 +395,31 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     )
                     manifest["source_server_id"] = str(self.state.server_id)
                     payload = {"manifest": manifest}
-                elif child == "share-links":
-                    payload = {
-                        "share_links": service.list_share_links(
-                            research_id, actor=viewer,
-                        ),
-                    }
+                elif child == "keycloak-share-links":
+                    service.require_keycloak_sharing()
+                    payload = {"share_links": service.list_keycloak_share_links(
+                        research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
+                        report_id=str(query.get("report_id", [""])[0]))}
+                elif child == "keycloak-sharing-capabilities":
+                    payload = {"capabilities": service.keycloak_target_sharing_capabilities(
+                        research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
+                        report_id=str(query.get("report_id", [""])[0]))}
+                elif child == "keycloak-grants":
+                    service.require_keycloak_grants()
+                    payload = {"grants": service.list_explicit_grants(
+                        research_id, actor=viewer, target_kind=str(query.get("target_kind", ["research"])[0]),
+                        report_id=str(query.get("report_id", [""])[0]))}
                 else:
                     raise KeyError("research route not found")
-        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+        except (LookupError, PermissionError, TypeError, ValueError, RuntimeError, OSError) as exc:
+            if (publication or local_publication or local_grants) and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
+                from urllib.error import HTTPError
+                missing = isinstance(exc, FileNotFoundError) or isinstance(exc, HTTPError) and exc.code == 404
+                json_response(self, {"success": False,
+                    "code": "research_publication_not_found" if missing else "research_store_unavailable",
+                    "error": "Research publication not found" if missing else "Research report store is unavailable"},
+                    404 if missing else 503)
+                return True
             self._research_catalog_error(exc)
             return True
         json_response(self, {"success": True, **payload})
@@ -264,44 +499,63 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         if session is None:
             return True
         actor = str(session["username"])
-        service = self._research_catalog_service()
+        publication = re.fullmatch(r"/api/research/([^/]+)/reports/([^/]+)/couchdb-publication", parsed.path)
+        local_publication = parsed.path == '/api/research/local-report-publication'
+        local_grants = parsed.path == '/api/research/local-report-publication/grants'
+        service = None if local_publication or local_grants else self._research_catalog_service()
         try:
-            data = self._research_catalog_body()
+            data = self._research_catalog_body(32 * 1024 * 1024 if publication or local_publication else 2 * 1024 * 1024)
+            if local_grants:
+                if set(data) != {'research_id', 'report_id', 'identity_id', 'scopes'}:
+                    raise ValueError('report grant fields are invalid')
+                changed = self._research_couch_service(local=True).set_grant(session=session,
+                    research_id=data['research_id'], report_id=data['report_id'],
+                    identity_id=data['identity_id'], scopes=data['scopes'])
+                json_response(self, {'success': True, 'changed': changed})
+                return True
+            if local_publication:
+                if set(data) - {'research_id', 'report_id', 'branch_ref', 'projection', 'expected_revision', 'authoring', 'research_title'}:
+                    raise ValueError('unsupported report publication fields')
+                value = self._research_couch_service(local=True).publish_local(session=session,
+                    research_id=data.get('research_id'), report_id=data.get('report_id'),
+                    branch_ref=str(data.get('branch_ref') or ''), projection=data.get('projection'),
+                    expected_revision=data.get('expected_revision'), authoring=data.get('authoring'),
+                    research_title=data.get('research_title'))
+                json_response(self, {'success': True, 'publication': value}, 201)
+                return True
+            if publication:
+                if set(data) - {"branch_ref", "projection", "expected_revision", "authoring"}:
+                    raise ValueError("unsupported report publication fields")
+                value = self._research_couch_service().publish(
+                    session=session, research_id=unquote(publication.group(1)), report_id=unquote(publication.group(2)),
+                    branch_ref=str(data.get("branch_ref") or ""), projection=data.get("projection"),
+                    expected_revision=data.get("expected_revision"),
+                    **({'authoring': data['authoring']} if 'authoring' in data else {}))
+                json_response(self, {"success": True, "publication": value}, 201)
+                return True
             if self._post_report_branch_route(parsed, actor, data):
                 return True
-            if parsed.path == "/api/research":
+            if parsed.path == "/api/research/keycloak-create":
+                service.require_keycloak_research_creation()
+                if set(data) - {"title", "description", "profile_ref"}:
+                    raise ValueError("legacy Research access fields are not supported")
                 value = service.create_research(
                     owner_ref=actor,
                     title=data.get("title"),
                     description=str(data.get("description") or ""),
-                    visibility=str(data.get("visibility") or "private"),
-                    authorized_users=data.get("authorized_users"),
                     profile_ref=str(data.get("profile_ref") or ""),
                 )
                 json_response(self, {"success": True, "research": value}, 201)
                 return True
-            if parsed.path == "/api/research/migrations/reports":
-                value = service.migrate_reports(
-                    list(data.get("records") or []), actor=actor,
-                )
-                json_response(self, {"success": True, **value}, 200)
+            if parsed.path in {"/api/research/migrations/reports", "/api/research/migrations/reports/discover"}:
+                json_response(self, {"success": False, "error": "Legacy report import is retired; use reviewed Keycloak migration"}, 410)
                 return True
-            if parsed.path == "/api/research/share-links/redeem":
+            if parsed.path == "/api/research/keycloak-share-links/redeem":
+                service.require_keycloak_sharing()
                 value = service.redeem_share_link(
                     str(data.get("token") or ""), actor=actor,
                 )
                 json_response(self, {"success": True, "grant": value})
-                return True
-            if parsed.path == "/api/research/migrations/reports/discover":
-                records = self._discover_research_report_records(actor)
-                if not bool(data.get("apply")):
-                    json_response(self, {
-                        "success": True, "status": "planned",
-                        "count": len(records), "records": records,
-                    })
-                    return True
-                value = service.migrate_reports(records, actor=actor)
-                json_response(self, {"success": True, **value}, 200)
                 return True
             research_id, child = self._research_catalog_target(parsed.path)
             if child == "members":
@@ -326,6 +580,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {"success": True, "workspace": value}, 201)
                 return True
             if child == "reports":
+                if {"visibility", "authorized_users"} & set(data):
+                    raise ValueError("legacy Research report ACL fields are not supported")
                 if data.get("report_id"):
                     value = service.register_report(
                         research_id,
@@ -336,8 +592,6 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         workspace_id=str(data.get("workspace_id") or ""),
                         build_source=str(data.get("build_source") or "client"),
                         build_source_ref=str(data.get("build_source_ref") or ""),
-                        visibility=str(data.get("visibility") or "private"),
-                        authorized_users=data.get("authorized_users"),
                         source_ref=str(data.get("source_ref") or ""),
                     )
                 else:
@@ -346,12 +600,11 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         actor=actor,
                         title=str(data.get("title") or ""),
                         profile_ref=str(data.get("profile_ref") or ""),
-                        visibility=str(data.get("visibility") or "private"),
-                        authorized_users=data.get("authorized_users"),
                     )
                 json_response(self, {"success": True, "report": value}, 201)
                 return True
-            if child == "share-links":
+            if child == "keycloak-share-links":
+                service.require_keycloak_sharing()
                 value = service.create_share_link(
                     target_kind=str(data.get("target_kind") or "research"),
                     research_id=research_id,
@@ -361,6 +614,14 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     expires_at=float(data.get("expires_at") or 0),
                 )
                 json_response(self, {"success": True, "share_link": value}, 201)
+                return True
+            if child == "keycloak-grants":
+                service.require_keycloak_grants()
+                value = service.set_explicit_grant(research_id, actor=actor,
+                    principal_ref=data.get("principal_ref"), scopes=data.get("scopes"),
+                    target_kind=str(data.get("target_kind") or "research"),
+                    report_id=str(data.get("report_id") or ""))
+                json_response(self, {"success": True, "grant": value})
                 return True
             if child == "evidence":
                 value = service.link_evidence(
@@ -377,13 +638,22 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 json_response(self, {"success": True, "evidence_link": value}, 201)
                 return True
             raise KeyError("research route not found")
-        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+        except (LookupError, PermissionError, TypeError, ValueError, RuntimeError, OSError) as exc:
+            from server.jobs.storage.couchdb_research_publication import ResearchPublicationConflict
+            if isinstance(exc, ResearchPublicationConflict):
+                json_response(self, {"success": False, "code": "research_publication_conflict",
+                                     "error": "Research publication revision changed"}, 409)
+                return True
+            if (publication or local_publication or local_grants) and isinstance(exc, OSError) and not isinstance(exc, PermissionError):
+                json_response(self, {"success": False, "code": "research_store_unavailable",
+                                     "error": "Research report store is unavailable"}, 503)
+                return True
             self._research_catalog_error(exc)
             return True
 
     def _patch_research_catalog_routes(self, parsed) -> bool:
         share_match = re.fullmatch(
-            r"/api/research/([^/]+)/share-links/([^/]+)", parsed.path,
+            r"/api/research/([^/]+)/keycloak-share-links/([^/]+)", parsed.path,
         )
         if share_match:
             session = self._research_catalog_session()
@@ -393,6 +663,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 data = self._research_catalog_body()
                 if data.get("revoked") is not True:
                     raise ValueError("share link patch requires revoked=true")
+                self._research_catalog_service().require_keycloak_sharing()
                 value = self._research_catalog_service().revoke_share_link(
                     unquote(share_match.group(1)),
                     unquote(share_match.group(2)),
@@ -412,18 +683,12 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 return True
             try:
                 data = self._research_catalog_body()
+                if {"visibility", "authorized_users"} & set(data):
+                    raise ValueError("legacy Research report ACL fields are not supported")
                 value = self._research_catalog_service().update_report(
                     unquote(report_match.group(1)),
                     unquote(report_match.group(2)),
                     actor=str(session["username"]),
-                    visibility=data.get("visibility"),
-                    authorized_users=data.get("authorized_users"),
-                )
-                self._sync_research_report_publications(
-                    owner=str(session["username"]),
-                    report_id=str(value["report_id"]),
-                    visibility=str(value["visibility"]),
-                    authorized_users=list(value.get("authorized_users") or []),
                 )
             except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
                 self._research_catalog_error(exc)
@@ -438,13 +703,13 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             return True
         try:
             data = self._research_catalog_body()
+            if {"visibility", "authorized_users"} & set(data):
+                raise ValueError("legacy Research ACL fields are not supported")
             value = self._research_catalog_service().update_research(
                 unquote(match.group(1)),
                 actor=str(session["username"]),
                 title=data.get("title"),
                 description=data.get("description"),
-                visibility=data.get("visibility"),
-                authorized_users=data.get("authorized_users"),
                 status=data.get("status"),
             )
         except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
@@ -499,89 +764,22 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         return path == "/api/research" or path.startswith("/api/research/")
 
     def _research_catalog_subordinate_refs(self, viewer: str) -> list[str]:
-        subordinate_users = self._subordinate_users(viewer)
+        # The directory helper consumes verified claims, not a username.
+        # Never let a caller-provided viewer substitute another user's claims.
+        session = self._session()
+        if not isinstance(session, dict) or str(session.get("username") or "") != str(viewer):
+            raise PermissionError("verified user session required")
+        subordinate_users = self._subordinate_users(session)
         return [
             str(item.get("username") or item.get("owner_ref") or "").strip()
             for item in subordinate_users
             if isinstance(item, dict)
         ]
 
-    def _research_catalog_superior_refs(self, viewer: str) -> list[str]:
-        from flask import g, has_request_context
-
-        identity = getattr(g, "keycloak_user_session", None) if has_request_context() else None
-        if not isinstance(identity, dict) or str(identity.get("username") or "") != str(viewer):
-            return []
-        parent = str(identity.get("parent_username") or "").strip()
-        return [parent] if parent else []
-
-    def _sync_research_report_publications(
-        self,
-        *,
-        owner: str,
-        report_id: str,
-        visibility: str,
-        authorized_users: list[str],
-    ) -> None:
-        """Apply the canonical Report policy to each uploaded Branch."""
-        users = list(authorized_users)
-        if visibility == "superiors":
-            users = self._research_catalog_superior_refs(owner)
-        for publication in self.state.public_research.list_owner(owner):
-            if str(publication.get("report_id") or "") != report_id:
-                continue
-            self.state.public_research.configure(
-                owner_ref=owner,
-                report_id=report_id,
-                publication_key=str(publication.get("publication_key") or report_id),
-                projection=None,
-                visibility=visibility,
-                auto_sync=bool(publication.get("auto_sync", True)),
-                relay_local_files=bool(publication.get("relay_local_files", False)),
-                authorized_users=users,
-            )
-
-    def _discover_research_report_records(self, actor: str) -> list[dict]:
-        """Project all three existing report stores into one explicit plan."""
-        records: list[dict] = []
-        for item in self.state.client_state.local_research(actor):
-            value = dict(item)
-            value.update(
-                source_kind="client",
-                source_ref=str(item.get("local_ref") or ""),
-                owner_ref=actor,
-                profile_ref=str(item.get("profile_id") or ""),
-            )
-            records.append(value)
-        for item in self.state.server_research.list_owner(actor):
-            value = dict(item)
-            value.update(
-                source_kind="server_agent",
-                source_ref=str(item.get("server_ref") or ""),
-                owner_ref=actor,
-                profile_ref=str(item.get("profile_id") or ""),
-            )
-            records.append(value)
-        for item in self.state.public_research.list_owner(actor):
-            value = dict(item)
-            value.update(
-                source_kind="publication",
-                source_ref=str(item.get("publication_id") or ""),
-                owner_ref=actor,
-            )
-            records.append(value)
-        return sorted(
-            records,
-            key=lambda item: (
-                str(item.get("source_kind") or ""),
-                str(item.get("source_ref") or ""),
-            ),
-        )
-
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:
         match = re.fullmatch(
-            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links|collaboration-branches))?",
+            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|collaboration-branches|keycloak-share-links|keycloak-grants|keycloak-sharing-capabilities))?",
             path,
         )
         if not match:

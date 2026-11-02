@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { partitionJobArtifacts, jobURL, jobDetailOf, runSpecURL, progressPercent, terminalStatus } from "./job-model.ts";
+import { partitionJobArtifacts, jobURL, jobDetailOf, runSpecURL, progressPercent, terminalStatus, isLocalJob } from "./job-model.ts";
+test("only a job explicitly owned by this Manager can use local restore", () => {
+ assert.equal(isLocalJob({job_id:"a",origin_server_id:"local",server_id:"remote"},"local"),true);
+ assert.equal(isLocalJob({job_id:"a",origin_server_id:"remote",server_id:"local"},"local"),false);
+ assert.equal(isLocalJob({job_id:"a",server_id:"remote"},"local"),false);
+ assert.equal(isLocalJob({job_id:"a"},"local"),false);
+ assert.equal(isLocalJob({job_id:"a",server_id:"local"},""),false);
+});
 test("job reads retain execution route identity and never invent progress", () => {
   const url = jobURL({ job_id: "a/b", server_id: "remote", service_port: 8000 }, "/stream");
   assert.equal(url, "/api/jobs/a%2Fb/stream?server_id=remote&port=8000");

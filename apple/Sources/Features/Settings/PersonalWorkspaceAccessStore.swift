@@ -22,6 +22,15 @@ enum PersonalWorkspaceAccessStore {
             of: #"^[A-Za-z0-9._-]{1,128}$"#,
             options: .regularExpression
         ) != nil else { return nil }
+        if let path = authorizedRootPath {
+            let root = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+            if root.lastPathComponent == principal && isCanonicalUserRoot(root) {
+                return root
+            }
+        }
+        guard let usersRoot = try? LocalDocumentsRoot.resolve().appendingPathComponent("users", isDirectory: true) else {
+            return nil
+        }
         return usersRoot.appendingPathComponent(principal, isDirectory: true)
             .standardizedFileURL
     }
@@ -68,8 +77,7 @@ enum PersonalWorkspaceAccessStore {
         guard let storedRoot = storedAuthorizedRoot(for: target),
               let bookmark = UserDefaults.standard.data(forKey: bookmarkKey),
               let resolved = resolve(bookmark),
-              sameLocation(resolved.root, storedRoot),
-              contains(target, in: resolved.root) else {
+              sameLogicalLocation(resolved.root, storedRoot) else {
             // Never fall through to an unscoped Documents read. Besides
             // bypassing the explicit directory choice, doing so makes macOS
             // show its TCC prompt whenever an ad-hoc build changes identity.
@@ -78,6 +86,19 @@ enum PersonalWorkspaceAccessStore {
         let started = resolved.root.startAccessingSecurityScopedResource()
         guard started else {
             throw WorkspaceAccessError.required
+        }
+        do {
+            // Inspect Documents and resolve symlinks only after activating the
+            // original security scope; otherwise macOS may trigger a naked
+            // Documents access prompt before the user's bookmark is applied.
+            _ = try LocalDocumentsRoot.resolve()
+            guard sameLocation(resolved.root, storedRoot),
+                  physicallyContains(target, in: resolved.root) else {
+                throw WorkspaceAccessError.required
+            }
+        } catch {
+            resolved.root.stopAccessingSecurityScopedResource()
+            throw error
         }
         if resolved.stale {
             // Refresh only after the original security extension is active.
@@ -98,9 +119,11 @@ enum PersonalWorkspaceAccessStore {
         for root: URL,
         securityScoped: Bool
     ) throws {
-        let options: URL.BookmarkCreationOptions = securityScoped
-            ? .withSecurityScope
-            : []
+        #if os(macOS)
+        let options: URL.BookmarkCreationOptions = securityScoped ? .withSecurityScope : []
+        #else
+        let options: URL.BookmarkCreationOptions = []
+        #endif
         let bookmark = try root.bookmarkData(
             options: options,
             includingResourceValuesForKeys: nil,
@@ -112,10 +135,11 @@ enum PersonalWorkspaceAccessStore {
     private static func resolve(
         _ bookmark: Data
     ) -> (root: URL, stale: Bool)? {
-        let optionSets: [URL.BookmarkResolutionOptions] = [
-            [.withSecurityScope, .withoutUI],
-            [.withoutUI],
-        ]
+        #if os(macOS)
+        let optionSets: [URL.BookmarkResolutionOptions] = [[.withSecurityScope, .withoutUI], [.withoutUI]]
+        #else
+        let optionSets: [URL.BookmarkResolutionOptions] = [[]]
+        #endif
         for options in optionSets {
             var stale = false
             if let root = try? URL(
@@ -131,17 +155,25 @@ enum PersonalWorkspaceAccessStore {
     }
 
     private static func requiresExplicitAccess(_ target: URL) -> Bool {
-        contains(target, in: factorTesterRoot)
+        let documents = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Documents", isDirectory: true)
+        return ["TradeResearch", "FactorTester"].contains {
+            let root = documents.appendingPathComponent($0, isDirectory: true)
+            let lexicalTarget = target.standardizedFileURL.path
+            let lexicalRoot = root.standardizedFileURL.path
+            return lexicalTarget == lexicalRoot || lexicalTarget.hasPrefix(lexicalRoot + "/")
+        }
     }
 
     static func storedAuthorizedRoot(
         path: String?,
-        for target: URL
+        for target: URL,
+        home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     ) -> URL? {
         guard let path, !path.isEmpty else { return nil }
         let root = URL(fileURLWithPath: path, isDirectory: true)
             .standardizedFileURL
-        guard isCanonicalUserRoot(root), contains(target, in: root) else {
+        guard isCanonicalUserRoot(root, home: home), logicallyContains(target, in: root, home: home) else {
             return nil
         }
         return root
@@ -151,31 +183,44 @@ enum PersonalWorkspaceAccessStore {
         storedAuthorizedRoot(path: authorizedRootPath, for: target)
     }
 
-    private static var factorTesterRoot: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester", isDirectory: true)
-            .standardizedFileURL
-    }
-
-    private static var usersRoot: URL {
-        factorTesterRoot.appendingPathComponent("users", isDirectory: true)
-    }
-
-    private static func isCanonicalUserRoot(_ root: URL) -> Bool {
-        let rootPath = root.standardizedFileURL.path
-        let prefix = usersRoot.path + "/"
+    private static func isCanonicalUserRoot(
+        _ root: URL, home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    ) -> Bool {
+        let usersRoot = home.appendingPathComponent("Documents/TradeResearch/users", isDirectory: true)
+        let rootPath = logicalPath(root, home: home)
+        let prefix = usersRoot.standardizedFileURL.path + "/"
         guard rootPath.hasPrefix(prefix) else { return false }
         let suffix = String(rootPath.dropFirst(prefix.count))
         return !suffix.isEmpty && !suffix.contains("/")
     }
 
     private static func sameLocation(_ lhs: URL, _ rhs: URL) -> Bool {
-        lhs.standardizedFileURL.path == rhs.standardizedFileURL.path
+        LocalDocumentsRoot.resolvedLocation(lhs).path == LocalDocumentsRoot.resolvedLocation(rhs).path
     }
 
-    private static func contains(_ target: URL, in root: URL) -> Bool {
-        let targetPath = target.standardizedFileURL.path
-        let rootPath = root.standardizedFileURL.path
+    private static func sameLogicalLocation(_ lhs: URL, _ rhs: URL) -> Bool {
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        return logicalPath(lhs, home: home) == logicalPath(rhs, home: home)
+    }
+
+    private static func logicalPath(_ url: URL, home: URL) -> String {
+        let path = url.standardizedFileURL.path
+        let old = home.appendingPathComponent("Documents/FactorTester", isDirectory: true).standardizedFileURL.path
+        let current = home.appendingPathComponent("Documents/TradeResearch", isDirectory: true).standardizedFileURL.path
+        if path == old { return current }
+        if path.hasPrefix(old + "/") { return current + path.dropFirst(old.count) }
+        return path
+    }
+
+    private static func logicallyContains(_ target: URL, in root: URL, home: URL) -> Bool {
+        let targetPath = logicalPath(target, home: home)
+        let rootPath = logicalPath(root, home: home)
+        return targetPath == rootPath || targetPath.hasPrefix(rootPath + "/")
+    }
+
+    static func physicallyContains(_ target: URL, in root: URL) -> Bool {
+        let targetPath = LocalDocumentsRoot.resolvedLocation(target).path
+        let rootPath = LocalDocumentsRoot.resolvedLocation(root).path
         return targetPath == rootPath
             || targetPath.hasPrefix(rootPath.hasSuffix("/") ? rootPath : rootPath + "/")
     }

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_skill_catalog import AgentSkillCatalog
@@ -25,6 +26,16 @@ from server.manager.services.profile_workspace_browser import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PRINCIPAL = "GTHT@MaxJJW@1234"
 PROFILE_ID = "profile-main"
+
+
+@pytest.fixture(autouse=True)
+def _stub_live_agent_role_for_skill_tests(monkeypatch):
+    """Skill tests do not depend on a live Keycloak instance."""
+    from server.identity import server_admission
+    monkeypatch.setattr(
+        server_admission, "current_manager_role",
+        lambda session, role: role in session.get("keycloak_roles", ()),
+    )
 
 
 def test_skill_catalog_only_exposes_profile_audience_and_hides_paths():
@@ -454,7 +465,7 @@ class _Handler(AgentRoutesMixin):
         self.wfile = io.BytesIO()
 
     def _session(self):
-        return {"username": PRINCIPAL, "keycloak_roles": ["agent_assistant:use"]}
+        return {"username": PRINCIPAL, "keycloak_roles": ["agent_assistant:internal:use"]}
 
     def _json_body(self, _maximum):
         return self._payload

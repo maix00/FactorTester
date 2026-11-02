@@ -7,7 +7,7 @@ import click
 from tools.cli.core.context import client_from_config
 from tools.cli.core.display import print_home_welcome
 from tools.cli.core.errors import friendly_errors
-from tools.cli.http import ClientConfig, save_config, load_config
+from tools.cli.http import ClientConfig, load_config, save_config
 from tools.cli.state import load_state, save_state
 
 
@@ -19,6 +19,10 @@ from tools.cli.state import load_state, save_state
 @friendly_errors
 def configure(host: str, port: int | None, base_url: str, server_id: str) -> None:
     """Save remote server address for later commands."""
+    try:
+        previous = load_config().base_url
+    except FileNotFoundError:
+        previous = ''
     if base_url:
         config = ClientConfig(base_url=base_url.rstrip("/"))
     elif host:
@@ -32,6 +36,14 @@ def configure(host: str, port: int | None, base_url: str, server_id: str) -> Non
         from tools.cli.server_connection import discover_server
         config = discover_server(config, server_id)
     save_config(config)
+    if previous != config.base_url:
+        # Workspace references belong to their issuing Manager. Credentials
+        # are stored per origin and are never copied to the selected target.
+        state = load_state()
+        state.reset()
+        state.workspace_id = ''
+        state.configuration_revision = 0
+        save_state(state)
     click.echo(f"已配置 TradeResearch 服务: {config.base_url}")
 
 

@@ -6,6 +6,13 @@ body { margin: 0; }
   --text: #202b3c; --muted: #697587; --line: #e8ecf1;
   --accent: #1677ff; --danger: #d92d20;
 }
+html[data-tr-theme="dark"] {
+  color-scheme: dark;
+  --bg:#121720; --panel:#1d2430; --sidebar:#171d27;
+  --text:#e7ebf2; --muted:#aab4c3; --line:#394150;
+  --ion-background-color:#121720; --ion-text-color:#e7ebf2; --ion-toolbar-background:#1d2430;
+  --ion-tab-bar-background:#1d2430; --ion-item-background:#1d2430; --ion-border-color:#394150;
+}
 .tr-app-shell {
   display: grid;
   grid-template-columns: var(--tr-sidebar-width) minmax(0, 1fr);
@@ -131,6 +138,16 @@ body { margin: 0; }
 .tr-mobile-workspace { padding: 18px 16px; }
 .tr-mobile-workspace header h1 { margin: 0; font-size: 20px; }
 .tr-mobile-workspace header p { margin: 4px 0 14px; color: var(--muted); font-size: 12px; }
+/* iOS zooms on focus below 16px. Include portals (drawers, dialogs and
+   dropdowns), and override library rules on their internal search inputs. */
+html.tr-mobile-runtime :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  font-size: 16px !important;
+}
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]), textarea, select {
+    font-size: 16px !important;
+  }
+}
 .tr-mobile-open-list { display: grid; gap: 8px; }
 .tr-mobile-open-row { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); text-decoration: none; }
 .tr-mobile-open-row:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
@@ -163,6 +180,9 @@ body { margin: 0; }
 .tr-settings-overlay .ant-modal-header { border-radius: 12px 12px 0 0; }
 .tr-page-surface { position: relative; isolation: isolate; }
 .tr-tab-layer { position: relative; isolation: isolate; height: 100%; min-height: 0; overflow: hidden; }
+/* Always-mounted Dockview panels retain state, but inactive descendants must
+   not override inherited visibility and paint over the active panel. */
+.tr-tab-layer[hidden], .tr-dock-assistant-layer[hidden] { display: none; }
 .tr-settings-hub { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; min-height: 430px; margin: -8px -4px; }
 .tr-settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
 .tr-settings-nav button { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 8px 10px; color: var(--text); background: transparent; font: inherit; font-size: 13px; text-align: left; }
@@ -178,6 +198,10 @@ body { margin: 0; }
 .tr-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
 .tr-settings-row b { display: block; font-size: 12px; }
 .tr-settings-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.tr-appearance-settings .tr-settings-row:first-child { border-top: 0; }
+.tr-appearance-select { width: min(160px, 55%); min-width: 0; }
+.tr-appearance-dropdown { min-width: max-content !important; }
+.tr-appearance-dropdown .ant-select-item-option-content { white-space: nowrap; overflow: visible; text-overflow: clip; }
 .tr-settings-value { color: var(--muted); font-size: 12px; }
 .tr-settings-migrating p { margin: 0; color: var(--muted); font-size: 12px; }
 @media (max-width: 620px) {
@@ -250,10 +274,7 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-legacy-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .tr-legacy-bar button { border: 0; background: transparent; color: var(--accent); font: inherit; }
 .tr-legacy-overlay iframe { width: 100%; height: 100%; border: 0; }
-.tr-research-page { padding: 24px 28px; overflow: auto; height: 100%; }
-.tr-research-page header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-.tr-research-page h1 { margin: 0; font-size: 22px; }
-.tr-research-page header p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.tr-research-page { overflow: auto; height: 100%; box-sizing: border-box; }
 .tr-research-list { display: grid; gap: 8px; }
 .tr-research-list button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); font: inherit; text-align: left; }
 .tr-research-list button:hover { border-color: var(--accent); }
@@ -289,9 +310,11 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-trading-tests button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
 .tr-catalog-reference { display: grid; gap: 8px; grid-column: 1 / -1; }
 .tr-catalog-reference select, .tr-catalog-reference input { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
-.tr-report-editor { padding: 16px; overflow: auto; height: 100%; }
-.tr-report-source-picker { display: grid; gap: 6px; max-width: 520px; margin: 0 16px 14px; color: var(--muted); font-size: 12px; }
-.tr-report-source-picker .ant-select { width: 100%; }
+.tr-report-editor { padding: 16px; }
+.tr-report-source-picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; max-width: 520px; margin: 0 16px 14px; color: var(--muted); font-size: 12px; }
+.tr-report-source-label { display: flex; align-items: center; gap: 8px; }
+.tr-report-source-label .ant-tag { margin: 0; }
+.tr-report-source-picker .ant-select { width: 100%; min-width: 0; }
 .tr-quota-subheading { margin: 18px 0 8px; color: var(--text); font-size: 14px; font-weight: 600; }
 .tr-quota-server-state { display: grid; justify-items: start; gap: 2px; min-width: 0; }
 .tr-quota-server-state .ant-tag { margin: 0; line-height: 18px; }
@@ -332,6 +355,10 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-agent-assistant-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .tr-agent-assistant-title strong { font-size: 16px; }
 .tr-agent-assistant-title span { overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.tr-agent-assistant-context { display:flex; align-items:baseline; gap:8px; min-width:0; padding:8px 16px; border-bottom:1px solid var(--line); color:var(--muted); font-size:12px; }
+.tr-agent-assistant-context strong { min-width:0; overflow:hidden; color:var(--text); text-overflow:ellipsis; white-space:nowrap; }
+.tr-agent-assistant-context > span:nth-of-type(2) { margin-left:auto; flex-shrink:0; }
+.tr-agent-assistant-context .ant-btn { flex-shrink:0; padding:0; }
 .tr-agent-assistant-error { flex: 0 0 auto; padding: 16px; }
 .tr-agent-assistant-setup-actions { display: flex; justify-content: flex-start; margin-top: 10px; }
 .tr-agent-assistant-setup { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 16px; min-height: 0; overflow: auto; padding: 24px; }
@@ -410,6 +437,8 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-test-bench-page { display: flex; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--panel); }
 .tr-test-bench { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
 .tr-test-bench > .ant-tabs { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.tr-test-bench > .ant-tabs > .ant-tabs-nav { padding: 0 32px; margin: 0; min-height: 52px; }
+.tr-test-bench > .ant-tabs > .ant-tabs-nav .ant-tabs-extra-content { display: flex; align-items: center; }
 .tr-test-bench > .ant-tabs > .ant-tabs-content-holder { flex: 1; min-height: 0; overflow: hidden; }
 .tr-test-bench .ant-tabs-content,
 .tr-test-bench .ant-tabs-tabpane { height: 100%; min-height: 0; }
@@ -417,11 +446,21 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-test-bench .tr-function-page { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 .tr-test-bench .tr-function-page { display: flex; flex-direction: column; }
 .tr-test-bench .tr-function-body { flex: 1; min-height: 0; overflow: auto; }
+.tr-test-bench-header { flex: none; }
+.tr-embedded-jobs { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.tr-embedded-jobs-toolbar { display: flex; justify-content: flex-end; padding: 16px 32px 0; }
+.tr-embedded-jobs > .tr-function-body { padding-top: 0; }
+/* Legacy page CSS sets every table to a 700px minimum. Ant Design controls
+   their own scroll widths; inheriting that rule makes compact descriptions
+   and one-column tables overflow into adjacent panels. */
+[data-tr-web-app] .ant-descriptions table,
+[data-tr-web-app] .ant-table table { min-width: 0; }
 @media (max-width: 760px) {
   .tr-workspace-empty { padding: 30px 18px; }
   .tr-workspace-empty h1 { font-size: 19px; }
-  .tr-test-bench > .ant-tabs > .ant-tabs-nav { margin-bottom: 12px; }
+  .tr-test-bench > .ant-tabs > .ant-tabs-nav { padding: 0 14px; margin-bottom: 12px; }
   .tr-test-bench .ant-tabs-tab { padding: 9px 12px; }
+  .tr-embedded-jobs-toolbar { padding: 8px 14px 0; }
 }
 
 /* The mobile workspace has one shared, persistent action bar above each page. */
@@ -462,6 +501,10 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-artifact-frame { width:100%; height:70vh; border:0; margin-top:20px; background:white; }
 .tr-picker-control { display:flex; align-items:center; gap:8px; }
 .tr-picker-control .ant-select { flex:1; min-width:0; }
+.tr-object-reference { max-width: 100%; overflow-wrap: anywhere; }
+.tr-object-reference-hint { color: var(--text-secondary, #64748b); margin: 12px 0 0; }
+.tr-reference-select { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tr-reference-select > .ant-select { flex: 1; min-width: 0; }
 .tr-library-picker { width:100%; min-width:0; }
 .tr-library-create { width:100%; }
 .tr-config-test-type { padding:16px 0; }
@@ -481,6 +524,30 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-library-filters { display:flex; gap:12px; margin:8px 0 24px; }
 .tr-library-filters .ant-input-search { flex:1; min-width:180px; }
 .tr-library-filters .ant-select { width:210px; flex-shrink:0; }
+.tr-research-page { min-height:100%; }
+.tr-table-expand { display:flex; justify-content:flex-end; margin-bottom:4px; }
+.tr-table-expand .ant-btn { font-size:13px; }
+/* Modal entry animation otherwise replaces the rotated transform and origin. */
+.tr-landscape-table-modal .ant-modal { transform:rotate(90deg) !important; transform-origin:0 0 !important; }
+/* Trigger's screen-space alignment cannot position a popup inside a rotated
+   ancestor. Keep table controls inside the panel in its own coordinate space. */
+.tr-landscape-table-modal .ant-dropdown,
+.tr-landscape-table-modal .ant-select-dropdown {
+  inset: 64px auto auto 50% !important;
+  transform: translateX(-50%) !important;
+}
+.tr-research-mobile-meta { display:flex; flex-wrap:wrap; gap:4px 14px; padding-top:6px; font-size:12px; }
+.tr-research-mobile-reference { display:inline-flex; align-items:baseline; gap:4px; min-width:0; max-width:100%; }
+.tr-research-mobile-reference > span:first-child { color:var(--muted); flex-shrink:0; }
+.tr-research-mobile-reference > span:last-child { min-width:0; overflow-wrap:anywhere; }
+@media(max-width:760px) {
+  .tr-research-table .ant-table-content > table { width:max-content !important; min-width:100%; table-layout:auto; }
+  .tr-research-table .ant-table-content { scrollbar-width:thin; }
+  .tr-research-table .ant-table-content::-webkit-scrollbar { height:4px; }
+  .tr-research-table .ant-table-content::-webkit-scrollbar-thumb { background:#b8c1ce; border-radius:4px; }
+  .tr-research-table .tr-table-link { max-width:200px; overflow-wrap:anywhere; white-space:normal; }
+  .tr-research-table .ant-table-cell { padding:8px 10px !important; font-size:13px; }
+}
 .tr-version-ref { display:inline-block; max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; font-variant-numeric:tabular-nums; }
 .tr-library-detail { border-top:1px solid #e8ecf2; padding-top:24px; margin-top:24px; }
 .tr-library-detail > header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
@@ -502,7 +569,7 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-settings-content h2 { font-size:22px; }
 .tr-settings-content .tr-settings-row b { font-size:14px; font-weight:500; }
 .tr-settings-content .tr-settings-row:last-child { border-bottom:0; }
-.tr-device-settings { display:grid; gap:16px; min-width:0; }
+.tr-device-settings { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; min-width:0; }
 .tr-device-controls { display:flex; align-items:center; gap:12px; }
 .tr-device-controls .ant-input-search { flex:1; min-width:0; }
 .tr-device-controls > .ant-select { flex:0 0 min(260px, 42%); min-width:180px; }
@@ -513,11 +580,15 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-device-client .ant-tag { flex:none; margin-inline-end:0; }
 .tr-device-client > span { min-width:0; overflow-wrap:anywhere; }
 @media(max-width:767px) {
-  .tr-device-controls { align-items:stretch; flex-wrap:wrap; }
-  .tr-device-controls .ant-input-search,.tr-device-controls > .ant-select { flex:1 1 100%; width:100%; min-width:0; }
+  .tr-device-controls { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; }
+  .tr-device-controls .ant-input-search { grid-column:1; grid-row:1; width:100%; min-width:0; }
+  .tr-device-controls > .tr-device-register { grid-column:2; grid-row:1; }
+  .tr-device-controls > .tr-device-reload { grid-column:3; grid-row:1; }
+  .tr-device-controls > .ant-select { grid-column:1 / -1; grid-row:2; width:100%; min-width:0; }
   .tr-device-filter-row { align-items:flex-start; flex-direction:column; }
   .tr-device-filter-row .ant-segmented { width:100%; }
   .tr-device-filter-row .ant-segmented-group { min-width:max-content; }
+  .tr-device-client > span { display:none; }
 }
 .tr-admin-tab { display:grid; gap:18px; min-width:0; }
 .tr-admin-identity { display:grid; gap:16px; }
@@ -583,6 +654,9 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-chart-host { min-width:0; }
 .tr-chart-host .ft-lightweight-price { position:relative; }
 .tr-chart-host .ft-lightweight-price-canvas { position:relative; width:100%; min-width:0; height:460px; }
+.tr-chart-fullscreen .tr-market-frame { min-height:0; padding:0; }
+.tr-chart-fullscreen .ft-lightweight-price-canvas { height:max(180px, calc(min(100vw, 100dvh) - 115px)); }
+.tr-chart-fullscreen .ft-factor-chart-canvas { height:max(180px, calc(min(100vw, 100dvh) - 150px)) !important; }
 .tr-chart-host .ft-lightweight-range-bands { position:absolute; inset:0 auto 0 0; pointer-events:none; overflow:hidden; }
 .tr-chart-host .ft-lightweight-range-band { position:absolute; top:0; bottom:26px; background:rgb(22 119 255 / 3%); border-right:1px solid rgb(22 119 255 / 20%); }
 .tr-chart-host .ft-lightweight-range-band:nth-child(even) { background:rgb(22 119 255 / 7%); }
@@ -855,3 +929,8 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
   .tr-library-create .ant-alert-with-description { flex-wrap:wrap; }
   .tr-library-create .ant-alert-action { margin:12px 0 0; width:100%; }
 }
+
+.tr-research-relations-actions { display: flex; justify-content: flex-end; margin: 0 0 16px; }
+.tr-research-relations .ant-tabs-nav { margin-bottom: 16px; }
+.tr-research-relations > .ant-tabs > .ant-tabs-nav .ant-tabs-tab + .ant-tabs-tab { margin-left: 16px; }
+.tr-reference-chip-list { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: -12px 0 18px; }

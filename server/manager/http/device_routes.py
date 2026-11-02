@@ -65,18 +65,25 @@ class DeviceNetworkRoutesMixin:
         # Server-wide administration has dedicated /api/admin/access-control APIs.
         owner = str(session["username"])
         try:
-            devices = self.state.device_registry.list(
-                username=owner,
-                include_disabled=True,
-            )
-            public_device_total_count = self.state.device_registry.public_device_total_count(
-                username=owner,
-            )
-            public_user_count = (
-                (1 if public_device_total_count else 0)
-                if owner
-                else self.state.device_registry.public_user_count()
-            )
+            from server.identity.keycloak_device import may_use_devices
+            from server.manager.domain.devices import _public_record
+            records = self.state.device_registry.authorization_records(username=owner)
+            allowed = may_use_devices(token=self._bearer_token(), session=session,
+                                      server_id=self.state.server_id, records=records)
+            # A registry mutation during the remote Keycloak request must not
+            # turn an obsolete key decision into a current device status.
+            current = self.state.device_registry.authorization_records(username=owner)
+            def identity(rows):
+                if any(type(row.get('enabled')) is not bool or row.get('username') != owner for row in rows):
+                    raise DeviceRegistryError('invalid device registry binding')
+                return sorted((str(row['device_id']), str(row['username']), row['enabled'],
+                               str(row['source_server_id']), json.dumps(row['public_key'], sort_keys=True)) for row in rows)
+            if identity(records) != identity(current):
+                raise DeviceRegistryError('device registry changed during authorization check')
+            devices = sorted(({**_public_record(row), 'keycloak_authorized': row['device_id'] in allowed}
+                              for row in current), key=lambda row: (str(row.get('device_name') or ''), str(row['device_id'])))
+            public_device_total_count = len(allowed)
+            public_user_count = 1 if allowed else 0
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device list failed: {exc}\n")
             json_response(self, {
@@ -84,12 +91,21 @@ class DeviceNetworkRoutesMixin:
                 "error": "device registry is unavailable",
             }, 503)
             return
+        except (PermissionError, DeviceRegistryError, ValueError, KeyError, TypeError):
+            json_response(self, {"success": False, "error": "device authorization could not be verified"}, 503)
+            return
+        except Exception:
+            json_response(self, {"success": False, "code": "keycloak_authorization_unavailable",
+                                 "error": "Keycloak authorization is unavailable"}, 503)
+            return
         json_response(self, {
             "success": True,
             "devices": devices,
             "public_device_count": public_device_total_count,
             "public_device_total_count": public_device_total_count,
             "public_user_count": public_user_count,
+            "registered_device_count": sum(bool(row['enabled']) for row in current),
+            "count_basis": "current_keycloak_use",
             "server_id": self.state.server_id,
             "public_server": bool(getattr(self.state, "public_server", False)),
             "device_policy": (
@@ -98,15 +114,22 @@ class DeviceNetworkRoutesMixin:
                 else "organization_device_auto_login"
             ),
             **self.state.device_registry.backend_status(),
-        })
+        }, headers={"Cache-Control": "private, no-store"})
 
     def _device_summary(self) -> None:
         session = self._session()
         owner = ""
         scope = "server"
-        if session is not None and str(session.get("role") or "") != "super_admin":
-            owner = str(session.get("username") or "")
-            scope = "account"
+        if session is not None:
+            from server.identity.server_admission import current_manager_role
+            # A stale legacy role label must not retain administrator scope.
+            # The unauthenticated aggregate remains available for compliance.
+            if not current_manager_role(session, "admin_console:manage"):
+                owner = str(session.get("username") or "").strip()
+                if not owner:
+                    json_response(self, {"success": False, "error": "verified user identity required"}, 403)
+                    return
+                scope = "account"
         try:
             total_count = self.state.device_registry.public_device_total_count(
                 username=owner,
@@ -128,6 +151,7 @@ class DeviceNetworkRoutesMixin:
             "public_device_count": total_count,
             "public_device_total_count": total_count,
             "public_user_count": user_count,
+            "count_basis": "enabled_device_records",
             "scope": scope,
             **self.state.device_registry.backend_status(),
         }, headers={"Cache-Control": "no-store"})
@@ -152,13 +176,39 @@ class DeviceNetworkRoutesMixin:
             return
         try:
             payload = self._json_body(64 * 1024)
-            device = self.state.device_registry.enroll(
-                username=str(session["username"]),
-                device_id=str(payload.get("device_id") or ""),
-                public_key=payload.get("public_key"),
-                device_name=str(payload.get("device_name") or ""),
-                **self._device_request_metadata(),
-            )
+            username = str(session["username"])
+            device_id = str(payload.get("device_id") or "")
+            public_key = payload.get("public_key")
+            binding = self.state.device_registry.key_binding(username=username, device_id=device_id)
+            changed = False
+            if binding is not None:
+                from server.manager.domain.devices import _public_record, normalise_public_key
+                if binding.get("public_key") != normalise_public_key(public_key):
+                    raise DeviceRegistryError("device cannot be re-enrolled with this identity or key")
+                if not binding.get("enabled"):
+                    device = self.state.device_registry.retry_enrollment(username=username, device_id=device_id, public_key=public_key)
+                    changed = True
+                else:
+                    device = _public_record(binding)
+            else:
+                device = self.state.device_registry.enroll(
+                    username=username, device_id=device_id, public_key=public_key,
+                    device_name=str(payload.get("device_name") or ""),
+                    **self._device_request_metadata(),
+                )
+                changed = True
+            # Registration is explicit: a verified signature alone must never
+            # create an authorization grant. A failed grant leaves the local
+            # record disabled until the user deliberately registers again.
+            try:
+                from server.identity.keycloak_device import register_device
+                register_device(session=session, server_id=self.state.server_id,
+                                device_id=str(payload.get("device_id") or ""),
+                                public_key=payload.get("public_key"))
+            except Exception:
+                if changed:
+                    self.state.device_registry.revoke(device_id, username=username, public_key=public_key)
+                raise
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device enrollment failed: {exc}\n")
             json_response(self, {
@@ -168,6 +218,10 @@ class DeviceNetworkRoutesMixin:
             return
         except (DeviceRegistryError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        except Exception:
+            json_response(self, {"success": False, "code": "keycloak_authorization_unavailable",
+                                 "error": "Keycloak authorization is unavailable"}, 503)
             return
         json_response(self, {
             "success": True,
@@ -197,12 +251,20 @@ class DeviceNetworkRoutesMixin:
                 include_disabled=True,
             )
             record = next(
-                (item for item in records if item.get("device_id") == device_id),
+                (item for item in records if item.get("device_id") == device_id
+                 and item.get("source_server_id") == self.state.server_id),
                 None,
             )
             if record is None:
                 raise PermissionError("device was not found")
-            device = self.state.device_registry.revoke(device_id)
+            binding = self.state.device_registry.key_binding(username=str(session["username"]), device_id=device_id)
+            if binding is None:
+                raise PermissionError("device key was not found")
+            from server.identity.keycloak_device import revoke_device
+            revoke_device(session=session, server_id=self.state.server_id, device_id=device_id,
+                          public_key=binding.get("public_key"))
+            device = self.state.device_registry.revoke(device_id, username=str(session["username"]),
+                                                       public_key=binding.get("public_key"))
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return
@@ -215,6 +277,10 @@ class DeviceNetworkRoutesMixin:
             return
         except (DeviceRegistryError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        except Exception:
+            json_response(self, {"success": False, "code": "keycloak_authorization_unavailable",
+                                 "error": "Keycloak authorization is unavailable"}, 503)
             return
         json_response(self, {
             "success": True,
@@ -260,6 +326,7 @@ class DeviceNetworkRoutesMixin:
                 username=str(record.get("username") or ""),
                 device_id=str(record.get("device_id") or ""),
                 origin=self._request_origin(),
+                public_key=record.get("public_key"),
             )
             from server.identity.manager_oidc import _safe_next_path
             from urllib.parse import urlencode

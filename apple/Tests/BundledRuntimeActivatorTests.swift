@@ -1,7 +1,28 @@
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class BundledRuntimeActivatorTests: XCTestCase {
+    func testSelectsExecutableAndReceiptFromSameBundleRoot() {
+        let root = URL(fileURLWithPath: "/bundle/Contents/Resources", isDirectory: true)
+        let old = root.appendingPathComponent("FactorTester/bin/factortester").path
+        let current = root.appendingPathComponent("FactorTester/bin/traderesearch").path
+        let renamed = root.appendingPathComponent("TradeResearch/bin/traderesearch").path
+        let names = ["traderesearch", "factortester"]
+        let both = ClientCLIResolution.bundledExecutable(resourceURL: root, names: names) {
+            [old, current, renamed].contains($0)
+        }
+        XCTAssertEqual(both?.executable.path, renamed)
+        XCTAssertEqual(both?.resources.path, root.appendingPathComponent("TradeResearch").path)
+        let shipped = ClientCLIResolution.bundledExecutable(resourceURL: root, names: names) {
+            [old, current].contains($0)
+        }
+        XCTAssertEqual(shipped?.executable.path, current)
+        XCTAssertEqual(shipped?.resources.path, root.appendingPathComponent("FactorTester").path)
+        let legacy = ClientCLIResolution.bundledExecutable(resourceURL: root, names: names) { $0 == old }
+        XCTAssertEqual(legacy?.executable.path, old)
+        XCTAssertNil(ClientCLIResolution.bundledExecutable(resourceURL: root, names: names) { _ in false })
+    }
+
     func testConcurrentCallersShareOneActivation() async {
         let probe = ActivationProbe()
         let coordinator = BundledRuntimeActivator.makeTestCoordinator {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,21 @@ BUILDER = ROOT / "scripts" / "docs" / "build_project_pdf.py"
 
 
 class ProjectPdfManifestTests(unittest.TestCase):
+    def test_figures_use_latex_floats_and_the_shared_topology_source(self) -> None:
+        figures = (ROOT / "docs/latex/figures.md").read_text(encoding="utf-8")
+        self.assertEqual(figures.count(r"\begin{figure}"), figures.count(r"\end{figure}"))
+        self.assertEqual(figures.count(r"\caption{"), figures.count(r"\begin{figure}"))
+        self.assertIn(r"\input{docs/latex/network-topology.tex}", figures)
+        self.assertNotIn("<figure>", figures)
+
+    def test_localized_topology_assets_are_served_as_static_svg(self) -> None:
+        from server.manager.web.assets import static_file
+
+        for language in ("zh", "en"):
+            image, content_type = static_file(f"vendor/web-app/network-topology.{language}.svg")
+            self.assertEqual(content_type, "image/svg+xml")
+            self.assertIn(b"<svg", image[:512])
+
     def test_curated_manifest_and_current_implementation_paths_validate(self) -> None:
         result = subprocess.run(
             [sys.executable, str(BUILDER), "--check"],
@@ -28,7 +44,11 @@ class ProjectPdfManifestTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("document manifest check: passed", result.stdout)
-        self.assertIn("sections, 43 documents", result.stdout)
+        manifest = tomllib.loads((ROOT / "docs/latex/manifest.toml").read_text(encoding="utf-8"))
+        sources = {doc["source"] for section in manifest["sections"] for doc in section["documents"]}
+        self.assertIn("docs/latex/operations.md", sources)
+        self.assertIn("product_docs/concepts/identity-permissions.md", sources)
+        self.assertFalse(any(source.startswith(("docs/operations/", "docs/audits/", "docs/adr/")) for source in sources))
 
     def test_inline_code_can_be_used_with_listings_without_verbatim_macro_error(self) -> None:
         source = r"\passthrough{\lstinline!product\_docs/foo.md!}"

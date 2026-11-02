@@ -191,11 +191,9 @@ extension TestJobsService {
     }
 
     private func artifactDownloadRoot(jobID: String) throws -> URL {
-        let root = FileManager.default.urls(
-            for: .documentDirectory, in: .userDomainMask
-        )[0].appendingPathComponent(
-            "FactorTester/jobs/\(jobID)", isDirectory: true
-        )
+        let root = try LocalDocumentsRoot.resolve()
+            .appendingPathComponent("jobs", isDirectory: true)
+            .appendingPathComponent(jobID, isDirectory: true)
         try FileManager.default.createDirectory(
             at: root, withIntermediateDirectories: true
         )

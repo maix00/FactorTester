@@ -63,6 +63,11 @@ def test_real_three_bar_native_catalog_readback_and_receipt(
     assert receipt.process_peak_rss_bytes > 0
     assert len(receipt.source_sha256) == len(receipt.selected_bars_sha256) == 64
     assert receipt.max_batch_bars == 2
+    assert receipt.source_ordinal_start == bars[0].row_number - 1
+    clock = hashlib.sha256()
+    for bar in bars:
+        clock.update(bar.clock.interval_end_ns.to_bytes(8, 'big', signed=True))
+    assert receipt.selected_clock_sha256 == clock.hexdigest()
     assert json.loads((target / "factor_tester_catalog_receipt.json").read_text())[
         "source_sha256"
     ] == receipt.source_sha256
@@ -75,6 +80,13 @@ def test_real_three_bar_native_catalog_readback_and_receipt(
     assert len(readback) == 3
     assert [Decimal(str(bar.high)) for bar in readback] == [bar.high for bar in bars]
     assert [bar.ts_event for bar in readback] == [bar.clock.interval_end_ns for bar in bars]
+    suffix = stage_contract_minute_catalog(
+        source, tmp_path / 'suffix-catalog', contract_uid=uid, instrument_spec=spec,
+        start_ns=bars[1].clock.interval_end_ns, end_ns=bars[-1].clock.interval_end_ns,
+        batch_bars=2, max_bars=2,
+    )
+    assert suffix.source_ordinal_start == bars[1].row_number - 1
+    assert suffix.selected_clock_sha256 != receipt.selected_clock_sha256
     with pytest.raises(FileExistsError):
         stage_contract_minute_catalog(
             source, target, contract_uid=uid, instrument_spec=spec,

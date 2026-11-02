@@ -29,6 +29,7 @@ def ensure_request_schema(connection: sqlite3.Connection) -> None:
             expires_at REAL NOT NULL,
             object_kind TEXT NOT NULL DEFAULT 'job_artifact',
             object_id TEXT NOT NULL DEFAULT '',
+            principal_identity_id TEXT NOT NULL DEFAULT '',
             CHECK (operation IN ('download', 'upload')),
             CHECK (status IN (
                 'created', 'planned', 'dispatched', 'streaming',
@@ -60,4 +61,8 @@ def ensure_request_schema(connection: sqlite3.Connection) -> None:
     if "content_type" not in columns:
         connection.execute(
             "ALTER TABLE transfer_requests ADD COLUMN content_type TEXT NOT NULL DEFAULT 'application/octet-stream'"
+        )
+    if "principal_identity_id" not in columns:
+        connection.execute(
+            "ALTER TABLE transfer_requests ADD COLUMN principal_identity_id TEXT NOT NULL DEFAULT ''"
         )

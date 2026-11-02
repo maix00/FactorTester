@@ -83,14 +83,14 @@ def test_agent_cli_files_are_private_and_cleaned(tmp_path: Path) -> None:
     assert launch.factor_tester_capability_path.stat().st_mode & 0o077 == 0
     assert "manager" in environment["NO_PROXY"]
     assert (
-        environment["FACTORTESTER_CONFIG"] == "/workspace/.codex/factor-tester-cli.json"
+        environment["TRADERESEARCH_CONFIG"] == "/workspace/.codex/factor-tester-cli.json"
     )
-    assert environment["FACTORTESTER_AGENT_CAPABILITY_FILE"] == (
+    assert environment["TRADERESEARCH_AGENT_CAPABILITY_FILE"] == (
         "/workspace/.codex/factor-tester-agent.json"
     )
-    assert environment["FACTORTESTER_CLIENT_ROOT"] == "/workspace/.factortester-client"
-    assert environment["FACTORTESTER_PROFILE"] == "profile-main"
-    assert environment["FACTORTESTER_AGENT_TOKEN"] == "provider-secret"
+    assert environment["TRADERESEARCH_CLIENT_ROOT"] == "/workspace/.factortester-client"
+    assert environment["TRADERESEARCH_PROFILE"] == "profile-main"
+    assert environment["TRADERESEARCH_AGENT_TOKEN"] == "provider-secret"
     profile = json.loads(
         (
             runtime.factor_tester_client_root / "profiles" / "profile-main.json"
@@ -106,6 +106,23 @@ def test_agent_cli_files_are_private_and_cleaned(tmp_path: Path) -> None:
 
     assert not launch.factor_tester_config_path.exists()
     assert not launch.factor_tester_capability_path.exists()
+
+
+def test_agent_process_receives_only_scoped_credentials(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADERESEARCH_KEYCLOAK_ADMIN_CLIENT_SECRET", "private-admin-secret")
+    monkeypatch.setenv("FACTORTESTER_CONTROL_DATABASE_URL", "private-db-secret")
+    monkeypatch.setenv("UNRELATED_DEPLOY_TOKEN", "private-deploy-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "private-manager-model-key")
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    launch = AgentAppServerLaunch(
+        runtime=runtime, provider={"secret": "profile-only-token"}, codex_binary="codex",
+    )
+    environment = launch.environment()
+    assert environment["TRADERESEARCH_AGENT_TOKEN"] == "profile-only-token"
+    assert all(key not in environment for key in (
+        "TRADERESEARCH_KEYCLOAK_ADMIN_CLIENT_SECRET", "FACTORTESTER_CONTROL_DATABASE_URL",
+        "UNRELATED_DEPLOY_TOKEN", "OPENAI_API_KEY",
+    ))
 
 
 def test_agent_profiles_have_distinct_writable_client_roots(tmp_path: Path) -> None:

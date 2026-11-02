@@ -44,6 +44,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
+        PRODUCT_NAME: TradeResearch
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"     # iPhone + iPad
     info:
@@ -71,7 +72,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
-        PRODUCT_NAME: FTClient
+        PRODUCT_NAME: TradeResearch
         # Xcode Run must use the same persistent identity as local/release
         # scripts. Automatic signing with an empty Team falls back to ad-hoc
         # signing and makes macOS ask for Documents access after every swap.
@@ -103,8 +104,22 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.gtht.client.app-update
             CFBundleURLSchemes:
+              - traderesearch
               - factortester
         <<: *ats
+
+  FactorTester-Client-iOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: iOSUITests
+    dependencies:
+      - target: FactorTester-Client-iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client.iosuitests
+        GENERATE_INFOPLIST_FILE: YES
 
   FactorTester-ClientTests:
     type: bundle.unit-test
@@ -120,7 +135,7 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: FTClient Beta Release
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/FTClient.app/Contents/MacOS/FTClient"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TradeResearch.app/Contents/MacOS/TradeResearch"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
   FactorTester-ClientUITests:
@@ -139,6 +154,14 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
+  FactorTester-Client-iOS-UI:
+    build:
+      targets:
+        FactorTester-Client-iOS: all
+        FactorTester-Client-iOSUITests: [test]
+    test:
+      targets:
+        - FactorTester-Client-iOSUITests
   FactorTester-Client-macOS:
     build:
       targets:

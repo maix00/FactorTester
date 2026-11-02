@@ -94,7 +94,7 @@ def test_cli_create_deactivate_and_legacy_purge_are_idempotent(
         "release": {"install_root": str(client_root)}
     }))
     workspace = (
-        tmp_path / "Documents/FactorTester/users" / OWNER
+        tmp_path / "Documents/TradeResearch/users" / OWNER
         / "profiles/maxa"
     )
     args = [
@@ -152,7 +152,7 @@ def test_delete_refuses_bound_profile_without_mutating_worktree_or_history(
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     client_root = tmp_path / "support"
     workspace = (
-        tmp_path / "Documents/FactorTester/users" / OWNER
+        tmp_path / "Documents/TradeResearch/users" / OWNER
         / "profiles/maxa"
     )
     lifecycle = ProfileLifecycle(client_root)

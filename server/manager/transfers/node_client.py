@@ -9,6 +9,8 @@ from urllib.request import Request
 from server.manager.domain.federation_transport import FederationTransport
 from server.manager.transfers.node_keys import NodeKey
 
+_MAX_CONTROL_RESPONSE = 12 * 1024 * 1024
+
 
 class NodeControlClient:
     def __init__(
@@ -42,6 +44,7 @@ class NodeControlClient:
         payload: dict[str, object],
         *,
         timeout: float = 10.0,
+        max_response_bytes: int = 1024 * 1024,
     ) -> dict[str, object]:
         body = _json_bytes(payload)
         challenge = self._challenge()
@@ -56,6 +59,7 @@ class NodeControlClient:
                 body=body,
             ),
             timeout=timeout,
+            max_response_bytes=max_response_bytes,
         )
 
     def _challenge(self) -> str:
@@ -96,6 +100,7 @@ class NodeControlClient:
         body: bytes | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 10.0,
+        max_response_bytes: int = 1024 * 1024,
     ) -> dict[str, object]:
         raw = body if body is not None else (
             _json_bytes(payload) if payload is not None else None
@@ -110,8 +115,14 @@ class NodeControlClient:
             },
             method=method,
         )
+        if (isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int)
+                or not 1 <= max_response_bytes <= _MAX_CONTROL_RESPONSE):
+            raise ValueError('peer response budget is invalid')
         with self.transport.open(request, timeout=timeout) as response:
-            value = json.loads(response.read(1024 * 1024).decode("utf-8"))
+            data = response.read(max_response_bytes + 1)
+        if len(data) > max_response_bytes:
+            raise ValueError('peer control response exceeds its budget')
+        value = json.loads(data.decode("utf-8"))
         if not isinstance(value, dict) or value.get("success") is False:
             raise ValueError("peer control response is invalid")
         return value

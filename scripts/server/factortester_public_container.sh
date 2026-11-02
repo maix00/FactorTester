@@ -15,6 +15,7 @@ Commands:
   config         render and validate Compose configuration
   container-id   print one service's current container ID
   build          build both versioned images explicitly
+  python-cache-promote  retain the verified release's Python dependencies
   up             start/reconcile from existing images; never builds or pulls
   restart-app    restart only FactorTester; PostgreSQL remains running
   stop-app       stop only FactorTester; PostgreSQL remains running
@@ -399,7 +400,45 @@ case "$command" in
   build)
     check_source
     builder="$(python3 "$script_dir/public_build_builder.py")"
+    if [[ -n "${TR_PUBLIC_PYTHON_SOURCE_ROOT:-}" && -n "${TR_PUBLIC_PYTHON_SOURCE_IMAGE:-}" ]]; then
+      cache_root="${TR_PUBLIC_PYTHON_CACHE_ROOT:?set Python dependency cache root}"
+      cache_plan="$(python3 "$script_dir/public_python_dependencies.py" prepare \
+        --candidate "$repo_root" --source "$TR_PUBLIC_PYTHON_SOURCE_ROOT" \
+        --source-image "$TR_PUBLIC_PYTHON_SOURCE_IMAGE" --root "$cache_root")"
+      export TR_PUBLIC_PYTHON_DEPS_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["identity"])' <<< "$cache_plan")"
+      export TR_PUBLIC_PYTHON_CACHE_CONTEXT="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["context"])' <<< "$cache_plan")"
+      export TR_PUBLIC_PYTHON_REUSE_REQUIRED="$(python3 -c 'import json,sys; print(int(json.load(sys.stdin)["reuse_required"]))' <<< "$cache_plan")"
+      snapshot_mib="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["snapshot_mib"])' <<< "$cache_plan")"
+      echo "Python dependencies: reuse_required=$TR_PUBLIC_PYTHON_REUSE_REQUIRED identity=$TR_PUBLIC_PYTHON_DEPS_ID"
+      bash "$script_dir/check_public_build_capacity.sh" --cache-root "$cache_root" --snapshot-mib "$snapshot_mib"
+    fi
     DOCKER_BUILDKIT=1 "${compose[@]}" build --builder "$builder" "$@"
+    if [[ -n "${TR_PUBLIC_PYTHON_SOURCE_ROOT:-}" && -n "${TR_PUBLIC_PYTHON_SOURCE_IMAGE:-}" ]]; then
+      candidate_image="${FACTORTESTER_PUBLIC_IMAGE:-factortester-public}:$revision"
+      if (( snapshot_mib > 0 )); then
+        if ! bash "$script_dir/check_public_build_capacity.sh" --cache-root "$cache_root" --snapshot-mib "$snapshot_mib" --build-mib 0; then
+          [[ "$candidate_image" == "$TR_PUBLIC_PYTHON_SOURCE_IMAGE" ]] || docker image rm "$candidate_image" >/dev/null 2>&1 || true
+          exit 1
+        fi
+      fi
+      if ! python3 "$script_dir/public_python_dependencies.py" capture \
+        --image "$candidate_image" --identity "$TR_PUBLIC_PYTHON_DEPS_ID" --root "$cache_root" --require-label >/dev/null; then
+        [[ "$candidate_image" == "$TR_PUBLIC_PYTHON_SOURCE_IMAGE" ]] || docker image rm "$candidate_image" >/dev/null 2>&1 || true
+        exit 1
+      fi
+    fi
+    ;;
+  python-cache-plan)
+    python3 "$script_dir/public_python_dependencies.py" plan \
+      --candidate "$repo_root" --source "${TR_PUBLIC_PYTHON_SOURCE_ROOT:?set source release}" \
+      --source-image "${TR_PUBLIC_PYTHON_SOURCE_IMAGE:?set source image}" \
+      --root "${TR_PUBLIC_PYTHON_CACHE_ROOT:?set Python dependency cache root}"
+    ;;
+  python-cache-promote)
+    cache_root="${TR_PUBLIC_PYTHON_CACHE_ROOT:?set Python dependency cache root}"
+    cache_identity="$(docker image inspect "${FACTORTESTER_PUBLIC_IMAGE:-factortester-public}:$revision" \
+      --format '{{index .Config.Labels "org.traderesearch.python-deps.identity"}}')"
+    python3 "$script_dir/public_python_dependencies.py" promote --identity "$cache_identity" --root "$cache_root"
     ;;
   up) "${compose[@]}" up --detach --no-build --remove-orphans --wait "$@" ;;
   restart-app) "${compose[@]}" up --detach --no-build --no-deps --force-recreate --wait factortester-public "$@" ;;

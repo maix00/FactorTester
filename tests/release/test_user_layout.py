@@ -59,13 +59,21 @@ def _fixture(tmp_path: Path, monkeypatch):
 
 def test_unified_defaults_have_one_principal_tree(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    user_root = tmp_path / "Documents/FactorTester/users" / OWNER
+    user_root = tmp_path / "Documents/TradeResearch/users" / OWNER
     assert default_user_factor_library(OWNER) == (
         user_root / "personal-workspace/factor-library"
     )
     assert default_user_profile_root(OWNER, "maxa") == (
         user_root / "profiles/maxa"
     )
+
+
+def test_existing_documents_root_is_preserved_until_reviewed_migration(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    legacy = tmp_path / "Documents/FactorTester"
+    legacy.mkdir(parents=True)
+    assert default_user_factor_library(OWNER) == legacy / "users" / OWNER / "personal-workspace/factor-library"
+    assert not (tmp_path / "Documents/TradeResearch").exists()
 
 
 def test_status_exposes_only_active_unified_layout(tmp_path, monkeypatch):

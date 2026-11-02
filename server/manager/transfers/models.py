@@ -73,6 +73,7 @@ class NewTransfer:
     content_type: str = "application/octet-stream"
     object_kind: str = "job_artifact"
     object_id: str = ""
+    principal_identity_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +98,7 @@ class TransferRecord:
     content_type: str = "application/octet-stream"
     object_kind: str = "job_artifact"
     object_id: str = ""
+    principal_identity_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 import click
@@ -11,20 +10,10 @@ import click
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.locations import default_client_root
-from tools.cli.release.research_reporting.public_research.client import (
-    PublicResearchClient,
-)
 
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
-
-
-def _read_json(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise click.ClickException(f"无法读取 JSON 文件: {path}") from exc
 
 
 def register_research_catalog_commands(research: click.Group) -> None:
@@ -54,41 +43,29 @@ def register_research_catalog_commands(research: click.Group) -> None:
         if not items:
             click.echo("暂无研究")
             return
-        click.echo("研究 ID\t标题\t所有者\t可见性\t更新时间")
+        click.echo("研究 ID\t标题\t所有者\t更新时间")
         for item in items:
             click.echo("\t".join([
                 str(item.get("research_id") or ""),
                 str(item.get("title") or ""),
                 str(item.get("owner_ref") or ""),
-                str(item.get("visibility") or ""),
                 str(item.get("updated_at") or ""),
             ]))
 
     @research.command("create")
     @click.option("--title", required=True, help="研究标题。")
     @click.option("--description", default="", help="研究说明。")
-    @click.option(
-        "--visibility",
-        type=click.Choice(("private", "superiors", "authorized", "public")),
-        default="private",
-        show_default=True,
-    )
-    @click.option("--authorized-user", multiple=True, help="授权用户，可重复。")
     @click.option("--profile", "profile_ref", default="", help="初始成员 Profile。")
     @friendly_errors
     def create_research(
         title: str,
         description: str,
-        visibility: str,
-        authorized_user: tuple[str, ...],
         profile_ref: str,
     ) -> None:
         """创建一个 Research 根对象。"""
         click.echo(_json(client_from_config().create_research(
             title=title,
             description=description,
-            visibility=visibility,
-            authorized_users=list(authorized_user),
             profile_ref=profile_ref,
         )))
 
@@ -103,44 +80,47 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @click.argument("research_id")
     @click.option("--title")
     @click.option("--description")
-    @click.option(
-        "--visibility",
-        type=click.Choice(("private", "superiors", "authorized", "public")),
-    )
     @click.option("--status", type=click.Choice(("active", "archived")))
-    @click.option("--authorized-user", multiple=True, help="替换授权用户列表。")
-    @click.option("--clear-authorized-users", is_flag=True)
     @friendly_errors
     def update_research(
         research_id: str,
         title: str | None,
         description: str | None,
-        visibility: str | None,
         status: str | None,
-        authorized_user: tuple[str, ...],
-        clear_authorized_users: bool,
     ) -> None:
         """更新 Research 元数据或归档状态。"""
-        if clear_authorized_users and authorized_user:
-            raise click.ClickException(
-                "--clear-authorized-users 不能与 --authorized-user 同时使用"
-            )
         payload: dict[str, Any] = {}
         if title is not None:
             payload["title"] = title
         if description is not None:
             payload["description"] = description
-        if visibility is not None:
-            payload["visibility"] = visibility
         if status is not None:
             payload["status"] = status
-        if clear_authorized_users:
-            payload["authorized_users"] = []
-        elif authorized_user:
-            payload["authorized_users"] = list(authorized_user)
         if not payload:
             raise click.ClickException("至少提供一个要更新的字段")
         click.echo(_json(client_from_config().update_research(research_id, payload)))
+
+    @research.command("grants")
+    @click.argument("research_id")
+    @click.option("--report-id", default="", help="指定单个报告。")
+    @friendly_errors
+    def list_grants(research_id: str, report_id: str) -> None:
+        """读取 Keycloak 中的直接授权。"""
+        click.echo(_json(client_from_config().research_grants(research_id, report_id=report_id)))
+
+    @research.command("grant")
+    @click.argument("research_id")
+    @click.option("--principal", required=True)
+    @click.option("--scope", "scopes", multiple=True, type=click.Choice(("read", "use", "write")))
+    @click.option("--revoke", is_flag=True, help="撤销此用户的直接授权。")
+    @click.option("--report-id", default="", help="指定单个报告。")
+    @friendly_errors
+    def set_grant(research_id: str, principal: str, scopes: tuple[str, ...], revoke: bool, report_id: str) -> None:
+        """在 Keycloak 中设置研究或报告的直接授权。"""
+        if (revoke and scopes) or (not revoke and not scopes):
+            raise click.ClickException("请选择权限，或使用 --revoke")
+        click.echo(_json(client_from_config().set_research_grant(
+            research_id, principal_ref=principal, scopes=list(scopes), report_id=report_id)))
 
     @research.command("member-add")
     @click.argument("research_id")
@@ -222,21 +202,12 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @click.argument("research_id")
     @click.option("--title", required=True, help="研究报告标题。")
     @click.option("--profile", "profile_ref", required=True)
-    @click.option(
-        "--visibility",
-        type=click.Choice(("private", "superiors", "authorized", "public")),
-        default="private",
-        show_default=True,
-    )
-    @click.option("--authorized-user", multiple=True, help="授权用户，可重复。")
     @click.option("--report-id", default="", help="恢复同一研究中已创建的报告，不再新建目录记录。")
     @friendly_errors
     def create_report(
         research_id: str,
         title: str,
         profile_ref: str,
-        visibility: str,
-        authorized_user: tuple[str, ...],
         report_id: str,
     ) -> None:
         """在 Research 中新建一个由 Profile 撰写的报告空间。"""
@@ -255,56 +226,19 @@ def register_research_catalog_commands(research: click.Group) -> None:
         else:
             report = client.create_research_report(research_id, {
                 "title": title, "profile_ref": profile_ref,
-                "visibility": visibility, "authorized_users": list(authorized_user),
             })
         initialized = initialize_report_space(store, profile_ref, report)
         # The existing server report reader sees the Profile-owned tree; client
         # reports continue to use the existing explicit publication workflow.
-        import os
-        if os.environ.get("FACTORTESTER_AGENT_CAPABILITY_FILE"):
+        from tools.cli.agent_auth import capability_path
+        if capability_path():
             client.register_research_report(research_id, {
                 "report_id": report["report_id"], "title": report["title"],
                 "profile_ref": profile_ref, "workspace_id": report["workspace_id"],
                 "build_source": "server_agent", "source_ref": initialized["source_ref"],
-                "visibility": report["visibility"], "authorized_users": report.get("authorized_users", []),
             })
         click.echo(_json(initialized))
 
-
-    @research.command("report-update")
-    @click.argument("research_id")
-    @click.argument("report_id")
-    @click.option(
-        "--visibility",
-        type=click.Choice(("private", "superiors", "authorized", "public")),
-    )
-    @click.option("--authorized-user", multiple=True, help="替换授权用户列表。")
-    @click.option("--clear-authorized-users", is_flag=True)
-    @friendly_errors
-    def update_report(
-        research_id: str,
-        report_id: str,
-        visibility: str | None,
-        authorized_user: tuple[str, ...],
-        clear_authorized_users: bool,
-    ) -> None:
-        """更新 Report 独立可见性。"""
-        if clear_authorized_users and authorized_user:
-            raise click.ClickException(
-                "--clear-authorized-users 不能与 --authorized-user 同时使用"
-            )
-        payload: dict[str, Any] = {}
-        if visibility is not None:
-            payload["visibility"] = visibility
-        if clear_authorized_users:
-            payload["authorized_users"] = []
-        elif authorized_user:
-            payload["authorized_users"] = list(authorized_user)
-        if not payload:
-            raise click.ClickException("至少提供一个要更新的字段")
-        click.echo(_json(client_from_config().update_research_report(
-            research_id, report_id, payload,
-        )))
 
     @research.command("report-remove")
     @click.argument("research_id")
@@ -349,47 +283,6 @@ def register_research_catalog_commands(research: click.Group) -> None:
                 "purpose": purpose,
             },
         )))
-
-    @research.command("migrate-reports")
-    @click.option(
-        "--file",
-        "records_file",
-        required=True,
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    )
-    @friendly_errors
-    def migrate_reports(records_file: Path) -> None:
-        """显式、幂等地把已有报告元数据迁移到同名 Research。"""
-        value = _read_json(records_file)
-        records = value.get("records") if isinstance(value, dict) else value
-        if not isinstance(records, list):
-            raise click.ClickException("迁移文件必须是报告数组或 {records: []}")
-        click.echo(_json(client_from_config().migrate_research_reports(records)))
-
-    @research.command("migrate-existing-reports")
-    @click.option("--apply", is_flag=True, help="执行计划；省略时只显示发现结果。")
-    @friendly_errors
-    def migrate_existing_reports(apply: bool) -> None:
-        """发现客户端、服务器 Agent 与公共发布中的旧报告并显式迁移。"""
-        client = client_from_config()
-        local_records = PublicResearchClient(
-            default_client_root(), session=client.session,
-        ).local_report_migration_records(apply_identities=apply)
-        remote = client.discover_research_report_migration(apply=apply)
-        if not apply:
-            click.echo(_json({
-                "status": "planned",
-                "local_count": len(local_records),
-                "remote_count": int(remote.get("count") or 0),
-                "records": local_records + list(remote.get("records") or []),
-            }))
-            return
-        local = client.migrate_research_reports(local_records)
-        click.echo(_json({
-            "status": "completed",
-            "local": local,
-            "remote": remote,
-        }))
 
     @research.command("manifest")
     @click.argument("research_id")

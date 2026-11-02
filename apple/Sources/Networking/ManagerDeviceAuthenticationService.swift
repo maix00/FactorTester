@@ -10,10 +10,10 @@ import Foundation
 final class ManagerDeviceAuthenticationService {
     static let shared = ManagerDeviceAuthenticationService()
 
-    func authenticate(
+    func beginOIDCLogin(
         endpoint: URL? = nil,
         expectedUsername: String? = nil
-    ) async throws -> ManagerDeviceAuthenticationResult {
+    ) async throws -> URL {
         guard let configuredEndpoint = endpoint ?? ManagerConfig.shared.baseURL else {
             throw APIError.notConfigured
         }
@@ -43,7 +43,7 @@ final class ManagerDeviceAuthenticationService {
             throw APIError.server(L10n.text("服务器返回的设备挑战无效。"))
         }
         let signature = try ManagerDeviceKeyStore.sign(Data(challengeBytes))
-        let response: DeviceSessionResponse = try await request(
+        let response: DeviceProofResponse = try await request(
             endpoint: endpoint,
             path: "/api/device/verify",
             method: "POST",
@@ -54,17 +54,14 @@ final class ManagerDeviceAuthenticationService {
                 "signature": Self.base64URL(signature),
             ]
         )
-        if let expected, !expected.isEmpty, response.username != expected {
-            ManagerSessionTokenStore.remove(for: endpoint)
-            throw APIError.unauthorized(
-                L10n.text(
-                    "当前设备绑定的用户与已登录用户不一致，已拒绝切换账号。"
-                )
-            )
+        guard response.success, response.requiresKeycloak,
+              response.deviceID == credential.deviceID,
+              let handoff = Self.validatedHandoff(response.loginURL, endpoint: endpoint) else {
+            throw APIError.server(L10n.text("设备认证地址无效。"))
         }
-        try ManagerDeviceKeyStore.updateUsername(response.username)
-        ManagerSessionTokenStore.save(response.token, for: endpoint)
-        return response.result(deviceID: credential.deviceID, endpoint: endpoint)
+        // The proof is not a Manager session. Keycloak and the Manager
+        // callback must authenticate and authorize the owner first.
+        return handoff
     }
 
     private func request<Response: Decodable>(
@@ -125,11 +122,24 @@ final class ManagerDeviceAuthenticationService {
               endpoint.fragment == nil else {
             throw APIError.server(L10n.text("设备认证地址无效。"))
         }
-        let loopback = ManagerEndpointPolicy.isLoopback(host)
-        guard scheme == "https" || (scheme == "http" && loopback) else {
+        guard scheme == "https" || (scheme == "http" && ManagerEndpointPolicy.isPrivateNetwork(host)) else {
             throw APIError.server(L10n.text("公网设备认证需要 HTTPS，不能使用公网 HTTP。"))
         }
         return endpoint
+    }
+
+    static func validatedHandoff(_ value: String, endpoint: URL) -> URL? {
+        guard value.utf8.count <= 2048, value.hasPrefix("/auth/oidc/start?"),
+              let relative = URLComponents(string: value), relative.scheme == nil,
+              relative.host == nil, relative.user == nil, relative.password == nil,
+              relative.fragment == nil, relative.path == "/auth/oidc/start",
+              let items = relative.queryItems,
+              items.filter({ $0.name == "device_ticket" }).count == 1,
+              let ticket = items.first(where: { $0.name == "device_ticket" })?.value,
+              !ticket.isEmpty, ticket.utf8.count <= 512,
+              items.allSatisfy({ $0.name == "device_ticket" || $0.name == "next" }),
+              items.filter({ $0.name == "next" }).count <= 1 else { return nil }
+        return URL(string: value, relativeTo: endpoint)?.absoluteURL
     }
 
     private static func url(endpoint: URL, path: String) -> URL? {
@@ -181,40 +191,20 @@ final class ManagerDeviceAuthenticationService {
         }
     }
 
-    private struct DeviceSessionResponse: Decodable {
+    private struct DeviceProofResponse: Decodable {
         let success: Bool
-        let username: String
-        let role: String?
-        let token: String
-        let expiresIn: Int?
+        let requiresKeycloak: Bool
+        let loginURL: String
+        let deviceID: String
 
         enum CodingKeys: String, CodingKey {
-            case success, username, role, token
-            case expiresIn = "expires_in"
-        }
-
-        func result(
-            deviceID: String,
-            endpoint: URL
-        ) -> ManagerDeviceAuthenticationResult {
-            ManagerDeviceAuthenticationResult(
-                deviceID: deviceID,
-                username: username,
-                role: role ?? "user",
-                expiresIn: expiresIn ?? 0,
-                endpoint: endpoint
-            )
+            case success
+            case requiresKeycloak = "requires_keycloak"
+            case loginURL = "login_url"
+            case deviceID = "device_id"
         }
     }
 
-}
-
-struct ManagerDeviceAuthenticationResult: Equatable {
-    let deviceID: String
-    let username: String
-    let role: String
-    let expiresIn: Int
-    let endpoint: URL
 }
 
 struct ManagerPublicTarget: Decodable, Equatable {

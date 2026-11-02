@@ -8,6 +8,7 @@ from server.identity.realm_groups import (
     administrative_group_role,
     managed_member_group_paths,
 )
+from server.identity.server_admission import current_administrative_groups, current_manager_role
 from server.manager.http.responses import json_response
 from server.manager.storage.control_db import ControlDatabaseError
 
@@ -35,12 +36,16 @@ class DeviceAdministrationRoutesMixin:
                 "error": "device administration requires a secure Manager connection",
             }, 400)
             return None, False, set()
-        roles = session.get("keycloak_roles") or ()
-        is_super = (
-            isinstance(roles, (tuple, list, set, frozenset))
-            and "admin_console:manage" in roles
-        )
-        groups = session.get("keycloak_groups") or ()
+        is_super = current_manager_role(session, "admin_console:manage")
+        groups = current_administrative_groups(session)
+        if groups is None:
+            json_response(self, {
+                "success": False,
+                "code": "keycloak_authorization_unavailable",
+                "error": "Keycloak authorization is unavailable",
+            }, 503)
+            return None, False, set()
+        groups = groups or ()
         scopes = managed_member_group_paths(groups)
         if not is_super and administrative_group_role(tuple(groups)) not in {
             "org_admin", "level_admin",
@@ -60,7 +65,8 @@ class DeviceAdministrationRoutesMixin:
         )
 
         adapter = manager_keycloak_admin_adapter()
-        user_id = adapter.user_id(username)
+        from server.identity.keycloak_research import resolve_keycloak_research_member
+        user_id = resolve_keycloak_research_member(username)["subject"]
         paths = adapter.user_group_paths(
             user_id, page_size=100, max_groups=2000,
         )
@@ -113,9 +119,9 @@ class DeviceAdministrationRoutesMixin:
             devices = self.state.device_registry.list(
                 username=username, include_disabled=True,
             )
-            total = self.state.device_registry.public_device_total_count(
-                username=username,
-            )
+            devices = [item for item in devices
+                       if item.get("source_server_id") == self.state.server_id]
+            total = sum(item.get("enabled") is True for item in devices)
         except ControlDatabaseError:
             json_response(self, {
                 "success": False,
@@ -129,6 +135,7 @@ class DeviceAdministrationRoutesMixin:
             "public_device_count": total,
             "public_device_total_count": total,
             "public_user_count": 1 if total else 0,
+            "count_basis": "enabled_device_records",
             "scope": "realm" if is_super else "keycloak-group",
             **self.state.device_registry.backend_status(),
         }, headers={"Cache-Control": "private, no-store"})
@@ -153,12 +160,23 @@ class DeviceAdministrationRoutesMixin:
                 username=username, include_disabled=True,
             )
             record = next(
-                (item for item in records if item.get("device_id") == device_id),
+                (item for item in records if item.get("device_id") == device_id
+                 and item.get("source_server_id") == self.state.server_id),
                 None,
             )
             if record is None:
                 raise PermissionError("device was not found for this user")
-            device = self.state.device_registry.revoke(device_id)
+            binding = self.state.device_registry.key_binding(username=username, device_id=device_id)
+            if binding is None:
+                raise PermissionError("device key was not found for this user")
+            from server.identity.keycloak_research import resolve_keycloak_research_member
+            from server.identity.keycloak_device import revoke_device_for_owner
+            owner = resolve_keycloak_research_member(username)
+            revoke_device_for_owner(owner_subject=owner["subject"], identity_id=owner["identity_id"],
+                                    server_id=self.state.server_id, device_id=device_id,
+                                    public_key=binding.get("public_key"))
+            device = self.state.device_registry.revoke(device_id, username=username,
+                                                       public_key=binding.get("public_key"))
         except LookupError:
             json_response(self, {
                 "success": False,

@@ -25,6 +25,16 @@ def test_verified_client_roles_and_cache():
     assert client.calls == 1
 
 
+def test_delegated_agent_token_can_require_fresh_introspection():
+    client = Client()
+    verifier = UserSessionVerifier(client, issuer='https://id/realms/tr', audience='manager')
+    assert verifier.session('token') is not None
+    client.claims = {**client.claims, 'active': False}
+    assert verifier.session('token', use_cache=False) is None
+    assert verifier.session('token') is None
+    assert client.calls == 3
+
+
 def test_oidc_settings_keep_public_issuer_separate_from_private_backchannel(monkeypatch, tmp_path):
     import server.identity.user_session as user_session
 
@@ -125,18 +135,25 @@ def test_reject_wrong_audience_and_revoked_token():
     assert verifier.session('revoked') is None
 
 
-def test_keycloak_permission_does_not_use_local_super_admin(monkeypatch):
+def test_agent_permission_is_scoped_to_manager_location(monkeypatch):
     from server.permissions.agent_assistant import can_use_agent_assistant
-    monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'keycloak')
-    assert not can_use_agent_assistant('alice', 'super_admin')
-    assert can_use_agent_assistant('alice', 'user', ('agent_assistant:use',))
+    from server.identity import server_admission
+    calls = []
+    session = {'username': 'alice', 'role': 'super_admin', 'keycloak_roles': ('agent_assistant:use',)}
+    monkeypatch.setattr(server_admission, 'current_manager_role',
+                        lambda current, role: calls.append((current, role)) or role == 'agent_assistant:internal:use')
+    assert can_use_agent_assistant(session, public_server=False)
+    assert not can_use_agent_assistant(session, public_server=True)
+    assert calls == [(session, 'agent_assistant:internal:use'), (session, 'agent_assistant:public:use')]
 
 
 def test_manager_keycloak_mode_uses_verified_session(monkeypatch):
     from server.manager.state.sessions import SessionStateMixin
     import server.identity.user_session as user_session
+    import server.identity.server_admission as server_admission
     monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'keycloak')
     monkeypatch.setattr(user_session, 'keycloak_session', lambda token: {'username': 'alice'} if token == 'trusted' else None)
+    monkeypatch.setattr(server_admission, 'server_admission', lambda *_a, **_k: (True, ''))
     state = SessionStateMixin()
     assert state.session('trusted') == {'username': 'alice'}
     assert state.session('local-super-admin') is None
@@ -145,10 +162,12 @@ def test_manager_keycloak_mode_uses_verified_session(monkeypatch):
 def test_manager_dual_mode_prefers_a_verified_keycloak_session(monkeypatch):
     from server.manager.state.sessions import SessionStateMixin
     import server.identity.user_session as user_session
+    import server.identity.server_admission as server_admission
     monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'dual')
     monkeypatch.setattr(user_session, 'keycloak_session', lambda token: {
         'username': 'alice', 'keycloak_roles': ('admin_console:manage',),
     } if token == 'kc-token' else None)
+    monkeypatch.setattr(server_admission, 'server_admission', lambda *_a, **_k: (True, ''))
     state = SessionStateMixin()
     assert state.session('kc-token')['keycloak_roles'] == ('admin_console:manage',)
     assert state.session('legacy-token') is None
@@ -172,9 +191,12 @@ def test_dual_mode_never_falls_back_to_a_preexisting_local_session(monkeypatch):
 
 def test_keycloak_roles_override_stale_local_admin_flags(monkeypatch):
     from flask import Flask, g
+    from server.identity import server_admission
     from tools.data.account_manage import is_super_admin_account, get_account
 
     monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'keycloak')
+    monkeypatch.setattr(server_admission, 'current_manager_role',
+                        lambda session, role: role in session.get('keycloak_roles', ()))
     app = Flask(__name__)
     with app.test_request_context('/'):
         g.keycloak_user_session = {
@@ -191,13 +213,44 @@ def test_keycloak_roles_override_stale_local_admin_flags(monkeypatch):
         assert not is_super_admin_account(projected)
 
 
+def test_sensitive_account_roles_follow_current_keycloak_grant(monkeypatch):
+    from flask import Flask, g
+    from server.identity import server_admission
+    from tools.data.account_manage import (
+        get_account, is_any_admin_account, is_developer_account, is_super_admin_account,
+    )
+
+    granted = {'admin_console:manage', 'factor:develop'}
+    monkeypatch.setattr(server_admission, 'current_manager_role',
+                        lambda _session, role: role in granted)
+    with Flask(__name__).test_request_context('/'):
+        g.keycloak_user_session = {
+            'username': 'alice',
+            'keycloak_roles': ('admin_console:manage', 'factor:develop'),
+        }
+        account = get_account('alice')
+        assert is_super_admin_account(account)
+        assert is_any_admin_account(account)
+        assert is_developer_account(account)
+        granted.clear()
+        assert not is_super_admin_account(account)
+        assert not is_any_admin_account(account)
+        assert not is_developer_account(account)
+        assert not is_developer_account({'username': 'other'})
+
+
 def test_keycloak_scoped_admin_roles_do_not_use_legacy_hierarchy(monkeypatch):
     from flask import Flask, g
+    from server.identity import server_admission
     from tools.data.account_manage import (
-        get_account, is_any_admin_account, is_org_admin_account,
+        get_account, is_any_admin_account, is_level_admin_account, is_org_admin_account,
     )
 
     monkeypatch.setenv('TRADERESEARCH_AUTH_MODE', 'keycloak')
+    current_groups = ['/traderesearch/admin-scopes/organizations/org-a/organization-admins']
+    monkeypatch.setattr(server_admission, 'current_manager_role', lambda *_args: False)
+    monkeypatch.setattr(server_admission, 'current_administrative_groups',
+                        lambda _session: tuple(current_groups))
     app = Flask(__name__)
     with app.test_request_context('/'):
         g.keycloak_user_session = {
@@ -207,7 +260,11 @@ def test_keycloak_scoped_admin_roles_do_not_use_legacy_hierarchy(monkeypatch):
         manager = get_account('manager')
         assert manager['role'] == 'org_admin'
         assert is_org_admin_account(manager)
+        assert is_level_admin_account(manager)
         assert not is_any_admin_account(manager)
+        current_groups.clear()
+        assert not is_org_admin_account(manager)
+        assert not is_level_admin_account(manager)
 
 
 def test_admin_owned_identity_label_preserves_owner_refs_after_login_normalization():

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from server.manager.http.responses import json_response
+from server.manager.domain.federation.registry import FederationRegistrationConflict
 
 
 _CATALOG_FIELDS = {
@@ -42,6 +43,9 @@ class FederationRegistrationRoutesMixin:
         try:
             payload = self._json_body(512 * 1024)
             value = self.state.accept_federation_registration(payload)
+        except FederationRegistrationConflict as exc:
+            json_response(self, {"success": False, "code": exc.code, "error": str(exc)}, 409)
+            return
         except (PermissionError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return

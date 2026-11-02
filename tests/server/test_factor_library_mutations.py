@@ -101,11 +101,41 @@ def _verified_keycloak_sessions(monkeypatch):
         }
 
     monkeypatch.setattr(user_session, "keycloak_session", verify)
+    # Admission is covered by its own integration tests; these tests isolate
+    # public-library authorization and mutation behavior.
+    from server.identity import server_admission
+    monkeypatch.setattr(server_admission, "server_admission", lambda *_args, **_kwargs: (True, ""))
 
 
 def _login(client, username: str = "alice") -> None:
     # Manager sessions carry the verified Keycloak access token in this cookie.
     client.set_cookie("ft-manager-session", f"test:{username}")
+
+
+def test_public_factor_admin_rechecks_current_keycloak_role(monkeypatch):
+    from flask import g
+    from server.identity import server_admission
+    from server.modules.custom_factors import factor_library_routes
+
+    effective = {"allowed": True}
+    calls = []
+
+    def current_role(identity, role):
+        calls.append((identity, role))
+        return effective["allowed"]
+
+    monkeypatch.setattr(server_admission, "current_manager_role", current_role)
+    monkeypatch.setattr(factor_library_routes, "keycloak_request_credentials", lambda: ("token", "subject", "alice"))
+    identity = {"username": "alice", "keycloak_roles": ("admin_console:manage",)}
+    with _app().test_request_context():
+        g.keycloak_user_session = identity
+        assert crud_routes._current_user_is_super_admin()
+        assert factor_library_routes._can_filter_organization()
+        effective["allowed"] = False
+        # The original token can still contain the revoked role.
+        assert not crud_routes._current_user_is_super_admin()
+        assert not factor_library_routes._can_filter_organization()
+        assert calls == [(identity, "admin_console:manage")] * 4
 
 
 def test_public_family_mutations_are_superadmin_only(monkeypatch) -> None:

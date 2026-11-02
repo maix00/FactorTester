@@ -29,10 +29,9 @@ class ClientReleaseRoutesMixin:
         if parsed.path != self._CLIENT_RELEASE_UPLOAD_PATH:
             return False
         session = self._session()
-        capabilities = session.get("capabilities") if session else {}
-        is_manager = isinstance(capabilities, dict) and bool(
-            capabilities.get("manager")
-        )
+        from server.identity.server_admission import current_manager_role
+
+        is_manager = bool(session and current_manager_role(session, "admin_console:manage"))
         # The local Manager capability is useful for the colocated operator
         # workflow, but it must never become a remotely usable release token.
         if not is_manager and not (self._is_loopback_client() and self._has_capability()):
@@ -137,11 +136,12 @@ class ClientReleaseRoutesMixin:
         if path != self._LOCAL_NODE_CATALOG_PATH and asset_match is None:
             return False
         session = self._session()
-        roles = session.get("keycloak_roles", ()) if session else ()
         if not session:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return True
-        if DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE not in roles:
+        from server.identity.server_admission import current_manager_role
+
+        if not current_manager_role(session, DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE):
             json_response(self, {
                 "success": False,
                 "error": f"Keycloak permission {DESKTOP_LOCAL_NODE_DOWNLOAD_ROLE} is required",

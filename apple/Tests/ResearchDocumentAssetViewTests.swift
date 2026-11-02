@@ -1,6 +1,6 @@
 import CryptoKit
 import XCTest
-@testable import FTClient
+@testable import TradeResearch
 
 final class ResearchDocumentAssetViewTests: XCTestCase {
     func testLoadsHashVerifiedPackageAsset() async throws {

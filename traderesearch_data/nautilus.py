@@ -112,7 +112,7 @@ class CatalogStagingRequest:
 
 @dataclass(frozen=True, slots=True)
 class CatalogLoadRequest:
-    """Immutable, bounded request handed to a source-owned catalog loader."""
+    """Immutable request; a loader must enforce the total Bar budget while staging."""
 
     source_key: str
     frequency: str
@@ -127,6 +127,7 @@ class CatalogLoadRequest:
     start_ns: int
     end_ns: int
     target_root: Path
+    max_input_bars: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.source_key, str) or not self.source_key:
@@ -153,6 +154,8 @@ class CatalogLoadRequest:
             raise ValueError("catalog range ends before its start")
         if not isinstance(self.target_root, Path):
             raise TypeError("catalog target_root must be a Path")
+        if self.max_input_bars is not None and (type(self.max_input_bars) is not int or self.max_input_bars < 1):
+            raise ValueError("catalog total Bar budget must be a positive integer")
 
 
 # The loader is source-owned; no engine or platform domain objects cross this

@@ -83,7 +83,9 @@ from server.manager.domain.federation import (
     ServiceRoute,
 )
 from server.manager.services.test_authoring import TestAuthoringService
-from server.manager.services.research_catalog import ResearchCatalog
+from server.manager.services.research_authorization_runtime import (
+    create_keycloak_research_catalog,
+)
 from server.services.strategy_library import StrategyLibraryService
 from server.manager.services.mihomo_supervisor import MihomoSupervisor
 from server.manager.services.technical_docs import TechnicalDocsLibrary
@@ -215,14 +217,11 @@ class ManagerState(
         )
         self.vibe_trading_root = VIBE_TRADING_ROOT
         self.python = python
-        self.server_role = str(
-            server_role or os.environ.get("FACTORTESTER_SERVER_ROLE") or "feat"
-        ).strip().lower()
+        from server import branding
+        self.server_role = str(server_role or branding.env("SERVER_ROLE") or "feat").strip().lower()
         if self.server_role not in {"main", "feat"}:
             raise ValueError("server_role must be main or feat")
-        self.server_id = str(
-            server_id or os.environ.get("FACTORTESTER_SERVER_ID") or "local"
-        ).strip()
+        self.server_id = str(server_id or branding.env("SERVER_ID") or "local").strip()
         if not self.server_id:
             raise ValueError("server_id is required")
         raw_fixed_port = fixed_port
@@ -268,17 +267,15 @@ class ManagerState(
         self.require_login_for_ui = _env_bool(
             "FACTORTESTER_REQUIRE_LOGIN_FOR_UI", False,
         )
-        self.require_device_auth = _env_bool(
-            "FACTORTESTER_REQUIRE_DEVICE_AUTH", False,
+        self.require_device_auth = branding.env_flag("REQUIRE_DEVICE_AUTH")
+        self.public_server = branding.env_flag("PUBLIC_SERVER", self.require_device_auth)
+        # This is an expected deployment identity, not permission by itself.
+        # Login requires a matching reciprocal Keycloak Realm Group binding.
+        from server.manager.domain.organization_scope import configured_managed_organizations
+        self.managed_organizations = configured_managed_organizations(
+            public_server=self.public_server, server_role=self.server_role,
+            explicit=managed_organizations,
         )
-        self.public_server = _env_bool(
-            "FACTORTESTER_PUBLIC_SERVER", self.require_device_auth,
-        )
-        # Organization and user authority lives in Keycloak Realm Groups.
-        # This empty compatibility projection is not used for authorization;
-        # deployments must not infer a local account hierarchy from Manager
-        # environment variables.
-        self.managed_organizations: tuple[str, ...] = ()
         self.trusted_proxy_networks = configured_trusted_proxy_networks()
         self.local_client_networks = configured_local_client_networks()
         self.visitor_entry_origins = configured_visitor_origins()
@@ -345,7 +342,9 @@ class ManagerState(
         # report links, and Evidence links share the Manager metadata store.
         # Report and Evidence bytes remain in their existing stores; this
         # catalog is the single relationship and access-policy seam.
-        self.research_catalog = ResearchCatalog(self.sessions_db_path)
+        self.research_catalog = create_keycloak_research_catalog(
+            self.sessions_db_path,
+        )
         # Account, organisation, hierarchy, profile, quota, and device
         # identity records share one PostgreSQL control plane when deployed.
         # The constructor is lazy: an unavailable database is reported by the
@@ -383,7 +382,7 @@ class ManagerState(
         self.federation_config_store = FederationConfigStore(
             self.state_root / "federation-config.json",
         )
-        self.federation_gateway = FederatedGateway()
+        self.federation_gateway = FederatedGateway(state=self)
         self.federation_announcer: FederationAnnouncer | None = None
         self.federation_directory = FederationNodeDirectory()
         self.federation_sync = FederationSyncWorker(
@@ -439,10 +438,6 @@ class ManagerState(
             control_store=self.control_store,
             profile_cache_root=self.state_root / "profile-cache",
             account_domain_sync=self.account_domain_sync,
-        )
-        self.research_catalog.set_synchronizer(
-            self.account_domain_sync,
-            lambda owner: self.client_state._refresh_account_domain_async(owner, force=True),
         )
         self.agent_profiles = AgentProfileService(
             db_path=self.sessions_db_path,

@@ -50,9 +50,9 @@ def test_profile_agent_cli_uses_capability_without_user_config(
 ) -> None:
     capability_path = tmp_path / "factor-tester-agent.json"
     _write_capability(capability_path)
-    monkeypatch.setenv("FACTORTESTER_AGENT_CAPABILITY_FILE", str(capability_path))
-    monkeypatch.setenv("FACTORTESTER_CONFIG", str(tmp_path / "missing.json"))
-    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TRADERESEARCH_AGENT_CAPABILITY_FILE", str(capability_path))
+    monkeypatch.setenv("TRADERESEARCH_CONFIG", str(tmp_path / "missing.json"))
+    monkeypatch.setenv("TRADERESEARCH_HOME", str(tmp_path / "home"))
 
     client = client_from_config()
 

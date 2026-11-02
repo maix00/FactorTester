@@ -5,10 +5,13 @@ selector needs to know this source's UID syntax or physical data paths.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, time
 from decimal import Decimal
+import logging
 from pathlib import Path
 import re
+import shutil
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -22,6 +25,8 @@ from server.modules.shared.price_services import (
 )
 from server.services.nautilus_bridge.source_registry import from_server_sources
 from .instrument_fields import instrument_fields
+
+logger = logging.getLogger(__name__)
 
 
 def _finite_decimal(value: Any, name: str, contract_uid: str) -> Decimal:
@@ -159,12 +164,30 @@ def _contract_requests(request: CatalogLoadRequest) -> tuple[CatalogStagingReque
     return tuple(result)
 
 
+@contextmanager
+def _staged_catalogs():
+    """Remove only catalogs created by this invocation if the batch fails."""
+    created: list[Path] = []
+    try:
+        yield created
+    except Exception:
+        for target in reversed(created):
+            try:
+                shutil.rmtree(target)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.exception("Failed to clean up staged catalog %s", target)
+        raise
+
+
 def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
     frequency = request.frequency
     source_key = request.source_key
     start_utc, end_utc = request.start_utc, request.end_utc
     start_ns, end_ns = request.start_ns, request.end_ns
     target_root = request.target_root
+    remaining = request.max_input_bars
     staging_requests = _contract_requests(request)
     bundle_identity = dict(
         bundle_id=request.bundle_id, bundle_version=request.bundle_version,
@@ -190,56 +213,68 @@ def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
     target_root.mkdir(parents=True, exist_ok=True)
     catalogs: dict[str, dict[str, str]] = {}
     seen_contracts: set[str] = set()
-    for request in staging_requests:
-        for contract_uid in request.paths:
-            if contract_uid in seen_contracts:
-                continue
-            seen_contracts.add(contract_uid)
-            product = find_contract_product(contract_uid)
-            if product is None:
-                raise ValueError(f"contract is not in the product catalog: {contract_uid}")
-            parent = product.get_parent_product()
-            rows = parent.get_contract_list(start_utc[:10], end_utc[:10]) if parent else []
-            row = next((item for item in rows if str(item.get("uid")) == contract_uid), None)
-            if row is None:
-                raise ValueError(f"contract has no frozen lifecycle row: {contract_uid}")
-            fields = instrument_fields(product)
-            if not fields or fields.get("multiplier") is None or fields.get("price_increment") is None:
-                raise ValueError(f"contract has no trading specification: {contract_uid}")
-            spec = build_contract_spec(
-                contract_uid, product=product, contract_row=row,
-                spec_fields=fields, source_key=source_key, frequency=frequency,
-            )
-            target = target_root / str(contract_uid).replace("|", "_")
-            clipped_start = max(start_ns, spec.activation_ns)
-            clipped_end = min(end_ns, spec.expiration_ns)
-            if frequency == "MIN1":
-                stage_contract_minute_catalog(
-                    contract_data_path_for(contract_uid, product), target,
-                    contract_uid=contract_uid, instrument_spec=spec,
-                    start_ns=clipped_start, end_ns=clipped_end,
-                    **bundle_identity,
+    with _staged_catalogs() as created:
+        for request in staging_requests:
+            for contract_uid in request.paths:
+                if contract_uid in seen_contracts:
+                    continue
+                seen_contracts.add(contract_uid)
+                product = find_contract_product(contract_uid)
+                if product is None:
+                    raise ValueError(f"contract is not in the product catalog: {contract_uid}")
+                parent = product.get_parent_product()
+                rows = parent.get_contract_list(start_utc[:10], end_utc[:10]) if parent else []
+                row = next((item for item in rows if str(item.get("uid")) == contract_uid), None)
+                if row is None:
+                    raise ValueError(f"contract has no frozen lifecycle row: {contract_uid}")
+                fields = instrument_fields(product)
+                if not fields or fields.get("multiplier") is None or fields.get("price_increment") is None:
+                    raise ValueError(f"contract has no trading specification: {contract_uid}")
+                spec = build_contract_spec(
+                    contract_uid, product=product, contract_row=row,
+                    spec_fields=fields, source_key=source_key, frequency=frequency,
                 )
-            else:
-                if parent is None:
-                    raise ValueError(f"contract has no parent product: {contract_uid}")
-                term_path = parent.get_term_structure_path()
-                if not term_path:
-                    raise ValueError(f"product has no DAY1 term-structure artifact: {contract_uid}")
-                codes = tuple(str(value) for value in (
-                    parent.name, getattr(parent, "alias", None),
-                ) if value)
-                stage_contract_daily_catalog(
-                    term_path, target, contract_uid=contract_uid,
-                    instrument_spec=spec, start_ns=clipped_start, end_ns=clipped_end,
-                    product_codes=set(codes),
-                    session_for_day=_session_for_day(
-                        parent, _trading_day_map(term_path),
-                    ),
-                    **bundle_identity,
-                )
-            product_key = str(contract_uid).split("|")[2]
-            catalogs[product_key] = {
-                "catalog_dir": str(target), "contract_uid": str(contract_uid),
-            }
+                target = target_root / str(contract_uid).replace("|", "_")
+                clipped_start = max(start_ns, spec.activation_ns)
+                clipped_end = min(end_ns, spec.expiration_ns)
+                if remaining is not None and remaining <= 0:
+                    raise ValueError("catalog staging exceeds the total Bar budget")
+                budget = min(100_000, remaining) if remaining is not None else 100_000
+                if frequency == "MIN1":
+                    receipt = stage_contract_minute_catalog(
+                        contract_data_path_for(contract_uid, product), target,
+                        contract_uid=contract_uid, instrument_spec=spec,
+                        start_ns=clipped_start, end_ns=clipped_end,
+                        max_bars=budget,
+                        **bundle_identity,
+                    )
+                else:
+                    if parent is None:
+                        raise ValueError(f"contract has no parent product: {contract_uid}")
+                    term_path = parent.get_term_structure_path()
+                    if not term_path:
+                        raise ValueError(f"product has no DAY1 term-structure artifact: {contract_uid}")
+                    codes = tuple(str(value) for value in (
+                        parent.name, getattr(parent, "alias", None),
+                    ) if value)
+                    receipt = stage_contract_daily_catalog(
+                        term_path, target, contract_uid=contract_uid,
+                        instrument_spec=spec, start_ns=clipped_start, end_ns=clipped_end,
+                        max_bars=budget,
+                        product_codes=set(codes),
+                        session_for_day=_session_for_day(
+                            parent, _trading_day_map(term_path),
+                        ),
+                        **bundle_identity,
+                    )
+                created.append(target)
+                if remaining is not None:
+                    count = getattr(receipt, 'selected_count', None)
+                    if type(count) is not int or count <= 0 or count > budget:
+                        raise ValueError("catalog receipt exceeds the total Bar budget")
+                    remaining -= count
+                product_key = str(contract_uid).split("|")[2]
+                catalogs[product_key] = {
+                    "catalog_dir": str(target), "contract_uid": str(contract_uid),
+                }
     return catalogs

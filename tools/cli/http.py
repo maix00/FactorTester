@@ -16,9 +16,11 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .agent_auth import AgentCapability
+from .local_paths import select_existing_root
 
 
-DEFAULT_HOME = Path.home() / ".factortester"
+DEFAULT_HOME = Path.home() / ".traderesearch"
+LEGACY_HOME = Path.home() / ".factortester"
 CONFIG_ENV = "TRADERESEARCH_CONFIG"
 HOME_ENV = "TRADERESEARCH_HOME"
 STREAM_TIMEOUT_ENV = "TRADERESEARCH_STREAM_TIMEOUT"
@@ -92,7 +94,12 @@ def state_path() -> Path:
 
 def _home_dir() -> Path:
     configured = config_env(HOME_ENV)
-    return Path(configured).expanduser() if configured else DEFAULT_HOME
+    if configured:
+        return Path(configured).expanduser()
+    # Existing installations remain authoritative until an explicit, reviewed
+    # migration; new installations use the current product name.  A migration
+    # may leave a compatibility symlink for Git worktrees and old clients.
+    return select_existing_root(DEFAULT_HOME, LEGACY_HOME, label="TradeResearch CLI state")
 
 
 def save_config(config: ClientConfig, path: Path | None = None) -> None:

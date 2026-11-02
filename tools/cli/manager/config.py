@@ -12,12 +12,14 @@ import platform
 import subprocess
 from urllib.parse import urlparse
 
-from tools.cli.http import DEFAULT_HOME, HOME_ENV, config_env
+from tools.cli.http import _home_dir, config_env
 
 
 MANAGER_CONFIG_ENV = "TRADERESEARCH_MANAGER_CONFIG"
 MANAGER_TOKEN_ENV = "TRADERESEARCH_MANAGER_TOKEN"
-KEYCHAIN_SERVICE = "com.gtht.factortester.manager"
+KEYCHAIN_SERVICE = "com.gtht.traderesearch.manager"
+LEGACY_KEYCHAIN_SERVICE = "com.gtht.factortester.manager"
+_KEYCHAIN_ITEM_NOT_FOUND = 44
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,8 +43,7 @@ def manager_config_path() -> Path:
     configured = config_env(MANAGER_CONFIG_ENV)
     if configured:
         return Path(configured).expanduser()
-    home = Path(config_env(HOME_ENV) or str(DEFAULT_HOME)).expanduser()
-    return home / "manager.json"
+    return _home_dir() / "manager.json"
 
 
 def save_manager_config(
@@ -86,7 +87,16 @@ class ManagerCredentialStore:
                 capture_output=True,
                 text=True,
             )
-            return result.stdout.strip() if result.returncode == 0 else ""
+            if result.returncode == 0:
+                return result.stdout.strip()
+            # Denied access must not silently select a different credential.
+            if result.returncode != _KEYCHAIN_ITEM_NOT_FOUND:
+                return ""
+            legacy = subprocess.run(
+                ["security", "find-generic-password", "-w", "-s", LEGACY_KEYCHAIN_SERVICE,
+                 "-a", self.account], capture_output=True, text=True,
+            )
+            return legacy.stdout.strip() if legacy.returncode == 0 else ""
         path = self._fallback_path()
         return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
 
@@ -103,6 +113,11 @@ class ManagerCredentialStore:
                 check=True,
                 capture_output=True,
             )
+            # Keep the legacy item if saving its replacement fails.
+            subprocess.run(
+                ["security", "delete-generic-password", "-s", LEGACY_KEYCHAIN_SERVICE,
+                 "-a", self.account], capture_output=True,
+            )
             return
         path = self._fallback_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,13 +126,11 @@ class ManagerCredentialStore:
 
     def clear(self) -> None:
         if platform.system() == "Darwin":
-            subprocess.run(
-                [
-                    "security", "delete-generic-password",
-                    "-s", KEYCHAIN_SERVICE, "-a", self.account,
-                ],
-                capture_output=True,
-            )
+            for service in (KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_SERVICE):
+                subprocess.run(
+                    ["security", "delete-generic-password", "-s", service, "-a", self.account],
+                    capture_output=True,
+                )
             return
         self._fallback_path().unlink(missing_ok=True)
 

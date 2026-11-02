@@ -10,7 +10,12 @@ def subordinate_principals(
     principal: str,
     account_provider: Callable[[], list[dict[str, Any]]] | None,
 ) -> set[str]:
-    """Resolve direct children without making the catalog depend on SQL."""
+    """Project the verified administrator's managed subtree as candidates.
+
+    This is a list filter, never an object grant: each resulting strategy is
+    separately authorized by Keycloak. A second direct-parent filter would
+    incorrectly discard deeper descendants of the managed group.
+    """
     if account_provider is None:
         try:
             from tools.data.account_manage import direct_subordinate_accounts_for
@@ -28,11 +33,7 @@ def subordinate_principals(
             row.get("username") or row.get("user_name") or row.get("account")
             or row.get("owner_ref") or ""
         ).strip()
-        parent = str(
-            row.get("parent_username") or row.get("parent_ref")
-            or row.get("superior_username") or ""
-        ).strip()
-        if username and (not parent or parent == principal):
+        if username and username != principal:
             result.add(username)
     return result
 

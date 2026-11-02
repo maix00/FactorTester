@@ -698,8 +698,8 @@ def test_remote_run_submission_uses_manager_frozen_authoring_context(
     )
     prepared_calls = []
 
-    def prepare_run_context(payload, *, owner):
-        prepared_calls.append((payload, owner))
+    def prepare_run_context(payload, *, owner, strategy_library=None):
+        prepared_calls.append((dict(payload), owner))
         return {
             "schema_version": 1,
             "owner": owner,
@@ -716,29 +716,19 @@ def test_remote_run_submission_uses_manager_frozen_authoring_context(
     )
     forwarded = []
 
-    def route_request(selected, **values):
-        payload = json.loads(values["body"])
-        forwarded.append((values["path"], payload))
-        context = payload.get("_manager_run_context")
-        if not isinstance(context, dict):
-            return manager.GatewayResponse(
-                status=404,
-                body=b'{"success":false,"error":"workspace configuration not found"}',
-                content_type="application/json",
-            )
-        if values["path"] == "/api/runs/capability-preview":
-            return manager.GatewayResponse(
-                status=200,
-                body=b'{"success":true,"capability":true}',
-                content_type="application/json",
-            )
-        return manager.GatewayResponse(
-            status=202,
-            body=b'{"success":true,"run_id":"remote-run"}',
-            content_type="application/json",
-        )
-
-    monkeypatch.setattr(state, "route_request", route_request)
+    monkeypatch.setattr(state.federation_registry, "servers", lambda **_: [{
+        "server_id": "remote-main", "role": "main",
+        "transfer_node": {"peer_control_endpoint": "https://10.77.0.1:17998"},
+    }])
+    def public_data(selected, **values):
+        assert selected.server_id == "remote-main"
+        assert values["delegated_user_token"] == "user-token"
+        forwarded.append(values)
+        if values["operation"] == "targets":
+            return {"targets": []}
+        assert values["payload"]["request"]["_manager_run_context"]["owner"] == "user@1"
+        return {"response": {"success": True, "run_id": "remote-run"}, "status": 202}
+    monkeypatch.setattr(state.federation_gateway, "public_data", public_data)
     body = json.dumps({
         "workspace_id": "origin-workspace",
         "configuration_revision": 7,
@@ -764,14 +754,9 @@ def test_remote_run_submission_uses_manager_frozen_authoring_context(
         "workspace_id": "origin-workspace",
         "configuration_revision": 7,
         "analyses": ["ic"],
+        "_execution_capability_directory": [],
     }, "user@1")]
-    assert [path for path, _payload in forwarded] == [
-        "/api/runs/capability-preview", "/api/runs",
-    ]
-    assert all(
-        payload["_manager_run_context"]["owner"] == "user@1"
-        for _path, payload in forwarded
-    )
+    assert [value["operation"] for value in forwarded] == ["targets", "submit"]
 
 
 def test_job_output_generation_uses_supplemental_route_and_forwards_body(

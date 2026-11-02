@@ -1,26 +1,30 @@
 import Foundation
+import Network
 
 enum ManagerEndpointPolicy {
     static func isLoopback(_ host: String) -> Bool {
-        ["127.0.0.1", "localhost", "::1"].contains(normalized(host))
+        let value = normalized(host)
+        if value == "localhost" { return true }
+        if let ip = IPv4Address(value) { return ip.rawValue.first == 127 }
+        if let ip = IPv6Address(value) { return ip.rawValue == IPv6Address("::1")?.rawValue }
+        return false
     }
 
+    /// Permit plain HTTP only for actual private IP literals and localhost.
+    /// Hostname prefixes such as `fc.example` are not IPv6 addresses.
     static func isPrivateNetwork(_ host: String) -> Bool {
         let value = normalized(host)
         if isLoopback(value) { return true }
-        if value.hasPrefix("fc") || value.hasPrefix("fd") { return true }
-        if value.hasPrefix("fe8") || value.hasPrefix("fe9")
-            || value.hasPrefix("fea") || value.hasPrefix("feb") {
-            return true
+        if let ip = IPv6Address(value) {
+            let bytes = Array(ip.rawValue)
+            return (bytes[0] & 0xfe) == 0xfc || (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80)
         }
-        let octets = value.split(separator: ".").compactMap { Int($0) }
-        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else {
-            return false
+        if let ip = IPv4Address(value) {
+            let bytes = Array(ip.rawValue)
+            return bytes[0] == 10 || (bytes[0] == 172 && (16...31).contains(Int(bytes[1])))
+                || (bytes[0] == 192 && bytes[1] == 168)
         }
-        return octets[0] == 10
-            || (octets[0] == 172 && (16...31).contains(octets[1]))
-            || (octets[0] == 192 && octets[1] == 168)
-            || octets[0] == 127
+        return false
     }
 
     private static func normalized(_ host: String) -> String {

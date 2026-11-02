@@ -5,6 +5,14 @@
 !deploy/docker/factortester-server/
 !deploy/docker/factortester-server/manager-entrypoint.sh
 !deploy/docker/factortester-server/start-fixed-service.py
+!deploy/docker/factortester-server/install-agent-tools.sh
+!deploy/docker/factortester-public/
+!deploy/docker/factortester-public/traderesearch-cli
+!deploy/docker/factortester-public/cc-switch-cli-linux-x64-musl-v5.10.2.tar.gz
+!deploy/docker/factortester-public/cc-switch-cli-linux-arm64-musl-v5.10.2.tar.gz
+!tools/
+!tools/cli/
+!tools/cli/**
 
 !vendor/
 !vendor/py-alpha-lib/

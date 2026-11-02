@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +16,7 @@ from server.manager.transfers.coordinator import DownloadRequest, TransferCoordi
 from server.manager.transfers.models import TransferMode, TransferTicketRole
 from server.manager.transfers.origin_tickets import OriginTicketIssuer
 from server.manager.transfers.planner import NodeEndpoint
+from server.manager.transfers.wire import parse_transfer_context, transfer_context_payload
 
 
 class _NoopPeerGateway:
@@ -124,3 +127,51 @@ def test_replica_rejects_context_for_non_storage_server(tmp_path) -> None:
 
     with pytest.raises(PermissionError, match="storage server"):
         replicas.import_context(transfer, attempt, now=101.0)
+
+
+def test_stable_user_identity_is_signed_replicated_and_part_of_immutable_context(tmp_path):
+    transfer, attempt = _direct_context(tmp_path)
+    transfer = replace(transfer, principal_identity_id="stable-identity-a")
+    payload = transfer_context_payload(transfer, attempt)
+    assert payload["schema_version"] == 2
+    decoded, decoded_attempt = parse_transfer_context(payload)
+    assert decoded.principal_identity_id == "stable-identity-a"
+    source = TransferReplicaStore(tmp_path / "source.sqlite", server_id="node-a")
+    assert source.import_context(decoded, decoded_attempt, now=101)[0].principal_identity_id == "stable-identity-a"
+    with pytest.raises(ValueError, match="replica conflicts"):
+        source.import_context(replace(decoded, principal_identity_id="other"), decoded_attempt, now=102)
+    payload["schema_version"] = 1
+    with pytest.raises(ValueError, match="cannot claim"):
+        parse_transfer_context(payload)
+    payload["schema_version"] = 2
+    payload["transfer"]["principal_identity_id"] = ""
+    with pytest.raises(ValueError, match="stable identity"):
+        parse_transfer_context(payload)
+
+
+def test_v9_transfer_schema_upgrade_preserves_existing_records(tmp_path):
+    transfer, _attempt = _direct_context(tmp_path)
+    path = tmp_path / "requester.sqlite"
+    with sqlite3.connect(path) as db:
+        db.execute("ALTER TABLE transfer_requests DROP COLUMN principal_identity_id")
+        db.execute("UPDATE transfer_meta SET value='9' WHERE key='schema_version'")
+    upgraded = TransferStore(path, server_id="node-b")
+    record = upgraded.require(transfer.transfer_id)
+    assert record.principal_identity_id == "" and record.principal == transfer.principal
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT value FROM transfer_meta WHERE key='schema_version'").fetchone()[0] == "10"
+
+
+def test_data_plane_rejects_ticket_if_bound_to_another_transfer_or_principal():
+    from server.manager.data_plane.authorization import authorize
+    grant = SimpleNamespace(transfer_id="transfer", principal="other")
+    runtime = SimpleNamespace(tickets=SimpleNamespace(verify=lambda *_a, **_k: grant),
+                              authorize_transfer_telemetry=lambda _h: None)
+    handler = SimpleNamespace(headers={"Authorization": "Bearer capability"})
+    context = SimpleNamespace(transfer=SimpleNamespace(transfer_id="transfer", principal="alice"),
+                              attempt=SimpleNamespace(attempt_id="attempt", resume_offset=0, expected_size=6))
+    with pytest.raises(PermissionError, match="identity"):
+        authorize(handler, runtime, context, role=TransferTicketRole.CLIENT_DOWNLOAD)
+    grant.principal, grant.transfer_id = "alice", "another-transfer"
+    with pytest.raises(PermissionError, match="identity"):
+        authorize(handler, runtime, context, role=TransferTicketRole.CLIENT_DOWNLOAD)

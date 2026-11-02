@@ -46,10 +46,10 @@ from tools.data.sqlite.factor_family_heads import family_head
 def _current_user_is_super_admin() -> bool:
     try:
         from flask import g
+        from server.identity.server_admission import current_manager_role
 
         identity = getattr(g, "keycloak_user_session", None)
-        roles = identity.get("keycloak_roles", ()) if isinstance(identity, dict) else ()
-        return "admin_console:manage" in roles
+        return current_manager_role(identity, "admin_console:manage")
     except Exception:
         return False
 

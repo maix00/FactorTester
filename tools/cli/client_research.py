@@ -31,19 +31,29 @@ class ResearchClientMixin(ClientMixinBase):
         *,
         title: str,
         description: str = "",
-        visibility: str = "private",
-        authorized_users: list[str] | None = None,
         profile_ref: str = "",
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/api/research",
+            "/api/research/keycloak-create",
             {
                 "title": title,
                 "description": description,
-                "visibility": visibility,
-                "authorized_users": authorized_users or [],
                 "profile_ref": profile_ref,
             },
+        ))
+
+    def research_grants(self, research_id: str, *, report_id: str = "") -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            self._research_url(research_id, "/keycloak-grants"),
+            query={"target_kind": "report" if report_id else "research", "report_id": report_id},
+        ))
+
+    def set_research_grant(self, research_id: str, *, principal_ref: str,
+                           scopes: list[str], report_id: str = "") -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            self._research_url(research_id, "/keycloak-grants"),
+            {"principal_ref": principal_ref, "scopes": scopes,
+             "target_kind": "report" if report_id else "research", "report_id": report_id},
         ))
 
     def get_research(self, research_id: str) -> dict[str, Any]:
@@ -129,18 +139,6 @@ class ResearchClientMixin(ClientMixinBase):
             self._research_url(research_id, "/evidence"), payload,
         ))
         return dict(data.get("evidence_link") or {})
-
-    def migrate_research_reports(
-        self, records: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/research/migrations/reports", {"records": records},
-        ))
-
-    def discover_research_report_migration(self, *, apply: bool = False) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/research/migrations/reports/discover", {"apply": bool(apply)},
-        ))
 
     def list_research_reports(
         self, *, scope: str = "all", include_archived: bool = False,

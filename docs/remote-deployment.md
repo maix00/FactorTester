@@ -46,3 +46,15 @@
 默认保留最新三个 verified 应用版本；可以用 `FACTORTESTER_PUBLIC_RELEASE_RETENTION` 调整。清理仅允许删除匹配 `factortester-public:<40 位 SHA>` 的旧应用镜像和相应 release，不删除 PostgreSQL 镜像、数据卷、其他 Compose 项目或 Docker 全局缓存。
 
 控制库首次迁移与校验见 [`remote-control-postgres.md`](remote-control-postgres.md)，当前生产访问应走独立 PostgreSQL WireGuard，不应重新开放公网 5432/TCP。
+
+## 两阶段发布
+
+需要在新镜像中先完成经过审核的数据或权限维护时，可在已获授权、干净且同步的 main
+工作区运行相同发布入口，并设置 `TR_PUBLIC_PREPARE_ONLY=1`。入口仍验证 feat/main
+包含关系、原生构建身份、产物校验和与主机容量；仅准备固定源码和新镜像，不停止旧
+应用、不切换生产配置、不执行数据库变更，也不记录为发布成功。
+
+维护应使用该固定镜像的独立运维进程、明确计划、保护配置和已验证备份，不将运维
+权限写入常驻 Manager。完成真实对账后取消 prepare-only，再运行相同发布入口激活。
+激活重新检查当前旧版本并制作新备份；准备与激活之间发生源版本或数据变化必须重新
+核对。准备阶段的 `.next-<revision>` 配置仍属于受保护文件，不提供给客户端。

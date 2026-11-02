@@ -4,10 +4,14 @@ import { useTranslation } from "react-i18next";
 import { ProfileSettings } from "./profile-settings.tsx";
 import { DeviceSettings } from "./device-settings.tsx";
 import { AccountActions } from "./account-actions.tsx";
+import { ObjectReference } from "./object-reference.tsx";
 import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
+import { AppearanceSettings } from "./appearance-settings.tsx";
 import { QuotaSummary } from "./quota-summary.tsx";
 import { ServerSummary } from "./server-summary.tsx";
+import { ManagerConnectionSettings, nativeManagerSettingsAvailable } from "./manager-connection-settings.tsx";
+import "./manager-connection-settings.css";
 import { request } from "../configuration/api.ts";
 import { useAuth } from "../auth.tsx";
 
@@ -53,8 +57,8 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
       .catch(reason => {if(!controller.signal.aborted)setError(reason.message);});
     return ()=>controller.abort();
   }, [section,reload]);
- if(error)return <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/>;
- return <>          {section === "language" ? (
+ if(error && section!=="server")return <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/>;
+ return <>          {section === "appearance" ? <AppearanceSettings /> : section === "language" ? (
             <div className="tr-settings-card">
               <div className="tr-settings-row">
                 <div><b>{t("settingsPanel.language")}</b></div>
@@ -69,9 +73,9 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
               </div>
             </div>
           ) : section === "server" ? (
-            <div className="tr-settings-card">
-              {serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
-            </div>
+            <>{typeof window !== "undefined" && nativeManagerSettingsAvailable(window) ? <div className="tr-settings-card tr-manager-connection"><ManagerConnectionSettings /></div> : null}<div className="tr-settings-card tr-manager-server-summary">
+              {error ? <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/> : serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
+            </div></>
           ) : section === "profiles" ? <ProfileSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "quota", "updates", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
               {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} onRefresh={() => setReload(value => value + 1)} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
@@ -80,11 +84,11 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
             <div className="tr-settings-card">
               <div className="tr-settings-row">
                 <div><b>{t("settingsPanel.accountSession")}</b></div>
-                <span className="tr-settings-value">{session?.username || t("settingsPanel.notSignedIn")}</span>
+                <span className="tr-settings-value">{session?.username ? <ObjectReference value={{kind:"user",ref:session.username}}/> : t("settingsPanel.notSignedIn")}</span>
               </div>
               <div className="tr-settings-row">
                 <div><b>{t("settingsPanel.role")}</b></div>
-                <span className="tr-settings-value">{session?.role || "—"}</span>
+                <span className="tr-settings-value">{session?.role ? t(`auth.roles.${session.role}`, {defaultValue:session.role}) : "—"}</span>
               </div>
               <div className="tr-settings-row">
                 <div><b>{t("settingsPanel.accountAction")}</b></div>

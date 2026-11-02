@@ -186,7 +186,7 @@ class CCSwitchGateway:
                 executable,
                 "--app", "codex",
                 "provider", "add",
-                "--name", "FactorTester Profile provider",
+                "--name", "TradeResearch Profile provider",
                 "--id", provider_key,
                 "--config-file", str(provider_config_path),
                 "--api-format", api_format,

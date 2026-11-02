@@ -76,7 +76,7 @@
     "读取失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Read failed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"读取失败"}}}},
     "中央控制数据库不可用；白名单和设备管理不会使用本地陈旧副本。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The central control database is unavailable; allowlist and device administration will not use stale local copies."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"中央控制数据库不可用；白名单和设备管理不会使用本地陈旧副本。"}}}},
     "本地适配器" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Local adapters"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地适配器"}}}},
-    "启动并打开安装在本机的 FactorTester 组件" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Start and open FactorTester components installed on this device"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"启动并打开安装在本机的 FactorTester 组件"}}}},
+    "启动并打开安装在本机的 TradeResearch 组件" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Start and open TradeResearch components installed on this device"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"启动并打开安装在本机的 TradeResearch 组件"}}}},
     "服务器互联" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Server federation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器互联"}}}},
     "服务器互联设置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Server federation settings"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器互联设置"}}}},
     "服务器互联设置已保存" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Server federation settings saved"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器互联设置已保存"}}}},
@@ -654,7 +654,7 @@
     "Keychain 读取失败（%d）。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Keychain read failed (%d)."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Keychain 读取失败（%d）。"}}}},
     "bridge fixture preparation failed" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Bridge fixture preparation failed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"桥接验收准备失败"}}}},
     "使用 Touch ID" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Use Touch ID"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"使用 Touch ID"}}}},
-    "使用 Touch ID 登录 FTClient" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Sign in to FTClient with Touch ID"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"使用 Touch ID 登录 FTClient"}}}},
+    "使用 Touch ID 登录 TradeResearch" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Sign in to TradeResearch with Touch ID"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"使用 Touch ID 登录 TradeResearch"}}}},
     "保存的凭证不属于当前登录账户" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The saved credential belongs to a different account"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"保存的凭证不属于当前登录账户"}}}},
     "信息性" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Informational"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"信息性"}}}},
     "允许未完全覆盖时推进" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Allow advance with incomplete coverage"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"允许未完全覆盖时推进"}}}},
@@ -994,7 +994,7 @@
     "数值" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Value"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"数值"}}}},
     "研究绑定 · %@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research binding · %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究绑定 · %@"}}}},
     "调用方 · %@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Caller · %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"调用方 · %@"}}}},
-    "选择 FactorTester 用户目录" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose FactorTester user directory"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择 FactorTester 用户目录"}}}},
+    "选择 TradeResearch 用户目录" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose TradeResearch user directory"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择 TradeResearch 用户目录"}}}},
     "请选择当前用户目录，用于读取本地中文研究报告。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose the current user directory to read local research reports."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请选择当前用户目录，用于读取本地中文研究报告。"}}}},
     "授权读取" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Authorize Read"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"授权读取"}}}},
     "空值（自动选择的 %@）" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Empty (auto-selected %@)"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"空值（自动选择的 %@）"}}}},
@@ -1449,19 +1449,19 @@
         }
       }
     },
-    "Beta · FactorTester 服务器" : {
+    "Beta · TradeResearch 服务器" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Beta · FactorTester Server"
+            "value" : "Beta · TradeResearch Server"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Beta · FactorTester 服务器"
+            "value" : "Beta · TradeResearch 服务器"
           }
         }
       }
@@ -1584,52 +1584,52 @@
         }
       }
     },
-    "FactorTester 服务端口" : {
+    "TradeResearch 服务端口" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FactorTester Service Port"
+            "value" : "TradeResearch Service Port"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FactorTester 服务端口"
+            "value" : "TradeResearch 服务端口"
           }
         }
       }
     },
-    "FTClient" : {
+    "TradeResearch" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FTClient"
+            "value" : "TradeResearch"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FTClient"
+            "value" : "TradeResearch"
           }
         }
       }
     },
-    "FTClient 已是最新状态" : {
+    "TradeResearch 已是最新状态" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FTClient Is Up to Date"
+            "value" : "TradeResearch Is Up to Date"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FTClient 已是最新状态"
+            "value" : "TradeResearch 已是最新状态"
           }
         }
       }
@@ -6602,19 +6602,19 @@
         }
       }
     },
-    "无法加载外部服务，请在设置中检查 FactorTester CLI。" : {
+    "无法加载外部服务，请在设置中检查 TradeResearch CLI。" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "External services could not be loaded. Check the FactorTester CLI in Settings."
+            "value" : "External services could not be loaded. Check the TradeResearch CLI in Settings."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无法加载外部服务，请在设置中检查 FactorTester CLI。"
+            "value" : "无法加载外部服务，请在设置中检查 TradeResearch CLI。"
           }
         }
       }
@@ -10713,19 +10713,19 @@
         }
       }
     },
-    "连接 FactorTester" : {
+    "连接 TradeResearch" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connect to FactorTester"
+            "value" : "Connect to TradeResearch"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "连接 FactorTester"
+            "value" : "连接 TradeResearch"
           }
         }
       }
@@ -12765,19 +12765,19 @@
         }
       }
     },
-    "选择 FTClient 的界面语言" : {
+    "选择 TradeResearch 的界面语言" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose the FTClient interface language"
+            "value" : "Choose the TradeResearch interface language"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择 FTClient 的界面语言"
+            "value" : "选择 TradeResearch 的界面语言"
           }
         }
       }
@@ -12799,19 +12799,19 @@
         }
       }
     },
-    "配置 Manager；具体 FactorTester 服务端口由 Manager 发现" : {
+    "配置 Manager；具体 TradeResearch 服务端口由 Manager 发现" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Configure Manager; FactorTester service ports are discovered by Manager"
+            "value" : "Configure Manager; TradeResearch service ports are discovered by Manager"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "配置 Manager；具体 FactorTester 服务端口由 Manager 发现"
+            "value" : "配置 Manager；具体 TradeResearch 服务端口由 Manager 发现"
           }
         }
       }
@@ -13060,7 +13060,7 @@
     "放大" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom in"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"放大"}}}},
     "缩小" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom out"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"缩小"}}}},
     "适应窗口" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Fit graph"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"适应窗口"}}}},
-    "正在寻找 FactorTester 服务器…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Looking for a FactorTester server…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在寻找 FactorTester 服务器…"}}}},
+    "正在寻找 TradeResearch 服务器…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Looking for a TradeResearch server…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在寻找 TradeResearch 服务器…"}}}},
     "Manager 地址无效；公网必须使用 HTTPS。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The Manager address is invalid; public endpoints must use HTTPS."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Manager 地址无效；公网必须使用 HTTPS。"}}}},
     "已连接；请在主页按需登录" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Connected; sign in from the home page when needed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已连接；请在主页按需登录"}}}},
     "服务器返回的附件上传授权无效。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The server returned an invalid attachment upload capability."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器返回的附件上传授权无效。"}}}},
