@@ -2,7 +2,8 @@ import React, { createContext, useContext } from "react";
 import { Button, Tooltip } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import type { ObjectReferenceValue } from "../object-reference.ts";
+import { objectReferenceLabel, type ObjectReferenceValue } from "../object-reference.ts";
+import { useAuth } from "../auth.tsx";
 
 export const ObjectReferenceContext = createContext<((value: ObjectReferenceValue) => void) | null>(null);
 
@@ -10,7 +11,8 @@ export const ObjectReferenceContext = createContext<((value: ObjectReferenceValu
 export function ObjectReference({ value, icon = false }: { value: ObjectReferenceValue; icon?: boolean }): React.ReactElement {
   const open = useContext(ObjectReferenceContext);
   const { t } = useTranslation();
-  const label = value.label || value.ref;
+  const { session } = useAuth();
+  const label = objectReferenceLabel(value,session);
   if (!value.ref || !open) return <span>{label || "—"}</span>;
   const action = t("objectReference.open", { name: label });
   if (icon) return <Tooltip title={action}><Button type="link" size="small" icon={<InfoCircleOutlined />} aria-label={action}

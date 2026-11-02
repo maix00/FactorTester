@@ -1,3 +1,4 @@
+import { objectReferenceLabel } from "./object-reference.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { matchingFamily, objectDetailURL, referenceForField } from "./object-reference.ts";
@@ -32,4 +33,14 @@ test("remote detail URLs escape identities and preserve factor ownership", () =>
   assert.equal(objectDetailURL({ kind: "factor", ref: "factor:v2:a/b", owner: "alice@org" }), "/api/factor-library/factors/detail?factor_ref=factor%3Av2%3Aa%2Fb&owner_username=alice%40org");
   assert.equal(objectDetailURL({ kind: "productGroup", ref: "product-group:a/b" }), "/api/product-library/product-groups/product-group%3Aa%2Fb");
   assert.equal(objectDetailURL({ kind: "user", ref: "alice" }), null);
+});
+
+
+test("the current user's verified display name never replaces their historical object reference", () => {
+  const value={kind:"user" as const,ref:"old-principal",label:"old-principal"};
+  assert.equal(objectReferenceLabel(value,{username:"old-principal",alias:"Readable name"}),"Readable name");
+  assert.equal(value.ref,"old-principal");
+  assert.equal(objectReferenceLabel(value,{username:"someone-else",alias:"Readable name"}),"old-principal");
+  assert.equal(objectReferenceLabel({...value,label:"Explicit owner label"},{username:"old-principal",alias:"Readable name"}),"Explicit owner label");
+  assert.equal(objectReferenceLabel({kind:"profile",ref:"old-principal"},{username:"old-principal",alias:"Readable name"}),"old-principal");
 });

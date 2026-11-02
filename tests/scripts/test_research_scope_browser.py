@@ -56,7 +56,7 @@ createRoot(document.getElementById('root')!).render(
                         fixture.requests.push(url.pathname + url.search);
                         const response = body => new Response(JSON.stringify(body),
                           {status:200,headers:{'Content-Type':'application/json'}});
-                        if (url.pathname === '/api/session') return Promise.resolve(response({session:{username:'alice'}}));
+                        if (url.pathname === '/api/session') return Promise.resolve(response({session:{username:'alice',alias:'当前研究员'}}));
                         if (url.pathname === '/api/public/entry') return Promise.resolve(response({}));
                         if (url.pathname === '/api/research/capabilities/keycloak-sharing') return Promise.resolve(response({capabilities:{schema:'tr-research-keycloak-sharing-v1',authority:fixture.authority}}));
                         if (url.pathname === '/api/research/r1') return Promise.resolve(response({research:{
@@ -91,7 +91,7 @@ createRoot(document.getElementById('root')!).render(
                     assert page.locator(".tr-research-mobile-meta").count() == 0
                     assert "/api/research/reports?scope=all" in page.evaluate("window.fixture.requests")
                     page.get_by_role("button", name="查看 self 的信息").first.click()
-                    page.get_by_role("button", name="查看 alice 的信息").click()
+                    page.get_by_role("button", name="查看 当前研究员 的信息").click()
                     opened = page.evaluate("window.fixture.opened")
                     assert opened[0]["kind"] == "profile" and opened[0]["ref"] == "self"
                     assert opened[0]["profileKey"] == "local::alice::self" and opened[0]["owner"] == "alice"
@@ -121,6 +121,16 @@ createRoot(document.getElementById('root')!).render(
                     assert dialog.locator('iframe[src*="/researches/"]').count() == 0
                     page.wait_for_function("window.fixture.context()?.researchId === 'r1'")
                     assert page.evaluate("window.fixture.context().section") == "details"
+                    # Visibility alone includes opacity-zero entrance frames.
+                    page.wait_for_function("""() => {
+                      const dialog=document.querySelector('[role="dialog"]');
+                      if(!dialog)return false;
+                      for(let node=dialog;node;node=node.parentElement)
+                        if(Number(getComputedStyle(node).opacity)<0.99)return false;
+                      const bounds=dialog.getBoundingClientRect();
+                      return bounds.width>100 && bounds.height>100 && bounds.bottom>0 && bounds.top<innerHeight;
+                    }""")
+                    page.wait_for_timeout(350)  # Wait for the modal content's own entrance transition.
                     page.screenshot(path=str(tmp_path / f"research-{viewport['width']}.png"), animations="disabled")
                     for label, endpoint in (("研究报告", "/api/research/r1/reports"),
                                             ("证据", "/api/research-evidence/catalog/research/r1"),

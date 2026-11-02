@@ -8,6 +8,13 @@ export interface ObjectReferenceValue {
   profileKey?: string;
 }
 
+/** Display names never replace the address used to open an object. */
+export function objectReferenceLabel(value: ObjectReferenceValue, session: {username?:string;alias?:string} | null): string {
+  if (value.label && value.label !== value.ref) return value.label;
+  if (value.kind === "user" && value.ref && value.ref === session?.username && session.alias?.trim()) return session.alias.trim();
+  return value.label || value.ref;
+}
+
 /** Recognize explicit schema fields; arbitrary strings are not treated as links. */
 export function referenceForField(key: string, value: unknown, parent: Record<string, unknown> = {}): ObjectReferenceValue | null {
   if (typeof value !== "string" || !value.trim() || value === "—") return null;
