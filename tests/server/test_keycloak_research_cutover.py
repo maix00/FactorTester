@@ -94,6 +94,14 @@ class LiveDirectory(Directory):
     def __init__(self):
         self.active = {"a", "b", "new-user"}
         self.org_members = None
+        self.aliases = {}
+
+    def user_by_identity_id(self, identity):
+        row = super().user_by_identity_id(identity)
+        row["username"] = {"a": "alice", "b": "bob"}.get(identity, identity)
+        if identity in self.aliases:
+            row["attributes"]["legacy_username"] = [self.aliases[identity]]
+        return row
 
     def _page(self, path, *, max_items):
         assert path == "users" and max_items == 20_000
@@ -211,3 +219,31 @@ def test_profile_parity_rejects_revoked_write_and_identity_collapse(legacy_catal
     args["identity_by_principal"] = {"alice": "a", "bob": "a"}
     with pytest.raises(AuthorizationUnavailable, match="ambiguous"):
         verify_live_profile_policy_parity(**args)
+
+
+def test_exact_old_and_current_aliases_preserve_multiple_profiles_per_user(legacy_catalog):
+    evaluator = AuditEvaluator()
+    evaluator.adapter.aliases = {"a": "old-alice", "b": "old-bob"}
+    with sqlite3.connect(legacy_catalog) as db:
+        db.execute("INSERT INTO research_catalog_memberships VALUES ('r','old-bob','work','viewer','active')")
+    evaluator.evaluate = lambda identity, *, candidates: {
+        (kind, ref, scope): json.loads(ref)[1] == identity and
+            (json.loads(ref)[2] == "profile" or scope != "write")
+        for kind, ref, scopes in candidates for scope in scopes
+    }
+    args = {"database": legacy_catalog, "source_sha256": legacy_authorization_snapshot_sha256(legacy_catalog),
+            "identity_by_principal": {"alice": "a", "old-alice": "a", "bob": "b", "old-bob": "b"},
+            "evaluator": evaluator}
+    assert verify_live_profile_policy_parity(**args) == {"principals": 3, "profiles": 2, "decisions": 18}
+    args["identity_by_principal"]["unreviewed-alice"] = "a"
+    with pytest.raises(AuthorizationUnavailable, match="differs.*ambiguous"):
+        verify_live_profile_policy_parity(**args)
+
+
+def test_protected_legacy_alias_cannot_collide_with_another_live_user(legacy_catalog):
+    evaluator = AuditEvaluator()
+    evaluator.adapter.aliases["a"] = "bob"
+    with pytest.raises(AuthorizationUnavailable, match="username is ambiguous"):
+        verify_live_profile_policy_parity(database=legacy_catalog,
+            source_sha256=legacy_authorization_snapshot_sha256(legacy_catalog),
+            identity_by_principal={"alice": "a", "bob": "b"}, evaluator=evaluator)

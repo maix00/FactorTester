@@ -147,6 +147,42 @@ def _active_human_subjects(adapter) -> dict[str, str]:
     return subjects
 
 
+def verified_research_migration_subjects(adapter, identity_by_principal: dict[str, str]) -> dict[str, str]:
+    """Verify reviewed exact aliases against the live Keycloak directory.
+
+    Several names may identify one human (current login plus protected legacy
+    name). A second user claiming either name is ambiguous, not another Profile.
+    This administrative migration check never grants runtime authorization.
+    """
+    if (not isinstance(identity_by_principal, dict) or not identity_by_principal
+            or any(not isinstance(name, str) or not name or name != name.strip()
+                   or not isinstance(stable, str) or not stable or stable != stable.strip()
+                   for name, stable in identity_by_principal.items())):
+        raise AuthorizationUnavailable("reviewed Research identities are missing or ambiguous")
+    subjects = _active_human_subjects(adapter)
+    names: dict[str, str] = {}
+    for stable, subject in subjects.items():
+        user = adapter.user_by_identity_id(stable)
+        attrs = user.get("attributes") if isinstance(user, dict) else None
+        if (not isinstance(user, dict) or user.get("id") != subject or user.get("enabled") is not True
+                or not isinstance(attrs, dict) or attrs.get("tr_identity_id") != [stable]):
+            raise AuthorizationUnavailable("Keycloak Research identity is invalid or ambiguous")
+        legacy = attrs.get("legacy_username")
+        if legacy is not None and (not isinstance(legacy, list) or len(legacy) != 1
+                                   or not isinstance(legacy[0], str) or not legacy[0].strip()):
+            raise AuthorizationUnavailable("Keycloak migration username is ambiguous")
+        username = user.get("username")
+        if not isinstance(username, str) or not username.strip():
+            raise AuthorizationUnavailable("Keycloak migration username is ambiguous")
+        for name in {username, *(legacy or [])}:
+            if name in names and names[name] != stable:
+                raise AuthorizationUnavailable("Keycloak migration username is ambiguous")
+            names[name] = stable
+    if any(names.get(name) != stable for name, stable in identity_by_principal.items()):
+        raise AuthorizationUnavailable("Keycloak migration identity differs from reviewed directory or is ambiguous")
+    return subjects
+
+
 def verify_live_profile_policy_parity(*, database: str | Path, source_sha256: str,
                                       identity_by_principal: dict[str, str],
                                       evaluator: KeycloakResearchPolicyEvaluator) -> dict[str, int]:
@@ -159,10 +195,7 @@ def verify_live_profile_policy_parity(*, database: str | Path, source_sha256: st
     """
     if legacy_authorization_snapshot_sha256(database) != source_sha256:
         raise AuthorizationUnavailable("legacy Research authorization snapshot changed")
-    identities = list(identity_by_principal.values())
-    if (any(not isinstance(item, str) or not item.strip() for item in identities)
-            or len(set(identities)) != len(identities)):
-        raise AuthorizationUnavailable("reviewed Research identities are missing or ambiguous")
+    subjects = verified_research_migration_subjects(evaluator.adapter, identity_by_principal)
     # Validates owner/explicit/member mappings as well; no unknown legacy
     # principal may silently disappear when a Profile is migrated.
     universe = research_candidate_universe(database, identity_by_principal=identity_by_principal)
@@ -189,7 +222,6 @@ def verify_live_profile_policy_parity(*, database: str | Path, source_sha256: st
                 if role in {"owner", "editor", "contributor"}:
                     scopes.add("write")
             memberships[(ref, identity)] = scopes
-    subjects = _active_human_subjects(evaluator.adapter)
     if not subjects:
         raise AuthorizationUnavailable("Keycloak has no active Research audit identities")
     checked = 0
@@ -201,7 +233,7 @@ def verify_live_profile_policy_parity(*, database: str | Path, source_sha256: st
         checked += len(actual)
     if legacy_authorization_snapshot_sha256(database) != source_sha256:
         raise AuthorizationUnavailable("legacy Research authorization changed during verification")
-    if _active_human_subjects(evaluator.adapter) != subjects:
+    if verified_research_migration_subjects(evaluator.adapter, identity_by_principal) != subjects:
         raise AuthorizationUnavailable("Keycloak user directory changed during verification")
     return {"principals": len(subjects), "profiles": len(candidates), "decisions": checked}
 
@@ -220,13 +252,7 @@ def verify_live_research_policy_parity(*, database: str | Path, source_sha256: s
     if legacy_authorization_snapshot_sha256(database) != source_sha256:
         raise AuthorizationUnavailable("legacy Research authorization snapshot changed")
     candidates = research_candidate_universe(database, identity_by_principal=identity_by_principal)
-    subjects = _active_human_subjects(evaluator.adapter)
-    for identity, subject in subjects.items():
-        user = evaluator.adapter.user_by_identity_id(identity)
-        attrs = user.get("attributes") if isinstance(user, dict) else None
-        if (not isinstance(attrs, dict) or attrs.get("tr_identity_id") != [identity]
-                or user.get("enabled") is not True or user.get("id") != subject):
-            raise AuthorizationUnavailable("Keycloak Research identity is invalid or ambiguous")
+    subjects = verified_research_migration_subjects(evaluator.adapter, identity_by_principal)
     if not subjects or set(expected_by_identity) != set(subjects):
         raise AuthorizationUnavailable("Research authorization principal coverage differs")
     required = {(kind, ref, scope) for kind, ref, scopes in candidates for scope in scopes}
@@ -240,6 +266,6 @@ def verify_live_research_policy_parity(*, database: str | Path, source_sha256: s
         checked += len(actual)
     if legacy_authorization_snapshot_sha256(database) != source_sha256:
         raise AuthorizationUnavailable("legacy Research authorization changed during verification")
-    if _active_human_subjects(evaluator.adapter) != subjects:
+    if verified_research_migration_subjects(evaluator.adapter, identity_by_principal) != subjects:
         raise AuthorizationUnavailable("Keycloak user directory changed during verification")
     return {"principals": len(subjects), "resources": len(candidates), "decisions": checked}

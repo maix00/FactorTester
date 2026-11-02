@@ -16,7 +16,7 @@ from scripts.test.keycloak_research_grant_smoke import run
 from server.identity.keycloak_authorization import AuthorizationUnavailable, ensure_keycloak_resource
 from server.identity.keycloak import KeycloakAdminAdapter
 from server.identity.keycloak_hierarchy_admin import KeycloakHierarchyProvisioner
-from server.identity.keycloak_research_cutover import KeycloakResearchPolicyEvaluator
+from server.identity.keycloak_research_cutover import KeycloakResearchPolicyEvaluator, verify_live_profile_policy_parity
 from scripts.migrations.keycloak_research_stage import build_plan, stage_plan
 from scripts.test.historical_research_catalog import HistoricalResearchCatalog
 
@@ -96,6 +96,7 @@ def check_hierarchy(*, sandbox, realm, client_id, client_uuid, client, sessions,
     for user in users.values():
         adapter._put("users/" + user["id"] + "/groups/" + group_ids[paths[-1]], {})
     accounts = [{"username": name, "tr_identity_id": "stable-" + name,
+                 "aliases": [users[name]["username"]],
                  "organization_id": "org-a", "parent_username": "member" if name == "owner" else ""}
                 for name in users]
     evaluator = KeycloakResearchPolicyEvaluator(adapter=adapter, settings=settings,
@@ -117,6 +118,11 @@ def check_hierarchy(*, sandbox, realm, client_id, client_uuid, client, sessions,
         staged = stage_plan(**kwargs)
         assert staged["scope_decisions"] == 63 and staged["needs_repair_researches"] == 0
         assert stage_plan(**kwargs)["scope_decisions"] == 63
+        alias_mapping = {row["username"]: row["identity"] for row in plan["directory"]}
+        assert len(alias_mapping) == 6
+        profiles = verify_live_profile_policy_parity(database=database, source_sha256=plan["source_sha256"],
+            identity_by_principal=alias_mapping, evaluator=evaluator)
+        assert profiles == {"principals": 3, "profiles": 1, "decisions": 9}
         update("owner", parent="late")
         try:
             stage_plan(**kwargs)
@@ -125,7 +131,8 @@ def check_hierarchy(*, sandbox, realm, client_id, client_uuid, client, sessions,
         else:
             raise AssertionError("migration accepted an administrator change after review")
         print(json.dumps({"real_hierarchy_migration_scope_decisions": staged["scope_decisions"],
-                          "idempotent_stage": True, "changed_hierarchy_blocks_stale_plan": True}, sort_keys=True))
+                          "idempotent_stage": True, "changed_hierarchy_blocks_stale_plan": True,
+                          "verified_aliases": len(alias_mapping), "live_profile_alias_parity": profiles}, sort_keys=True))
     # Reset to avoid affecting the independent catalog-grant checks.
     for name in users:
         update(name)

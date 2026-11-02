@@ -21,7 +21,8 @@ from server.identity.keycloak_research import (
     legacy_authorization_snapshot_digest, legacy_authorization_snapshot_sha256, profile_resource_ref,
 )
 from server.identity.keycloak_research_cutover import (
-    KeycloakResearchPolicyEvaluator, _ALL_SCOPES, _active_human_subjects, compare_research_decisions,
+    KeycloakResearchPolicyEvaluator, _ALL_SCOPES, compare_research_decisions,
+    verified_research_migration_subjects,
 )
 
 
@@ -243,20 +244,10 @@ def _verify_backup(database: str | Path, backup: str | Path, expected: str) -> N
 
 
 def _subjects(adapter, directory: list[dict[str, str]]) -> dict[str, str]:
-    active = _active_human_subjects(adapter)
-    for row in directory:
-        stable, name = row["identity"], row["username"]
-        user = adapter.user_by_identity_id(stable)
-        attributes = user.get("attributes") if isinstance(user, dict) else None
-        legacy = attributes.get("legacy_username") if isinstance(attributes, dict) else None
-        if legacy is not None and (not isinstance(legacy, list) or len(legacy) != 1 or not isinstance(legacy[0], str)):
-            raise AuthorizationUnavailable("Keycloak migration username is ambiguous")
-        verified_names = {str(user.get("username") or ""), *(legacy or [])} if isinstance(user, dict) else set()
-        if (not isinstance(user, dict) or user.get("enabled") is not True
-                or not isinstance(attributes, dict) or attributes.get("tr_identity_id") != [stable]
-                or user.get("id") != active.get(stable) or name not in verified_names):
-            raise AuthorizationUnavailable("Keycloak migration identity differs from reviewed directory")
-    return active
+    mapping = {row["username"]: row["identity"] for row in directory}
+    if len(mapping) != len(directory):
+        raise AuthorizationUnavailable("reviewed Research migration aliases are ambiguous")
+    return verified_research_migration_subjects(adapter, mapping)
 
 
 def _expected(group: dict[str, Any], identity: str, *, hierarchy=None) -> dict[tuple[str, str, str], bool]:
