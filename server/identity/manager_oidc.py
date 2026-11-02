@@ -134,7 +134,7 @@ def refresh_browser_tokens(refresh_token: str) -> dict:
             settings['realm'], settings['client_id'], client_secret=settings['client_secret'],
         ).refresh(refresh_token)
         access = str(tokens.get('access_token') or '')
-        if not access or not keycloak_session(access):
+        if not access or not keycloak_session(access, fail_on_unavailable=True):
             raise PermissionError('unverified refreshed identity')
         result = {
             'access_token': access,
