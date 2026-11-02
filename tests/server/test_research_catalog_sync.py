@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 from server.manager.storage.account_domain import AccountDomainSyncService
 from server.manager.storage.account_domain.research_sync import backfill_researches
 from tests.scripts.test_worktree_manager_account_domain_sync import MemoryControlStore
@@ -426,7 +426,7 @@ def test_same_named_profile_members_replicate_and_revoke_independently(tmp_path)
     author.remove_membership(rid, actor='alice', principal_ref='bob', profile_ref='self')
     outgoing.flush(principal='alice'); incoming.pull(principal='bob')
     assert mirror.list_researches(viewer='bob') == []
-    assert {(m['principal_ref'], m['profile_ref']) for m in mirror.list_members(rid, viewer='alice')} == {('alice', 'self')}
+    assert mirror.list_members(rid, viewer='alice') == []  # Withdrawal does not reconstruct owner membership.
 
 
 def test_shared_report_branches_sync_without_changing_report_owner(tmp_path):

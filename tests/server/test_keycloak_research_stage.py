@@ -13,7 +13,7 @@ import pytest
 from scripts.migrations.keycloak_research_stage import (
     _Journal, _read_private_json, _write_private_json, build_plan, stage_plan,
 )
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 from scripts.test.legacy_research_fixture import seed_share_link
 
 

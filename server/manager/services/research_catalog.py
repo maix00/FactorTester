@@ -43,22 +43,20 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         self,
         db_path: str | Path,
         *,
-        account_provider: Callable[[], list[dict[str, Any]]] | None = None,
         research_authorizer=None,
         profile_authorizer=None,
         profile_grant_manager=None,
         profile_identity_resolver=None,
     ) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
-        self._account_provider = account_provider
         if research_authorizer is not None and profile_authorizer is None:
             raise ValueError("Keycloak Research access requires Profile membership authorization")
         # Callers may select this only after migration and parity validation.
         # Once selected, Research and Report decisions never fall back to ACL
         # columns, same-name ownership, or a local hierarchy projection.
         self._research_authorizer = research_authorizer
-        # A runtime may supply this only after the Profile migration proof has
-        # passed. Until then legacy Profile semantics remain the authority.
+        # Profile permissions are evaluated by Keycloak. Local associations
+        # are metadata candidates and never replace its authorization decision.
         self._profile_authorizer = profile_authorizer
         self._profile_grant_manager = profile_grant_manager
         self._profile_identity_resolver = profile_identity_resolver
@@ -127,12 +125,6 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
                 after_commit()
         if owner and self._schedule_refresh is not None:
             self._schedule_refresh(owner)
-
-    def set_account_provider(
-        self, provider: Callable[[], list[dict[str, Any]]] | None,
-    ) -> None:
-        """Attach the shared account hierarchy after runtime initialization."""
-        self._account_provider = provider
 
     def ensure_schema(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -416,6 +408,7 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
         users = _authorized_users(authorized_users, owner)
         if self._research_authorizer is not None and (clean_visibility != "private" or authorized_users):
             raise ValueError("Research authorization must be configured in Keycloak after creation")
+        self.require_keycloak_research_creation()
         research_id = "research:v1:" + secrets.token_urlsafe(18)
         now = time.time()
         initial_workspace = None
@@ -744,14 +737,7 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
             with connect_sqlite(self.db_path, readonly=True) as conn:
                 unchanged = self._profile_pairs(conn, viewer, research_id=str(row["research_id"])) == profiles
             return bool(allowed and unchanged)
-        if str(row["owner_ref"]) == viewer:
-            return True
-        with connect_sqlite(self.db_path, readonly=True) as conn:
-            return conn.execute(
-                """SELECT 1 FROM research_catalog_memberships WHERE research_id=?
-                   AND principal_ref=? AND status='active' AND role IN ('owner','editor','contributor')""",
-                (str(row["research_id"]), viewer),
-            ).fetchone() is not None
+        return False
 
     def authorize_server_report_read(
         self, *, owner: str, server_ref: str, viewer: str,
@@ -2294,25 +2280,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
                     str(direct.get("access_basis") or "research") if direct.get("can_view") else "research",
                     research_id)
             return direct
-        if viewer and viewer == owner:
-            return _access(True, True, True, True, "owner", research_id)
-        if status == "archived":
-            return _access(False, False, False, False, "none", research_id)
-        if self._profile_authorizer is not None and (profile_access or {}).get("can_view"):
-            return _access(True, True, bool(profile_access.get("can_download")), False, "research", research_id)
-        if self._profile_authorizer is None and membership is not None and str(membership["status"]) == "active":
-            return _access(
-                True, True, True,
-                False,  # Membership grants collaboration, never research administration.
-                "research", research_id,
-            )
-        if visibility == "public":
-            return _access(True, True, True, False, "research", research_id)
-        if visibility == "superiors" and self._is_superior(viewer, owner):
-            return _access(True, True, True, False, "research", research_id)
-        if viewer and viewer in _loads_list(authorized_users_json):
-            return _access(True, True, True, False, "research", research_id)
-        return _access(False, False, False, False, "none", research_id)
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        raise AuthorizationUnavailable("Keycloak Research authorization is not configured")
 
     def _report_access(
         self, row, viewer: str | None, *, research_access=None, keycloak_access=None,
@@ -2336,59 +2305,8 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
                 bool(direct.get("can_manage") or parent.get("can_manage")),
                 str(parent.get("access_basis")) if parent.get("can_view") else str(direct.get("access_basis") or "none"),
                 str(row["report_id"]))
-        if viewer_ref and viewer_ref == str(row["owner_ref"]):
-            return _access(True, True, True, True, "owner", str(row["report_id"]))
-        if research_access is None:
-            try:
-                research = self._research_row(str(row["research_id"]))
-            except KeyError:
-                research = None
-            if research is not None:
-                research_access = self._research_access(research, viewer_ref)
-        if research_access and research_access["can_view"]:
-            return _access(
-                True,
-                True,
-                research_access["can_download"],
-                research_access["can_manage"],
-                research_access["access_basis"],
-                str(row["report_id"]),
-            )
-        if str(row["visibility"]) == "public":
-            return _access(True, True, False, False, "report", str(row["report_id"]))
-        if str(row["visibility"]) == "superiors" and self._is_superior(
-            viewer_ref, str(row["owner_ref"]),
-        ):
-            return _access(True, True, False, False, "report", str(row["report_id"]))
-        if viewer_ref and viewer_ref in _loads_list(row["authorized_users_json"]):
-            return _access(True, True, False, False, "report", str(row["report_id"]))
-        return _access(False, False, False, False, "none", str(row["report_id"]))
-
-    def _is_superior(self, viewer: str, owner: str) -> bool:
-        """Resolve the owner's active parent chain from the account authority."""
-        if not viewer or not owner or not callable(self._account_provider):
-            return False
-        try:
-            accounts = list(self._account_provider() or [])
-        except (OSError, RuntimeError, TypeError, ValueError):
-            return False
-        by_username = {
-            str(item.get("username") or "").strip(): item
-            for item in accounts if isinstance(item, dict)
-        }
-        current = owner
-        visited: set[str] = set()
-        while current and current not in visited:
-            visited.add(current)
-            account = by_username.get(current)
-            if account is None or account.get("active", True) is False:
-                return False
-            parent = str(account.get("parent_username") or "").strip()
-            if parent == viewer:
-                superior = by_username.get(parent)
-                return superior is not None and superior.get("active", True) is not False
-            current = parent
-        return False
+        from server.identity.keycloak_authorization import AuthorizationUnavailable
+        raise AuthorizationUnavailable("Keycloak Report authorization is not configured")
 
     def _research_value(
         self, row, *, viewer: str | None, access: dict[str, Any] | None = None,

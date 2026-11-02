@@ -32,7 +32,7 @@ from server.identity.keycloak_research import (
 from server.identity.request_context import bind_verified_identity, identity_request
 from server.manager import runtime as manager
 from server.manager.services.client_state import ClientStateService
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "web/app"

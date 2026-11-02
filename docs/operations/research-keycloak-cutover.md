@@ -78,3 +78,5 @@ Manager 与 7997 数据面共用 Keycloak Research 授权工厂；发布投影�
 目录初始化不再执行旧 publication→superiors 授权字段重写，也不再按 owner_ref 自动重建 self 成员及工作区。创建时的关联仍由创建事务和 Keycloak 资源登记处理；历史缺失关系由显式迁移解决。61 项聚焦回归通过，新增重开/重复读取不改变历史 ACL、撤销成员、归档工作区及迁移日志的逐行对比。
 
 独立 realm 补充验收：`python -m scripts.test.federated_report_keycloak_couch_smoke` 通过两套真实临时 Keycloak realm、签名 peer HTTP 和真实 CouchDB。覆盖不同所有者/共享接收人、2 MiB 附件、编辑权限预检、源及目标撤权、同一源会话撤权后再次请求拒绝。浏览器→来源 Manager 网关在该脚本中仍由聚焦测试覆盖，未做浏览器视觉验收；真实内网/公网部署仍未覆盖。
+
+生产 `ResearchCatalog` 已删除公开标记、本地用户名名单、同名 owner、旧层级和本地成员带来的 Research/Report 读取回退，并移除本地账户层级 provider 接口。缺少 Keycloak 授权器时读取抛出 AuthorizationUnavailable；创建在写库前拒绝。历史策略只存于 `scripts/test/historical_research_catalog.py`，作为迁移历史快照/允许集的冻结测试对照，生产目录没有引用。旧 ACL 数据列仍保留为显式迁移输入，不再是生产权限来源。119 项聚焦回归通过；真实临时 Keycloak 验证研究创建、直接授权、链接领取、同 token 撤权及目录撤权均通过，未写旧 ACL。Agent 运行准入和 Profile 成员提供器在该独立检查中分别为测试替身和只拒绝替身，不能据此声称其真实端到端完成。

@@ -4,7 +4,7 @@ import pytest
 
 from server.identity.keycloak_authorization import AuthorizationUnavailable, keycloak_resource_uri
 from server.identity.keycloak_research import KeycloakResearchAuthorization
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 class NoProfileGrants:

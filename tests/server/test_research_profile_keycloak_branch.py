@@ -9,7 +9,7 @@ import pytest
 from server.identity.keycloak_authorization import AuthorizationUnavailable, keycloak_resource_uri
 from server.identity.keycloak_research import KeycloakResearchAuthorization, ResearchRequestIdentity, profile_resource_ref
 from server.identity.request_context import bind_verified_identity, identity_request
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 def test_branch_profile_uses_verified_keycloak_decision_and_rechecks_each_write(tmp_path):

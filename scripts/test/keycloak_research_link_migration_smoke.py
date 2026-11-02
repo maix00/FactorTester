@@ -19,7 +19,7 @@ from server.identity.keycloak_hierarchy_admin import KeycloakHierarchyProvisione
 from server.identity.keycloak_research import KeycloakResearchAuthorization
 from server.identity.keycloak_research_cutover import KeycloakResearchPolicyEvaluator
 from server.identity.request_context import bind_verified_identity, identity_request
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 def exercise(*, sandbox, realm, settings, sessions, users, manager, issuer, **_unused):

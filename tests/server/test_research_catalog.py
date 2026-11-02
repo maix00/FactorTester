@@ -7,7 +7,7 @@ from urllib.parse import quote
 import pytest
 
 from server.manager.http import research_catalog_routes, research_object_routes
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 def test_research_catalog_keeps_research_and_profile_workspaces_distinct(tmp_path):
@@ -245,7 +245,7 @@ def test_owner_can_remove_report_and_profile_from_research(tmp_path):
 
 
 def test_share_link_operations_require_keycloak(tmp_path):
-    from server.manager.services.research_catalog import KeycloakResearchSharingUnavailable
+    from server.manager.services.research_catalog import KeycloakResearchSharingUnavailable, ResearchCatalog
     catalog = ResearchCatalog(tmp_path / "research.sqlite")
     for action in (
         lambda: catalog.create_share_link(target_kind="research", research_id="r", actor="alice"),

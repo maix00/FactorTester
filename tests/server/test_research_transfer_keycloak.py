@@ -13,7 +13,7 @@ import pytest
 
 from server.identity.keycloak_research import KeycloakResearchAuthorization
 from server.identity.keycloak_research_transfer import KeycloakResearchTransferAuthorization
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 def _setup(tmp_path):

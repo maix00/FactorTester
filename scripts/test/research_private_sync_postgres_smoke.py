@@ -13,7 +13,7 @@ from urllib.parse import quote
 import psycopg
 
 from scripts.test.postgres_sandbox import postgres_sandbox
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 from server.manager.storage.account_domain import AccountDomainSyncService
 from server.manager.storage.account_domain.research_sync import snapshot
 from server.manager.storage.control_db import ControlDatabaseConfig, PostgresControlStore

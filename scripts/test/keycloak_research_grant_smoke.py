@@ -23,7 +23,7 @@ from server.identity.keycloak_authorization import ensure_keycloak_resource
 from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
 from server.identity.keycloak_research import KeycloakResearchAuthorization, KeycloakResearchGrantManager
 from server.identity.request_context import bind_verified_identity, identity_request
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 class NoProfileGrants:

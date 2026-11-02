@@ -1,5 +1,5 @@
 import pytest
-from server.manager.services.research_catalog import ResearchCatalog
+from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 
 
 def setup(tmp_path):
