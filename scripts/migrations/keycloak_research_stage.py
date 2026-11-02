@@ -40,6 +40,38 @@ def _capture(database: str | Path) -> tuple[dict[str, list[dict[str, Any]]], str
     return snapshot, digest
 
 
+def _reviewed_hierarchy(accounts, identities):
+    """A migration comparison baseline, never a runtime permission store.
+
+    Omitted hierarchy keeps legacy superiors blocked. Partial, cyclic or
+    cross-organization input must not be interpreted as an empty ancestor set.
+    """
+    if not any("parent_username" in row for row in accounts):
+        return {}
+    result = {}
+    for row in accounts:
+        name = str(row.get("username") or "").strip()
+        stable = identities[name]
+        organization = str(row.get("organization_id") or "").strip()
+        parent_name = str(row.get("parent_username") or "").strip()
+        if ("parent_username" not in row or not organization or row.get("active", True) is not True
+                or (parent_name and parent_name not in identities)):
+            raise ValueError("reviewed Research hierarchy is incomplete")
+        item = {"organization_id": organization, "parent_identity_id": identities.get(parent_name, "")}
+        if stable in result and result[stable] != item:
+            raise ValueError("reviewed Research aliases disagree on hierarchy")
+        result[stable] = item
+    for stable, row in result.items():
+        current, seen = stable, set()
+        while current:
+            if (current in seen or current not in result or len(seen) >= 128
+                    or result[current]["organization_id"] != row["organization_id"]):
+                raise ValueError("reviewed Research hierarchy has a cycle or crosses organizations")
+            seen.add(current)
+            current = result[current]["parent_identity_id"]
+    return dict(sorted(result.items()))
+
+
 def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: str,
                now: float | None = None) -> dict[str, Any]:
     """Build one deterministic, consistent-snapshot plan; no network or writes."""
@@ -49,6 +81,7 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
     snapshot, source = _capture(database)
     inventory = inventory_plan(snapshot, accounts, now=time.time() if now is None else now)
     identities = reviewed_identity_map(accounts)
+    hierarchy = _reviewed_hierarchy(accounts, identities)
     research = {str(row["research_id"]): row for row in snapshot["researches"]}
     reports = {str(row["report_id"]): row for row in snapshot["reports"]}
     projected = {(row["kind"], row["ref"]): row for row in inventory["resources"]}
@@ -84,7 +117,7 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
             parent = ref if kind == "research" else str(row["research_id"])
             if row["status"] != "active":
                 mark(parent, "non_active_object")
-            if row["visibility"] == "superiors":
+            if row["visibility"] == "superiors" and not hierarchy:
                 mark(parent, "dynamic_hierarchy_not_verified")
             if row["visibility"] == "public":
                 mark(parent, "public_policy_not_verified")
@@ -129,6 +162,8 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
         if group["state"] == "ready":
             group["resources"].append({"kind": "research", "ref": research_id,
                                        "owner_identity": base["owner_identity"], "owner_scopes": list(_ALL_SCOPES)})
+            if row["visibility"] == "superiors":
+                group["resources"][-1]["hierarchy_scopes"] = ["read", "use"]
             for identity in base["explicit_identities"]:
                 group["grants"].append({"kind": "research", "ref": research_id, "identity": identity,
                                         "source": "explicit", "scopes": ["read", "use"]})
@@ -152,6 +187,8 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
                 item = projected[("research_report", ref)]
                 group["resources"].append({"kind": "research_report", "ref": ref,
                                            "owner_identity": item["owner_identity"], "owner_scopes": list(_ALL_SCOPES)})
+                if report["visibility"] == "superiors":
+                    group["resources"][-1]["hierarchy_scopes"] = ["read"]
                 for identity in item["explicit_identities"]:
                     group["grants"].append({"kind": "research_report", "ref": ref, "identity": identity,
                                             "source": "explicit", "scopes": ["read"]})
@@ -160,7 +197,7 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
             group["links"] = sorted(links_by_research.get(research_id, []), key=lambda item: item["link_id"])
             for link in group["links"]:
                 kind = "research" if link["target_kind"] == "research" else "research_report"
-                if link["claimant_identity"] and not _expected(group, link["claimant_identity"]).get((kind, link["target_ref"], "read"), False):
+                if link["claimant_identity"] and not _expected(group, link["claimant_identity"], hierarchy=hierarchy).get((kind, link["target_ref"], "read"), False):
                     group.update(state="needs_repair", reasons=["share_link_claimant_access_not_mapped"],
                                  resources=[], grants=[], links=[])
                     break
@@ -175,6 +212,8 @@ def build_plan(database: str | Path, accounts: list[dict[str, Any]], *, issuer: 
         "groups": groups, "global_issues": sorted(global_issues),
         "link_states": inventory["summary"]["link_states"],
     }
+    if hierarchy:
+        payload["hierarchy"] = hierarchy
     payload["plan_sha256"] = _hash(payload)
     payload["summary"] = {
         "researches": len(groups), "reports": len(reports),
@@ -220,18 +259,41 @@ def _subjects(adapter, directory: list[dict[str, str]]) -> dict[str, str]:
     return active
 
 
-def _expected(group: dict[str, Any], identity: str) -> dict[tuple[str, str, str], bool]:
+def _expected(group: dict[str, Any], identity: str, *, hierarchy=None) -> dict[tuple[str, str, str], bool]:
     results = {}
     grants = group["grants"]
     for resource in group["resources"]:
         kind, ref = resource["kind"], resource["ref"]
         scopes = set(resource["owner_scopes"]) if resource["owner_identity"] == identity else set()
+        if resource.get("hierarchy_scopes"):
+            if not hierarchy:
+                raise ValueError("Research hierarchy comparison baseline is missing")
+            current = hierarchy[resource["owner_identity"]]["parent_identity_id"]
+            while current:
+                if current == identity:
+                    scopes.update(resource["hierarchy_scopes"])
+                    break
+                current = hierarchy[current]["parent_identity_id"]
         for grant in grants:
             if (grant["kind"], grant["ref"], grant["identity"]) == (kind, ref, identity):
                 scopes.update(grant["scopes"])
         for scope in _ALL_SCOPES:
             results[(kind, ref, scope)] = scope in scopes
     return results
+
+
+def _verify_live_hierarchy(adapter, hierarchy):
+    for stable, expected in hierarchy.items():
+        user = adapter.user_by_identity_id(stable)
+        attrs = user.get("attributes", {}) if isinstance(user, dict) else {}
+        parent = expected["parent_identity_id"]
+        allowed_parents = ([parent],) if parent else ([], [""])
+        if (not isinstance(user, dict) or user.get("enabled") is not True
+                or not isinstance(attrs, dict)
+                or attrs.get("tr_identity_id") != [stable]
+                or attrs.get("tr_organization_id") != [expected["organization_id"]]
+                or attrs.get("tr_parent_identity_id", []) not in allowed_parents):
+            raise AuthorizationUnavailable("live Keycloak hierarchy differs from reviewed migration")
 
 
 def stage_plan(*, database: str | Path, backup: str | Path, reviewed_plan: dict[str, Any],
@@ -261,6 +323,7 @@ def _stage_plan_locked(*, database: str | Path, backup: str | Path, reviewed_pla
         raise ValueError("unscoped Research migration issues block staging")
     _verify_backup(database, backup, current["source_sha256"])
     subjects = _subjects(adapter, current["directory"])
+    _verify_live_hierarchy(adapter, current.get("hierarchy", {}))
     actions = decisions = 0
     link_bindings: list[tuple[str, str, str, str, str]] = []
     for group in current["groups"]:
@@ -277,6 +340,11 @@ def _stage_plan_locked(*, database: str | Path, backup: str | Path, reviewed_pla
                                    creation_intent=intent)
             record({"event": "resource", "ref_sha256": _hash([resource["kind"], resource["ref"]])})
             actions += 1
+            if resource.get("hierarchy_scopes"):
+                grants._reconcile_hierarchy_grant(resource_type=resource["kind"], resource_ref=resource["ref"],
+                                                   enabled=True, require_identical=True)
+                record({"event": "hierarchy_policy", "ref_sha256": _hash([resource["kind"], resource["ref"]])})
+                actions += 1
         for grant in group["grants"]:
             grants._reconcile_user_grant(resource_type=grant["kind"], resource_ref=grant["ref"],
                                          source=grant["source"], identity_id=grant["identity"],
@@ -287,7 +355,7 @@ def _stage_plan_locked(*, database: str | Path, backup: str | Path, reviewed_pla
             actions += 1
         candidates = [(item["kind"], item["ref"], _ALL_SCOPES) for item in group["resources"]]
         for identity in sorted(subjects):
-            expected = _expected(group, identity)
+            expected = _expected(group, identity, hierarchy=current.get("hierarchy"))
             actual = evaluator.evaluate(identity, candidates=candidates)
             compare_research_decisions(expected, actual)
             decisions += len(actual)
@@ -337,6 +405,9 @@ def _stage_plan_locked(*, database: str | Path, backup: str | Path, reviewed_pla
                 raise ValueError("Research authorization changed during link binding")
         for link_id, *_ in link_bindings:
             record({"event": "link_binding", "ref_sha256": _hash(link_id)})
+    _verify_live_hierarchy(adapter, current.get("hierarchy", {}))
+    if _subjects(adapter, current["directory"]) != subjects:
+        raise AuthorizationUnavailable("Keycloak user directory changed during Research staging")
     return {"actions": actions, "scope_decisions": decisions,
             "links_bound": len(link_bindings), "needs_repair_researches": current["summary"]["needs_repair_researches"]}
 

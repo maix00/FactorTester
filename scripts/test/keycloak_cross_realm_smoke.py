@@ -27,18 +27,23 @@ from server.identity.user_session import UserSessionVerifier
 
 
 class Sandbox:
-    def __init__(self) -> None:
+    def __init__(self, *, policy_jar: Path | None = None) -> None:
         self.name = "tr-kc-chain-" + secrets.token_hex(6)
         self.admin_password = secrets.token_urlsafe(30)
         self.base = ""
         self.admin = ""
         self.started = False
+        self.policy_jar = policy_jar
 
     def __enter__(self):
         command = ["docker", "run", "--rm", "-d", "--pull=never", "--name", self.name,
                    "--memory=1200m", "--cpus=2", "--pids-limit=400", "-p", "127.0.0.1::8080",
                    "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=tr-qa", "-e",
-                   "KC_BOOTSTRAP_ADMIN_PASSWORD=" + self.admin_password,
+                   "KC_BOOTSTRAP_ADMIN_PASSWORD=" + self.admin_password]
+        if self.policy_jar is not None:
+            command += ["--mount", f"type=bind,source={self.policy_jar.resolve()},target=/opt/keycloak/providers/tr-policies.jar,readonly",
+                        "-e", "KC_FEATURES=scripts"]
+        command += [
                    "quay.io/keycloak/keycloak:26.8.1", "start-dev",
                    "--http-enabled=true", "--hostname=http://localhost:8080"]
         try:

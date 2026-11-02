@@ -580,6 +580,58 @@ class KeycloakResearchGrantManager:
             raise ValueError("Research user grants cannot delegate administration")
         return normalized_scopes
 
+    def _reconcile_hierarchy_grant(self, *, resource_type: str, resource_ref: str,
+                                   enabled: bool, require_identical: bool = False) -> bool:
+        """Stage a live Keycloak relation, never a frozen ancestor-user grant.
+
+        Private: callers must authorize the change or run guarded migration.
+        UMA's deployed-script condition preserves the resource server's current
+        decision strategy and keeps owner/explicit/Profile grants independent.
+        """
+        if resource_type not in {"research", "research_report"} or type(enabled) is not bool:
+            raise ValueError("invalid Research hierarchy grant")
+        settings = self.settings_provider()
+        pat = self.token_provider(settings)
+        resource = self._resource(settings, pat, resource_type, resource_ref)
+        resource_id = str(resource.get("_id") or resource.get("id") or "")
+        if not resource_id:
+            raise AuthorizationUnavailable("Research hierarchy resource is unavailable")
+        name = keycloak_resource_name(resource_type, resource_ref) + ":current-superiors"
+        scopes = ["read", "use"] if resource_type == "research" else ["read"]
+        description = '{"schema":"tr-research-hierarchy-v1","source":"current-superiors"}'
+        condition = "script-research-superiors.js"
+
+        def matching():
+            rows = [row for row in self._resource_policies(settings, pat, resource_id) if row.get("name") == name]
+            if len(rows) > 1:
+                raise AuthorizationUnavailable("duplicate Research hierarchy policy")
+            return rows
+
+        def valid(row):
+            return (bool(row.get("id")) and row.get("description") == description
+                    and row.get("condition") == condition and sorted(row.get("scopes") or []) == scopes
+                    and not any(row.get(key) for key in ("users", "roles", "groups", "clients"))
+                    and str(row.get("logic") or "POSITIVE") == "POSITIVE")
+
+        previous = matching()
+        if previous and not valid(previous[0]):
+            raise AuthorizationUnavailable("Research hierarchy conflicts with existing Keycloak policy")
+        if bool(previous) == enabled:
+            return False
+        if previous:
+            if require_identical:
+                raise AuthorizationUnavailable("Research migration would remove a hierarchy policy")
+            self.request(settings, pat, "DELETE", "uma-policy/" + quote(str(previous[0]["id"]), safe=""))
+        else:
+            self.request(settings, pat, "POST", "uma-policy/" + quote(resource_id, safe=""),
+                         {"name": name, "description": description, "condition": condition,
+                          "scopes": scopes, "logic": "POSITIVE"})
+        confirmed = matching()
+        if bool(confirmed) != enabled or (confirmed and not valid(confirmed[0])):
+            raise AuthorizationUnavailable("Research hierarchy update was not confirmed")
+        self.clear_cache()
+        return True
+
     def _reconcile_user_grant(self, *, resource_type: str, resource_ref: str,
                               source: str, identity_id: str, subject: str,
                               scopes: Iterable[str], require_identical: bool = False) -> bool:
@@ -624,7 +676,7 @@ class KeycloakResearchGrantManager:
             if (not policy_id or policy.get("description") != description
                     or not isinstance(users, list) or len(users) != 1 or users[0] not in labels
                     or not isinstance(previous_scopes, list) or any(s not in _USER_GRANT_SCOPES for s in previous_scopes)
-                    or any(policy.get(key) for key in ("roles", "groups", "clients"))
+                    or any(policy.get(key) for key in ("roles", "groups", "clients", "condition"))
                     or str(policy.get("logic") or "POSITIVE") != "POSITIVE"):
                 raise AuthorizationUnavailable("Research grant conflicts with existing Keycloak policy")
             if sorted(previous_scopes) == normalized_scopes:
@@ -650,7 +702,7 @@ class KeycloakResearchGrantManager:
                     or sorted(confirmed[0].get("scopes") or []) != normalized_scopes
                     or len(confirmed[0].get("users") or []) != 1
                     or confirmed[0]["users"][0] not in labels
-                    or any(confirmed[0].get(key) for key in ("roles", "groups", "clients"))
+                    or any(confirmed[0].get(key) for key in ("roles", "groups", "clients", "condition"))
                     or str(confirmed[0].get("logic") or "POSITIVE") != "POSITIVE"):
                 raise AuthorizationUnavailable("Research Keycloak grant update was not confirmed")
         elif confirmed:

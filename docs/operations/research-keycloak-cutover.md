@@ -2,6 +2,33 @@
 
 适用于 ADR-190 的 Research、Report 与 Profile 授权迁移。此文记录准备和验收程序；目前没有完成严格模式切换，也不能仅凭阶段性迁移日志删除旧授权数据。
 
+## 可变上下级的迁移进展（2026-11-02）
+
+`superiors` 改为 Keycloak 原生 UMA 的 deployed-script `condition`，脚本源码在
+`deploy/docker/keycloak/policies/research-superiors.js`；不修改 Keycloak 核心，不改变
+资源服务器的全局 decisionStrategy。它读取管理员维护的实时稳定身份父链，
+不使用旧 token 的 parent claim，不生成当前上级名单的长期授权，不新增 Manager 权限存储。
+需要部署可选的 scripts preview feature，入口和回退见
+[Keycloak 部署说明](../../deploy/docker/keycloak/README.md#mutable-research-hierarchy)。
+
+迁移输入可提供完整的 `organization_id`、`parent_username` 审核基线；只用于迁移前后
+逐对象 allow/deny 比较。运行时仍由 Keycloak 当前属性决定。未提供基线的旧计划继续阻止
+superiors；不完整、循环、跨机构基线直接拒绝。stage 在写入前及比较后核对 Keycloak
+实时父链，管理员在审核后修改层级将阻止旧计划执行，需要重新审核，不能改回旧关系。
+Resource/Profile 归属不会随着更换上级而改变；显式协作授权保持独立。
+
+真实临时 Keycloak 26.8.1 演练通过：旧 token 下更换上级、两级上级、明确协作授予和
+撤销、禁止额外 write/manage、停用的中间上级、跨机构、循环及缺失父级。真实迁移入口
+对一项研究、一份报告和 owner self Profile 执行 3 用户×3 资源×7 scopes=63 项策略
+比较，重复执行一致；审核后修改层级拒绝。演练复用既有研究创建/Profile/链接撤权测试。
+14 次本机 HTTP 决策样本最大约 0.260 秒，包含冷脚本编译和网络；不是浏览器 p95 或
+大目录容量验证，未据此宣称性能最优。
+
+现网内网只读重算计划：3 位用户，10/25 研究可准备迁移、40 资源、20 项显式/成员授权；
+另外 15 研究仍需修复，涉及已删除身份的历史引用以及非活跃对象。计划摘要
+`2894e3d83385b77844a5ecbf1bc9058cbbfc752109f4deed33417de3317a6226`。
+本次没有写入现网 Keycloak/SQLite、重启或部署，不能据此宣称两端权限已经迁移完成。
+
 ## 边界
 
 - Keycloak 是目标授权权威；Research SQLite 保留对象、Profile 关联和迁移期间的旧授权输入。迁移日志只记录操作和校验，不提供权限。

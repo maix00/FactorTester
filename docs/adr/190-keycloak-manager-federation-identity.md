@@ -48,6 +48,20 @@ Keycloak multi-cluster v2 可在满足同步数据库和低延迟条件的高可
 3. 不把用户密码、refresh token、完整认证 token 或可复用 bearer token 写入 RabbitMQ 消息、RunSpec、ExecutionPlan 或长期缓存。任务执行只携带完成本次授权所必需的最小冻结主体上下文。
 4. 个人显示偏好可以继续经既有 account-domain 同步机制传输，但不得把该机制当作用户/权限权威或新身份同步协议；偏好同步不授予任何权限。
 
+### 可变用户父链与研究可见性（2026-11-02）
+
+组织/层级 Realm Groups 负责委派管理范围；用户之间可由管理员调整的父链使用受保护的
+`tr_parent_identity_id`。旧研究 `superiors` 不转换为当前上级的显式用户名单，而使用
+Keycloak 原生 UMA `condition` 调用随部署提供的固定 JavaScript policy。策略在 Keycloak
+进程内读取当前用户模型，验证同机构、启用状态、唯一稳定身份及无环父链，只授予该资源
+明确绑定的只读 scopes。所有者、Profile 归属和单独协作授权不随改挂上级而改变。
+
+这需要可选 scripts preview feature，不需要 Keycloak 源码补丁；不能将实时父链检查
+移回 Manager，也不能依赖旧 token 中的父级 claim。查找仅在单个 KeycloakSession 内
+有界复用（至多 512 项），请求结束即释放，避免跨请求缓存造成管理员修改后旧权限继续有效。
+迁移计划中的父链只是审核和逐 scope 对账基线；审核后层级改变必须重新审核，迁移不得
+把管理员修改回滚为审核时的旧关系。部署、真实两端迁移与跨 Manager 撤权验收仍是独立门槛。
+
 ## 迁移顺序与清理门槛
 
 1. 在公网和内网各自的 Keycloak realm 创建并核验 Manager 客户端、角色、Realm Groups、层级关系及默认拒绝授权；公网自助注册始终关闭。

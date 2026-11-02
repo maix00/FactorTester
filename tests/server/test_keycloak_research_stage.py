@@ -11,15 +11,52 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.migrations.keycloak_research_stage import (
-    _Journal, _read_private_json, _write_private_json, build_plan, stage_plan,
+    _Journal, _expected, _read_private_json, _verify_live_hierarchy, _write_private_json, build_plan, stage_plan,
 )
 from scripts.test.historical_research_catalog import HistoricalResearchCatalog as ResearchCatalog
 from scripts.test.legacy_research_fixture import seed_share_link
+from server.identity.keycloak_authorization import AuthorizationUnavailable
 
 
 ISSUER = "https://identity.invalid/realms/test"
 ACCOUNTS = [{"username": "alice", "tr_identity_id": "id-a"},
             {"username": "bob", "tr_identity_id": "id-b"}]
+
+
+def test_reviewed_hierarchy_compares_scopes_without_freezing_ancestors_as_grants(legacy):
+    path, _backup_path, refs = legacy
+    accounts = [{**ACCOUNTS[0], "organization_id": "org", "parent_username": "bob"},
+                {**ACCOUNTS[1], "organization_id": "org", "parent_username": ""}]
+    plan = build_plan(path, accounts, issuer=ISSUER)
+    group = next(group for group in plan["groups"] if group["research_id"] == refs["upper"])
+    assert group["state"] == "ready"
+    assert not any(grant["identity"] == "id-b" for grant in group["grants"])
+    decisions = _expected(group, "id-b", hierarchy=plan["hierarchy"])
+    assert decisions[("research", refs["upper"], "read")]
+    assert decisions[("research", refs["upper"], "use")]
+    assert not decisions[("research", refs["upper"], "write")]
+    changed = [{**accounts[0], "parent_username": ""}, accounts[1]]
+    assert build_plan(path, changed, issuer=ISSUER)["plan_sha256"] != plan["plan_sha256"]
+
+
+@pytest.mark.parametrize("parent,organization", [("alice", "org"), ("ghost", "org"), ("", "other")])
+def test_inconsistent_reviewed_hierarchy_cannot_remove_blocker(legacy, parent, organization):
+    path, *_ = legacy
+    accounts = [{**ACCOUNTS[0], "organization_id": "org", "parent_username": "bob"},
+                {**ACCOUNTS[1], "organization_id": organization, "parent_username": parent}]
+    with pytest.raises(ValueError, match="hierarchy"):
+        build_plan(path, accounts, issuer=ISSUER)
+
+
+def test_live_parent_must_still_match_reviewed_baseline():
+    row = {"enabled": True, "attributes": {"tr_identity_id": ["id-a"],
+           "tr_organization_id": ["org"], "tr_parent_identity_id": ["id-b"]}}
+    directory = SimpleNamespace(user_by_identity_id=lambda _: row)
+    baseline = {"id-a": {"organization_id": "org", "parent_identity_id": "id-b"}}
+    _verify_live_hierarchy(directory, baseline)
+    row["attributes"]["tr_parent_identity_id"] = ["id-c"]
+    with pytest.raises(AuthorizationUnavailable, match="hierarchy differs"):
+        _verify_live_hierarchy(directory, baseline)
 
 
 def _backup(source, destination):

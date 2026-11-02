@@ -292,10 +292,28 @@ def test_independent_keycloak_grants_can_be_updated_and_revoked():
     with pytest.raises(AuthorizationUnavailable, match="conflicts"):
         manager.set_user_grant(**common, source="explicit", scopes=[])
     del explicit["roles"]
+    explicit["condition"] = "script-unrelated.js"
+    with pytest.raises(AuthorizationUnavailable, match="conflicts"):
+        manager.set_user_grant(**common, source="explicit", scopes=[])
+    del explicit["condition"]
     assert manager.set_user_grant(**common, source="explicit", scopes=[])
+    hierarchy = {"resource_type": "research", "resource_ref": "r"}
+    assert manager._reconcile_hierarchy_grant(**hierarchy, enabled=True)
+    assert not manager._reconcile_hierarchy_grant(**hierarchy, enabled=True, require_identical=True)
+    policy = next(row for row in policies.values() if row.get("condition"))
+    assert policy["scopes"] == ["read", "use"] and not policy.get("users")
+    assert manager.list_user_grants(actor="alice", resource_type="research", resource_ref="r") == []
+    with pytest.raises(AuthorizationUnavailable, match="would remove"):
+        manager._reconcile_hierarchy_grant(**hierarchy, enabled=False, require_identical=True)
+    policy["users"] = ["subject-b"]
+    with pytest.raises(AuthorizationUnavailable, match="conflicts"):
+        manager._reconcile_hierarchy_grant(**hierarchy, enabled=True)
+    del policy["users"]
+    assert manager._reconcile_hierarchy_grant(**hierarchy, enabled=False)
+    assert not manager._reconcile_hierarchy_grant(**hierarchy, enabled=False)
     assert len(policies) == 1
     assert sorted(next(iter(policies.values()))["scopes"]) == ["read", "use"]
-    assert len(invalidations) == 11  # seven fresh caller checks plus four changes
+    assert len(invalidations) == 15  # includes rejected mixed-condition calls and hierarchy create/revoke
 
 
 def test_user_grants_require_verified_share_permission_and_cannot_delegate_admin():
