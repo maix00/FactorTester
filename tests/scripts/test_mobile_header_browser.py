@@ -59,6 +59,14 @@ createRoot(document.getElementById('root')!).render(<AuthGate><MobileShell /></A
                 page.locator('.ant-drawer-open').wait_for(state='visible')
                 page.wait_for_timeout(350)
                 page.screenshot(path='/tmp/tr-mobile-header-fixture.png')
+                page.go_back()
+                page.locator('.ant-drawer-open').wait_for(state='hidden')
+                assert header.is_visible()
+                assistant.click()
+                page.locator('.ant-drawer-open').wait_for(state='visible')
+                page.locator('.ant-drawer-open .ant-drawer-close').click()
+                page.locator('.ant-drawer-open').wait_for(state='hidden')
+                assert header.is_visible()
             finally:
                 browser.close()
     finally:

@@ -26,6 +26,8 @@ function MobileWorkspace(): React.ReactElement {
   const [active, setActive] = useState(entries[0].id);
   const [setting, setSetting] = useState<MobileSettingSection | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const assistantHistoryId = useRef(newPageInstanceId("assistant"));
+  const assistantClosing = useRef(false);
   const refs = useRef(entries); refs.current = entries;
   const current = entries.find((item) => item.id === active) || entries[0];
   useEffect(() => {
@@ -39,6 +41,23 @@ function MobileWorkspace(): React.ReactElement {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+  useEffect(() => {
+    if (!assistantOpen) return;
+    const id = assistantHistoryId.current;
+    assistantClosing.current = false;
+    history.pushState({ ...history.state, trAssistant: id }, "", location.href);
+    const onPop = (event: PopStateEvent): void => {
+      if (event.state?.trAssistant !== id) setAssistantOpen(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [assistantOpen]);
+  const setAssistantVisible = (visible: boolean): void => {
+    if (visible) { setAssistantOpen(true); return; }
+    if (history.state?.trAssistant === assistantHistoryId.current) {
+      if (!assistantClosing.current) { assistantClosing.current = true; history.back(); }
+    } else setAssistantOpen(false);
+  };
   const setRoute = (id: string, replace = false): void => {
     const url = new URL(location.href);
     for (const key of ["tr_config", "tr_item", "tr_path", "workspace_id"]) url.searchParams.delete(key);
@@ -62,7 +81,7 @@ function MobileWorkspace(): React.ReactElement {
       : t(`nav.${current.pageId}`, { defaultValue: currentPage?.title || current.pageId });
   const nested = !current.root || Boolean(setting);
   return <>
-    <AgentAssistant open={assistantOpen} onOpenChange={setAssistantOpen} />
+    <AgentAssistant open={assistantOpen} onOpenChange={setAssistantVisible} />
     <IonPage className="tr-mobile-shell" data-nested={nested} data-root={current.root}>
       <MobileHeader title={title} nested={nested} onBack={back} onOpenAssistant={() => setAssistantOpen(true)} />
       <IonContent className="tr-mobile-content" data-root={current.root}>
