@@ -138,6 +138,38 @@ def main() -> int:
             if expected_role and session.get("role") != expected_role:
                 raise SystemExit("Manager role does not match migration acceptance")
             checks = ["react_login_entry", "manager_login", "verified_session"]
+            if os.environ.get('KEYCLOAK_VERIFY_RESEARCH_PAGES') == '1':
+                if page.locator('.tr-module-nav:visible').count():
+                    page.locator('.tr-module-nav button').filter(has_text=re.compile(r'^(研究台?|Research)$')).click()
+                table = page.locator('.tr-research-table:visible')
+                table.locator('.ant-table-row').first.wait_for()
+                titles = table.locator('.ant-table-row td:first-child .tr-table-link').all_text_contents()
+                if len(titles) < 2:
+                    raise SystemExit('Research page acceptance needs two authorized Research objects')
+                mobile = page.locator('.tr-mobile-header:visible').count() > 0
+                for title in titles[:2]:
+                    table.get_by_role('button', name=title, exact=True).click()
+                    visible = page.locator('.tr-mobile-instance:not([hidden])') if mobile else page.locator('.tr-tab-layer[data-tab-layer="research-detail"]:not([hidden])')
+                    if mobile:
+                        page.locator('.tr-mobile-header ion-title').filter(has_text=title).wait_for()
+                    else:
+                        visible.get_by_role('heading', name=title, exact=True).wait_for()
+                    visible.get_by_role('tab', name=re.compile(r'^(详情|Details)$')).wait_for()
+                    if page.get_by_role('dialog').count():
+                        raise SystemExit('Research is still presented as an overlay')
+                    if mobile:
+                        page.locator('.tr-mobile-header').get_by_role('button', name=re.compile(r'^(返回|Back)$')).click()
+                    else:
+                        page.locator('.tr-module-nav button').filter(has_text=re.compile(r'^(研究台?|Research)$')).click()
+                if not mobile:
+                    count = page.locator('.tr-tab-layer[data-tab-layer="research-detail"]').count()
+                    table.get_by_role('button', name=titles[0], exact=True).click()
+                    if page.locator('.tr-tab-layer[data-tab-layer="research-detail"]').count() != count:
+                        raise SystemExit('Repeated Research navigation creates duplicate tabs')
+                screenshot = os.environ.get('KEYCLOAK_RESEARCH_DETAIL_SCREENSHOT')
+                if screenshot:
+                    page.screenshot(path=screenshot)
+                checks.append('independent_research_pages_and_navigation')
             if os.environ.get('KEYCLOAK_VERIFY_REFRESH') == '1':
                 if not any(c['name'] == 'tr-oidc-refresh' and c['httpOnly']
                            for c in context.cookies(manager)):
@@ -195,7 +227,7 @@ def main() -> int:
                     if len(set(refs)) != len(refs) or set(refs) != set(wanted):
                         raise SystemExit(f'Research allow-set mismatch (list={field}, missing={len(set(wanted)-set(refs))}, unexpected={len(set(refs)-set(wanted))})')
                     checks.append(f'{field}_ref_set_verified:{len(refs)}')
-                page.locator('.tr-module-nav button').filter(has_text=re.compile(r'^(研究|Research)$')).click()
+                page.locator('.tr-module-nav button').filter(has_text=re.compile(r'^(研究台?|Research)$')).click()
                 page.locator('.tr-research-page .ant-table-tbody').wait_for()
                 page.locator('.tr-research-page .ant-spin-spinning').wait_for(state='hidden')
                 leaked = page.locator('.tr-tab-layer[aria-hidden="true"] button, .tr-tab-layer[aria-hidden="true"] input').evaluate_all('''nodes => nodes.some(node => {
@@ -281,6 +313,11 @@ def main() -> int:
                     raise SystemExit("Logout left an authenticated user session")
             checks.append("manager_logout")
             print(json.dumps({"manager": manager, "role": session.get("role"), "checks": checks}))
+        except Exception:
+            failure_screenshot = os.environ.get('KEYCLOAK_FAILURE_SCREENSHOT')
+            if failure_screenshot and 'page' in locals():
+                page.screenshot(path=failure_screenshot)
+            raise
         finally:
             browser.close()
     return 0

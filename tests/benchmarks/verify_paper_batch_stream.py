@@ -45,6 +45,20 @@ def comparison_passed(comparison: dict) -> bool:
         'reference_nonfinite', 'candidate_nonfinite', 'finite_status_mismatches', 'mismatches'))
 
 
+def causal_sample_to_source(sample_times, sample_values, source_times):
+    """Audit join only: carry already formed batch outputs to source observations."""
+    clocks=np.asarray(sample_times,dtype=np.int64)
+    values=np.asarray(sample_values,dtype=float)
+    targets=np.asarray(source_times,dtype=np.int64)
+    if clocks.ndim!=1 or values.shape!=clocks.shape or targets.ndim!=1 or np.any(np.diff(clocks)<=0):
+        raise ValueError('expected strictly increasing sample clocks and matching values')
+    result=np.full(len(targets),np.nan)
+    positions=np.searchsorted(clocks,targets,side='right')-1
+    formed=positions>=0
+    result[formed]=values[positions[formed]]
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--factors', required=True, type=Path)
@@ -132,7 +146,10 @@ def main():
         raise ValueError('formal batch signals cannot all be matched to source Bars')
     batch_values = batch[product].to_numpy()[mask]
     increment_values = incremental[positions[mask]]
-    comparison = compare_formal_values(batch_values, increment_values)
+    sampled_comparison = compare_formal_values(batch_values, increment_values)
+    carried=causal_sample_to_source(batch_times,batch[product].to_numpy(),times)
+    source_formal=times>=formal_start.value
+    comparison=compare_formal_values(carried[source_formal],incremental[source_formal])
     peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if sys.platform.startswith('linux'):
         peak_rss *= 1024
@@ -142,7 +159,9 @@ def main():
         'rows': len(times), 'trading_days': len(starts), 'formal_start': args.formal_start,
         'source_start_utc': pd.Timestamp(times[0], unit='ns', tz='UTC').isoformat(),
         'source_end_utc': pd.Timestamp(times[-1], unit='ns', tz='UTC').isoformat(),
-        'batch_signal_rows_compared': comparison['rows'], 'mismatches': comparison['mismatches'],
+        'batch_signal_rows_compared': sampled_comparison['rows'],
+        'source_rows_compared':comparison['rows'], 'sampled_mismatches':sampled_comparison['mismatches'],
+        'mismatches': comparison['mismatches'],
         'batch_nonfinite': comparison['reference_nonfinite'],
         'incremental_nonfinite': comparison['candidate_nonfinite'],
         'finite_status_mismatches': comparison['finite_status_mismatches'],

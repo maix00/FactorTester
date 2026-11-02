@@ -171,8 +171,10 @@ class FactorSourceCatalog:
             raise FileNotFoundError("因子源码版本不存在")
         return {
             "success": True,
-            **value,
+            # Rendering with a newer operator engine must not rewrite the
+            # immutable version requested by a historical Job/reference.
             **self._detail(value["source_code"], factor_id, metadata),
+            **value,
             "source_kind": kind,
             "factor_id": factor_id,
             "factor_owner_ref": owner,

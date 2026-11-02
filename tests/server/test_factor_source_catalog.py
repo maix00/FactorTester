@@ -118,3 +118,16 @@ def test_current_source_reports_missing_copy(monkeypatch) -> None:
         FactorSourceCatalog().version(
             "reader", "public", "Momentum", "current",
         )
+
+
+def test_rendering_with_new_engine_never_replaces_frozen_revision(monkeypatch):
+    frozen='b'*64
+    monkeypatch.setattr(factor_source_catalog,'get_factor_source_metadata',lambda *args:{})
+    monkeypatch.setattr(factor_source_catalog,'load_factor_formula_version',lambda *args:{
+        'family_formula_fingerprint':frozen,'source_code':'original source','source_sha256':'stored-source-hash'})
+    monkeypatch.setattr(FactorSourceCatalog,'_detail',staticmethod(lambda *args:{
+        'family_formula_fingerprint':'c'*64,'source_code':'original source','params':[{'alias':'N'}]}))
+    result=FactorSourceCatalog().version('reader','public','Historical',frozen)
+    assert result['family_formula_fingerprint']==frozen
+    assert result['source_sha256']=='stored-source-hash'
+    assert result['params']==[{'alias':'N'}]

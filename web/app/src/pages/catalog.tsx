@@ -1,15 +1,22 @@
-import { catalogRows, catalogSearchMatches } from "../catalog-search.ts";
+import { catalogRows, catalogSearchMatches, catalogIdentity as identity, catalogTitle as title } from "../catalog-search.ts";
 import { sourceIdentity } from "../source-model.ts";
-import React, { useEffect, useMemo, useState } from "react";
-import { Button, Input, Select, Tabs, Tag } from "antd";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Button, Input, Select, Spin, Tabs, Tag } from "antd";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import {useAuth} from "../auth.tsx";
+import {FactorFamilyEditor} from "../components/factor-family-editor.tsx";
+import {ProductTree} from "../components/product-tree.tsx";
+import {FactorSetDetail} from "../components/factor-set-detail.tsx";
+import {FactorSetEditor} from "../components/factor-set-editor.tsx";
 import { StrategyDetail } from "../components/strategy-detail.tsx";
+import {FactorFamilyDetail} from "../components/factor-family-detail.tsx";
 import { FactorDetail } from "../components/factor-detail.tsx";
 import { FunctionPage } from "../components/function-page.tsx";
 import { TRDataTable } from "../components/data-table.tsx";
 import { DetailsPanel } from "../components/details-panel.tsx";
 import { LibraryCreate } from "../components/library-create.tsx";
+import {ProductDefinitionDetail} from "../components/product-definition-detail.tsx";
 import { ProductGroupEditor } from "../components/product-group-editor.tsx";
 import { CategoryEditor } from "../components/category-editor.tsx";
 import { ResultView } from "../components/result-view.tsx";
@@ -21,9 +28,7 @@ import { useCompactLayout } from "../configuration/layout.ts";
 
 type Row = Record<string, any>;
 type Domain = "products" | "factors" | "strategies";
-const tabsByDomain = { products: ["products", "groups", "sources", "categories", "reference"], factors: ["factors", "families", "sets"], strategies: ["public", "mine", "subordinates", "shared", "strategyFamilies"] };
-const identity = (row: Row): string => String(row.group_ref || row.ref || row.factor_ref || row.strategy_ref || row.template_ref || row.family_ref || row.set_ref || row.id || row.family_id || row.bundle_id || row.source_name || row.factor_family_alias || row.alias || row.name || "");
-const title = (row: Row): string => String(row.family_name || row.bundle_name || row.source_name || row.name || row.title || row.factor_family_name || row.factor_alias || row.alias || identity(row));
+const tabsByDomain = { products: ["products", "tree", "groups", "sources", "categories", "reference"], factors: ["factors", "families", "sets"], strategies: ["public", "mine", "subordinates", "shared", "strategyFamilies"] };
 const owner = (row: Row): string => String(row.owner_username || row.owner || row.owner_ref || "—");
 const family = (row: Row): string => String(row.factor_family_alias || row.family_alias || row.identity?.family_alias || row.family_ref || "—");
 const ownerLink = (row: Row): React.ReactNode => {
@@ -32,12 +37,15 @@ const ownerLink = (row: Row): React.ReactNode => {
 };
 const familyLink = (row: Row): React.ReactNode => {
   const label = family(row), ref = String(row.factor_family_ref || row.family_ref || row.identity?.family_ref || (label === "—" ? "" : label));
-  return ref ? <ObjectReference value={{ kind: "factorFamily", ref, label, owner: row.family_owner_username || row.identity?.family_owner_username }} /> : "—";
+  return ref ? <ObjectReference value={{ kind: "factorFamily", ref, label, owner: row.family_owner_username || row.identity?.family_owner_username, familyAlias:row.factor_family_alias||row.identity?.family_alias, versionRef:row.family_formula_fingerprint||row.identity?.family_formula_fingerprint }} /> : "—";
 };
 
 export function CatalogPage({ domain = "products" }: { domain?: Domain }): React.ReactElement {
   const { t } = useTranslation(), mobile = useCompactLayout(), instance = usePageInstance();
-  const [tab, setTab] = useState(tabsByDomain[domain][0]);
+  const {session}=useAuth();
+  const [specialEditor,setSpecialEditor]=useState<"family"|"set"|null>(null),[editingSpecial,setEditingSpecial]=useState(false);
+  const [editingFactor,setEditingFactor]=useState(false);
+  const [tab, setTab] = useState(tabsByDomain[domain].includes(instance.args.section||"")?instance.args.section!:tabsByDomain[domain][0]);
   const [rows, setRows] = useState<Row[]>([]), [total, setTotal] = useState(0);
   const [query, setQuery] = useState(""), [familyFilter, setFamilyFilter] = useState<string>(), [ownerFilter, setOwnerFilter] = useState<string>();
   const [page, setPage] = useState(1), [size, setSize] = useState(20), [revision, setRevision] = useState(0);
@@ -47,7 +55,7 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
   const [groupCreating, setGroupCreating] = useState(false), [groupEditing, setGroupEditing] = useState(false), [categoryCreating, setCategoryCreating] = useState(false), [categoryEditing, setCategoryEditing] = useState(false);
   const serverPaged = domain === "strategies" && !["public", "strategyFamilies"].includes(tab);
   useEffect(() => {
-    if (tab === "reference") { setRows([]); return; }
+    if (tab === "reference" || tab === "tree") { setRows([]); return; }
     const controller = new AbortController(); setLoading(true); setError("");
     const url = domain === "strategies" ? ["public", "strategyFamilies"].includes(tab) ? "/api/strategy-library/factor-strategies" : `/api/strategy-library/strategies?scope=${tab}&page=${page}&limit=${size}&query=${encodeURIComponent(query)}`
       : tab === "products" ? "/api/product-library/products" : tab === "groups" ? "/api/product-library/product-groups?view=summary" : tab === "sources" ? "/api/product-library/data-sources" : tab === "categories" ? "/api/product-library/categories"
@@ -71,20 +79,46 @@ export function CatalogPage({ domain = "products" }: { domain?: Domain }): React
     void request(url, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setDetail(data); }).catch((reason) => { if (!controller.signal.aborted) setDetailError(reason.message); });
     return () => controller.abort();
   }, [selected, tab, domain]);
+  useEffect(()=>{
+    if(tab!=="families"||!selected||selected.family_ref||loading)return;
+    const matches=rows.filter(row=>row.factor_family_alias===selected.factor_family_alias&&row.owner_username===selected.owner_username&&(!selected.family_formula_fingerprint||row.family_formula_fingerprint===selected.family_formula_fingerprint));
+    if(matches.length===1&&matches[0].family_ref)setSelected(matches[0]);
+  },[rows,selected,loading,tab]);
+  const openedLink=useRef(false);
+  useEffect(()=>{
+    if(openedLink.current)return;
+    const mode=instance.args.catalogMode;
+    if(mode==="create"){
+      openedLink.current=true;
+      if(tab==="families")setSpecialEditor("family");else if(tab==="sets")setSpecialEditor("set");else if(domain!=="products")setCreating(true);
+      return;
+    }
+    const ref=instance.args.catalogRef;if(!ref||loading||!rows.length)return;
+    const matches=rows.filter(row=>(identity(row)===ref||row.factor_family_alias===ref||row.alias===ref)&&(!instance.args.catalogOwner||owner(row)===instance.args.catalogOwner));
+    if(matches.length!==1)return; // Never resolve an ambiguous alias to someone else's object.
+    openedLink.current=true;setSelected(matches[0]);if(mobile)setDetailOpen(true);
+    if(mode==="edit"&&owner(matches[0])===session?.username){if(tab==="families"||tab==="sets")setEditingSpecial(true);else if(tab==="factors")setEditingFactor(true);}
+  },[rows,loading,tab,domain,instance.args,mobile,session?.username]);
   const displayTitle = (row: Row): string => row.template_ref ? t(`configuration.templates.${row.template_ref.split(":").pop()}`, { defaultValue: title(row) }) : title(row);
   const filtered = useMemo(() => rows.filter((row) => (serverPaged || catalogSearchMatches(query, [displayTitle(row), family(row), owner(row)], domain === "products" ? [row.desc, row.exchange] : [])) && (!familyFilter || family(row) === familyFilter) && (!ownerFilter || owner(row) === ownerFilter)), [rows, query, familyFilter, ownerFilter, serverPaged, t]);
   const visible = serverPaged ? filtered : filtered.slice((page - 1) * size, page * size);
   const label = (key: string): string => t(domain === "strategies" ? `library.scopes.${key}` : `catalog.${key}`);
-  const select = (row: Row): void => { if (tab === "sources") { instance.open("source-detail", {sourceFamilyId: sourceIdentity(row)}); return; } if (tab === "products") { instance.open("product-detail", { productName: row.name || row.code || row.id, productTitle: row.desc || row.name || row.code }); return; } setSelected(row); if (mobile) setDetailOpen(true); };
+  const select = (row: Row): void => {setEditingFactor(false); if (tab === "sources") { instance.open("source-detail", {sourceFamilyId: sourceIdentity(row)}); return; } if (tab === "products") { instance.open("product-detail", { productName: row.name || row.code || row.id, productTitle: row.desc || row.name || row.code }); return; } setSelected(row); if (mobile) setDetailOpen(true); };
   const groupDetail = (detail as Row | null)?.group ?? detail ?? selected;
   const categoryDetail = (detail as Row | null) ?? selected;
-  const contents = detailError ? <div role="alert">{detailError}</div> : tab === "categories" && categoryEditing ? <CategoryEditor category={categoryDetail as Row} onCancel={() => setCategoryEditing(false)} onDeleted={() => { setCategoryEditing(false); setSelected(null); setDetail(null); setRevision((revision) => revision + 1); }} onSaved={(value) => { setCategoryEditing(false); setSelected(value); setDetail(value); setRevision((revision) => revision + 1); }} /> : tab === "categories" ? <div className="tr-group-detail"><ResultView value={detail} />{categoryDetail && !categoryDetail.source_managed ? <Button onClick={() => setCategoryEditing(true)}>{t("category.edit")}</Button> : null}</div> : tab === "groups" && groupEditing ? <ProductGroupEditor group={groupDetail as Row} onCancel={() => setGroupEditing(false)} onDeleted={() => { setGroupEditing(false); setSelected(null); setDetail(null); setRevision((revision) => revision + 1); }} onSaved={(value) => { setGroupEditing(false); setSelected(value); setDetail({ group: value } as Row); setRevision((revision) => revision + 1); }} /> : tab === "factors" || tab === "families" ? <FactorDetail key={identity(selected || {})} detail={detail} /> : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? <StrategyDetail onRemoved={() => { setSelected(null); setDetailOpen(false); setRevision((value) => value + 1); }} key={identity(selected || {})} detail={detail} onUpdated={(value) => { setSelected(value); setRevision((revision) => revision + 1); }} /> : tab === "groups" ? <div className="tr-group-detail"><ResultView value={detail} /><Button onClick={() => setGroupEditing(true)}>{t("productGroup.edit")}</Button></div> : <ResultView value={detail} />;
+  const specialKind=tab==="families"?"family":tab==="sets"?"set":null;
+  const specialSaved=(value:Row):void=>{setSpecialEditor(null);setEditingSpecial(false);const next:Row={...selected,...value,owner_username:value.owner_username||selected?.owner_username||session?.username};if(specialKind==="family"){delete next.family_ref;next.factor_family_alias=value.factor_family_alias||value.id||value.name||selected?.factor_family_alias;}setSelected(next);setRevision(current=>current+1);};
+  const specialForm=(kind:"family"|"set",editing:boolean):React.ReactElement=>kind==="family"?<FactorFamilyEditor initialSource={instance.args.catalogSource} family={editing?selected||undefined:undefined} onSaved={specialSaved} onCancel={()=>{setSpecialEditor(null);setEditingSpecial(false);}}/>:<FactorSetEditor value={editing?selected||undefined:undefined} onSaved={specialSaved} onCancel={()=>{setSpecialEditor(null);setEditingSpecial(false);}}/>;
+  const originalContents = tab==="sets"&&selected?<FactorSetDetail key={identity(selected)} value={selected}/>:detailError ? <div role="alert">{detailError}</div> : tab === "categories" && categoryEditing ? <CategoryEditor category={categoryDetail as Row} onCancel={() => setCategoryEditing(false)} onDeleted={() => { setCategoryEditing(false); setSelected(null); setDetail(null); setRevision((revision) => revision + 1); }} onSaved={(value) => { setCategoryEditing(false); setSelected(value); setDetail(value); setRevision((revision) => revision + 1); }} /> : tab === "categories" ? <div className="tr-group-detail"><ProductDefinitionDetail key={identity(selected||{})} value={categoryDetail as Row} category/>{categoryDetail && !categoryDetail.source_managed ? <Button onClick={() => setCategoryEditing(true)}>{t("category.edit")}</Button> : null}</div> : tab === "groups" && groupEditing ? <ProductGroupEditor group={groupDetail as Row} onCancel={() => setGroupEditing(false)} onDeleted={() => { setGroupEditing(false); setSelected(null); setDetail(null); setRevision((revision) => revision + 1); }} onSaved={(value) => { setGroupEditing(false); setSelected(value); setDetail({ group: value } as Row); setRevision((revision) => revision + 1); }} /> : tab==="families"&&selected?<FactorFamilyDetail key={identity(selected)} family={selected} onChanged={()=>{setSelected(null);setDetailOpen(false);setRevision(value=>value+1);}}/>:tab === "factors" ? <FactorDetail key={identity(selected || {})} detail={detail} /> : domain === "strategies" && !["public", "strategyFamilies"].includes(tab) ? <StrategyDetail onRemoved={() => { setSelected(null); setDetailOpen(false); setRevision((value) => value + 1); }} key={identity(selected || {})} detail={detail} onUpdated={(value) => { setSelected(value); setRevision((revision) => revision + 1); }} /> : tab === "groups" ? <div className="tr-group-detail"><ProductDefinitionDetail key={identity(selected||{})} value={groupDetail as Row}/><Button onClick={() => setGroupEditing(true)}>{t("productGroup.edit")}</Button></div> : <ResultView value={detail} />;
+  const canEditSpecial=!!specialKind&&!!selected&&(owner(selected)===session?.username||(specialKind==="family"&&session?.role==="super_admin"&&(selected.source==="public"||selected.factor_kind==="public")));
+  const contents=editingSpecial&&specialKind?specialForm(specialKind,true):editingFactor?(detailError?<div role="alert">{detailError}</div>:!detail?<Spin/>:<LibraryCreate kind="factor" factor={{...(detail?.factor||selected),...(detail?.family?.owner_username?{family_owner_username:detail.family.owner_username}: {})} as Row} onCancel={()=>setEditingFactor(false)} onCreated={value=>{setEditingFactor(false);setSelected(value);setRevision(current=>current+1);}}/>):<>{originalContents}{tab==="factors"&&selected&&owner(selected)===session?.username?<div className="tr-inline-actions"><Button onClick={()=>setEditingFactor(true)}>{t("catalogActions.editFactor")}</Button></div>:null}{canEditSpecial?<div className="tr-inline-actions"><Button onClick={()=>setEditingSpecial(true)}>{t("configuration.edit")}</Button></div>:null}</>;
+  if(specialEditor)return <FunctionPage title={t(specialEditor==="family"?"catalogActions.newFamily":"catalogActions.newSet")}>{specialForm(specialEditor,false)}</FunctionPage>;
   if (creating) return <FunctionPage title={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}><LibraryCreate kind={domain === "factors" ? "factor" : "strategy"} onCancel={() => setCreating(false)} onCreated={() => { setCreating(false); setRevision((value) => value + 1); }} /></FunctionPage>;
   if (groupCreating) return <FunctionPage title={t("productGroup.create")}><ProductGroupEditor onCancel={() => setGroupCreating(false)} onDeleted={() => setGroupCreating(false)} onSaved={(value) => { setGroupCreating(false); setRevision((revision) => revision + 1); setSelected(value); }} /></FunctionPage>;
   if (categoryCreating) return <FunctionPage title={t("category.create")}><CategoryEditor onCancel={() => setCategoryCreating(false)} onDeleted={() => setCategoryCreating(false)} onSaved={(value) => { setCategoryCreating(false); setRevision((revision) => revision + 1); setSelected(value); }} /></FunctionPage>;
-  return <FunctionPage title={t(`nav.${domain}`)} actions={<><Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} />{domain === "products" && tab === "groups" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setGroupCreating(true)}>{t("productGroup.create")}</Button> : null}{domain === "products" && tab === "categories" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setCategoryCreating(true)}>{t("category.create")}</Button> : null}{domain !== "products" ? <Button type="primary" aria-label={t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")} icon={<PlusOutlined />} onClick={() => setCreating(true)}>{t(domain === "factors" ? "editor.newFactor" : "editor.newStrategy")}</Button> : null}</>}>
-    <Tabs activeKey={tab} onChange={(value) => { setTab(value); setPage(1); setRows([]); setSelected(null); setQuery(""); setOwnerFilter(undefined); setFamilyFilter(undefined); }} items={tabsByDomain[domain].map((key) => ({ key, label: label(key) }))} />
-    {tab === "reference" ? <ReferenceLookup /> : <><div className="tr-library-filters"><Input.Search allowClear aria-label={t(domain === "products" && tab === "products" ? "market.productSearch" : "library.search")} placeholder={t(domain === "products" && tab === "products" ? "market.productSearch" : "library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
+  return <FunctionPage title={t(`nav.${domain}`)} actions={<><Button type="text" icon={<ReloadOutlined />} aria-label={t("configuration.reload")} onClick={() => setRevision((value) => value + 1)} />{domain === "products" && tab === "groups" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setGroupCreating(true)}>{t("productGroup.create")}</Button> : null}{domain === "products" && tab === "categories" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setCategoryCreating(true)}>{t("category.create")}</Button> : null}{domain !== "products" ? <Button type="primary" aria-label={t(domain === "factors" ? specialKind==="family"?"catalogActions.newFamily":specialKind==="set"?"catalogActions.newSet":"editor.newFactor" : "editor.newStrategy")} icon={<PlusOutlined />} onClick={() => {if(specialKind)setSpecialEditor(specialKind);else setCreating(true);}}>{t(domain === "factors" ? specialKind==="family"?"catalogActions.newFamily":specialKind==="set"?"catalogActions.newSet":"editor.newFactor" : "editor.newStrategy")}</Button> : null}</>}>
+    <Tabs activeKey={tab} onChange={(value) => { setTab(value); setPage(1); setRows([]); setSelected(null);setEditingSpecial(false);setEditingFactor(false); setQuery(""); setOwnerFilter(undefined); setFamilyFilter(undefined); }} items={tabsByDomain[domain].map((key) => ({ key, label: label(key) }))} />
+    {tab === "tree" ? <ProductTree/> : tab === "reference" ? <ReferenceLookup /> : <><div className="tr-library-filters"><Input.Search allowClear aria-label={t(domain === "products" && tab === "products" ? "market.productSearch" : "library.search")} placeholder={t(domain === "products" && tab === "products" ? "market.productSearch" : "library.search")} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
       {domain === "factors" ? <Select allowClear aria-label={t("library.allFamilies")} placeholder={t("library.allFamilies")} value={familyFilter} options={[...new Set(rows.map(family))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setFamilyFilter(value); setPage(1); }} /> : null}
       {!serverPaged && domain !== "products" ? <Select allowClear aria-label={t("library.allOwners")} placeholder={t("library.allOwners")} value={ownerFilter} options={[...new Set(rows.map(owner))].filter((name) => name !== "—").map((name) => ({ value: name, label: name }))} onChange={(value) => { setOwnerFilter(value); setPage(1); }} /> : null}
       <Button onClick={() => { setQuery(""); setFamilyFilter(undefined); setOwnerFilter(undefined); setPage(1); }}>{t("library.reset")}</Button></div>

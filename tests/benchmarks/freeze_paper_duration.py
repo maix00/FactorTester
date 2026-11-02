@@ -15,7 +15,9 @@ from tools.factors.factor_param_resolution import factor_param_resolver_scope
 from tools.factors.formula_identity import freeze_factor_identity
 
 
-def freeze(database:Path,window:str):
+def freeze(database:Path,window:str,*,deviation_family:str="TsDurDev"):
+    if deviation_family not in {"TsDurDev","TsDurDevDayScope"}:
+        raise ValueError("unsupported duration deviation family")
     records=[];sources={}
     with sqlite3.connect(database.resolve().as_uri()+'?mode=ro',uri=True) as connection:
         def build(name,params):
@@ -36,17 +38,21 @@ def freeze(database:Path,window:str):
             records.append(record);return record
         threshold=build('SgChgPct',{'P':'CA','B':1,'N':'250d','M':.6,'$F':'30m'})
         duration=build('SgChgDurDay',{'P':'CA','Th':threshold,'$F':'30m'})
-        deviation=build('TsDurDevDayScope',{'Dur':duration,'V':'C','$F':'30m'})
+        deviation_params={'Dur':duration,'V':'C','$F':'30m'}
+        if deviation_family=='TsDurDev':deviation_params['N']='1d'
+        deviation=build(deviation_family,deviation_params)
         signal=build('TsHistCmp',{'X':deviation,'N':window,'$F':'30m'})
     return dict(factors=records,signal_ref=signal['ref'],source_sha256=sources,
         provenance='read-only historical source snapshot; unchanged family sources, freshly frozen identities',
-        parameters=dict(window=window,threshold_history='250d',quantile=.6,lag=1,signal_frequency='30m'))
+        parameters=dict(window=window,deviation_family=deviation_family,deviation_window='1d' if deviation_family=='TsDurDev' else None,threshold_history='250d',quantile=.6,lag=1,signal_frequency='30m'))
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--database',required=True,type=Path)
     parser.add_argument('--output',required=True,type=Path);parser.add_argument('--window',default='20d')
-    args=parser.parse_args();payload=freeze(args.database,args.window)
+    parser.add_argument('--deviation-family',choices=['TsDurDev','TsDurDevDayScope'],default='TsDurDev',
+                        help='corrected report uses TsDurDev(N=1d); DayScope is a separate diagnostic variant')
+    args=parser.parse_args();payload=freeze(args.database,args.window,deviation_family=args.deviation_family)
     with args.output.open('x') as handle:json.dump(payload,handle,indent=2)
     print(payload['signal_ref'])
 

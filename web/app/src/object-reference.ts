@@ -6,6 +6,8 @@ export interface ObjectReferenceValue {
   label?: string;
   owner?: string;
   profileKey?: string;
+  familyAlias?: string;
+  versionRef?: string;
 }
 
 /** Display names never replace the address used to open an object. */
@@ -47,6 +49,8 @@ export function referenceForField(key: string, value: unknown, parent: Record<st
   if (key === "factor_family_ref" || key === "factor_family_alias" || (key === "family_ref" && ("factor_ref" in parent || "factor_family_alias" in parent))) return {
     kind: "factorFamily", ref,
     owner: typeof parent.family_owner_username === "string" ? parent.family_owner_username : undefined,
+    ...(typeof parent.factor_family_alias === "string" ? {familyAlias:parent.factor_family_alias} : {}),
+    ...(typeof parent.family_formula_fingerprint === "string" ? {versionRef:parent.family_formula_fingerprint} : {}),
   };
   if (["template_ref", "strategy_family_ref", "strategy_family_refs"].includes(key)) return { kind: "strategyFamily", ref };
   if (key === "strategy_ref" || key === "strategy_refs") return { kind: "strategy", ref };
@@ -54,12 +58,16 @@ export function referenceForField(key: string, value: unknown, parent: Record<st
 }
 
 /** Resolve an exact family identity. An ambiguous alias must never select a different owner's family. */
-export function matchingFamily(rows: Record<string, unknown>[], ref: string, owner?: string): Record<string, unknown> | null {
+export function matchingFamily(rows: Record<string, unknown>[], ref: string, owner?: string, frozen?:{alias?:string;version?:string}): Record<string, unknown> | null {
   const matches = rows.filter(row => {
     const ids = [row.family_ref, row.ref, row.factor_family_alias, row.family_alias, row.alias];
     return ids.some(id => id === ref) && (!owner || row.owner_username === owner || row.owner_ref === owner);
   });
-  return matches.length === 1 ? matches[0] : null;
+  if(matches.length === 1)return matches[0];
+  // Frozen heads require explicit source identity and full revision, never a display label.
+  if(matches.length || !owner || !frozen?.alias || !/^[0-9a-f]{64}$/i.test(frozen.version||""))return null;
+  const sources=rows.filter(row => [row.factor_family_alias,row.family_alias,row.alias].includes(frozen.alias) && (row.owner_username===owner||row.owner_ref===owner));
+  return sources.length===1?sources[0]:null;
 }
 
 /** Only canonical IDs with a real detail endpoint become remote requests. */

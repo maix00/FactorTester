@@ -42,9 +42,6 @@
   async function factorDetail(
     context, data, targetRef, mode = "view", nativeRequest, options = {},
   ) {
-    if (mode === "create" || mode === "edit") {
-      return FTFactorEditor.render(context, data, targetRef, mode, options);
-    }
     let factor = (context.testObjectTemporary || context.testObjectSnapshot)
       && context.testObjectInitialValue
       ? context.testObjectInitialValue
@@ -127,23 +124,6 @@
   ) {
     let family = data.families.find(item => item.family_ref === targetRef
       || item.factor_family_alias === targetRef);
-    if (mode === "create" || mode === "edit") {
-      if (mode === "edit" && !family) {
-        throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
-      }
-      return FTFactorEditor.render(
-        context,
-        data,
-        family?.family_ref || targetRef,
-        mode,
-        {
-          familyMode: true,
-          publicMode: options.publicMode === true
-            || family?.factor_kind === "public"
-            || family?.source === "public",
-        },
-      );
-    }
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
     // A test-local family (created inline in a test editor, never persisted)
     // has no server version history: render its carried frozen value directly.

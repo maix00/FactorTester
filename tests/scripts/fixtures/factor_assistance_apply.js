@@ -61,45 +61,4 @@ assert.match(
   /forward-fill/,
 );
 
-vm.runInThisContext(
-  fs.readFileSync("server/manager/web/catalog/factor-editor.js", "utf8"),
-  {filename: "factor-editor.js"},
-);
-assert.deepStrictEqual(
-  window.FTFactorEditor.reconcileParameterValues([
-    {alias: "$F", default_value: "1m"},
-    {alias: "$Rev", default_value: "0"},
-  ], {N: "25d", "$F": "5m"}),
-  {$F: "5m", $Rev: "0"},
-  "source validation must discard parameters not declared by the new source",
-);
-const visibleInput = {value: ""};
-const fieldRow = window.FTFactorEditor.bindFieldValue({}, visibleInput);
-fieldRow.value = "Aroon指标下轨";
-assert.equal(
-  visibleInput.value, "Aroon指标下轨",
-  "assistance must write the visible input instead of a property on its row",
-);
-visibleInput.value = "自编";
-assert.equal(fieldRow.value, "自编");
-assert.equal(window.FTFactorEditor.persistedFamilyClassName({
-  name: "StoredClass", factor_family_name: "ProjectionClass",
-}), "StoredClass");
-assert.equal(window.FTFactorEditor.persistedFamilyClassName({
-  factor_family_name: "ProjectionClass", factor_alias: "ProjectionClass|N:25d",
-}), "ProjectionClass");
-assert.equal(window.FTFactorEditor.persistedFamilyClassName({
-  factor_family_alias: "LegacyFamily", factor_alias: "LegacyFamily|N:25d",
-}), "LegacyFamily");
-assert.equal(window.FTFactorEditor.persistedFamilyClassName({
-  name: "SgChgDur|P:[CA]|Th:[0.001]|K:30m|$F:30m",
-  factor_alias: "SgChgDur|P:[CA]|Th:[0.001]|K:30m|$F:30m",
-  factor_family_name: "SgChgDur",
-}), "SgChgDur", "factor records must not use their full alias as the family class name");
-assert.equal(window.FTFactorEditor.familyClassNameMatches(
-  "MmAroonDown", {factor_name: "MmAroonDown"},
-), true);
-assert.equal(window.FTFactorEditor.familyClassNameMatches(
-  "MmAroonDown", {factor_name: "MmAroonUp"},
-), false);
 console.log("ok");

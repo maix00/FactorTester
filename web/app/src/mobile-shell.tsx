@@ -1,3 +1,5 @@
+import {appCatalogLink} from "./app-link.ts";
+import {pageObjectKey,pageObjectTitle} from "./page-object.ts";
 import React, { useEffect, useRef, useState } from "react";
 import { IonApp, IonBadge, IonButton, IonButtons, IonContent, IonHeader, IonPage, IonTabBar, IonTabButton, IonTitle, IonToolbar } from "@ionic/react";
 import { useTranslation } from "react-i18next";
@@ -22,12 +24,14 @@ export function MobileShell(): React.ReactElement {
 
 function MobileWorkspace(): React.ReactElement {
   const { t } = useTranslation();
+  const initialLink=appCatalogLink(location.search);
   const initialAccount = new URLSearchParams(location.search).get("settings") === "account";
   const [entries, setEntries] = useState<Entry[]>(() => [
     ...tabs.map((page) => ({ id: newPageInstanceId(page.id), pageId: page.id, args: {}, root: true })),
+    ...(initialLink ? [{id:newPageInstanceId(initialLink.pageId),pageId:initialLink.pageId,args:initialLink.args}] : []),
     ...(initialAccount ? [{id: newPageInstanceId("settings"), pageId: "settings", args: {}}] : []),
   ]);
-  const [active, setActive] = useState(() => initialAccount ? entries[entries.length - 1].id : entries[0].id);
+  const [active, setActive] = useState(() => initialAccount || initialLink ? entries[entries.length - 1].id : entries[0].id);
   const [setting, setSetting] = useState<MobileSettingSection | null>(initialAccount ? "account" : null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const assistantHistoryId = useRef(newPageInstanceId("assistant"));
@@ -40,6 +44,11 @@ function MobileWorkspace(): React.ReactElement {
       history.replaceState({trPage: entries[0].id}, "", url.href);
       history.pushState({trPage: active}, "", url.href);
       history.pushState({trPage: active, trSettings: "account"}, "", url.href);
+    } else if (initialLink) {
+      const url=new URL(location.href);
+      for(const key of ["page","section","object_ref","owner_username","mode"])url.searchParams.delete(key);
+      history.replaceState({trPage:entries[0].id},"",url.href);
+      history.pushState({trPage:active},"",location.href);
     } else history.replaceState({ ...history.state, trPage: active }, "", location.href);
     const onPop = (event: PopStateEvent): void => {
       const known = refs.current.find((item) => item.id === event.state?.trPage);
@@ -74,6 +83,9 @@ function MobileWorkspace(): React.ReactElement {
     setActive(id); setSetting(null);
   };
   const open = (pageId: string, args: PageArguments = {}): void => {
+    const key=pageObjectKey(pageId,args);
+    const matching=key?entries.find(entry=>pageObjectKey(entry.pageId,entry.args)===key):undefined;
+    if(matching){setRoute(matching.id);return;}
     if (Object.keys(args).length === 0) {
       const existing = entries.find((item) => item.pageId === pageId && Object.keys(item.args).length === 0);
       if (existing) { setRoute(existing.id); return; }
@@ -85,8 +97,8 @@ function MobileWorkspace(): React.ReactElement {
   const currentPage = getPage(current.pageId);
   const title = current.pageId === "settings" && setting
     ? t(`settingsPanel.sections.${setting}`)
-    : current.pageId === "product-detail" && current.args.productTitle
-      ? current.args.productTitle
+    : pageObjectTitle(current.pageId,current.args)
+      ? pageObjectTitle(current.pageId,current.args)!
       : t(`nav.${current.pageId}`, { defaultValue: currentPage?.title || current.pageId });
   const nested = !current.root || Boolean(setting);
   return <>

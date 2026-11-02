@@ -1,3 +1,4 @@
+import {appCatalogLink} from "./app-link.ts";
 import React, { useCallback, useEffect, useState } from "react";
 import { Dropdown, Tooltip } from "antd";
 import { DeleteOutlined, MoreOutlined } from "@ant-design/icons";
@@ -12,6 +13,7 @@ import {
 import { BUILTIN_PAGES, getPage, pagesForAdminCapabilities, registerPage } from "./registry.ts";
 import { PageIcon } from "./icon.tsx";
 import { PageInstanceProvider, newPageInstanceId, type PageArguments } from "./page-instance.ts";
+import {pageObjectKey,pageObjectTitle} from "./page-object.ts";
 import { PageSurface } from "./surface.tsx";
 import { useCompactLayout } from "./configuration/layout.ts";
 import { AppTheme } from "./components/app-theme.tsx";
@@ -36,7 +38,10 @@ function Panel(props: IDockviewPanelProps<{ pageId: string; args?: PageArguments
       <PageInstanceProvider value={{ id: props.api.id, pageId: props.params.pageId, args: props.params.args || {}, mobile: false, active: visible,
         open: (pageId, args) => {
           const page = getPage(pageId); if (!page) return;
-          props.containerApi.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: t(`nav.${page.id}`, { defaultValue: page.title }),
+          const key=pageObjectKey(pageId,args);
+          const existing=key?props.containerApi.panels.find(panel=>pageObjectKey(panel.params?.pageId,panel.params?.args)===key):undefined;
+          if(existing){existing.api.setActive();return;}
+          props.containerApi.addPanel({ id: newPageInstanceId(pageId), component: "page", tabComponent: "page", title: pageObjectTitle(pageId,args)||t(`nav.${page.id}`, { defaultValue: page.title }),
             params: { pageId, args, ordinal: props.containerApi.panels.filter((p) => p.params?.pageId === pageId).length + 1 }, renderer: "always" });
         } }}><PageErrorBoundary label={props.params.pageId}><PageSurface pageId={props.params.pageId} /></PageErrorBoundary></PageInstanceProvider>
     </div>
@@ -54,7 +59,7 @@ function AgentAssistantPanel(props: IDockviewPanelProps<{ pageId: string }>): Re
   </div>;
 }
 
-function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number }>): React.ReactElement {
+export function WorkspaceTab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number; args?:PageArguments }>): React.ReactElement {
   const page = getPage(props.params.pageId);
   const { t } = useTranslation();
   const [foreground, setForeground] = useState(() => props.containerApi.activePanel?.id === props.api.id);
@@ -63,13 +68,14 @@ function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number
     return () => subscription.dispose();
   }, [props.containerApi, props.api.id]);
   const isAssistant = props.params.pageId === "agent-assistant";
-  const title = page ? t(`nav.${page.id}`, { defaultValue: page.title }) : isAssistant ? t("assistant.title") : (props.api.title ?? props.params.pageId);
+  const objectTitle=pageObjectTitle(props.params.pageId,props.params.args);
+  const title = objectTitle || (page ? t(`nav.${page.id}`, { defaultValue: page.title }) : isAssistant ? t("assistant.title") : (props.api.title ?? props.params.pageId));
   const icon = page?.icon ?? (isAssistant ? "assistant" : undefined);
   const inOverflow = props.tabLocation === "headerOverflow";
   return (
     <span className={`tr-dock-tab${foreground ? " is-foreground" : ""}${inOverflow ? " is-overflow" : ""}`} title={title}>
       <PageIcon name={icon} />
-      <span className="tr-dock-tab-title" title={title}>{title}{(props.params.ordinal || 1) > 1 ? ` ${props.params.ordinal}` : ""}</span>
+      <span className="tr-dock-tab-title" title={title}>{title}{!objectTitle && (props.params.ordinal || 1) > 1 ? ` ${props.params.ordinal}` : ""}</span>
       {!inOverflow ? <Dropdown trigger={["click"]} menu={{ items: [
         { key: "right", label: t("panelLayout.right") }, { key: "bottom", label: t("panelLayout.below") },
         { key: "maximize", label: t("panelLayout.maximize") }, { key: "restore", label: t("panelLayout.restore") },
@@ -83,7 +89,7 @@ function Tab(props: IDockviewPanelHeaderProps<{ pageId: string; ordinal?: number
 }
 
 const components = { page: Panel };
-const tabComponents = { page: Tab };
+const tabComponents = { page: WorkspaceTab };
 const dockComponents = { ...components, agentAssistant: AgentAssistantPanel };
 type DockviewApi = DockviewReadyEvent["api"];
 
@@ -257,6 +263,12 @@ export function DesktopShell(): React.ReactElement {
       if (!rootIds.has(pageId) || (args && Object.keys(args).length > 0)) continue;
       if (seenRootPages.has(pageId)) panel.api.close();
       else seenRootPages.add(pageId);
+    }
+    const link=appCatalogLink(location.search);
+    if(link){
+      const page=getPage(link.pageId);
+      if(page){const matching=event.api.panels.find(panel=>panel.params?.pageId===link.pageId&&JSON.stringify(panel.params?.args||{})===JSON.stringify(link.args));
+        if(matching)matching.api.setActive();else event.api.addPanel({id:newPageInstanceId(link.pageId),component:"page",tabComponent:"page",title:label(page),params:{pageId:link.pageId,args:link.args},renderer:"always"});}
     }
     const currentPageId = String(event.api.activePanel?.params?.pageId ?? "");
     if (currentPageId) setActive(currentPageId);

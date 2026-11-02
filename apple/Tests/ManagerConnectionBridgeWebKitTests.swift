@@ -16,6 +16,29 @@ final class ManagerConnectionBridgeWebKitTests: XCTestCase, WKNavigationDelegate
         XCTAssertNil(WebSessionCookieSynchronizer.makeSessionCookie(token: "", endpoint: http))
     }
 
+    func testManagerSwitchClearsAccessAndRefreshButKeepsUnrelatedCookies() async throws {
+        let endpoint = try XCTUnwrap(URL(string: "https://manager-cookie-scope.invalid:7998"))
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: .zero, configuration: config)
+        let cookieStore = config.websiteDataStore.httpCookieStore
+        for name in ["ft-manager-session", "tr-oidc-refresh", "unrelated-preference"] {
+            let cookie = try XCTUnwrap(HTTPCookie(properties: [
+                .name: name, .value: "test-only", .domain: "manager-cookie-scope.invalid", .path: "/",
+            ]))
+            HTTPCookieStorage.shared.setCookie(cookie)
+            await cookieStore.setCookie(cookie)
+        }
+        await WebSessionCookieSynchronizer.clearManagerSession(for: endpoint, webView: view)
+        let remaining = await withCheckedContinuation { continuation in
+            cookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+        XCTAssertEqual(Set(remaining.map(\.name)), ["unrelated-preference"])
+        let native = HTTPCookieStorage.shared.cookies(for: endpoint) ?? []
+        XCTAssertEqual(Set(native.map(\.name)), ["unrelated-preference"])
+        for cookie in native { HTTPCookieStorage.shared.deleteCookie(cookie) }
+    }
+
     func testDeniedTargetClearsNativeIdentityAndSelectsTarget() async throws {
         let value: [String: Any] = ["username": "alice", "keep_login": true,
                                     "keycloak_issuer": "https://identity.test/realm", "keycloak_subject": "subject", "tr_identity_id": "alice-id"]
@@ -133,10 +156,13 @@ server.serve_forever()
             .name: "ft-manager-session", .value: "session", .secure: "TRUE"]))
         let other = try XCTUnwrap(HTTPCookie(properties: [.domain: "cookie-test.invalid", .path: "/",
             .name: "unrelated", .value: "other", .secure: "TRUE"]))
+        let refresh = try XCTUnwrap(HTTPCookie(properties: [.domain: "cookie-test.invalid", .path: "/",
+            .name: "tr-oidc-refresh", .value: "web-only", .secure: "TRUE"]))
         let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent()
         let view = WKWebView(frame: .zero, configuration: config)
         await config.websiteDataStore.httpCookieStore.setCookie(session)
         await config.websiteDataStore.httpCookieStore.setCookie(other)
+        await config.websiteDataStore.httpCookieStore.setCookie(refresh)
         defer {
             HTTPCookieStorage.shared.deleteCookie(session)
             HTTPCookieStorage.shared.deleteCookie(other)
@@ -146,6 +172,37 @@ server.serve_forever()
         let native = HTTPCookieStorage.shared.cookies(for: endpoint) ?? []
         XCTAssertTrue(native.contains { $0.name == session.name })
         XCTAssertFalse(native.contains { $0.name == other.name })
+        XCTAssertFalse(native.contains { $0.name == refresh.name })
+    }
+
+    func testSessionImportUsesManagerRefreshBeforeExportingAccess() async throws {
+        let endpoint = try XCTUnwrap(URL(string: "https://refresh-cookie-test.invalid"))
+        let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: .zero, configuration: config); view.navigationDelegate = self
+        loaded = expectation(description: "refresh document")
+        view.loadHTMLString("<html><body>Manager</body></html>", baseURL: endpoint)
+        await fulfillment(of: [try XCTUnwrap(loaded)], timeout: 10)
+        let refresh = try XCTUnwrap(HTTPCookie(properties: [.domain: "refresh-cookie-test.invalid", .path: "/",
+            .name: "tr-oidc-refresh", .value: "web-only", .secure: "TRUE"]))
+        await config.websiteDataStore.httpCookieStore.setCookie(refresh)
+        _ = try await view.evaluateJavaScript("""
+            window.refreshCalls=0;window.fetch=async function(path, options){
+                if(path!='/api/session'||options.credentials!=='same-origin')throw Error('unexpected request');
+                window.refreshCalls++;document.cookie='ft-manager-session=renewed-access; Path=/; Secure';
+                return {status:200};
+            };void 0;
+            """)
+        defer {
+            for cookie in HTTPCookieStorage.shared.cookies(for: endpoint) ?? [] {
+                HTTPCookieStorage.shared.deleteCookie(cookie)
+            }
+            ManagerSessionTokenStore.remove(for: endpoint)
+        }
+        await WebSessionCookieSynchronizer.importManagerSession(from: view, endpoint: endpoint)
+        let calls = try await view.evaluateJavaScript("window.refreshCalls")
+        XCTAssertEqual(calls as? Int, 1)
+        XCTAssertEqual(ManagerSessionTokenStore.read(for: endpoint), "renewed-access")
+        XCTAssertFalse((HTTPCookieStorage.shared.cookies(for: endpoint) ?? []).contains { $0.name == refresh.name })
     }
 
     func testAuthorizedSwitchClearsHostScopedCookiesBeforeApplyingTarget() async throws {

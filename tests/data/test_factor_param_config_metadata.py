@@ -198,3 +198,13 @@ def test_deleted_family_retry_cleans_residual_registrations(monkeypatch, public)
         monkeypatch.setattr(routes, 'family_head', lambda *a: None)
         assert method.__wrapped__('CA')[1] == 404
     assert len(calls) == 1
+
+
+def test_materialized_write_enqueues_exactly_once_through_public_facade(monkeypatch,tmp_path):
+    from tools.data.sqlite.db import connect_sqlite
+    database=tmp_path/'single-outbox.sqlite'
+    monkeypatch.setattr(Settings,'CACHE_DB_PATH',database)
+    saved=save_factor_param_config('alice','Family',[],resolved_factors=[])
+    assert load_factor_param_config('alice','Family')==saved
+    with connect_sqlite(database,readonly=True) as db:
+        assert db.execute("SELECT count(*) FROM account_domain_outbox WHERE principal='alice' AND entity_type='factor_param_config'").fetchone()[0]==1

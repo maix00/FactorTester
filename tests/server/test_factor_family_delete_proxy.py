@@ -15,7 +15,7 @@ def test_deleted_family_only_allows_delete_retry(monkeypatch, method, forwarded)
     response = GatewayResponse(200, b'{"success": true}', 'application/json')
     state = SimpleNamespace(server_id='local', route_for=lambda **k: 'route',
                             route_request=lambda *a, **k: calls.append(k) or response)
-    handler = SimpleNamespace(state=state, headers={}, _session=lambda: {'username': 'alice'},
+    handler = SimpleNamespace(state=state, headers={}, _session=lambda: {'username': 'alice'},_bearer_token=lambda:'verified-user-token',
                               _is_local_agent_request=lambda: False,
                               _send_gateway_response=lambda *a, **k: None)
     assert job_proxy_routes.JobProxyRoutesMixin._proxy_authenticated_local_service(
@@ -23,5 +23,6 @@ def test_deleted_family_only_allows_delete_retry(monkeypatch, method, forwarded)
     if forwarded:
         assert calls[0]['principal'] == 'alice'
         assert calls[0]['method'] == 'DELETE'
+        assert calls[0]['delegated_user_token']=='verified-user-token'
     else:
         assert calls == [404]

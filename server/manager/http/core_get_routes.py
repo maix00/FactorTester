@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from server.jobs.artifacts import default_user_quota_bytes
 from server.manager.config import VIBE_TRADING_PORT
@@ -607,6 +607,29 @@ class CoreGetRoutesMixin:
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return True
+        # Retired catalog URLs only select canonical React views; they never render legacy editors.
+        set_route = re.fullmatch(r"/factors/(sets|set|families|family|factor)(?:/([^/]+))?/?", parsed.path)
+        if set_route or parsed.path == "/factors":
+            query = parse_qs(parsed.query)
+            target = unquote((set_route.group(2) or "") if set_route else "")
+            section = set_route.group(1) if set_route else "factor"
+            values = {"page": "factors", "section": {"sets":"sets", "set":"sets", "families":"families", "family":"families", "factor":"factors"}[section]}
+            if target and target != "new":
+                values["object_ref"] = target
+            mode = str(query.get("mode", ["create" if target == "new" else ""])[0])
+            if mode in {"create", "edit"}:
+                values["mode"] = mode
+            if query.get("visibility", [""])[0] == "public":
+                values["source"] = "public"
+            owner = query.get("owner_username", [""])[0]
+            if owner:
+                values["owner_username"] = owner
+            self.send_response(302)
+            self.send_header("Location", "/app?" + urlencode(values))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
             return True
         shell_paths = {
             "/", "/research", "/researches", "/evidence", "/reference",

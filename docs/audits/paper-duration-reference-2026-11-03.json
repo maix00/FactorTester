@@ -1,0 +1,384 @@
+{
+  "checked_at": "2026-11-03 Asia/Taipei",
+  "report_id": "report:v1:TvyK4dXAippiobAiXU1MYGyJ",
+  "title": "高频时间维度因子复现与筛选报告（T/TL）",
+  "provenance": "Authenticated public Manager report chapters and corrected 1x Job detail; historical engine, not a new Nautilus result",
+  "historical_jobs": [
+    {
+      "job_id": "b9f55303ad454ccc85df3de83cb114ef",
+      "source_revision": "bf6bddc0288d1112ed1a16817f01afd51c2b1e2f",
+      "run_spec_hash": "aff515c158612a43860fcf48e7a7cc3dae63e9e6e9c81fef68ac5570dd629979",
+      "start": "2025-02-03",
+      "end": "2026-05-27",
+      "warmup_mode": "fixed",
+      "warmup_window": "260d",
+      "signal_freq": "1d",
+      "target_margin_utilization": 0.02,
+      "max_margin_utilization": 0.03,
+      "metrics": {
+        "A忠实 T DFP N=20d": {
+          "Annual Return": 2.9335635201004573,
+          "Avg Turnover": 1.6405252756133895,
+          "Calmar Ratio": 3.4839565842318847,
+          "Kurtosis": 13.906927404303266,
+          "Max Drawdown": 0.842020688023937,
+          "Mean Return": 0.0014419079216833677,
+          "Sharpe Ratio": 1.6503045572703676,
+          "Skewness": -0.1305970866559587,
+          "Total Return": 3.9512890000001466,
+          "Volatility": 1.7614241912545583,
+          "Win Rate": 42.70910436713545
+        }
+      },
+      "factors": [
+        {
+          "ref": "factor:v2:gZRo7V8xzFJ8sxJU7KWdPX6OdYlDt4_v41N_LkT6x0c",
+          "family_alias": "TsHistCmp",
+          "family_formula_fingerprint": "980ecd128aa37d4e7af2014cbc80967f90610b61f989a9605b30b94b4192437c",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "N": "20d",
+            "X": "factor:v2:aw2S0Q_rtklgqc2xh1XAwfpxm-_Nc1gl2dTau7XVHA0"
+          }
+        },
+        {
+          "ref": "factor:v2:Z3hxL0ykqs834sS7DxnBroeQNBaAMjpTWEy9bDlEHEI",
+          "family_alias": "SgChgPct",
+          "family_formula_fingerprint": "4c8cbc2982b3b15da00e8c393d8935ce11b528e91c09f1f5027ef88e5255f8f4",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "B": "1",
+            "M": "0.6",
+            "N": "250d",
+            "P": "CA"
+          }
+        },
+        {
+          "ref": "factor:v2:Ce2gtET_HmMPI3L7VNduvdajY9TP3LYSqlgsUkLPHO4",
+          "family_alias": "SgChgDurDay",
+          "family_formula_fingerprint": "51c8da080339888a556f9df002d319f52e8265342058e6236fb61660cc6efd35",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "P": "CA",
+            "Th": "factor:v2:Z3hxL0ykqs834sS7DxnBroeQNBaAMjpTWEy9bDlEHEI"
+          }
+        },
+        {
+          "ref": "factor:v2:aw2S0Q_rtklgqc2xh1XAwfpxm-_Nc1gl2dTau7XVHA0",
+          "family_alias": "TsDurDev",
+          "family_formula_fingerprint": "d52a8b1e43471c1ac6361b81a25c3ffa8b7a75eb8780a7129cd59f2f723ceae2",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "Dur": "factor:v2:Ce2gtET_HmMPI3L7VNduvdajY9TP3LYSqlgsUkLPHO4",
+            "N": "1d",
+            "V": "C"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "4cc0b3ef8407403ba5eb2932d9ecda73",
+      "source_revision": "4140495b7b9b3c43b54e09b75bc7d892697c67f2",
+      "run_spec_hash": "bcffcac0ec13232c85536efbf3bdc4ef6643ded00c902c589dae6d01caa4710b",
+      "start": "2025-02-03",
+      "end": "2026-05-27",
+      "warmup_mode": "fixed",
+      "warmup_window": "260d",
+      "signal_freq": "1d",
+      "target_margin_utilization": 0.035,
+      "max_margin_utilization": 0.045,
+      "metrics": {
+        "TL1x DFP N=20d": {
+          "Annual Return": 3.7687756197853695,
+          "Avg Turnover": 1.1175160795987373,
+          "Calmar Ratio": 0.609827097008793,
+          "Kurtosis": 67.14213251220228,
+          "Max Drawdown": 6.180072414412619,
+          "Mean Return": 0.0019149786601347085,
+          "Sharpe Ratio": 0.6793688650080097,
+          "Skewness": 2.4737500404532176,
+          "Total Return": 5.0833310000003795,
+          "Volatility": 5.6826227660374995,
+          "Win Rate": 43.19022945965951
+        }
+      },
+      "factors": [
+        {
+          "ref": "factor:v2:gZRo7V8xzFJ8sxJU7KWdPX6OdYlDt4_v41N_LkT6x0c",
+          "family_alias": "TsHistCmp",
+          "family_formula_fingerprint": "980ecd128aa37d4e7af2014cbc80967f90610b61f989a9605b30b94b4192437c",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "N": "20d",
+            "X": "factor:v2:aw2S0Q_rtklgqc2xh1XAwfpxm-_Nc1gl2dTau7XVHA0"
+          }
+        },
+        {
+          "ref": "factor:v2:Z3hxL0ykqs834sS7DxnBroeQNBaAMjpTWEy9bDlEHEI",
+          "family_alias": "SgChgPct",
+          "family_formula_fingerprint": "4c8cbc2982b3b15da00e8c393d8935ce11b528e91c09f1f5027ef88e5255f8f4",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "B": "1",
+            "M": "0.6",
+            "N": "250d",
+            "P": "CA"
+          }
+        },
+        {
+          "ref": "factor:v2:Ce2gtET_HmMPI3L7VNduvdajY9TP3LYSqlgsUkLPHO4",
+          "family_alias": "SgChgDurDay",
+          "family_formula_fingerprint": "51c8da080339888a556f9df002d319f52e8265342058e6236fb61660cc6efd35",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "P": "CA",
+            "Th": "factor:v2:Z3hxL0ykqs834sS7DxnBroeQNBaAMjpTWEy9bDlEHEI"
+          }
+        },
+        {
+          "ref": "factor:v2:aw2S0Q_rtklgqc2xh1XAwfpxm-_Nc1gl2dTau7XVHA0",
+          "family_alias": "TsDurDev",
+          "family_formula_fingerprint": "d52a8b1e43471c1ac6361b81a25c3ffa8b7a75eb8780a7129cd59f2f723ceae2",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "Dur": "factor:v2:Ce2gtET_HmMPI3L7VNduvdajY9TP3LYSqlgsUkLPHO4",
+            "N": "1d",
+            "V": "C"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "7f115a04a7df4551982f8c8dac34c99e",
+      "source_revision": "bf6bddc0288d1112ed1a16817f01afd51c2b1e2f",
+      "run_spec_hash": "e86429399c7654fe33980af652320f2d2e488f44cd9f663ebe95d63b6a74c6b7",
+      "start": "2025-02-03",
+      "end": "2026-05-27",
+      "warmup_mode": "fixed",
+      "warmup_window": "260d",
+      "signal_freq": "1d",
+      "target_margin_utilization": 0.02,
+      "max_margin_utilization": 0.03,
+      "metrics": {
+        "A忠实 T DFP N=10d": {
+          "Annual Return": 2.8116125057057406,
+          "Avg Turnover": 1.4167783528867277,
+          "Calmar Ratio": 2.2291313227139136,
+          "Kurtosis": 9.71172225052809,
+          "Max Drawdown": 1.2613041129773683,
+          "Mean Return": 0.001386138792729547,
+          "Sharpe Ratio": 1.343504989184122,
+          "Skewness": -0.1907242982881079,
+          "Total Return": 3.786258000000453,
+          "Volatility": 2.079974267784277,
+          "Win Rate": 48.038490007401926
+        }
+      },
+      "factors": [
+        {
+          "ref": "factor:v2:Yx7nTNOukgjUThus-H8vrGViGOzaFRVWOPKBH1-iClE",
+          "family_alias": "TsHistCmp",
+          "family_formula_fingerprint": "980ecd128aa37d4e7af2014cbc80967f90610b61f989a9605b30b94b4192437c",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "N": "10d",
+            "X": "factor:v2:aw2S0Q_rtklgqc2xh1XAwfpxm-_Nc1gl2dTau7XVHA0"
+          }
+        },
+        {
+          "ref": "factor:v2:Z3hxL0ykqs834sS7DxnBroeQNBaAMjpTWEy9bDlEHEI",
+          "family_alias": "SgChgPct",
+          "family_formula_fingerprint": "4c8cbc2982b3b15da00e8c393d8935ce11b528e91c09f1f5027ef88e5255f8f4",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "B": "1",
+            "M": "0.6",
+            "N": "250d",
+            "P": "CA"
+          }
+        },
+        {
+          "ref": "factor:v2:Ce2gtET_HmMPI3L7VNduvdajY9TP3LYSqlgsUkLPHO4",
+          "family_alias": "SgChgDurDay",
+          "family_formula_fingerprint": "51c8da080339888a556f9df002d319f52e8265342058e6236fb61660cc6efd35",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "P": "CA",
+            "Th": "factor:v2:Z3hxL0ykqs834sS7DxnBroeQNBaAMjpTWEy9bDlEHEI"
+          }
+        },
+        {
+          "ref": "factor:v2:aw2S0Q_rtklgqc2xh1XAwfpxm-_Nc1gl2dTau7XVHA0",
+          "family_alias": "TsDurDev",
+          "family_formula_fingerprint": "d52a8b1e43471c1ac6361b81a25c3ffa8b7a75eb8780a7129cd59f2f723ceae2",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "Dur": "factor:v2:Ce2gtET_HmMPI3L7VNduvdajY9TP3LYSqlgsUkLPHO4",
+            "N": "1d",
+            "V": "C"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "a48b865b2fae454bbd8f54a4bae3d1de",
+      "source_revision": "4140495b7b9b3c43b54e09b75bc7d892697c67f2",
+      "run_spec_hash": "d9c8fba5b80d9d784f2c868f870906a88a1eab50706a39693e1026138540c9a2",
+      "start": "2025-02-03",
+      "end": "2026-05-27",
+      "warmup_mode": "fixed",
+      "warmup_window": "260d",
+      "signal_freq": "1d",
+      "target_margin_utilization": 0.035,
+      "max_margin_utilization": 0.045,
+      "metrics": {
+        "TL1x DFP N=10d": {
+          "Annual Return": 7.4611120781366,
+          "Avg Turnover": 0.9633952870046423,
+          "Calmar Ratio": 1.145146739509257,
+          "Kurtosis": 43.890163961418345,
+          "Max Drawdown": 6.5154200948378,
+          "Mean Return": 0.00367043454128517,
+          "Sharpe Ratio": 1.1584519686811383,
+          "Skewness": 1.77758740142028,
+          "Total Return": 10.124883999999934,
+          "Volatility": 6.387486262080519,
+          "Win Rate": 49.33382679496669
+        }
+      },
+      "factors": [
+        {
+          "ref": "factor:v2:Yx7nTNOukgjUThus-H8vrGViGOzaFRVWOPKBH1-iClE",
+          "family_alias": "TsHistCmp",
+          "family_formula_fingerprint": "980ecd128aa37d4e7af2014cbc80967f90610b61f989a9605b30b94b4192437c",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "N": "10d",
+            "X": "factor:v2:aw2S0Q_rtklgqc2xh1XAwfpxm-_Nc1gl2dTau7XVHA0"
+          }
+        },
+        {
+          "ref": "factor:v2:Z3hxL0ykqs834sS7DxnBroeQNBaAMjpTWEy9bDlEHEI",
+          "family_alias": "SgChgPct",
+          "family_formula_fingerprint": "4c8cbc2982b3b15da00e8c393d8935ce11b528e91c09f1f5027ef88e5255f8f4",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "B": "1",
+            "M": "0.6",
+            "N": "250d",
+            "P": "CA"
+          }
+        },
+        {
+          "ref": "factor:v2:Ce2gtET_HmMPI3L7VNduvdajY9TP3LYSqlgsUkLPHO4",
+          "family_alias": "SgChgDurDay",
+          "family_formula_fingerprint": "51c8da080339888a556f9df002d319f52e8265342058e6236fb61660cc6efd35",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "P": "CA",
+            "Th": "factor:v2:Z3hxL0ykqs834sS7DxnBroeQNBaAMjpTWEy9bDlEHEI"
+          }
+        },
+        {
+          "ref": "factor:v2:aw2S0Q_rtklgqc2xh1XAwfpxm-_Nc1gl2dTau7XVHA0",
+          "family_alias": "TsDurDev",
+          "family_formula_fingerprint": "d52a8b1e43471c1ac6361b81a25c3ffa8b7a75eb8780a7129cd59f2f723ceae2",
+          "params": {
+            "$F": "30m",
+            "$Rev": "0",
+            "Dur": "factor:v2:Ce2gtET_HmMPI3L7VNduvdajY9TP3LYSqlgsUkLPHO4",
+            "N": "1d",
+            "V": "C"
+          }
+        }
+      ]
+    }
+  ],
+  "source_snapshots": [
+    {
+      "family": "TsHistCmp",
+      "requested_fingerprint": "980ecd128aa37d4e7af2014cbc80967f90610b61f989a9605b30b94b4192437c",
+      "response_recomputed_fingerprint": "f61ab67f363d9f227ffa1c9d1a1a01f3cdbd7728d09362e15b0dd0998c3d152e",
+      "source_sha256": "290bd372df6f03eed5e7f187dda2b55c05c96ed7b5ee4a1343874972696f65cb"
+    },
+    {
+      "family": "SgChgPct",
+      "requested_fingerprint": "4c8cbc2982b3b15da00e8c393d8935ce11b528e91c09f1f5027ef88e5255f8f4",
+      "response_recomputed_fingerprint": "468cd3d32270049c59ceb972a716e2a241a881e00523f75065ab6e79abcb22b2",
+      "source_sha256": "c85dce708d21f639a578d1860d336e63ed18322eb6447a937c26e9d8c947a695"
+    },
+    {
+      "family": "SgChgDurDay",
+      "requested_fingerprint": "51c8da080339888a556f9df002d319f52e8265342058e6236fb61660cc6efd35",
+      "response_recomputed_fingerprint": "0aac2d4a462ea7f6c8af8b2404cf8d06fb4add4c41b1717805ede291373c9d65",
+      "source_sha256": "fd7805d7db4a78eca57a4f34287858b76315965f66f7afdb8fdff60fdbd53c2d"
+    },
+    {
+      "family": "TsDurDev",
+      "requested_fingerprint": "d52a8b1e43471c1ac6361b81a25c3ffa8b7a75eb8780a7129cd59f2f723ceae2",
+      "response_recomputed_fingerprint": "cadfadece90f5e6786f70c62ec339b5bd0aafe33298ce8ac028d30a0fdbe7749",
+      "source_sha256": "578fb89793fccc7ca6b243cb3bae094b58bf53c0ef8d921951813c2de01845ce"
+    }
+  ],
+  "value_diagnostics": [
+    {
+      "source_sha256": "9dc18db2f6fb8f36e9124fee9ffd61be83da6233ccfcf865512db18e1912469b",
+      "factor_sha256": "fcd72a55136602e620b2c7d281c349725e08de547136cede8e383785665a4045",
+      "alpha_extension_sha256": "a962b855ef6ae01deb94c2aece9aa7fd44afbc9afcad84b751a9ae4d008df97a",
+      "product": "T.CFE",
+      "rows": 147390,
+      "trading_days": 578,
+      "formal_start": "2025-02-03T00:00:00+08:00",
+      "source_start_utc": "2024-01-02T01:31:00+00:00",
+      "source_end_utc": "2026-05-27T07:15:00+00:00",
+      "batch_signal_rows_compared": 2703,
+      "source_rows_compared": 81090,
+      "sampled_mismatches": 0,
+      "mismatches": 0,
+      "batch_nonfinite": 0,
+      "incremental_nonfinite": 0,
+      "finite_status_mismatches": 0,
+      "batch_diagnostic_seconds": 0.15114920800260734,
+      "incremental_diagnostic_seconds": 0.33394050000060815,
+      "process_peak_rss_bytes": 221560832,
+      "limitation": "factor-only diagnostic, not a trading backtest or remote Job; time excludes data loading"
+    },
+    {
+      "source_sha256": "076a90caf014628f8d9fabc777644f2a735c044c0ef2d02aec3bb17abe6ac2e6",
+      "factor_sha256": "fcd72a55136602e620b2c7d281c349725e08de547136cede8e383785665a4045",
+      "alpha_extension_sha256": "a962b855ef6ae01deb94c2aece9aa7fd44afbc9afcad84b751a9ae4d008df97a",
+      "product": "TL.CFE",
+      "rows": 147390,
+      "trading_days": 578,
+      "formal_start": "2025-02-03T00:00:00+08:00",
+      "source_start_utc": "2024-01-02T01:31:00+00:00",
+      "source_end_utc": "2026-05-27T07:15:00+00:00",
+      "batch_signal_rows_compared": 2703,
+      "source_rows_compared": 81090,
+      "sampled_mismatches": 0,
+      "mismatches": 0,
+      "batch_nonfinite": 0,
+      "incremental_nonfinite": 0,
+      "finite_status_mismatches": 0,
+      "batch_diagnostic_seconds": 0.15221937499882188,
+      "incremental_diagnostic_seconds": 0.33046683299471624,
+      "process_peak_rss_bytes": 219709440,
+      "limitation": "factor-only diagnostic, not a trading backtest or remote Job; time excludes data loading"
+    }
+  ]
+}

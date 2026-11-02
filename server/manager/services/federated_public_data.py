@@ -70,6 +70,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
         )
         self.cache_seconds = max(1.0, float(cache_seconds))
         self._cache: dict[tuple[object, ...], tuple[float, Any]] = {}
+        self._factor_cache_revision = 0
         self._publication_sources: dict[str, str] = {}
         self._lock = threading.RLock()
 
@@ -192,6 +193,18 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                 "inventory": dict(value) if value is not None else None,
             })
         return result
+
+    def invalidate_factor_cache(self) -> None:
+        """Invalidate projections after an acknowledged local factor mutation.
+
+        An in-flight read keeps its old revision and cannot repopulate the
+        current generation. This does no source execution or peer I/O.
+        """
+        with self._lock:
+            self._factor_cache_revision += 1
+            for key in tuple(self._cache):
+                if key and key[0] == "factors":
+                    self._cache.pop(key, None)
 
     def invalidate_research_cache(self) -> None:
         """Drop cached research listings after a local publication mutation."""
@@ -767,7 +780,8 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                     TypeError, ValueError,
                 ):
                     pass
-        key = ("factors", viewer)
+        with self._lock:
+            key = ("factors", viewer, self._factor_cache_revision)
         cached = None if refresh else self._cached(key)
         if cached is not None:
             return dict(cached)
@@ -816,7 +830,10 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
             list(merged_scopes.values()), principal=str(principal or viewer),
         )
         result["family_scopes"] = merged_scopes
-        return dict(self._store(key, result))
+        with self._lock:
+            if key[2] != self._factor_cache_revision:
+                return dict(result)
+            return dict(self._store(key, result))
 
     def factor_sets(self, principal: str, query: str = "") -> list[dict[str, Any]]:
         # Immutable sets share the same account-domain mirror as factors.
