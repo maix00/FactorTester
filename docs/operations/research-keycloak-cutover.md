@@ -87,6 +87,14 @@ Resource/Profile 归属不会随着更换上级而改变；显式协作授权保
 
 ## 设备授权完整对账（2026-11-02）
 
+公网准备检查：新的 SQLite 备份保留 25 项研究、20 份报告和 34 项 Profile 关联；
+控制库备份校验与实际恢复检查通过（16 张 public 表），Keycloak dump 在隔离、限额
+PostgreSQL 中恢复后，26 张身份及授权配置表内容摘要一致。正常浏览器表单在旧公网
+版本上通过 MaxJJW 登录、super_admin 会话、管理员入口和注销；这不是新版本切换回执。
+自签证书由运维保存的公钥证书显式信任，两端指纹一致；验收脚本的
+`KEYCLOAK_BROWSER_CA_FILE` 为 Node API 配置信任并向 Chrome 提供精确 SPKI pin，
+不启用全局 `ignore_https_errors`。此过程不改变生产浏览器或 Manager 的 TLS 配置。
+
 `keycloak_device_stage_cli verify` 在同一恢复备份、已审核计划和目标 issuer 下，
 比较所选主体全部本 Manager 设备与 realm 全部活跃用户的 `use` 允许/拒绝集合。
 外站镜像计数单列，不在本 Manager 补发权限；已禁用设备的资源缺失视为拒绝，
