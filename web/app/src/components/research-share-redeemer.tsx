@@ -5,6 +5,7 @@ import { useAuth } from "../auth.tsx";
 import { request } from "../configuration/api.ts";
 import { notify } from "../notifications/core.ts";
 import { clearResearchShare, pendingResearchShare } from "../research-share-intent.ts";
+import { objectReferenceLabel } from "../object-reference.ts";
 
 /** Explicit confirmation ensures an invitation is not consumed by the wrong account. */
 export function ResearchShareRedeemer(): React.ReactElement | null {
@@ -12,8 +13,7 @@ export function ResearchShareRedeemer(): React.ReactElement | null {
   const [token,setToken]=useState(pendingResearchShare), [busy,setBusy]=useState(false);
   const mutation=useRef(false);
   if(!token || !session)return null;
-  const account = session.alias && session.username && session.alias !== session.username
-    ? `${session.alias} (${session.username})` : session.username || session.alias || "";
+  const account = objectReferenceLabel({kind:"user",ref:session.username || "",label:session.alias},session);
   const dismiss=():void=>{if(!mutation.current){clearResearchShare();setToken("");}};
   const redeem=async():Promise<void>=>{
     if(mutation.current)return;mutation.current=true;setBusy(true);

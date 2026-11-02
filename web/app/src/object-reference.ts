@@ -10,8 +10,16 @@ export interface ObjectReferenceValue {
 
 /** Display names never replace the address used to open an object. */
 export function objectReferenceLabel(value: ObjectReferenceValue, session: {username?:string;alias?:string} | null): string {
+  if (value.kind === "user") {
+    const explicit = value.label?.trim();
+    const label = explicit && explicit !== value.ref ? explicit :
+      value.ref && value.ref === session?.username && session.alias?.trim() ? session.alias.trim() : explicit || value.ref;
+    // Presentation only: old qualified user refs encode organization@alias@id.
+    // Keep the actual ref intact; neither identity nor authority is resolved here.
+    const qualified = /^[^@\s]+@([^@]+)@[0-9]+$/.exec(label);
+    return qualified ? qualified[1] : label;
+  }
   if (value.label && value.label !== value.ref) return value.label;
-  if (value.kind === "user" && value.ref && value.ref === session?.username && session.alias?.trim()) return session.alias.trim();
   return value.label || value.ref;
 }
 
@@ -23,7 +31,11 @@ export function referenceForField(key: string, value: unknown, parent: Record<st
     typeof parent.owner_ref === "string" ? parent.owner_ref : undefined;
   if (["owner", "owner_ref", "owner_username", "principal_ref", "username", "author_ref", "authorized_users", "shared_principals"].includes(key)) {
     // Public-catalog sentinels describe a library scope, not a user account.
-    return ref.startsWith("__") ? null : { kind: "user", ref };
+    const aliasKey = ["owner", "owner_ref", "owner_username"].includes(key) ? "owner_alias" :
+      key === "principal_ref" ? "principal_alias" : key === "author_ref" ? "author_alias" : "user_alias";
+    const label = parent[aliasKey];
+    return ref.startsWith("__") ? null : { kind: "user", ref,
+      ...(typeof label === "string" && label.trim() ? {label:label.trim()} : {}) };
   }
   if (["profile_ref", "profile_id", "profile_key", "profile_refs"].includes(key)) return {
     kind: "profile", ref, owner,

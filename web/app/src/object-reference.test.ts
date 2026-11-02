@@ -44,3 +44,23 @@ test("the current user's verified display name never replaces their historical o
   assert.equal(objectReferenceLabel({...value,label:"Explicit owner label"},{username:"old-principal",alias:"Readable name"}),"Explicit owner label");
   assert.equal(objectReferenceLabel({kind:"profile",ref:"old-principal"},{username:"old-principal",alias:"Readable name"}),"old-principal");
 });
+
+test("qualified user references display only the alias for every user", () => {
+  const ref = "Org@testB@123456";
+  const value = {kind:"user" as const,ref};
+  assert.equal(objectReferenceLabel(value,null),"testB");
+  assert.equal(objectReferenceLabel({...value,label:ref},{username:"someone-else",alias:"Other"}),"testB");
+  assert.equal(objectReferenceLabel({...value,label:"Visible alias"},null),"Visible alias");
+  assert.equal(value.ref,ref);
+  assert.equal(objectReferenceLabel({kind:"profile",ref},null),ref);
+  for (const ref of ["name@example.com","Org@testB@not-an-id","Org@too@many@123"]) {
+    assert.equal(objectReferenceLabel({kind:"user",ref},null),ref);
+  }
+});
+
+test("owner labels use owner metadata and never the containing object's alias", () => {
+  assert.deepEqual(referenceForField("owner_ref","Org@testB@123",{alias:"Factor name",owner_alias:"testB"}),
+    {kind:"user",ref:"Org@testB@123",label:"testB"});
+  assert.deepEqual(referenceForField("owner_ref","Org@testB@123",{alias:"Factor name"}),
+    {kind:"user",ref:"Org@testB@123"});
+});

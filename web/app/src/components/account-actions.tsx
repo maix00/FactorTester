@@ -4,6 +4,7 @@ import { Button, Dropdown, Tooltip, type MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth.tsx";
 import { PageIcon } from "../icon.tsx";
+import { objectReferenceLabel } from "../object-reference.ts";
 
 export function AccountActions(): React.ReactElement {
   const {t}=useTranslation(),{session,openAuth,logout}=useAuth();
@@ -15,6 +16,7 @@ export function AccountActions(): React.ReactElement {
 }
 export function AccountMenu({collapsed=false,onOpenSettings}:{collapsed?:boolean;onOpenSettings?:()=>void}):React.ReactElement {
   const {t}=useTranslation(),{session,openAuth,logout}=useAuth();
+  const accountLabel = session ? objectReferenceLabel({kind:"user",ref:session.username || "",label:session.alias},session) || t("auth.account") : t("auth.account");
   const items: MenuProps["items"] = session
     ? [{key:"settings",label:t("settings")},{type:"divider"},{key:"logout",label:t("auth.signOut"),danger:true}]
     : [{key:"login",label:t("auth.signIn")}];
@@ -23,8 +25,8 @@ export function AccountMenu({collapsed=false,onOpenSettings}:{collapsed?:boolean
     else if(key==="settings")onOpenSettings?.();
     else openAuth("login");
   }}}>
-    <Tooltip title={collapsed?(session?.alias||session?.username||t("auth.account")):undefined} placement="right"><button type="button" className="tr-account-menu" aria-label={session?.alias||session?.username||t("auth.account")}>
-      <PageIcon name="account"/>{collapsed?null:<><span>{session?.alias||session?.username||t("auth.account")}</span><DownOutlined/></>}
+    <Tooltip title={collapsed?accountLabel:undefined} placement="right"><button type="button" className="tr-account-menu" aria-label={accountLabel}>
+      <PageIcon name="account"/>{collapsed?null:<><span>{accountLabel}</span><DownOutlined/></>}
     </button></Tooltip>
   </Dropdown>;
 }

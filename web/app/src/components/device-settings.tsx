@@ -3,6 +3,7 @@ import { Button, Input, Popconfirm, Segmented, Select, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { ObjectReference } from "./object-reference.tsx";
+import { objectReferenceLabel } from "../object-reference.ts";
 import { request } from "../configuration/api.ts";
 import { notify } from "../notifications/core.ts";
 import { devicePlatform, DEVICE_PLATFORMS, type DevicePlatform } from "../device-platform.ts";
@@ -176,8 +177,8 @@ export function DeviceSettings({ scope = "self" }: { scope?: "self" | "admin" })
     }
     return rows.map(user => ({
       value: user.username,
-      label: <span>{user.alias || user.username}<small className="tr-device-user-meta">
-        {user.organization_name || user.level_id || user.username}
+      label: <span>{objectReferenceLabel({kind:"user",ref:user.username,label:user.alias},null)}<small className="tr-device-user-meta">
+        {user.organization_name || user.level_id || ""}
       </small></span>,
       searchText: `${user.username} ${user.alias || ""} ${user.organization_name || ""}`.toLocaleLowerCase(),
     }));

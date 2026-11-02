@@ -5,6 +5,7 @@ import { request } from "../configuration/api.ts";
 import { formatDate } from "../format.ts";
 import { notify } from "../notifications/core.ts";
 import { ObjectReference } from "./object-reference.tsx";
+import { objectReferenceLabel } from "../object-reference.ts";
 import { TRDataTable } from "./data-table.tsx";
 import "./research-sharing.css";
 
@@ -77,7 +78,7 @@ function ResearchGrants({target}:{target:Target}):React.ReactElement {
     if(editing || !search.trim()) {setChoices([]);return;}
     const controller=new AbortController();
     const timer=setTimeout(() => { void request(`/api/research/principals?${new URLSearchParams({q:search.trim()})}`,{signal:controller.signal,cache:"no-store"})
-      .then(value => {if(!controller.signal.aborted)setChoices(Array.isArray(value.principals) ? value.principals.map((row:any) => ({value:String(row.principal_ref||""),label:String(row.label||row.principal_ref||"")})).filter((row:any) => row.value) : []);})
+      .then(value => {if(!controller.signal.aborted)setChoices(Array.isArray(value.principals) ? value.principals.map((row:any) => ({value:String(row.principal_ref||""),label:objectReferenceLabel({kind:"user",ref:String(row.principal_ref||""),label:String(row.label||"")},null)})).filter((row:any) => row.value) : []);})
       .catch(() => {if(!controller.signal.aborted)setChoices([]);}); },250);
     return () => {clearTimeout(timer);controller.abort();};
   },[search,editing]);

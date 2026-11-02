@@ -56,7 +56,7 @@ setupIonicReact({{mode:'md'}});
                         if(mobile)document.documentElement.classList.add('tr-mobile-runtime');
                         window.fetch=async input=>{
                             const path=new URL(String(input),location.origin).pathname;
-                            const value=path==='/api/session'?{session:{username:'alice',alias:'Alice',role:'user'}}:
+                            const value=path==='/api/session'?{session:{username:'Example@Alice@123',alias:'Alice',role:'user'}}:
                                 path==='/api/client/profiles'?{profiles:[]}: {items:[],researches:[],reports:[]};
                             return new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
                         };
@@ -64,8 +64,9 @@ setupIonicReact({{mode:'md'}});
                     page.add_script_tag(path=str(bundle))
                     reference = page.locator(".tr-object-reference").filter(has_text="Alice")
                     reference.wait_for()
+                    assert reference.inner_text() == "Alice"
                     reference.click()
-                    details = page.get_by_role("dialog").filter(has=page.get_by_text("alice", exact=True))
+                    details = page.get_by_role("dialog").filter(has=page.get_by_text("Example@Alice@123", exact=True))
                     details.wait_for()
                     if mobile:
                         details.get_by_role("button", name="返回" if zh else "Back", exact=True).click()
