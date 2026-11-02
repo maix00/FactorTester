@@ -46,3 +46,19 @@ def test_factor_family_write_upserts_catalog():
     CouchDBLibraryWriter(store).upsert_factor_family("custom", "alice", {"factor_id": "F", "name": "F"})
     assert store.saved["kind"] == "factor_family"
     assert store.saved["catalog"]["factor_id"] == "F"
+
+
+def test_factor_family_writer_accepts_authoring_summary_identity():
+    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+
+    class Store:
+        def _request(self, method, path, body=None):
+            if method == 'GET':
+                return 404, b'{}'
+            self.saved = json.loads(body)
+            return 201, b'{}'
+
+    store = Store()
+    CouchDBLibraryWriter(store).upsert_factor_family('custom', 'alice', {'id': 'F', 'name': 'F'})
+    assert store.saved['factor_id'] == 'F'
+    assert store.saved['_id'] == 'factor-family:alice:F'

@@ -303,7 +303,14 @@ def list_factor_summaries(source_kind: str, owner: str | None = "", *, include_h
                         payload = dict(doc.get("payload") or {})
                         merged[key] = {**dict(payload.get("catalog") or {}), **payload,
                                        "owner_username": key[0], "factor_id": key[1]}
-                return list(merged.values())
+                values = list(merged.values())
+                if include_heads:
+                    # The account-domain outbox is committed with authoring.
+                    # Apply that same local projection while its CouchDB
+                    # snapshot catches up, including deletion tombstones.
+                    from tools.data.sqlite.factor_family_heads import project_family_heads
+                    return project_family_heads(values, source_kind, owner)
+                return values
         except Exception:
             pass
     try:
@@ -356,11 +363,7 @@ def sync_factor_metadata_sqlite_store() -> str:
             now=now,
         )
 
-        for account in accounts:
-            owner_username = str(account.get("username") or "").strip()
-            if not owner_username:
-                continue
-            owner_alias = owner_alias_by_username.get(owner_username) or str(account.get("alias") or owner_username)
+        for owner_username, owner_alias in owner_alias_by_username.items():
             _insert_factor_rows(
                 conn,
                 custom_factors_by_owner.get(owner_username, []),
