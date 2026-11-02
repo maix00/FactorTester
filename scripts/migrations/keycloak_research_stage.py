@@ -20,9 +20,9 @@ from server.identity.keycloak_authorization import AuthorizationUnavailable
 from server.identity.keycloak_research import (
     legacy_authorization_snapshot_digest, legacy_authorization_snapshot_sha256, profile_resource_ref,
 )
+from server.identity.keycloak_migration_directory import verified_migration_subjects
 from server.identity.keycloak_research_cutover import (
     KeycloakResearchPolicyEvaluator, _ALL_SCOPES, compare_research_decisions,
-    verified_research_migration_subjects,
 )
 
 
@@ -247,7 +247,7 @@ def _subjects(adapter, directory: list[dict[str, str]]) -> dict[str, str]:
     mapping = {row["username"]: row["identity"] for row in directory}
     if len(mapping) != len(directory):
         raise AuthorizationUnavailable("reviewed Research migration aliases are ambiguous")
-    return verified_research_migration_subjects(adapter, mapping)
+    return verified_migration_subjects(adapter, mapping)
 
 
 def _expected(group: dict[str, Any], identity: str, *, hierarchy=None) -> dict[tuple[str, str, str], bool]:

@@ -66,7 +66,7 @@ def _snapshot(config, *, manager_id: str, principal: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('review', 'stage'))
+    parser.add_argument('action', choices=('review', 'stage', 'verify'))
     parser.add_argument('--manager-id', required=True)
     parser.add_argument('--manager-state-root', help='existing Manager state directory when using persisted control DB settings')
     parser.add_argument('--principal', required=True)
@@ -103,6 +103,21 @@ def main() -> None:
             output.flush()
             os.fsync(output.fileno())
         print(json.dumps({'sha256': prepared['sha256'], 'statuses': prepared['statuses']}, sort_keys=True))
+        return
+    if args.action == 'verify':
+        if not args.device_writes_quiesced:
+            parser.error('verify requires device and Keycloak policy writes quiesced')
+        from scripts.migrations.keycloak_device_parity import verify_device_policy_parity
+        reviewed = _read_private_json(args.plan)
+        if reviewed != prepared:
+            raise ValueError('reviewed device plan does not match restored backup')
+        evaluator = KeycloakPolicyEvaluator(allowed_kinds=('device',), allowed_scopes=('use',), settings=settings)
+        backend = KeycloakDeviceStageBackend(settings=settings, evaluator=evaluator, issuer=issuer)
+        result = verify_device_policy_parity(reviewed=reviewed,
+            live_snapshot=lambda: _snapshot(live, manager_id=args.manager_id, principal=args.principal),
+            live_directory=lambda: read_keycloak_directory(args.principal), manager_id=args.manager_id,
+            issuer=issuer, evaluator=evaluator, resource_absent=backend.resource_absent)
+        print(json.dumps(result, sort_keys=True))
         return
     if not args.device_writes_quiesced or not args.journal or not args.keycloak_backup or not args.keycloak_backup_sha256:
         parser.error('stage requires quiesced device writes, a journal and a checksummed Keycloak backup')

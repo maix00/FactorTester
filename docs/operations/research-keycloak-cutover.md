@@ -46,6 +46,35 @@ Resource/Profile 归属不会随着更换上级而改变；显式协作授权保
 `2894e3d83385b77844a5ecbf1bc9058cbbfc752109f4deed33417de3317a6226`。
 本次没有写入现网 Keycloak/SQLite、重启或部署，不能据此宣称两端权限已经迁移完成。
 
+## 设备授权完整对账（2026-11-02）
+
+`keycloak_device_stage_cli verify` 在同一恢复备份、已审核计划和目标 issuer 下，
+比较所选主体全部本 Manager 设备与 realm 全部活跃用户的 `use` 允许/拒绝集合。
+外站镜像计数单列，不在本 Manager 补发权限；已禁用设备的资源缺失视为拒绝，
+但存在任何有效授权都会使对账失败。已启用设备缺失授权同样失败，不自动修复。
+开始和结束核对源 ref/密钥摘要、身份目录、subject 及资源存在状态。
+调用前暂停设备和 Keycloak 策略写入；非原子的 Admin REST 查询不能代替维护窗口。
+
+```sh
+python -m scripts.migrations.keycloak_device_stage_cli verify \
+  --manager-id "$MANAGER_ID" --principal "$REVIEWED_PRINCIPAL" \
+  --manager-state-root "$MANAGER_STATE" --plan "$PROTECTED_DEVICE_PLAN" \
+  --device-writes-quiesced
+```
+
+继承经过审核的目标 OIDC 配置与独立运维迁移服务凭据，恢复库由
+`TR_DEVICE_RESTORED_DB_URL` 指定。Manager 常驻 `tr-directory` 只有目录读取权限，
+不能访问任意客户端与 Policy Evaluation；不得为通过迁移把它提升为 realm-admin。
+隔离运维进程可使用准备阶段的受保护 `migration.env`，容器内须设置其正确的内部
+Keycloak URL。凭据不放参数、日志或回执。对账内存随设备数增长，复用批量评估器；
+超过一百万项决策预算拒绝，须拆分明确的 principal 范围。
+
+真实临时 Keycloak＋PostgreSQL dump/restore＋CLI `review/stage/verify` 已验收，
+覆盖全部用户、禁用设备残留授权、同 token 撤权、检查不得重授。91 项相关聚焦测试通过；
+真实研究层级及 Manager HTTP＋CouchDB 可编辑报告双向同步演练亦通过。
+共用身份核验已下沉为 `keycloak_migration_directory`，不再在研究/设备各维护一份。
+这些结果不构成实际两端的切换回执；工具不写运行时权限缓存，`cutover_ready` 仍为 false。
+
 ## 边界
 
 - Keycloak 是目标授权权威；Research SQLite 保留对象、Profile 关联和迁移期间的旧授权输入。迁移日志只记录操作和校验，不提供权限。

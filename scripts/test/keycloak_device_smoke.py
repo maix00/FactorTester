@@ -22,6 +22,7 @@ from server.identity import keycloak_authorization, keycloak_device
 from server.identity.keycloak import KeycloakAdminAdapter
 from scripts.migrations.keycloak_device_inventory import read_keycloak_directory
 from scripts.migrations.keycloak_device_stage import KeycloakDeviceStageBackend, review, stage
+from scripts.migrations.keycloak_device_parity import verify_device_policy_parity
 from scripts.migrations import keycloak_device_stage_cli
 from server.identity.keycloak_policy_evaluation import KeycloakPolicyEvaluator
 from server.manager.domain.devices import DeviceRegistry
@@ -107,6 +108,11 @@ def run(sandbox: Sandbox) -> dict[str, str]:
 
     admin = KeycloakAdminAdapter(sandbox.base, realm)
     admin._token = lambda: sandbox.admin  # ephemeral realm test credential
+    from server.identity.keycloak_hierarchy_admin import KeycloakHierarchyProvisioner
+    paths = ['/traderesearch', '/traderesearch/organizations', '/traderesearch/organizations/qa']
+    group_ids, _ = KeycloakHierarchyProvisioner(admin).ensure_groups(paths)
+    for user in users.values():
+        admin._put('users/' + user['id'] + '/groups/' + group_ids[paths[-1]], {})
 
     settings = {"issuer": issuer, "base_url": sandbox.base, "backchannel_base_url": sandbox.base,
                 "realm": realm, "authz_client_id": "tr-resource-server", "authz_client_secret": secret}
@@ -151,11 +157,38 @@ def run(sandbox: Sandbox) -> dict[str, str]:
             manager_id='manager-1', issuer=issuer, journal=Path(temp) / 'staging.jsonl',
             resource_absent=backend.resource_absent, create=backend.create, verify=backend.verify)
         assert staged['staged'] == 1 and staged['cutover_ready'] is False
+        parity_args = dict(reviewed=review(snapshot, old_directory, manager_id='manager-1', issuer=issuer),
+            live_snapshot=lambda: snapshot, live_directory=lambda: read_keycloak_directory(old_name),
+            manager_id='manager-1', issuer=issuer, evaluator=evaluator, resource_absent=backend.resource_absent)
+        parity = verify_device_policy_parity(**parity_args)
+        assert parity['users'] == 2 and parity['allowed'] == 1 and parity['denied'] == 1
         migrated = {**args, 'device_id': old_device}
         assert keycloak_device.may_use_device(token=owner_token, session=owner, **migrated)
         assert not keycloak_device.may_use_device(token=other_token, session=other, **migrated)
         assert keycloak_device.revoke_device(session=owner, **migrated)
         assert not keycloak_device.may_use_device(token=owner_token, session=owner, **migrated)
+        try:
+            verify_device_policy_parity(**parity_args)
+        except keycloak_authorization.AuthorizationUnavailable:
+            pass
+        else:
+            raise AssertionError('parity must not accept or repair a revoked device')
+        # A disabled legacy record is denied even if a stale Keycloak resource
+        # accidentally still grants use. The verifier must discover that grant.
+        disabled_snapshot = {'server_id': 'manager-1', 'devices': [
+            {**snapshot['devices'][0], 'enabled': False}]}
+        denied_args = {**parity_args,
+            'reviewed': review(disabled_snapshot, old_directory, manager_id='manager-1', issuer=issuer),
+            'live_snapshot': lambda: disabled_snapshot}
+        assert verify_device_policy_parity(**denied_args)['denied'] == 2
+        keycloak_device.register_device(session=owner, **migrated)
+        try:
+            verify_device_policy_parity(**denied_args)
+        except keycloak_authorization.AuthorizationUnavailable:
+            pass
+        else:
+            raise AssertionError('disabled device overgrant must block parity')
+        assert keycloak_device.revoke_device(session=owner, **migrated)
         # Exercise the operator entry against an actual dump/restored database.
         # The realm backup here is only a disposable fixture; it is not a
         # Keycloak restore rehearsal or evidence about a production backup.
@@ -175,6 +208,8 @@ def run(sandbox: Sandbox) -> dict[str, str]:
                 with patch.object(sys, 'argv', [common[0], 'stage', *common[1:], '--journal', str(journal),
                     '--keycloak-backup', str(kc_fixture), '--keycloak-backup-sha256',
                     hashlib.sha256(kc_fixture.read_bytes()).hexdigest(), '--device-writes-quiesced']):
+                    keycloak_device_stage_cli.main()
+                with patch.object(sys, 'argv', [common[0], 'verify', *common[1:], '--device-writes-quiesced']):
                     keycloak_device_stage_cli.main()
             cli_args = {**args, 'device_id': cli_device}
             assert keycloak_device.may_use_device(token=owner_token, session=owner, **cli_args)
@@ -206,7 +241,7 @@ def run(sandbox: Sandbox) -> dict[str, str]:
         assert replies[-1][1]['registered_device_count'] == 2 and replies[-1][1]['public_device_count'] == 0
         assert not keycloak_device.revoke_device(session=owner, **args)
     return {"owner": "allowed", "other_user": "denied", "other_key": "denied", "live_inventory": "verified",
-            "legacy_stage": "verified", "postgres_restore_cli": "verified",
+            "legacy_stage": "verified", "postgres_restore_cli": "verified", "allow_deny_parity": "verified",
             "same_token_after_revoke": "denied"}
 
 

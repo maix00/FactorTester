@@ -119,10 +119,10 @@ def test_policy_inventory_change_is_detected_even_if_sampled_decisions_match():
 def test_backend_reads_authoritative_receipt_and_updates_only_the_resource(monkeypatch):
     import json
     from types import SimpleNamespace
-    from server.identity import keycloak_research_cutover
+    from server.identity import keycloak_migration_directory
     state, checks = evidence(), decisions()
     settings = {'issuer': state['issuer'], 'realm': 'test', 'authz_client_id': 'authz'}
-    monkeypatch.setattr(keycloak_research_cutover, '_active_human_subjects', lambda _adapter: state['directory'])
+    monkeypatch.setattr(keycloak_migration_directory, 'active_human_subjects', lambda _adapter: state['directory'])
     class Store:
         def _request(self, method, path):
             assert method == 'GET'

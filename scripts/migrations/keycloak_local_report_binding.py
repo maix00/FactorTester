@@ -42,9 +42,9 @@ class BindingBackend:
         return current
 
     def read_evidence(self) -> dict:
-        from server.identity.keycloak_research_cutover import _active_human_subjects
+        from server.identity.keycloak_migration_directory import active_human_subjects
         from server.jobs.storage.couchdb_research_reports import get_research_report
-        directory = _active_human_subjects(self.adapter)
+        directory = active_human_subjects(self.adapter)
         subject = directory.get(self.owner_id, '')
         settings = self._settings()
         pat = self.manager.token_provider(settings)

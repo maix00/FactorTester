@@ -333,7 +333,7 @@ def exercise(*, couch, **case):
                     f'clients/{client_uuid}/authz/resource-server/policy/evaluate', body))
             # This fixture knows its three human users; production enumerates
             # and validates the complete Keycloak group directory instead.
-            with patch('server.identity.keycloak_research_cutover._active_human_subjects', lambda _adapter: identities), \
+            with patch('server.identity.keycloak_migration_directory.active_human_subjects', lambda _adapter: identities), \
                  patch.object(manager, 'settings_provider', lambda: kc_settings):
                 backend = BindingBackend(state=state, store=store, manager=manager,
                     adapter=manager_keycloak_admin_adapter(), research_id=research['research_id'],
