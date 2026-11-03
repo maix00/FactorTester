@@ -36,12 +36,13 @@ def test_prunes_incremental_first_and_preserves_reusable_dependency_bytes(tmp_pa
     assert dependency.read_bytes() == b'compiled dependency'
 
 
-def test_still_oversized_evicts_only_owned_target(tmp_path):
+def test_oversized_compiled_dependencies_are_preserved_for_review(tmp_path):
     target = populate(tmp_path)
     wheel = tmp_path / 'completed.whl'
     wheel.write_bytes(b'finished release')
-    assert cache.trim(tmp_path, target, limit_kib=1)['action'] == 'evicted'
-    assert not target.exists()
+    with pytest.raises(ValueError, match='preserved to avoid repeated cold builds'):
+        cache.trim(tmp_path, target, limit_kib=1)
+    assert (target / 'release/deps/unchanged.rlib').read_bytes() == b'compiled dependency'
     assert wheel.read_bytes() == b'finished release'
 
 

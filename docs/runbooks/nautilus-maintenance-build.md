@@ -1,34 +1,33 @@
-# Nautilus wheel maintenance build
+# Nautilus wheel build and cache maintenance
 
-The public app host must not build while CouchDB and the app are running.
-When no separate x86 builder is available, use a short maintenance window:
+Use `scripts/server/build_nautilus_linux_wheel.sh` on a dedicated build host or
+an explicitly selected external build volume. The public application host does
+not compile Rust alongside production services. Do not stop CouchDB or the app
+merely to make room for a build. The former production maintenance-build recipe
+is retired; source history retains it for incident analysis.
 
-1. Confirm `/data` has at least 20 GiB free. Run `scripts/server/check_public_build_capacity.sh`.
-2. Stop `factortester-public-factortester-public-1` and `factortester-couchdb`;
-   leave PostgreSQL/RabbitMQ running.
-3. Confirm `MemAvailable` is at least 6 GiB.
-4. Use a persistent builder image. A 4 GiB cgroup with fat LTO is not enough
-   for `nautilus-pyo3` linking; use 5 GiB and thin LTO:
-   `--memory=5g --memory-swap=5g --cpus=3`,
-   `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`,
-   `CARGO_PROFILE_RELEASE_LTO=thin`, `CARGO_BUILD_JOBS=2`.
-5. Always restart CouchDB and the app in a `trap`/watcher, whether the build
-   succeeds or fails.
-6. Smoke-test the wheel inside the public runtime image before using it.
+Finished wheels and Cargo objects have different identities and lifetimes.
+Verify the checksummed finished artifacts first. Otherwise retain compatible
+Linux Cargo dependencies for incremental compilation; macOS arm64 objects cannot
+be used as Linux amd64 objects. An adapter-only change can reuse a checksummed
+standalone alpha wheel only after all other source inputs are equal.
 
-This is a controlled downtime, not a background build on a live host.
+The default is `NAUTILUS_INCREMENTAL_ONLY=1`: missing retained Nautilus
+libraries refuse a cold build. Set it to `0` only for an explicitly approved
+initial build, then restore the default. Keep the existing two-CPU, 3 GiB,
+single-job, no-extra-swap limits. A memory limit is not a disk limit.
 
-## Disk safety
+Before building, agree on the allowed local footprint. For storage-constrained
+clients, place Cargo registry/git/target and the source snapshot on the selected
+build host or external volume via `NAUTILUS_CACHE` and `NAUTILUS_TARGET_CACHE`;
+retain only verified finished wheels locally if allowed. Use a stable cache path
+across release worktrees and the existing exclusive build lock. Do not create
+one full build cache per checkout.
 
-Rust `target/` trees are disposable and have reached ~100 GiB on a developer
-host.  Never leave them in the repository across builds.
-
-- Local wheel builds run `scripts/server/check_local_build_capacity.sh` and use
-  an external target directory (`NAUTILUS_TARGET_CACHE`) that is deleted on
-  exit, with release debug symbols and incremental compilation disabled.
-- Public deploys use `scripts/server/check_public_build_capacity.sh` and may
-  reclaim only disposable state with
-  `scripts/server/prune_public_build_artifacts.sh`; tagged rollback images are
-  never pruned.
-- A build that would leave less than the configured free-space floor must fail
-  before it starts, not exhaust the host.
+The target default budget is 6 GiB, excluding registry/git, source and finished
+wheels; this may be unacceptable on a personal machine. Check all those paths,
+peak staging allocations and Docker storage before starting. A capacity check
+or after-build cache trim does not impose a hard disk quota during compilation.
+Never clear all targets or global Docker/Xcode state as an automatic retry.
+Cleanup of named generated artifacts remains a separately scoped operation;
+protect current/rollback images, source, user data, databases and backups.

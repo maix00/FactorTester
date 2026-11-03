@@ -63,3 +63,38 @@ createRoot(document.getElementById('root')!).render(<PageInstanceProvider value=
                 assert not errors
             finally:browser.close()
     finally:server.shutdown();server.server_close();thread.join(timeout=5)
+
+
+def test_logged_out_entry_hides_query_and_preserves_login_destination(tmp_path):
+    from urllib.parse import urlparse, parse_qs
+    subprocess.run([str(APP/'node_modules/.bin/esbuild'),str(APP/'src/desktop-entry.tsx'),
+                    '--bundle','--format=iife',f'--outfile={tmp_path / "entry.js"}'],check=True,capture_output=True)
+    (tmp_path/'app').write_text('<div data-tr-web-app></div><script src="/entry.js"></script>')
+    class Handler(SimpleHTTPRequestHandler):
+        extensions_map={**SimpleHTTPRequestHandler.extensions_map,'':'text/html'}
+    server=ThreadingHTTPServer(('127.0.0.1',0),partial(Handler,directory=str(tmp_path)))
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    try:
+        with sync_playwright() as p:
+            browser=p.chromium.launch(channel='chrome',headless=True)
+            try:
+                page=browser.new_page(locale='zh-CN')
+                page.route('**/api/session',lambda route:route.fulfill(status=401,json={}))
+                page.route('**/api/public/entry',lambda route:route.fulfill(json={'authentication_provider':'keycloak'}))
+                destinations=[]
+                def login(route):
+                    destinations.append(route.request.url)
+                    route.fulfill(content_type='text/html',body='Organization login')
+                page.route('**/auth/oidc/start?*',login)
+                base=f'http://127.0.0.1:{server.server_port}/app'
+                page.goto(base+'?page=factors&object_ref=factor%3Av2%3Aexample&auth_error=access_denied')
+                page.get_by_role('button',name='使用组织账户继续').wait_for()
+                assert page.url==base
+                assert 'auth_error' not in page.evaluate('history.state.trEntrySearch')
+                page.get_by_role('button',name='使用组织账户继续').click()
+                page.wait_for_url('**/auth/oidc/start?*')
+                target=parse_qs(urlparse(destinations[0]).query)['next'][0]
+                assert target.startswith('/app?page=factors&object_ref=')
+                assert 'auth_error' not in target
+            finally:browser.close()
+    finally:server.shutdown();server.server_close();thread.join(timeout=5)
