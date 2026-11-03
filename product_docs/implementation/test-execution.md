@@ -26,7 +26,7 @@ IC、因子序列和回测可以共享配置框架，但它们的核心输入、
 
 规范代码入口：
 
-- 字段与配置规范化：server/manager/services/test_authoring.py
-- 测试模块：server/modules/
-- Job 路由与结果投影：server/manager/http/、server/manager/storage/job_index.py
-- Web 测试工作台：server/manager/web/test-modules/
+- 字段与配置规范化：`server/manager/services/test_authoring.py`
+- 测试模块：`server/modules/`
+- Job 路由与结果投影：`server/manager/http/`、`server/manager/storage/job_index.py`
+- Web 测试工作台：`server/manager/web/test-modules/`
