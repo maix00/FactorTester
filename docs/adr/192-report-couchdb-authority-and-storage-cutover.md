@@ -26,7 +26,7 @@ CouchDB `_rev` 仅用于当前 HEAD 的 CAS。业务版本另存为不可变、�
 
 实际存储切换显式启用 `storage_cutover`，即使正文节点没有改变，也创建迁移后继 generation，并保留原 HEAD/root。已有目录同一 generation 的投影哈希与迁移投影不同不能覆盖，不能放宽分支 CAS 或伪称字节相同。单纯兼容性预览默认不递增未变化的树。
 
-个人客户端内容使用 `~/Documents/TradeResearch`，机构 Manager 的本机数据使用 `~/Documents/GTHT/TradeResearch`，应用状态统一到 `~/Library/Application Support/TradeResearch`。这些根分别承担个人客户端和机构服务职责，不因同在本机而合并主体或拓扑。路径转换针对已核对的存储配置，不重写不可变对象 ref。旧根目录下的行情、因子工作树、其他用户数据和执行产物须分类并完成对应转移，不能把整个目录当作报告缓存删除。
+个人客户端内容使用 `~/Documents/TradeResearch`，机构 Manager 的本机数据使用 `~/Documents/GTHT/TradeResearch`，应用状态统一到 `~/Library/Application Support/TradeResearch`。这些根分别承担个人客户端和机构服务职责，不因同在本机而合并主体或拓扑。路径切换采用同盘 rename，合并前逐文件排除冲突，切换后核对 inode、长度与 SHA-256；同时更新现有部署挂载、LAN 服务、Profile 和 Git worktree 注册。个人工作区中的草稿及历史仍是本地用户内容，服务器已发布报告的权威保持为 CouchDB，不以路径改名建立第二份服务端权威。废弃备份及可重建的阅读镜像可在读回验收后删除，不为清理创建额外副本。路径转换针对已核对的存储配置，不重写不可变对象 ref。旧根目录下的行情、因子工作树、其他用户数据和执行产物须分类并完成对应转移，不能把整个目录当作报告缓存删除。
 
 ## 迁移和验收
 
