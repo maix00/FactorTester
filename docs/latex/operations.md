@@ -64,6 +64,10 @@ PostgreSQL 使用一致性备份，SQLite 使用原生备份机制，CouchDB 文
 
 ## 增量构建与存储预算 {#incremental-build-storage}
 
+发布默认保留旧发布镜像及源代码工作区；只有已授权并显式设置 `FACTORTESTER_CLEANUP_RELEASES=1` 时，才按发布保留策略清理旧应用版本。发布不清理全局 Docker 镜像或其他项目的编译缓存；容量不足时由预检停止，先列明待清理产物或补充容量，再继续发布。
+
+公网应用镜像构建默认使用 2 GiB BuildKit 容器；部署者可在受保护的部署环境文件中显式设置 `TR_PUBLIC_BUILD_MEMORY_MIB=1536`，选择 1.5 GiB 的受限尝试。两档均保留额外 512 MiB 可用主机内存、限制两个 CPU 核和一个并行构建步骤，并禁用额外 swap；交换空间不计入可用内存。低内存档位使用独立且有 GC 预算的缓存，应计入整体磁盘预算，不覆盖原有缓存。构建失败时保留运行中的应用，不自动提高限额或停止业务服务；此能力只用于成品原生 wheel 之上的应用镜像构建。
+
 成品 wheel 缓存与 Cargo 编译缓存分别管理。源码及平台身份一致、校验和有效的成品直接复用；只修改 Nautilus adapter 时，独立 alpha Python wheel 只有在其余输入树完全一致且旧字节校验通过后才复用。组合运行时仍须重新链接以包含 adapter 修复，不能给旧二进制改标签冒充新版本。
 
 保留与目标平台、工具链匹配的 Cargo target、registry 和 git 缓存，在不同发布 worktree 间显式使用同一 `NAUTILUS_CACHE`、`NAUTILUS_TARGET_CACHE` 与 `NAUTILUS_WHEEL_DIR`。共用缓存由现有构建锁串行保护；macOS arm64 缓存不能代替 Linux amd64 缓存。默认 `NAUTILUS_INCREMENTAL_ONLY=1`，在缺少 Linux Nautilus 依赖产物时拒绝冷构建；只有明确批准的初始构建才设置为 `0`，以后恢复默认。缓存存在时仍由 Cargo 校验依赖是否有效。

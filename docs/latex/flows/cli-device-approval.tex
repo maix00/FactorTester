@@ -1,0 +1,28 @@
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\scriptsize]
+  \node[trFlowLaneClient,text width=2.8cm] (browser) at (0,0.7) {React Web / Swift\\浏览器登录与 CLI 验证码批准};
+  \node[trFlowLaneClient,text width=2.8cm] (cli) at (4,0.7) {CLI\\设备授权客户端};
+  \node[trFlowLaneManager,text width=2.8cm] (manager) at (8,0.7) {用户选定的 Manager A\\HTTPS 控制端口 7998};
+  \node[trFlowLaneIdentity,text width=2.8cm] (keycloak) at (12,0.7) {Manager A 自己的\\Keycloak Realm};
+  \draw[trFlowLifeline] (0,.15) -- (0,-16.2);
+  \draw[trFlowLifeline] (4,.15) -- (4,-16.2);
+  \draw[trFlowLifeline] (8,.15) -- (8,-16.2);
+  \draw[trFlowLifeline] (12,.15) -- (12,-16.2);
+
+  \draw[trFlowControl] (0,-1.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {1. Web/Swift：向 A 请求 OIDC 登录入口\\\texttt{/auth/oidc/start}，走同源 HTTPS 7998} (8,-1.9);
+  \draw[trFlowControl] (8,-3.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {2. A 返回重定向；浏览器访问配置的 Keycloak A\\Realm issuer，不把私网后端地址暴露给客户端} (0,-3.4);
+  \draw[trFlowControl] (0,-4.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {3. 浏览器向 Keycloak A 认证并完成 MFA；随后携带一次性 code 与 state 回调 A} (8,-4.9);
+  \draw[trFlowControl] (8,-6.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {4. A 以自己的 OIDC client 兑换 code，核对 issuer、subject、audience 与本地准入策略} (12,-6.4);
+  \draw[trFlowControl] (8,-7.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {5. A 通过后才向浏览器签发 Manager 会话 Cookie，并回到 \texttt{/app}} (0,-7.9);
+
+  \draw[trFlowControl] (4,-9.4) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {6. CLI 先从 A 的 7998 读取设备登录配置：issuer 与 CLI client\;随后直接向该 issuer 申请 device code} (8,-9.4);
+  \draw[trFlowControl] (12,-10.9) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {7. Keycloak A 返回 device\_code、user\_code、有效期与轮询间隔；CLI 显示目标 Manager 和验证码} (4,-10.9);
+  \draw[trFlowControl] (0,-12.4) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {8. 用户在浏览器核对验证码并批准；此批准只作用于 Keycloak A 的本次请求} (12,-12.4);
+  \draw[trFlowControl] (4,-13.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {9. CLI 按服务端间隔向 Keycloak A 轮询取得令牌，再向 A 的 7998\,\texttt{/api/session}提交 Bearer token} (8,-13.9);
+  \draw[trFlowControl] (8,-15.4) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {10. A 验证 issuer、subject 与 Manager 准入；成功才回送已验证身份。CLI 将刷新会话绑定到 A 的地址} (4,-15.4);
+\end{tikzpicture}
+\caption{网页登录和 CLI 设备授权登录共用用户选定的 Manager A 与其 Keycloak Realm，但令牌路径不同：浏览器由 A 发起 OIDC 重定向；CLI 直接向 A 的 issuer 申请并轮询设备码，最后仍须回 A 的 7998 验证身份。}
+\end{figure}
+
+\noindent\textbf{Manager 边界：}Manager B 使用自己的客户端入口、Keycloak Realm 和准入策略。登录 A 不会创建 B 的会话；相同用户名不是同一主体，身份映射也不会复制密码、MFA 或刷新令牌。CLI 使用后向同一 Realm 撤销刷新令牌，再清除该 Manager 地址对应的本地会话。不同 Manager 的程序版本可以不同；登录依赖受信任 issuer、接口与本地权限策略，不以版本号相同作为拓扑条件。

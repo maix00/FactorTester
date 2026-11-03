@@ -1,27 +1,28 @@
-## 职责与系统位置 {#responsibility}
+## 系统职责与边界 {#responsibility}
 
-Manager 提供 React /app、登录会话、目录与任务聚合。独立计算节点通过 Celery/RabbitMQ 执行冻结任务，数据 I/O 服务在 Bundle 所在主机读取并提供有界数据批次。Nautilus 承担回测与执行，Alpha 因子引擎提供共用因子计算；二者通过 bridge 协作。Swift 客户端是共享 Web 页面的原生宿主，提供本机研究、设备和 Manager 连接等窄桥接能力。
+Manager 提供 /app、认证会话、业务 API、对象目录、任务状态和结果投影。它是 Job、RunSpec 和业务授权的服务端权威，不承载所有大体积行情数据或执行器内存状态。
 
-字段、对象和结果的职责也分开：测试注册协议声明可编辑/可冻结字段，目录服务提供稳定对象引用，执行器消费冻结 RunSpec，结果服务只读取已登记生成物。客户端可以有不同呈现方式，但不能各自发明字段语义。
+执行节点通过 Celery/RabbitMQ 接收经授权的冻结任务，由 Nautilus 完成事件驱动回测或已配置的交易执行。Data I/O 在 Bundle 所在主机读取所需数据，并提供有界 Arrow 批次和缓存。Alpha 因子引擎为表达式和策略提供共用计算能力；Manager、worker 和数据服务通过明确接口协作，不共享进程内 Python 对象。
 
-## 主要流程 {#main-flow}
+电脑、网页、移动端和 CLI 是同一业务服务的不同客户端。Swift 宿主提供设备密钥、窗口和本机资源等窄桥接能力，不另建一套业务字段或授权规则。
 
-浏览器、桌面客户端和移动端打开共用 React 页面。桌面使用 Dockview 工作区，移动端使用 Ionic 导航与 Header；字段候选和结果查看器按需读取。保留挂载的非活动页面隐藏内容并保留草稿，避免其他页控件叠到当前页。
+## 一次任务的执行顺序 {#main-flow}
 
-测试配置页面编辑包含 RunSpec 的 ExecutionPlan。自动或手动选择执行位置后，配置 JSON、页面和冻结计划保持一致；Manager 按节点能力、权限与数据可达性核验路由，再派发任务。结果和生成物通过对象引用聚合展示，计算节点离线不改变已持久化结果的身份。
+1. 客户端读取字段和对象候选，并提交待编辑配置。
+2. Manager 按用户权限和当前注册契约规范化配置，返回预览。
+3. 用户提交后，Manager 冻结 RunSpec，创建 Job/Attempt 和执行计划。
+4. 执行计划匹配可用节点、服务版本和所需数据 Bundle；不满足时停止并报告原因。
+5. 队列向执行节点投递任务。worker 按冻结引用读取数据和因子，产生结果。
+6. Manager 登记状态和 Artifact 引用；客户端按需读取结果摘要、切片和明细。
 
-## 规范代码入口 {#canonical-paths}
+执行过程和职责交接见“研究任务运行流程”。执行节点离线不改变已经持久化的 Job 或 Artifact 身份。
 
-- Manager 组合与状态：`server/manager/runtime.py`
-- HTTP 路由：`server/manager/http/`
-- React Web Shell：`web/app/src/desktop-shell.tsx`、`web/app/src/mobile-shell.tsx`
-- 测试定义与执行：`server/services/`、`server/modules/`
-- Swift 宿主与桥：`apple/Sources/Features/Web/`、`apple/Sources/Navigation/`
+## 代码定位与扩展边界 {#canonical-paths}
 
-这些路径用于定位职责，不代表整个目录都属于公开接口。
+- Manager 组合与状态：server/manager/runtime.py
+- HTTP 路由：server/manager/http/
+- React Web Shell：web/app/src/desktop-shell.tsx、web/app/src/mobile-shell.tsx
+- 测试定义与执行：server/services/、server/modules/
+- Swift 宿主与桥接：apple/Sources/Features/Web/、apple/Sources/Navigation/
 
-## 边界与扩展点 {#boundaries}
-
-服务器不推测客户端本地有哪些数据源。模块、字段、生成物和展示器应通过后端注册协议扩展；前端不硬编码某个本地数据源或测试字段。新增客户端时复用同一字段契约，只增加该客户端的投影能力声明。
-
-扩展必须同时说明所有权、权限、生命周期、版本和失败行为。只有影响用户提交或结果追溯的稳定业务契约才进入公开参考文档；进程内部缓存、DOM 状态和实现细节留在实现说明，不生成另一张公共字段表。
+新增模块应声明权威来源、对象引用、权限、生命周期、版本兼容和失败行为。服务器不扫描客户端文件系统以猜测本地数据源；客户端不自行发明公共字段语义。

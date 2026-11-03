@@ -1,0 +1,50 @@
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\scriptsize]
+  \node[trFlowLaneClient,text width=2.6cm] (client) at (0,0.7) {React Web / Swift / CLI\\用户选定的客户端};
+  \node[trFlowLaneManager,text width=2.6cm] (managera) at (3.3,0.7) {Manager A\\用户入口与本次路由权威};
+  \node[trFlowLaneManager,text width=2.6cm] (managerb) at (6.6,0.7) {Manager B\\被选中的执行服务};
+  \node[trFlowLaneSystem,text width=2.6cm] (broker) at (9.9,0.7) {RabbitMQ\\目标 deployment / service 队列};
+  \node[trFlowLaneData,text width=2.8cm] (worker) at (13.2,0.7) {B 管理的执行节点\\Celery worker / Nautilus};
+  \foreach \x in {0,3.3,6.6,9.9,13.2} {\draw[trFlowLifeline] (\x,.15) -- (\x,-14.7);}
+
+  \draw[trFlowControl] (0,-1.9) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {1. 预览与提交：测试字段、产品范围、精确因子/策略引用和执行选择；HTTPS 7998 JSON} (3.3,-1.9);
+  \draw[trFlowFederation] (3.3,-3.4) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {2. A 依据用户选择的 target 与能力投影，经已认证的对端控制入口 17998 请求 B 的预览} (6.6,-3.4);
+  \draw[trFlowFederation] (6.6,-4.9) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {3. B 复核主体委托、字段、Bundle 与运行能力；返回绑定摘要、服务身份和拒绝原因} (3.3,-4.9);
+  \draw[trFlowFederation] (3.3,-6.4) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {4. 用户确认后，A 将相同绑定摘要的提交请求送往 B；B 校验后冻结 RunSpec、Job 与 Attempt} (6.6,-6.4);
+  \draw[trFlowLocal] (6.6,-7.9) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {5. B 在同一事务写 JobAttempt 与 dispatch outbox；dispatcher 只发布版本化小消息} (9.9,-7.9);
+  \draw[trFlowLocal] (9.9,-9.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {6. RabbitMQ 按 deployment 与 service\_port 路由；目标 worker 校验后领取 Attempt} (13.2,-9.4);
+  \draw[trFlowControl] (13.2,-10.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {7. Worker 用受限服务身份读取冻结引用，回写进度、错误层级、结果摘要与 Artifact 清单} (6.6,-10.9);
+  \draw[trFlowFederation] (6.6,-12.4) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {8. A 按 owner-scoped 路由投影 B 的 Job/Attempt 状态；A 的客户端继续经 7998 轮询} (3.3,-12.4);
+  \draw[trFlowControl] (3.3,-13.9) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {9. A 向客户端返回任务状态、执行位置与结果元数据；文件字节按下一图单独授权传送} (0,-13.9);
+\end{tikzpicture}
+\caption{跨 Manager 的研究任务控制路径。A 是用户所连接的入口，B 是经授权选中的执行服务；客户端不直连 B 的测试服务端口。若执行服务就在 A，A 与 B 是同一控制域，跨 Manager 一跳折叠为本机路由。}
+\end{figure}
+
+\noindent\textbf{队列消息边界：}RabbitMQ 只承载 \texttt{schema\_version}、\texttt{job\_id}、\texttt{attempt}、\texttt{deployment\_id}、\texttt{run\_spec\_hash} 与 \texttt{job\_spec\_hash} 等路由和幂等字段，不承载 RunSpec 正文、行情数组、DataFrame、FactorExpr、因子源码或结果文件。B 的 Job/Attempt 和冻结输入仍按稳定引用读取；排队消息不是数据副本，也不改变权威归属。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\scriptsize]
+  \node[trFlowLaneClient,text width=2.6cm] (client) at (0,0.7) {React Web / Swift / CLI\\用户会话于 Manager A};
+  \node[trFlowLaneManager,text width=2.6cm] (managera) at (3.3,0.7) {Manager A\\7998 + 7997 数据入口};
+  \node[trFlowLaneManager,text width=2.6cm] (managerb) at (6.6,0.7) {Manager B\\Job 权威与 Artifact 存储};
+  \node[trFlowLaneData,text width=2.8cm] (worker) at (9.9,0.7) {B 执行节点\\Celery worker / Nautilus};
+  \node[trFlowLaneData,text width=2.8cm] (bundle) at (13.2,0.7) {B 同主机 Bundle\\Data I/O / 本地数据源};
+  \foreach \x in {0,3.3,6.6,9.9,13.2} {\draw[trFlowLifeline] (\x,.15) -- (\x,-13.2);}
+
+  \draw[trFlowFederation] (3.3,-1.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {1. A 与 B 的 17998 对端控制协商不可变 Transfer / Attempt、长度、SHA-256 与短期角色票据} (6.6,-1.9);
+  \draw[trFlowBytes] (3.3,-3.4) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {2. 运行必需的因子/策略源码字节：A:7997 transfer 代理经 WireGuard 直推 B:17997；B 校验长度与 SHA-256 后才提升对象} (6.6,-3.4);
+  \draw[trFlowControl] (6.6,-4.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {3. B 以受限服务身份向目标 worker 提供冻结输入引用与 Job/Attempt 领取权；队列消息不含行情或源码} (9.9,-4.9);
+  \draw[trFlowLocal] (13.2,-6.4) -- node[midway,above=2pt,trFlowMessage,text width=4.3cm] {4. 同主机 Bundle → Data I/O → Worker：按需读取有界 Arrow 批次与缓存；worker 不挂载 A 的 SQLite} (9.9,-6.4);
+  \node[draw=trAmber!80!black,fill=trPaleAmber,rounded corners=2pt,align=center,text width=5.3cm,inner sep=4pt,font=\scriptsize] (flight) at (11.5,-7.15) {独立数据主机到 Worker 的跨主机 Arrow Flight 尚未接通；该场景不能作为可执行回测输入};
+  \draw[trFlowPending] (13.2,-6.9) -- (flight.north east);
+  \draw[trFlowBytes] (9.9,-7.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {5. Worker 将 Artifact 文件和 manifest/hash 写回 B 的本地对象存储} (6.6,-7.9);
+  \draw[trFlowControl] (0,-9.4) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {6. 客户端向 A 的 7998 请求具体 Artifact 访问权；A 核验 Job owner / 权限并返回短期 client\_download ticket 与 A:7997 URL} (3.3,-9.4);
+  \draw[trFlowBytes] (6.6,-10.9) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {7. 远端文件由 A:7997 按 origin\_read ticket 经 WireGuard 从 B:17997 直拉并核验} (3.3,-10.9);
+  \draw[trFlowBytes] (3.3,-12.4) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {8. 客户端只向获授权的 A:7997 取文件字节；7997 不接收 Manager 会话 Cookie，元数据仍由 A:7998 返回} (0,-12.4);
+\end{tikzpicture}
+\caption{研究任务的代码、行情与结果字节路径。7998/17998 承载权限检查和传输上下文；7997/17997 承载经短期能力授权的对象字节。实线表示已接入的路径，琥珀虚线表示跨主机行情读取尚不可用。}
+\end{figure}
+
+\noindent\textbf{执行条件：}执行节点必须归属被选 Manager，并在提交时满足运行版本、Bundle 身份、数据字段和覆盖要求。Bundle 同一逻辑 ID 不代表节点上的安装相同；Manager 按稳定 node / installation / source 引用与能力合同选择，而不要求客户端、Manager 和 worker 版本号完全一致。缺少本地数据源或跨主机数据能力时应拒绝执行，不得自动切换成个人电脑上的 Nautilus 运行时。

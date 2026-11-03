@@ -1,23 +1,38 @@
-## 网络拓扑 {#network-topology}
+## 网络中的角色 {#network-topology}
 
-TradeResearch 区分控制面、执行面和数据面。**Manager** 提供身份验证入口、Job 权威 API、配置冻结、调度和结果登记；**Nautilus 执行节点**消费 Manager 指派的任务；**Data I/O** 在数据所在主机读取 Bundle 并管理有界 Arrow 缓存。执行节点和数据设施均可选地与 Manager 同机部署，也可以部署在独立主机；一个节点可安装多个 Bundle。
+系统按控制面、执行面和数据面分工。Manager 是业务 API、身份校验、RunSpec 冻结、Job 状态和结果引用的权威；Nautilus 执行节点消费 Manager 派发的任务；Data I/O 在数据所在主机读取 Bundle，并提供有界 Arrow 批次和缓存。
 
-## 客户端与 Manager {#clients-and-manager}
+执行节点、数据设施可以与 Manager 同机，也可以部署在独立主机。一台主机可运行多个服务，但进程内存不因此共享；不同服务的数据接口和资源限制仍应分别定义。
 
-电脑网页端、桌面客户端、移动端和 CLI 可连接多台服务器。每个机构有一台内网 Manager，公网有一台 Manager。用户可以连接所属机构的内网服务器；具有公网登录权限时还可连接公网服务器，但不可连接其他机构的内网服务器。每台服务器的 Keycloak realm 管理该服务器的登录和访问权限。多个 Manager 之间发现服务或传递任务时，仍由服务端身份和明确的授权边界控制。机构归属和登录授权必须由服务端验证，不能仅依靠页面筛选；内网机构校验尚未覆盖所有入口，不应视为已完成的隔离保证。
+## 客户端能连接到哪里 {#clients-and-manager}
 
-## 执行节点 {#manager-managed-execution}
+电脑网页端、桌面客户端、移动端和 CLI 都是客户端，不会因安装了本机运行时就自动成为服务器节点。每个机构有自己的内网 Manager；公网有获授权访问的 Manager。用户可以连接所属机构的内网服务，并在具备公网登录权限时连接公网服务；其他机构的内网服务不可因“网络可达”而直接连接。
 
-执行节点是 Manager 可调度的服务；可以有多台执行节点主机，每台主机也可以安装多个 Bundle。机构节点归属于某个机构；公网 Manager 也可以管理额外的公共节点。节点通过受限身份连接所属 Manager 的队列，并按冻结的 RunSpec 与数据 Bundle 执行。执行节点不能把自己的本地计算身份当作用户身份，也不拥有 Job 权威数据库。
+每台 Manager 使用自己的 Keycloak Realm 和授权策略。客户端会话按 Manager 地址隔离；相同用户名或显示名称不代表同一身份。多个 Manager 之间发现对象、同步身份或传递任务，必须由服务器验证主体、对象引用、目标能力和明确授权。
 
-## 数据专用节点 {#data-only-node}
+## 执行节点与数据节点 {#manager-managed-execution}
 
-数据专用节点可以只运行 Data I/O 和多个本地数据 Bundle，不安装 Manager 或 Nautilus worker。当前同主机复用 Arrow 缓存使用本机文件页与 Unix 文件描述符传递；跨主机 Arrow Flight 数据读取尚未实现，因此不能把远程数据专用节点报告成已可用于回测的数据源。
+执行节点由所属 Manager 调度，凭受限服务身份连接队列，并按 RunSpec 和本地安装的 Bundle 工作。它不拥有 Job 数据库，也不能把本地计算身份当作提交用户身份。若节点权限、运行版本或数据能力不匹配，Manager 应拒绝派发并返回原因。
 
-## 桌面用户的本机运行时 {#personal-desktop-runtime}
+数据专用节点可以只部署 Data I/O 和本地 Bundle，不安装 Manager 或 Nautilus worker。同机数据读取可复用文件页和有界缓存；跨主机 Arrow Flight 尚未接通，不能把远端数据节点描述为已可用于回测的数据源。
 
-桌面客户端的目标是在用户明确授权并安装后，在个人电脑上启动本机运行时。该运行时只供当前用户自己的测试或交易；它**不会向 Manager 注册，不参与 Manager 的执行节点发现或自动选址，也不会接受同一或其他 Manager 派发的任务**。Manager 负责 Keycloak 权限检查和提供经过签名校验的下载包。本机下载与启动链路尚未完成；数据、缓存和运行状态应属于本机用户会话。
+## 桌面用户的个人运行时 {#personal-desktop-runtime}
 
-## 图例与实现状态 {#legend-and-status}
+个人电脑上的 Nautilus/Alpha 运行时只供当前用户自己的测试或交易。它不会向任一 Manager 注册，不参与远程节点发现和自动选址，也不接受 Manager 派发。桌面安装包须经 Manager 授权和签名校验；包下载链路尚未完成时，不能将“允许下载”写成“已经可用”。
 
-图中实线表示代码已实现的组件关系；虚线表示规划中或尚未端到端验收的连接，包括跨主机数据通道、身份懒同步、远程任务和本机下载。容器同在一台机器上不意味着其进程内存可以直接共享；当前 Data I/O 的有界 Arrow 文件缓存可通过同机文件映射复用文件页。
+## 端点与数据类别 {#network-endpoints-and-data}
+
+| 网络路径 | 发送方 → 接收方 | 传递内容 | 边界 |
+|---|---|---|---|
+| 客户端控制面 TCP 7998 | React、Swift、CLI → 当前选定 Manager | 登录会话、业务 JSON、预览/提交、任务状态、对象访问授权请求 | 每个 Manager 独立验证主体和权限；浏览器不直连 Keycloak 内部地址或测试服务端口 |
+| 客户端数据面 TCP 7997 | 客户端或 Manager 本机传输代理 → 当前 Manager 数据面 | 经短期 bearer 授权的文件字节 | bearer 限定对象、操作、主体、范围与有效期；不发送 Manager 会话 Cookie |
+| Manager 控制同步 TCP 7998 | Manager B 与已登记 Manager A | account-domain outbox/cursor 与稳定对象/版本索引；已启用时也承载独立的 Job 投影 | 小型、分页元数据；各域有自己的权限、cursor 和冲突策略。身份变更流采用独立合同，尚未完成两端端到端验收 |
+| WireGuard peer control TCP 17998 | 已登记 Manager 节点之间 | 签名服务代理、Transfer/Attempt 上下文、短期 peer ticket | 仅私有 overlay；不向浏览器公开，也不作为普通客户端 API |
+| WireGuard peer data TCP 17997 | 请求所有者节点与来源/目标节点 | 源码、附件、提交文件和 Artifact 等受授权字节 | 端点、对象身份、长度、SHA-256 和传输 Attempt 必须核验 |
+| Manager → RabbitMQ → worker | Manager dispatcher → 目标队列 → 执行节点 | `job_id`、`attempt`、deployment/service 路由和规范 hash | 小型版本化信封；行情数组、源码正文和结果文件不进入消息 |
+
+不同 Manager 之间并非一条无差别的“同步线”。例如，因子版本索引走账户域元数据通道，因子源码仍由来源节点经对象数据面提供；报告章节投影和 Evidence 文件也各走自己的授权路径。回测 worker 只读取它所在节点可访问的 Bundle；跨主机 Arrow Flight 仍未接通。Manager 软件版本可以不同，互通判断依据端点、权限、API 与节点能力合同，不能要求设备以版本号相同来改变网络角色。
+
+## 实现状态与版本 {#legend-and-status}
+
+图中实线表示已经实现的连接；虚线表示规划中或未完成端到端验收的路径。客户端、Manager、执行节点和数据节点可以采用不同版本。验收按目标 Manager 公布的能力和接口契约判断；版本号相同本身既不证明拓扑兼容，也不是网络角色变更的理由。

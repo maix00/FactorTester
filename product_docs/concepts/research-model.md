@@ -1,36 +1,38 @@
-## 研究对象的边界 {#research-boundary}
+## Research 的职责 {#research-boundary}
 
-Research 是一个研究上下文，不是单篇文章的别名。它拥有研究目标、参与的研究身份、工作区和可以持续演进的证据集合；一个 Research 可以包含多份 Report。Research 可以单独公开或共享，Report 也可以有更窄的公开范围。
+Research 是研究目标、参与身份、协作上下文和证据集合的根对象。它可以包含多份 Report；Report 是面向阅读的结构化表达，不是 Research 的别名。报告中的文字只有在引用正式 Evidence 时才建立证据关系。
 
-研究报告是面向阅读的结构化投影。它包含章节、段落、表格、对象引用和证据引用，但不能因为某段文字出现在报告里，就推断它已经成为正式证据或满足研究义务。
+Research 不应被实现为嵌套目录。需要表达层次时，使用 Research 内的报告章节、对象引用或 Evidence 关联；不要把一个 Research 挂到另一个 Research 下面。
 
 ## Profile 与 Research Workspace {#profile-research-workspace}
 
-Profile 表示执行研究工作的身份。Profile 可以参与多个 Research，但每个 Profile 在每个 Research 中都需要一个独立的 Research Workspace，用于保存该研究上下文下的草稿、提交和协作状态。
+Profile 表示执行研究工作的身份。一个 Profile 可以参加多项 Research；每个 Profile 在每项 Research 中有独立的 Research Workspace，用于保存该研究范围内的选择、配置、草稿和协作状态。
 
-Research Workspace 不等于 Profile 的因子工作区。因子工作区是 Profile 可复用的独立副本；Research Workspace 只保存本研究所需的选择、RunSpec、报告材料和协作产物，不能把一次研究的临时修改悄悄变成全局因子库变更。
+Research Workspace 是逻辑对象，不是文件目录，也不是新的权威因子库。因子工作区保存可复用的因子副本；测试配置草稿只在提交前编辑；Research Workspace 保存研究上下文。三者用途不同，不能相互覆盖。
 
-## Report 与 Evidence {#report-evidence}
+## Report、Evidence 与 Artifact {#report-evidence}
 
-Evidence 是跨 Research 可复用的事实对象。Job、RunSpec、Artifact、外部来源和人工记录都可以成为 Evidence 的不同来源；报告只通过正式引用显示相应证据。
+| 对象 | 作用 | 权限含义 |
+| --- | --- | --- |
+| Report | 组织正文、表格、链接和证据引用 | 报告阅读权限只决定读者能否看报告 |
+| Evidence | 记录可追溯的研究事实和来源 | 必须使用正式引用建立关联 |
+| Artifact | 保存 Job 产生的结构化输出或文件 | 文件下载仍由对象存储端和研究权限控制 |
 
-权限按传播范围区分：报告公开时，报告读者可以看到被引用证据的摘要和关联关系，但不自动获得生成物或文件下载权；Research 公开或共享时，授权范围内的读者才可以按该 Research 的权限下载相应生成物和文件。UI 上的“可见”不能替代服务端权限判断。
+Job、RunSpec、Attempt、Artifact、外部权威来源和人工记录都可以作为 Evidence 来源。引用 Evidence 不会自动授予下载原始 Artifact 的权限。
 
 ## 对象关系 {#research-object-graph}
 
 ```text
 Research
-├── Research Workspace（按参与 Profile 分开）
-├── Report × 多份
-├── Profile × 一个或多个参与身份
-└── Evidence × 可跨 Research 引用
+├── 参与身份（Profile）
+├── 每个参与身份对应的 Research Workspace
+├── Report（可以有多个）
+└── Evidence（可被多个 Report 引用）
     ├── RunSpec / Job / Attempt
     ├── Artifact
     └── 外部来源或人工记录
 ```
 
-Research 不嵌套 Research。需要组织层级时，应使用报告章节或 Evidence 关联表达，而不是把一个 Research 挂到另一个 Research 下面。
+## 共享前的权限核对 {#sharing-checklist}
 
-## 共享时要核对什么 {#sharing-checklist}
-
-共享前至少确认四件事：公开对象是什么、读者能看到什么、读者能下载什么、撤销共享后哪些缓存和下载凭证立即失效。报告的阅读权限、Research 的证据下载权限和 Profile 的写入权限是三个独立判断。
+共享前分别回答：公开的是 Research 还是 Report；读者能看到正文和哪些证据摘要；读者能否下载相应文件；撤销权限后，服务端、客户端缓存和下载凭证如何失效。界面显示“可见”不能替代 Manager 对对象和文件的授权判断。

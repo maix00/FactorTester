@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { request } from "./api.ts";
 import { parseDraft, readPath, writePath, type JSONObject } from "./draft.ts";
 import { FactorPicker } from "../components/library-picker.tsx";
+import { ProductGroupPicker } from "../components/product-group-picker.tsx";
 import { ObjectReference } from "../components/object-reference.tsx";
 import { LibraryCreate } from "../components/library-create.tsx";
 import { NO_DEFAULTS } from "./form-options.ts";
@@ -14,29 +15,11 @@ import type { ConfigurationView } from "./navigation.ts";
 import { appendStrategy, attachFrozenFactors, configurationStrategies, patchStrategy, templateInputs, strategyDefaults, strategySchema, type StrategyChoice } from "./strategies.ts";
 
 function ReferenceWidget(props: WidgetProps): React.ReactElement {
-  const [rows, setRows] = useState<JSONObject[]>([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const factor = props.options.referenceType === "factor_ref";
-  useEffect(() => {
-    if (factor) return;
-    const controller = new AbortController(); setLoading(true);
-    request(factor ? "/api/factor-library/factors" : "/api/product-library/product-groups?view=summary", { signal: controller.signal })
-      .then((data) => setRows(factor ? data.factors ?? [] : data.groups ?? []))
-      .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [factor]);
-  const reference = (row: JSONObject): string => String(factor ? row.ref || row.factor_ref || "" : row.ref || row.group_ref || row.id || "");
-  const options = [...new Map(rows.map((row) => [reference(row), { value: reference(row), label: String(row.name || row.title || row.factor_alias || row.alias || reference(row)) }])).values()];
-  if (props.value && !options.some((item) => item.value === props.value)) options.unshift({ value: props.value, label: props.value });
-  if (factor) return <FactorPicker label={props.label} value={props.value} disabled={props.disabled || props.readonly} onSelect={(record) => { props.formContext?.rememberFactor?.(String(record.ref), record); props.onChange(String(record.ref)); }} />;
-  return <><div className="tr-reference-select"><Select id={props.id} aria-label={props.label} value={props.value || undefined} showSearch optionFilterProp="label" style={{ width: "100%" }}
-    options={options} loading={loading} disabled={props.disabled || props.readonly} onChange={(value: string) => {
-      const row = rows.find((item) => reference(item) === value);
-      if (factor && row) props.formContext?.rememberFactor?.(value, row);
-      props.onChange(value);
-    }} />{props.value ? <ObjectReference icon value={{kind:"productGroup",ref:String(props.value),label:options.find(option=>option.value===props.value)?.label || String(props.value)}} /> : null}</div>{error ? <span role="alert">{error}</span> : null}</>;
+  if (props.options.referenceType === "factor_ref") return <FactorPicker label={props.label} value={props.value} disabled={props.disabled || props.readonly} onSelect={record => {
+    props.formContext?.rememberFactor?.(String(record.ref), record); props.onChange(String(record.ref));
+  }} />;
+  return <ProductGroupPicker id={props.id} label={props.label} value={props.value} disabled={props.disabled || props.readonly}
+    scopeKey={props.formContext?.productScopeKey || ""} onChange={props.onChange} />;
 }
 
 interface StrategyEditorOptions { scope: string; text: string; onChange: (text: string) => void; view: ConfigurationView; navigate: (view: ConfigurationView) => void }
@@ -174,7 +157,7 @@ export function useStrategyEditor({ scope, text, onChange, view, navigate }: Str
         onChange(patchStrategy(latest.current.text, String(selected.binding.binding_id), { template_ref: next.template_ref, revision_ref: next.revision_ref, ...templateInputs(next, defaults) }));
       }} /><ObjectReference icon value={{kind:"strategyFamily",ref:String(template.template_ref),label:name(template)}} /></div> : <ObjectReference value={{kind:"strategy",ref:String((selected.binding.source as JSONObject)?.strategy_ref || "")}} />}</div>
     {template ? <Form idPrefix={`tr-strategy-${formId}`} key={String(selected.binding.binding_id)} schema={schema as RJSFSchema} formData={values} validator={validator} uiSchema={uiSchema} widgets={{ reference: ReferenceWidget }}
-      experimental_defaultFormStateBehavior={NO_DEFAULTS} formContext={{ rememberFactor: (ref: string, row: JSONObject) => factorRows.current.set(ref, row) }}
+      experimental_defaultFormStateBehavior={NO_DEFAULTS} formContext={{ productScopeKey: scope + text, rememberFactor: (ref: string, row: JSONObject) => factorRows.current.set(ref, row) }}
       onChange={(event) => {
         const next = event.formData || {};
         if (JSON.stringify(next) === JSON.stringify(values)) return;

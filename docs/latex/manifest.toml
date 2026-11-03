@@ -1,158 +1,247 @@
-schema_version = 1
-title = "TradeResearch 项目文档合集"
-description = "功能、架构、实现方式与通用运维手册。"
-edition = "0.2.0"
+schema_version = 2
+title = "TradeResearch 项目手册"
+description = "按用户工作流程、领域模型、系统架构、接口和运行验收组织。"
+edition = "0.4.1"
 
 [[changes]]
-version = "0.2.0"
-date = "2026-11-02"
-summary = "按功能与实现组织正文；运维方法与具体变更档案分离。"
+version = "0.4.1"
+date = "2026-11-03"
+summary = "更新产品组、分类和测试配置的共享多选与路径规则，区分多节点 Bundle 安装，并明确报告缺失附件的保留政策。"
+
+[[changes]]
+version = "0.4.0"
+date = "2026-11-03"
+summary = "重组章节并将业务流程改画为客户端、Manager、队列、执行节点和数据面的真实交互路径，标明数据内容、端口与待接通链路。"
 
 [[sections]]
-id = "user-guide"
-title = "用户使用指南"
-audience = "平台用户、研究人员与命令行用户"
-purpose = "按任务介绍平台使用流程、研究对象和常见问题。"
+id = "research-workflows"
+title = "研究人员使用流程"
+audience = "平台用户、研究人员和 CLI 使用者"
+purpose = "按实际先后说明登录、研究准备、运行、查看结果和发布报告。"
 
-[[sections.documents]]
-title = "准备产品与因子"
-source = "product_docs/guides/prepare-products-and-factors.md"
-slug = "prepare-products-and-factors"
+[[sections.chapters]]
+id = "login-and-inputs"
+title = "登录与准备研究输入"
+audience = "首次登录的平台用户、研究人员和 CLI 使用者"
+purpose = "确认 Manager、用户身份和研究输入，再进入配置流程。"
 
-[[sections.documents]]
-title = "运行 IC 测试与回测"
-source = "product_docs/guides/run-tests.md"
-slug = "run-tests"
-
-[[sections.documents]]
-title = "阅读任务结果"
-source = "product_docs/guides/read-results.md"
-slug = "read-results"
-
-[[sections.documents]]
-title = "开展研究"
-source = "product_docs/guides/research-workflow.md"
-slug = "research-workflow"
-
-[[sections.documents]]
+[[sections.chapters.documents]]
 title = "自动化与 CLI"
 source = "product_docs/guides/automation-and-cli.md"
 slug = "automation-and-cli"
 
-[[sections.documents]]
-title = "核心对象"
-source = "product_docs/concepts/core-objects.md"
-slug = "core-objects"
+[[sections.chapters.documents]]
+title = "CLI 设备授权登录流程"
+source = "docs/latex/flows/cli-device-approval.tex"
 
-[[sections.documents]]
-title = "研究、报告与证据"
-source = "product_docs/concepts/research-model.md"
-slug = "research-model"
+[[sections.chapters.documents]]
+title = "准备产品与因子"
+source = "product_docs/guides/prepare-products-and-factors.md"
+slug = "prepare-products-and-factors"
 
-[[sections.documents]]
+[[sections.chapters]]
+id = "run-and-review"
+title = "配置运行并阅读结果"
+audience = "研究人员、测试人员和结果读者"
+purpose = "从输入校验一路追踪到冻结运行配置、任务尝试和生成物。"
+
+[[sections.chapters.documents]]
+title = "运行 IC 测试与回测"
+source = "product_docs/guides/run-tests.md"
+slug = "run-tests"
+
+[[sections.chapters.documents]]
+title = "研究任务运行流程"
+source = "docs/latex/flows/research-run.tex"
+
+[[sections.chapters.documents]]
 title = "运行配置、任务与生成物"
 source = "product_docs/concepts/runspec-job-artifact.md"
 slug = "runspec-job-artifact"
 
-[[sections.documents]]
+[[sections.chapters.documents]]
+title = "阅读任务结果"
+source = "product_docs/guides/read-results.md"
+slug = "read-results"
+
+[[sections.chapters.documents]]
 title = "任务失败排查"
 source = "product_docs/troubleshooting/job-failures.md"
 slug = "job-failures"
 
+[[sections.chapters]]
+id = "research-evidence"
+title = "组织研究证据并发布报告"
+audience = "研究负责人、报告作者和审核者"
+purpose = "区分研究上下文、正式证据和对外发布的报告版本。"
+
+[[sections.chapters.documents]]
+title = "开展研究"
+source = "product_docs/guides/research-workflow.md"
+slug = "research-workflow"
+
+[[sections.chapters.documents]]
+title = "报告发布与访问流程"
+source = "docs/latex/flows/report-publication.tex"
+
 [[sections]]
-id = "architecture-design"
-title = "技术方案与架构设计"
-audience = "架构师、研发人员和维护人员"
-purpose = "描述系统边界、运行组件与业务实现方式。"
+id = "domain-and-architecture"
+title = "领域模型与系统架构"
+audience = "架构师、研发人员和平台维护人员"
+purpose = "解释业务对象、权限边界、系统拓扑和执行职责。"
 
-[[sections.documents]]
-title = "系统总览"
-source = "product_docs/implementation/system-overview.md"
-slug = "system-overview"
+[[sections.chapters]]
+id = "research-domain"
+title = "研究对象、权限与协作"
+audience = "研究系统开发者、平台管理员和研究负责人"
+purpose = "说明 Workspace、Research、Report、Evidence 和访问授权的关系。"
 
-[[sections.documents]]
-title = "网络拓扑"
-source = "product_docs/concepts/network-topology.md"
-slug = "network-topology"
+[[sections.chapters.documents]]
+title = "核心对象"
+source = "product_docs/concepts/core-objects.md"
+slug = "core-objects"
 
-[[sections.documents]]
-title = "系统图例与关键流程图"
-source = "docs/latex/figures.md"
-slug = "system-figures"
+[[sections.chapters.documents]]
+title = "研究、报告与证据"
+source = "product_docs/concepts/research-model.md"
+slug = "research-model"
 
-[[sections.documents]]
+[[sections.chapters.documents]]
 title = "用户与权限"
 source = "product_docs/concepts/identity-permissions.md"
 slug = "identity-permissions"
 
-[[sections.documents]]
-title = "回测与交易"
-source = "product_docs/concepts/backtest-trading.md"
-slug = "backtest-trading"
-
-[[sections.documents]]
-title = "因子表示"
-source = "product_docs/concepts/factor-representation.md"
-slug = "factor-representation"
-
-[[sections.documents]]
-title = "Web 与 Swift 导航"
-source = "product_docs/implementation/web-swift-navigation.md"
-slug = "web-swift-navigation"
-
-[[sections.documents]]
+[[sections.chapters.documents]]
 title = "研究报告实现"
 source = "product_docs/implementation/research-reports.md"
 slug = "research-reports"
 
-[[sections.documents]]
+[[sections.chapters]]
+id = "system-boundaries"
+title = "系统边界与网络拓扑"
+audience = "系统架构师、部署人员和客户端开发者"
+purpose = "区分客户端、Manager、执行节点、数据节点和个人本机运行时。"
+
+[[sections.chapters.documents]]
+title = "系统总览"
+source = "product_docs/implementation/system-overview.md"
+slug = "system-overview"
+
+[[sections.chapters.documents]]
+title = "网络拓扑"
+source = "product_docs/concepts/network-topology.md"
+slug = "network-topology"
+
+[[sections.chapters.documents]]
+title = "客户端与 Manager 之间的数据路由"
+source = "docs/latex/flows/network-data-routing.tex"
+
+[[sections.chapters.documents]]
+title = "系统结构图与图例"
+source = "docs/latex/figures.md"
+slug = "system-figures"
+
+[[sections.chapters]]
+id = "factor-and-execution"
+title = "因子、策略与回测执行"
+audience = "量化研究开发者、执行器维护人员和回测使用者"
+purpose = "从因子表达式追踪到策略意图、交易事件和可审计结果。"
+
+[[sections.chapters.documents]]
+title = "因子表示"
+source = "product_docs/concepts/factor-representation.md"
+slug = "factor-representation"
+
+[[sections.chapters.documents]]
+title = "回测与交易"
+source = "product_docs/concepts/backtest-trading.md"
+slug = "backtest-trading"
+
+[[sections.chapters.documents]]
+title = "因子目录与同步流程"
+source = "docs/latex/flows/factor-catalog-sync.tex"
+
+[[sections.chapters]]
+id = "client-and-compliance"
+title = "客户端导航、合规与数据边界"
+audience = "Web、Swift、Manager 开发者和安全审核者"
+purpose = "说明共享页面导航、服务端权威、输入冻结和权限控制。"
+
+[[sections.chapters.documents]]
+title = "Web 与 Swift 导航"
+source = "product_docs/implementation/web-swift-navigation.md"
+slug = "web-swift-navigation"
+
+[[sections.chapters.documents]]
 title = "代码架构与合规控制"
 source = "product_docs/implementation/compliance-architecture.md"
 slug = "compliance-architecture"
 
-[[sections.documents]]
-title = "技术文档实现"
-source = "product_docs/implementation/technical-docs.md"
-slug = "technical-docs"
-
 [[sections]]
-id = "api-reference"
-title = "API 与字段参考"
-audience = "客户端、集成开发者和测试配置维护人员"
-purpose = "提供当前登记的业务 API、CLI 和测试字段参考；具体版本的 schema 仍以运行服务返回为准。"
+id = "interfaces-and-docs"
+title = "接口与文档参考"
+audience = "集成开发者、客户端维护者和文档维护者"
+purpose = "提供稳定接口入口、字段解释和公开技术文档维护规则。"
 
-[[sections.documents]]
+[[sections.chapters]]
+id = "api-and-fields"
+title = "API、CLI 与测试字段"
+audience = "客户端开发者、集成开发者和测试配置维护者"
+purpose = "从运行时接口和字段注册契约读取当前可用能力。"
+
+[[sections.chapters.documents]]
 title = "API 与 CLI 参考"
 source = "product_docs/reference/api-cli-reference.md"
 slug = "api-cli-reference"
 
-[[sections.documents]]
+[[sections.chapters.documents]]
 title = "测试字段参考"
 source = "product_docs/reference/test-fields.md"
 slug = "test-fields"
 
-[[sections.documents]]
+[[sections.chapters]]
+id = "documentation-system"
+title = "技术文档的实现与维护"
+audience = "平台文档作者和技术文档服务维护者"
+purpose = "说明文档如何登记、编译、公开读取和退役。"
+
+[[sections.chapters.documents]]
+title = "技术文档实现"
+source = "product_docs/implementation/technical-docs.md"
+slug = "technical-docs"
+
+[[sections.chapters.documents]]
 title = "技术文档发布契约"
 source = "product_docs/reference/documentation-contract.md"
 slug = "documentation-contract"
 
 [[sections]]
-id = "testing"
-title = "测试与验收"
-audience = "研发人员、测试人员和发布审核人员"
-purpose = "说明测试执行机制。"
+id = "acceptance-and-operations"
+title = "验收与运行维护"
+audience = "测试人员、发布审核人员、部署人员和管理员"
+purpose = "给出执行验收、分阶段发布、恢复和回退时需要核对的证据。"
 
-[[sections.documents]]
+[[sections.chapters]]
+id = "execution-acceptance"
+title = "测试执行与验收"
+audience = "测试人员、研发人员和发布审核人员"
+purpose = "核对字段、冻结输入、执行路由、任务状态和生成物之间的一致性。"
+
+[[sections.chapters.documents]]
 title = "测试执行链路"
 source = "product_docs/implementation/test-execution.md"
 slug = "test-execution"
 
-[[sections]]
-id = "operations"
-title = "部署与日常运维"
-audience = "部署人员、管理员与维护人员"
-purpose = "说明部署、监控、容量、备份和回退机制，不收录具体迁移计划或现场执行记录。"
+[[sections.chapters]]
+id = "deployment-operations"
+title = "部署、健康检查与恢复"
+audience = "部署人员、管理员和服务维护人员"
+purpose = "按授权、备份、准备、激活、验收和回退的顺序执行发布。"
 
-[[sections.documents]]
+[[sections.chapters.documents]]
+title = "分阶段部署与回退流程"
+source = "docs/latex/flows/deployment-release.tex"
+
+[[sections.chapters.documents]]
 title = "服务部署与运行维护"
 source = "docs/latex/operations.md"

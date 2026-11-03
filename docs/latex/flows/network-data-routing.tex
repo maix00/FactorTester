@@ -1,0 +1,27 @@
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\scriptsize]
+  \node[trFlowLaneClient,text width=2.3cm] (client) at (0,0.7) {React Web / Swift / CLI\\用户选定客户端};
+  \node[trFlowLaneManager,text width=2.3cm] (managera) at (2.9,0.7) {Manager A\\用户入口 / Keycloak A};
+  \node[trFlowLaneManager,text width=2.3cm] (managerb) at (5.8,0.7) {Manager B\\来源或执行目标 / Keycloak B};
+  \node[trFlowLaneSystem,text width=2.3cm] (broker) at (8.7,0.7) {RabbitMQ\\目标隔离队列};
+  \node[trFlowLaneData,text width=2.3cm] (worker) at (11.6,0.7) {Manager 管理的\\Celery / Nautilus worker};
+  \node[trFlowLaneData,text width=2.3cm] (bundle) at (14.5,0.7) {同主机 Data I/O\\Bundle / 数据源};
+  \foreach \x in {0,2.9,5.8,8.7,11.6,14.5} {\draw[trFlowLifeline] (\x,.15) -- (\x,-16.5);}
+
+  \draw[trFlowControlBoth] (0,-1.9) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {1. HTTPS 7998：OIDC 会话、业务 JSON、配置/预览、任务状态与元数据} (2.9,-1.9);
+  \draw[trFlowBytesBoth] (0,-3.4) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {2. 客户端 TCP 7997：短期 \texttt{client\_upload} / \texttt{client\_download} 票据授权的文件字节} (2.9,-3.4);
+  \draw[trFlowMetaSync] (5.8,-4.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {3. Manager API TCP 7998：B 按 cursor 同步账户域对象版本 metadata 与已启用的 Job 投影；身份变更流另有独立合同，当前未端到端接通} (2.9,-4.9);
+  \draw[trFlowFederation] (2.9,-6.4) -- node[midway,above=2pt,trFlowMessage,text width=3.9cm] {4. WireGuard peer control TCP 17998：签名代理请求、Transfer/Attempt 上下文与短期 peer ticket} (5.8,-6.4);
+  \draw[trFlowBytes] (2.9,-7.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {5. WireGuard peer data TCP 17997：源码、提交物、附件或 Artifact 文件；按对象身份、长度和 SHA-256 校验} (5.8,-7.9);
+  \draw[trFlowControl] (5.8,-9.4) -- node[midway,above=2pt,trFlowMessage,text width=3.7cm] {6. dispatcher 发出 \texttt{job\_id}、attempt、deployment、hash 等小型版本化信封} (8.7,-9.4);
+  \draw[trFlowControl] (8.7,-10.9) -- node[midway,above=2pt,trFlowMessage,text width=3.7cm] {7. RabbitMQ 只路由信封；匹配目标的 worker 领取 Job，不接收行情数组或源码正文} (11.6,-10.9);
+  \draw[trFlowLocal] (14.5,-12.4) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {8. 同主机：Bundle → Data I/O → worker，按需读取有界 Arrow 批次} (11.6,-12.4);
+  \draw[trFlowControl] (11.6,-13.9) -- node[midway,above=2pt,trFlowMessage,text width=3.9cm] {9. Worker 将进度、结果摘要与 Artifact 清单回写目标 Job 服务；大文件留在所属对象存储} (5.8,-13.9);
+  \node[draw=trAmber!80!black,fill=trPaleAmber,rounded corners=2pt,align=center,text width=5.6cm,inner sep=4pt,font=\scriptsize] (flight) at (11.7,-15.7) {独立数据主机到 worker 的跨主机 Arrow Flight 尚未接通；虚线只表示缺失能力，不表示可用流量};
+  \draw[trFlowPending] (14.5,-13.15) -- (flight.north east);
+\end{tikzpicture}
+\caption{客户端、Manager、队列、worker 和数据节点之间的具体网络与对象流。7998 与 17998 传递控制/元数据，7997 与 17997 承载受授权文件字节，RabbitMQ 只携带任务引用。}
+\end{figure}
+
+\noindent\textbf{安全和兼容边界：}Manager A 与 B 各自验证本地身份、权限和对象来源。客户端会话不跨 Manager 复用；稳定身份映射也不会复制密码或 MFA。7998/7997 是客户端可达端点，17998/17997 只绑定 WireGuard 私有地址，测试服务端口留在 Manager 后方。客户端、Manager、worker 的版本可以不同；每条请求按 issuer、API、服务部署、Bundle 和数据能力合同核验，不以版本号相同替代兼容性检查。

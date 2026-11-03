@@ -5,10 +5,12 @@ import { request } from "../configuration/api.ts";
 import { DetailsCancelButton, DetailsPanel } from "./details-panel.tsx";
 import { useCompactLayout } from "../configuration/layout.ts";
 import { notify } from "../notifications/core.ts";
+import { ProductPathPicker } from "./product-path-picker.tsx";
 
 type Group = Record<string, any>;
 
-export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
+export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel, embedded = false }: {
+  embedded?: boolean;
   group?: Group | null;
   onSaved: (value: Group) => void;
   onDeleted: () => void;
@@ -17,8 +19,8 @@ export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
   const { t } = useTranslation();
   const mobile = useCompactLayout();
   const [name, setName] = useState(String(group?.name || ""));
-  const [paths, setPaths] = useState((Array.isArray(group?.paths) ? group.paths : []).map((value: unknown) => String(value)).join("\n"));
-  const [categories, setCategories] = useState<string[]>((Array.isArray(group?.category_ids) ? group.category_ids : []).map((value: unknown) => String(value)));
+  const [paths, setPaths] = useState(() => (Array.isArray(group?.paths) ? group.paths : []).map((value: unknown) => String(value)).join("\n"));
+  const [categories, setCategories] = useState<string[]>(() => (Array.isArray(group?.category_ids) ? group.category_ids : []).map((value: unknown) => String(value)));
   const [categoryOptions, setCategoryOptions] = useState<{ value: string; label: string }[]>([]);
   const [categoryLoading, setCategoryLoading] = useState(true);
   const [categoryError, setCategoryError] = useState("");
@@ -74,15 +76,15 @@ export function ProductGroupEditor({ group, onSaved, onDeleted, onCancel }: {
     {error ? <Alert type="error" message={error} showIcon /> : null}
     <Form layout="vertical" requiredMark={false}>
       <Form.Item label={t("productGroup.name")}><Input aria-label={t("productGroup.name")} value={name} onChange={(event) => setName(event.target.value)} /></Form.Item>
-      <Form.Item label={t("productGroup.paths")} help={t("productGroup.pathsHint")}>
-        <Input.TextArea aria-label={t("productGroup.paths")} className="tr-source-input" autoSize={{ minRows: 6 }} value={paths} onChange={(event) => setPaths(event.target.value)} />
+      <Form.Item label={t("productGroup.paths")}>
+        <ProductPathPicker label={t("productGroup.paths")} value={paths} onChange={setPaths} disabled={busy} categoryIds={categories} />
       </Form.Item>
       <Form.Item label={t("productGroup.categories")} help={t("productGroup.categoriesHint")}>
         <Select mode="multiple" showSearch optionFilterProp="label" loading={categoryLoading} disabled={categoryLoading || !!categoryError} aria-label={t("productGroup.categories")} value={categories} options={categoryOptions} onChange={setCategories} />
       </Form.Item>
       {categoryError ? <Alert type="error" showIcon message={t("productGroup.categoriesLoadFailed")} description={categoryError} action={<Button onClick={() => setCategoryRevision((value) => value + 1)}>{t("retry")}</Button>} /> : null}
-      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={categoryLoading || !!categoryError} onClick={() => void save()}>{t("configuration.save")}</Button><DetailsCancelButton disabled={busy} closePanel={mobile && !groupRef} onCancel={onCancel}/>{groupRef ? <Popconfirm title={t("productGroup.deleteTitle")} description={t("productGroup.deleteHint")} onConfirm={() => void remove()} okText={t("productGroup.deleteConfirm")} cancelText={t("configuration.cancel")}><Button danger loading={busy}>{t("productGroup.delete")}</Button></Popconfirm> : null}</div>
+      <div className="tr-inline-actions"><Button type="primary" loading={busy} disabled={categoryLoading || !!categoryError} onClick={() => void save()}>{t("configuration.save")}</Button><DetailsCancelButton disabled={busy} closePanel={mobile && !groupRef && !embedded} onCancel={onCancel}/>{groupRef ? <Popconfirm title={t("productGroup.deleteTitle")} description={t("productGroup.deleteHint")} onConfirm={() => void remove()} okText={t("productGroup.deleteConfirm")} cancelText={t("configuration.cancel")}><Button danger loading={busy}>{t("productGroup.delete")}</Button></Popconfirm> : null}</div>
     </Form>
   </div>;
-  return mobile && !groupRef ? <DetailsPanel title={t("productGroup.create")} onClose={onCancel}>{content}</DetailsPanel> : content;
+  return mobile && !groupRef && !embedded ? <DetailsPanel title={t("productGroup.create")} onClose={onCancel}>{content}</DetailsPanel> : content;
 }
