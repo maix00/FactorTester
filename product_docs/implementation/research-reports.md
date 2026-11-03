@@ -1,25 +1,25 @@
-## 职责 {#responsibility}
+## 报告对象与阅读关系 {#responsibility}
 
-研究报告保存结构化章节、小节、对象链接与证据引用。Research 是协作对象，一个 Research 可以包含多份 Report；Report 不是 Research 的同义词。
+Report 保存结构化章节、对象链接和 Evidence 引用；Research 提供协作上下文，一个 Research 可以包含多份 Report。Report 和 Research 可以分别授权，不能把“报告存放在服务器”直接解释成“报告已共享”。
 
-## 存储与发布 {#storage-publishing}
+报告树由领域 authoring 服务维护。ReportBranch 是可编辑版本线；已发布内容是供读者读取的只读投影。插入、移动和删除操作由报告树领域逻辑校验父子类型、顺序和循环关系，不由底层文档数据库代替。
 
-authoring 后端维护当前可写树与提交事务；发布生成只读投影。本机报告使用内容寻址的树节点和 HEAD，SQLite 索引用于定位并可重建，Git 记录工作区变更。
+## 编辑、提交和发布 {#storage-publishing}
 
-研究入口和具体 Research 均可列出报告；列表的名称、所属研究和研究身份可以打开相应详情。电脑客户端的本机报告与 Manager 报告通过位置列区分。
+编辑者在草稿中通过稳定 component ID 指定内容位置，提交后获得 revision 或操作收据。发布前校验结构、对象引用、Evidence 绑定和目标可见范围。用户明确发布后，系统生成对应的只读阅读投影；后续编辑应进入新的草稿或分支，不改写已发布版本。
 
-客户端创建的研究内容与服务器 Profile Agent 创建的内容共享同一结构化 authoring 和发布协议。共享/公开时只发布允许的投影：报告可读不等于文件可下载，Research 的共享范围才决定关联 Evidence/Artifact 的下载范围。
+客户端创建的本机报告需要显式发布，已有发布记录按服务能力分批检查更新。服务器 Profile Agent 创建的报告从其授权工作区读取。跨 Manager 的摘要、对象字节和报告正文由各自所有者提供；不可把可见元数据误认为拥有下载权。
 
-## 规范代码入口 {#canonical-paths}
+## 阅读、同步和并发边界 {#reading-sync}
 
-- 报告 authoring：`tools/cli/release/research_reporting/authoring/`
-- 报告展示服务：`server/services/research_report_presentations.py`
-- 本机目录与原生桥：`tools/cli/release/research_reporting/local_catalog.py`、`apple/Sources/Features/Web/LocalResearchBridge.swift`
-- Manager 报告与授权：`server/manager/http/research_catalog_routes.py`、`server/manager/services/research_couchdb_publication.py`
-- React 报告页面：`web/app/src/pages/research.tsx`、`web/app/src/components/local-research-page.tsx`
+React 阅读器按需加载章节、对象链接和允许显示的证据摘要，不把整个研究树或全部生成物一次发送给客户端。报告读者能看正文，不代表能下载底层 Artifact；下载权限由 Research 和对象存储端分别校验。
 
-## 边界 {#boundaries}
+报告同步或发布暂不可达时，应保留待同步状态和原有草稿，不把失败伪装为已发布。发生并发 revision 冲突时，必须保留双方内容并返回冲突；禁止用 last-write-wins 静默覆盖。CouchDB 提供文档 revision、冲突检测和附件存储，报告树操作仍由领域服务负责。
 
-研究要求、义务和证据是不同对象；界面显示内容存在，不等于绑定自动成立。普通小节与系统特殊小节共享折叠交互，但系统绑定只能通过正式 authoring 协议变更。
+规范代码入口：
 
-证据可以跨 Research 复用，但证据所有权、报告可见性、Research 共享和文件下载是独立权限判断。阅读器按需加载章节和对象传输，不把完整研究树、所有生成物或服务器目录一次性发给客户端。
+- 报告 authoring：tools/cli/release/research_reporting/authoring/
+- 报告展示服务：server/services/research_report_presentations.py
+- 本机目录与原生桥：tools/cli/release/research_reporting/local_catalog.py、apple/Sources/Features/Web/LocalResearchBridge.swift
+- Manager 报告与授权：server/manager/http/research_catalog_routes.py、server/manager/services/research_couchdb_publication.py
+- React 报告页面：web/app/src/pages/research.tsx、web/app/src/components/local-research-page.tsx

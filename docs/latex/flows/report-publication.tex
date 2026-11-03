@@ -1,0 +1,51 @@
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\scriptsize]
+  \node[trFlowLaneClient,text width=2.55cm] (author) at (0,0.7) {报告作者端\\Web / Swift / CLI};
+  \node[trFlowLaneManager,text width=2.55cm] (manager) at (3,0.7) {Manager A\\7998 报告 API};
+  \node[trFlowLaneIdentity,text width=2.55cm] (keycloak) at (6,0.7) {A 的 Keycloak\\身份与 UMA 对象授权};
+  \node[trFlowLaneSystem,text width=2.55cm] (couch) at (9,0.7) {A 报告存储\\CouchDB revision / 附件索引};
+  \node[trFlowLaneData,text width=2.55cm] (data) at (12,0.7) {A 对象数据面\\7997 / 附件对象库};
+  \foreach \x in {0,3,6,9,12} {\draw[trFlowLifeline] (\x,.15) -- (\x,-16.2);}
+
+  \draw[trFlowControl] (0,-1.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {1. 作者提交草稿操作：research\_id、report\_id、branch\_ref、稳定 component\_id、Evidence ref 与 expected revision；HTTPS 7998} (3,-1.9);
+  \draw[trFlowControl] (3,-3.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {2. A 以当前登录主体核对 Research、Report 的读写范围；报告名或列表可见不代表有编辑权} (6,-3.4);
+  \draw[trFlowControl] (3,-4.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {3. 权限通过后，A 按 expected revision 向 CouchDB 写入分支操作与作者回执} (9,-4.9);
+  \draw[trFlowControl] (9,-6.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {4. CouchDB 返回新 revision；并发基线不匹配时保留双方内容并返回 conflict} (3,-6.4);
+  \draw[trFlowControl] (0,-7.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {5. 新增附件时，客户端经 A:7998 申请 research\_attachment 上传能力，并声明 object ID、长度与 SHA-256} (3,-7.9);
+  \draw[trFlowControl] (3,-9.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {6. A 返回短期 client\_upload bearer 与 A:7997 URL；能力绑定当前主体、附件对象和本次传输} (0,-9.4);
+  \draw[trFlowBytes] (0,-10.9) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {7. 客户端直接向 A:7997 PUT 附件字节；数据面验证声明长度与 SHA-256 后才提升到附件对象库} (12,-10.9);
+  \draw[trFlowControl] (0,-12.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {8. 用户显式发布时，经 A:7998 提交 source-free 投影；A 重查发布权限、树结构、附件与 Evidence 引用} (3,-12.4);
+  \draw[trFlowControl] (3,-13.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {9. A 将只读 publication projection、稳定对象引用与附件 hash 写入报告存储；文件字节不进入控制 JSON} (9,-13.9);
+  \draw[trFlowControl] (3,-15.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {10. A 返回 publication\_ref 与 revision；阅读者再经 A:7998 按章节和允许展示的摘要分页读取} (0,-15.4);
+\end{tikzpicture}
+\caption{报告控制元数据、附件字节和发布投影的路径。A:7998 处理授权及 revision；客户端持短期能力将附件直接送到 A:7997；CouchDB 保存报告 revision 与索引，附件对象库只接收完整性校验通过的字节。}
+\end{figure}
+
+\noindent\textbf{本机草稿与服务器报告：}桌面端创建的本机报告先留在该用户的本地工作区；明确发布后才由客户端把所选分支和发布投影提交给 Manager A。React/Web 与移动端直接编辑服务器报告时，草稿 revision 存在 A 的报告存储。此两种路径不可因同一标题或 report\_id 被视为自动双向同步。新报告附件经 7997 传输并独立校验，7998 投影只携带稳定引用、大小与 hash；Evidence ref 指向研究证据对象，其上传、授权和下载均按 Evidence 的对象范围单独处理。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\scriptsize]
+  \node[trFlowLaneClient,text width=2.4cm] (reader) at (0,0.7) {获授权的阅读者\\React / Swift / CLI};
+  \node[trFlowLaneManager,text width=2.4cm] (managerb) at (2.8,0.7) {Manager B\\7998 入口 / 7997 接收};
+  \node[trFlowLaneManager,text width=2.4cm] (managera) at (5.6,0.7) {Manager A\\7998 来源 API};
+  \node[trFlowLaneIdentity,text width=2.4cm] (keycloak) at (8.4,0.7) {A 的 Keycloak\\来源端权限判断};
+  \node[trFlowLaneData,text width=2.4cm] (store) at (11.2,0.7) {A 的源对象库\\CouchDB 索引 / 附件};
+  \node[trFlowLaneData,text width=2.4cm] (peerdata) at (14,0.7) {A 的对等数据面\\17997 origin\_read};
+  \foreach \x in {0,2.8,5.6,8.4,11.2,14} {\draw[trFlowLifeline] (\x,.15) -- (\x,-14.7);}
+
+  \draw[trFlowControl] (0,-1.9) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {1. 阅读者请求已授权可见的 publication\_ref；连接当前入口 B 的 HTTPS 7998} (2.8,-1.9);
+  \draw[trFlowFederation] (2.8,-3.4) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {2. B 按来源 Manager ID，经已登记 peer-control 17998 请求 A 的章节/组件；不按同名对象猜来源} (5.6,-3.4);
+  \draw[trFlowControl] (5.6,-4.9) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {3. A 通过自己的 Keycloak/UMA 复核当前主体的 Report、Research 读取范围} (8.4,-4.9);
+  \draw[trFlowFederation] (5.6,-6.4) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {4. A 返回受限章节投影、对象 metadata 与来源 ref；附件字节不进入控制 JSON} (2.8,-6.4);
+  \draw[trFlowControl] (2.8,-7.9) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {5. B 经自己的 7998 向客户端返回允许显示的正文/摘要；A 保有原始报告与附件} (0,-7.9);
+  \draw[trFlowFederation] (2.8,-9.4) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {6. 读取 Evidence/附件时，B 另行向 A 的 17998 申请对象 Transfer/Attempt 上下文} (5.6,-9.4);
+  \draw[trFlowFederation] (5.6,-10.9) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {7. A 重验来源端下载权限并回签短期 origin\_read；票据绑定对象身份、长度、SHA-256 与本次 Attempt} (2.8,-10.9);
+  \draw[trFlowLocal] (11.2,-12.4) -- node[midway,above=2pt,trFlowMessage,text width=3.8cm] {8. A 的 17997 transfer worker 从本机对象库读取授权文件；CouchDB 不直接暴露 peer 端口} (14,-12.4);
+  \draw[trFlowBytes] (14,-13.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {9. B 的 7997 handler 经 WireGuard 拉取 A:17997 字节流，核验长度/hash 后才交给阅读请求} (2.8,-13.9);
+\end{tikzpicture}
+\caption{跨 Manager 报告阅读路径。B 通过 17998 访问来源 A 的受限章节投影；读取文件时 A 重新授权，由 B:7997 handler 经 WireGuard 从 A:17997 拉取，再按长度与 hash 校验。报告存储不会直接暴露 peer 数据端口。}
+\end{figure}
+
+\noindent\textbf{拒绝与撤权：}B 的登录并不代替 A 的来源授权。稳定身份、来源 Manager、Research/Report scope 或对象 hash 任一核验失败时，A 必须拒绝该次读取；A 不在线时，B 不能用旧摘要推断仍有下载权。撤销分享后，服务端须重新判断授权，并使短期传输票据到期或失效。没有跨 Manager 映射的本机报告保持本机可读状态，不会因另一个 Manager 上出现同名报告而被认领。

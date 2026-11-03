@@ -1,0 +1,23 @@
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\scriptsize]
+  \node[trFlowLaneClient,text width=2.8cm] (operator) at (0,0.7) {发布操作员\\受控工作站};
+  \node[trFlowLaneSystem,text width=2.8cm] (origin) at (4,0.7) {Git origin / 固定构建产物\\SHA 与 tree 身份};
+  \node[trFlowLaneManager,text width=2.8cm] (intranet) at (8,0.7) {机构内网 Manager A\\独立配置、数据与服务};
+  \node[trFlowLaneManager,text width=2.8cm] (public) at (12,0.7) {公网 Manager B\\独立配置、数据与服务};
+  \foreach \x in {0,4,8,12} {\draw[trFlowLifeline] (\x,.15) -- (\x,-14.7);}
+
+  \draw[trFlowControl] (0,-1.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {1. 发布程序先核对明确授权、干净工作区、目标分支包含关系与目标列表；条件不全则不推送、不传输} (4,-1.9);
+  \draw[trFlowControl] (4,-3.4) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {2. 固定候选 commit / tree 和构建产物，记录受影响文件与内容摘要，供后续各目标逐项比对} (0,-3.4);
+  \draw[trFlowRelease] (0,-4.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {3. 操作员经部署配置指定的受控通道向 A 请求 preflight、备份和恢复校验；不使用应用 7998/7997 端口} (8,-4.9);
+  \draw[trFlowRelease] (8,-6.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {4. A 在本机备份配置与数据，校验备份并检查恢复路径，再回送目标版本和检查回执} (0,-6.4);
+  \draw[trFlowRelease] (0,-7.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {5. A 的前置条件通过后，操作员传送同一固定产物；A 暂存、校验内容身份并在受控窗口激活} (8,-7.9);
+  \draw[trFlowRelease] (0,-9.4) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {6. 操作员对 B 单独请求 preflight、备份与恢复校验；B 不读取或继承 A 的业务数据库} (12,-9.4);
+  \draw[trFlowRelease] (12,-10.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {7. B 在本机备份配置与数据，验证恢复路径后回送自己的检查回执} (0,-10.9);
+  \draw[trFlowRelease] (0,-12.4) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {8. B 仅在自身前置条件通过后接收固定产物、校验并激活；目标传输通道由部署配置决定} (12,-12.4);
+  \draw[trFlowRelease] (8,-13.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {9. A、B 分别回报实际运行版本、tree/文件 hash、健康和代表性业务读取；操作员逐目标记录结果} (0,-13.9);
+\end{tikzpicture}
+\caption{内网 Manager A 与公网 Manager B 的独立发布路径。候选源、备份、激活和验收回执分别核对；Git 推送或容器启动都不能单独证明业务发布完成。}
+\end{figure}
+
+\noindent\textbf{失败处理与拓扑：}任何一端的授权、备份校验或恢复检查失败时，该端停止在激活之前；另一端仍须按自己的批准范围单独决定是否继续。激活后失败，只能用该端的对象映射和备份回退，再检查活跃/删除对象、未处理冲突与同步 head。A、B 的 Keycloak Realm、用户数据、对象来源、执行节点和回退映射各自归属。部署通道由目标环境配置决定，不能臆造一个通用端口；Manager 版本可以不同，互通与验收按实际 tree、文件内容和接口能力判断，不让版本差异改变机器在拓扑中的角色。
