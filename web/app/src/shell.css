@@ -737,6 +737,7 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-property-list dd { margin:0; text-align:right; color:var(--text); overflow-wrap:anywhere; min-width:0; font-variant-numeric:tabular-nums; }
 .tr-property-groups.has-controls .tr-property-list > div { min-height:42px; padding:7px 0; align-items:center; }
 .tr-property-groups.has-controls .tr-property-list dd { display:flex; justify-content:flex-end; align-items:center; gap:8px; }
+.tr-property-groups.has-controls .ant-select { text-align:start; }
 .tr-property-groups.has-controls .tr-property-list > .is-wide dd { justify-content:flex-start; }
 .tr-property-list > .is-wide { grid-template-columns:1fr; gap:8px; }
 .tr-property-list > .is-wide dd { text-align:left; }
