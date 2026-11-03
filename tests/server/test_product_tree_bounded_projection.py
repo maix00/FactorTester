@@ -36,3 +36,24 @@ def test_empty_out_of_range_page_does_not_project_metadata(directory):
     result=ClientProductCatalogMixin.contract_tree_page(page=1000,limit=25)
     assert result['nodes']==[] and result['total']==5000
     assert directory==[]
+
+def test_warm_search_reuses_metadata_and_empty_scope_does_not_fall_back(directory):
+    ClientProductCatalogMixin.contract_tree_page(query='source',page=1,limit=25)
+    assert len(directory)==5000
+    ClientProductCatalogMixin.contract_tree_page(query='source',page=2,limit=25)
+    assert len(directory)==5000
+    result=ClientProductCatalogMixin.contract_tree_page(source_ids=(),page=1,limit=25)
+    assert result['total']==0 and result['nodes']==[]
+
+
+def test_explicit_catalog_search_includes_non_contract_products(directory, monkeypatch):
+    from server.modules.products import product_category_views
+    from server.modules.shared import price_services
+    rows = price_services.cached_contracts()
+    monkeypatch.setattr(price_services, 'cached_contracts', lambda: ())
+    monkeypatch.setattr(product_category_views, 'tree_for_path', lambda *a, **k: (
+        {'Product': {'$OBJECTS$': rows}}, '',
+    ))
+    result = ClientProductCatalogMixin.contract_tree_page(catalog=True, query='P04999', limit=50)
+    assert result['total'] == 1 and result['nodes'][0]['product_ref'] == 'product:Product/P04999'
+    assert ClientProductCatalogMixin.contract_tree_page(query='P04999')['total'] == 0

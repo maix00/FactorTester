@@ -8,6 +8,8 @@ projects those declarations for Web and embedded clients.
 from __future__ import annotations
 
 from functools import lru_cache
+from collections import OrderedDict
+from threading import RLock
 from typing import Any, Iterable, Mapping
 
 from sources.registry import installed_bundles, load_all_sources
@@ -21,6 +23,29 @@ from tools.products.classifier_paths import (
     classifier_class_path,
     classifier_object_path,
 )
+
+_CACHE_LOCK = RLock()
+_CACHE_EPOCH = 0
+_CACHE_INVENTORY = None
+_CACHE_DECLARATIONS: tuple = ()
+_FILTERED_TREES: OrderedDict = OrderedDict()
+
+
+def product_catalog_revision() -> int:
+    """Observe installed metadata/registry replacements without probing products.
+
+    Availability refreshes must call the existing explicit clear function.
+    Product/tree replacement is also checked by each derived index.
+    """
+    global _CACHE_INVENTORY, _CACHE_DECLARATIONS
+    inventory = installed_bundles()
+    declarations = tuple(id(item) for item in data_source_declarations())
+    with _CACHE_LOCK:
+        if inventory is not _CACHE_INVENTORY or declarations != _CACHE_DECLARATIONS:
+            clear_product_catalog_projection_cache()
+            _CACHE_INVENTORY = inventory
+            _CACHE_DECLARATIONS = declarations
+        return _CACHE_EPOCH
 
 
 def _supports(source: Any, product: Any) -> bool:
@@ -210,7 +235,16 @@ def filter_product_tree(
     source_ids: Iterable[str] | None,
 ) -> dict[Any, Any]:
     """Return a source-filtered tree without mutating the CategoryTree."""
+    revision = product_catalog_revision()
     selected_ids = normalize_source_ids(source_ids)
+    if source_ids is not None and not selected_ids:
+        return {}
+    cache_key = (revision, tuple(sorted(selected_ids)))
+    with _CACHE_LOCK:
+        cached = _FILTERED_TREES.get(cache_key)
+        if cached is not None and cached[0] is tree:
+            _FILTERED_TREES.move_to_end(cache_key)
+            return cached[1]
     visible = _visible_source_index()
     sources = (
         tuple(visible[source_id] for source_id in selected_ids)
@@ -240,7 +274,25 @@ def filter_product_tree(
                 result[key] = child
         return result
 
-    return filtered(tree)
+    result = filtered(tree)
+    def object_count(value):
+        if not isinstance(value, Mapping):
+            return 0
+        return len(value.get("$OBJECTS$", ())) + sum(
+            object_count(child) for key, child in value.items() if key != "$OBJECTS$"
+        )
+    weight = object_count(result)
+    with _CACHE_LOCK:
+        # Derived trees retain object refs only, not copied market data.
+        # Large individual trees remain correct, simply uncached.
+        if weight <= 200_000:
+            _FILTERED_TREES.pop(cache_key, None)
+            while _FILTERED_TREES and (len(_FILTERED_TREES) >= 8 or
+                  sum(item[2] for item in _FILTERED_TREES.values()) + weight > 200_000):
+                _FILTERED_TREES.popitem(last=False)
+            if revision == _CACHE_EPOCH:
+                _FILTERED_TREES[cache_key] = (tree, result, weight)
+    return result
 
 
 def _tree_has_products(value: Any) -> bool:
@@ -513,6 +565,9 @@ def source_family_ids_for_member_ids(
     ))
     if not requested:
         return ()
+    if source_descriptors is None:
+        member_to_family = source_member_families()
+        return tuple(sorted({member_to_family.get(value, value) for value in requested}))
     descriptors = tuple(
         source_descriptors
         if source_descriptors is not None else product_source_descriptors()
@@ -536,6 +591,23 @@ def source_family_ids_for_member_ids(
     return tuple(sorted({member_to_family.get(value, value) for value in requested}))
 
 
+@lru_cache(maxsize=1)
+def source_member_families() -> dict[str, str]:
+    """Read member ownership, never product availability/count projections.
+
+    These aliases are local-process IDs. Federated bindings require separate
+    node/installation identity and must not enter this lookup as bare aliases.
+    """
+    load_all_sources()
+    result = {}
+    for source in data_source_declarations():
+        for member in source.members:
+            if member.key in result and result[member.key] != source.key:
+                raise ValueError("数据源成员身份在本机注册表中不唯一")
+            result[member.key] = source.key
+    return result
+
+
 def _category_free_path(value: object) -> str:
     path = str(value or "").strip().lstrip("-").strip().strip("/")
     parts = path.split("/") if path else []
@@ -556,6 +628,13 @@ def _paths_overlap(requested: str, declared: str) -> bool:
 
 def clear_product_catalog_projection_cache() -> None:
     """Invalidate projections after a source registry or cache refresh."""
-    product_source_descriptors.cache_clear()
-    catalog_product_records.cache_clear()
-    _visible_source_index.cache_clear()
+    global _CACHE_EPOCH
+    from server.services.product_tree_pages import product_tree_pages
+    with _CACHE_LOCK:
+        _CACHE_EPOCH += 1
+        product_source_descriptors.cache_clear()
+        catalog_product_records.cache_clear()
+        _visible_source_index.cache_clear()
+        source_member_families.cache_clear()
+        _FILTERED_TREES.clear()
+    product_tree_pages.clear()

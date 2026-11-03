@@ -16,11 +16,14 @@ traderesearch-manager login --no-browser
 traderesearch-manager status --json
 ```
 
-1. 确认 CLI 配置的是目标机构内网或获授权的公网 Manager。本机若部署机构内网 Docker Manager，可使用其实际地址；个人桌面运行时仍是用户客户端，不因此成为可被 Manager 调度的执行节点。
-2. CLI 输出验证地址和临时用户码。用户自行打开该地址，核对码及申请应用后批准；拒绝或过期时 CLI 应结束登录，重新登录须使用新申请。
-3. CLI 在有效期内按服务端规定的间隔轮询。批准后获得令牌，再调用目标 Manager 验证 Keycloak subject、issuer 和准入权限，成功后才保存该端点的会话。浏览器显示批准成功还不能单独证明 CLI 登录成功，应等待 CLI 返回并检查 `status`。
-4. 各 Manager URL 的会话独立。切换 Manager 后重新验证其身份和授权；不复制浏览器 Cookie、密码或其他 Manager 的令牌，也不按相同用户名自动合并身份。
-5. 使用完毕执行 `traderesearch-manager logout`，撤销该 CLI 会话的刷新凭据并清除本地记录。一次性验收使用隔离 CLI 目录，保留状态摘要，不保留临时用户码或令牌。退出不会撤销其他客户端的独立会话。
+设备授权中的责任分工如下：
+
+- **CLI** 只申请一次性授权、等待结果，并向配置的目标 Manager 验证身份；未通过验证时不得保存会话。
+- **用户** 在浏览器核对 Manager、应用和一次性用户码后作出批准或拒绝。拒绝、超时或过期后，本次申请结束；重新尝试必须生成新用户码。
+- **目标 Manager** 验证 Keycloak issuer、subject 和准入权限。浏览器显示批准成功后，仍须等待 CLI 完成验证，并检查登录状态。
+- **会话管理** 按 Manager URL 分开保存。切换端点时应重新核对身份和权限；不得复制浏览器 Cookie、密码或其他 Manager 的令牌。使用结束后执行 `traderesearch-manager logout`，撤销本 CLI 会话的刷新凭据并清除本地记录。
+
+一次性验收应使用隔离 CLI 状态目录，记录不含凭据的状态摘要。退出该 CLI 会话不会撤销其他客户端各自持有的会话。
 
 设备授权登录与设备自动登录白名单是两件事：批准本轮 OAuth 登录不等于注册计算节点、授予下载角色或批准业务写入；具体对象操作仍由 Keycloak 当前授权决定。
 

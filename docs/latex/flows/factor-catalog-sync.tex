@@ -1,0 +1,23 @@
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\scriptsize]
+  \node[trFlowLaneClient,text width=2.6cm] (author) at (0,0.7) {作者客户端\\React / Swift / CLI};
+  \node[trFlowLaneManager,text width=2.6cm] (managera) at (3.3,0.7) {Manager A\\源码权威与 outbox};
+  \node[trFlowLaneManager,text width=2.6cm] (managerb) at (6.6,0.7) {Manager B\\同步镜像与执行目标};
+  \node[trFlowLaneClient,text width=2.6cm] (reader) at (9.9,0.7) {消费者客户端\\浏览目录 / 提交任务};
+  \node[trFlowLaneData,text width=2.8cm] (bytes) at (13.2,0.7) {对象数据面\\A:7997 / B:17997};
+  \foreach \x in {0,3.3,6.6,9.9,13.2} {\draw[trFlowLifeline] (\x,.15) -- (\x,-13.2);}
+
+  \draw[trFlowControl] (0,-1.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {1. 作者经 A 的 7998 创建或修订 FactorFamily；写入源码、owner、稳定 factor\_ref 与不可变 revision/hash} (3.3,-1.9);
+  \draw[trFlowLocal] (3.3,-3.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {2. A 原子保存来源记录，并把可同步的可见性、版本索引和 SHA-256 写入既有 account-domain outbox} (3.3,-3.4);
+  \draw[trFlowFederation] (6.6,-4.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {3. B 按现有 cursor/outbox 通道向 A 拉取本范围的变更；经 Manager 7998 控制 API 传分页元数据} (3.3,-4.9);
+  \draw[trFlowFederation] (3.3,-6.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {4. A 回传 source-free manifest：object\_ref、revision\_ref、owner、visibility、hash；不传源码字节} (6.6,-6.4);
+  \draw[trFlowControl] (6.6,-7.9) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {5. B 的 7998 按本地投影分页返回目录；列表不加载家族、不计算源码指纹、不等待 A 在线} (9.9,-7.9);
+  \draw[trFlowFederation] (3.3,-9.4) -- node[midway,above=2pt,trFlowMessage,text width=4.1cm] {6. 用户选择在 B 执行时，A 与 B 的 17998 交换受签名保护的 Transfer / Attempt 上下文和短期 destination\_write 票据} (6.6,-9.4);
+  \draw[trFlowBytes] (3.3,-10.9) -- node[midway,above=2pt,trFlowMessage,text width=4.2cm] {7. A 的 7997 transfer worker 经 WireGuard 向 B 的 17997 直推源码；B 按预期大小与 SHA-256 校验后存入目标对象库} (13.2,-10.9);
+  \draw[trFlowControl] (6.6,-12.4) -- node[midway,above=2pt,trFlowMessage,text width=4.0cm] {8. B 将已水合的精确 revision 供后续 RunSpec 引用，再经 B 的 7998 向客户端返回可用状态} (9.9,-12.4);
+\end{tikzpicture}
+\caption{因子目录元数据与源码字节沿两种不同路径同步。Manager A 是来源权威；B 的目录先收到可查询的版本投影，只有打开源码或向 B 提交远程运行时才传输相应版本字节。}
+\end{figure}
+
+\noindent\textbf{错误与拓扑处理：}对象可见性和版本索引沿既有账户域 outbox/cursor/conflict 流传播；冲突保留双方修订，离线游标不前进。源码由拥有它的 Manager 通过 7997/17997 对象数据面提供。缺源码、长度不符、hash 不符或 WireGuard 对端不可达时，应把对象标为未水合/不可用并阻止依赖它的运行；不得静默截断、换成同名源码或产生全局删除。Manager A、B 的软件版本可不同，只要各自公布并满足此次对象与运行合同；对象 revision/hash 必须精确一致。

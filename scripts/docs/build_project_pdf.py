@@ -75,8 +75,8 @@ def load_manifest() -> dict[str, Any]:
         manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise BuildError(f"cannot read {MANIFEST_PATH.relative_to(ROOT)}: {exc}") from exc
-    if manifest.get("schema_version") != 1:
-        raise BuildError("manifest schema_version must be 1")
+    if manifest.get("schema_version") != 2:
+        raise BuildError("manifest schema_version must be 2")
     if (
         not manifest.get("title")
         or not manifest.get("edition")
@@ -89,6 +89,7 @@ def load_manifest() -> dict[str, Any]:
         if not all(change.get(key) for key in ("version", "date", "summary")):
             raise BuildError("each change entry requires version, date, and summary")
     section_ids: set[str] = set()
+    chapter_ids: set[str] = set()
     source_paths: set[str] = set()
     document_slugs: set[str] = set()
     documents = 0
@@ -99,23 +100,37 @@ def load_manifest() -> dict[str, Any]:
         section_ids.add(section_id)
         if not section.get("title") or not section.get("audience") or not section.get("purpose"):
             raise BuildError(f"section {section_id!r} needs title, audience, and purpose")
-        entries = section.get("documents", [])
-        if not entries:
-            raise BuildError(f"section {section_id!r} has no documents")
-        for entry in entries:
-            source = entry.get("source")
-            if not entry.get("title") or not source:
-                raise BuildError(f"document in {section_id!r} needs title and source")
-            if source in source_paths:
-                raise BuildError(f"duplicate document source: {source}")
-            source_paths.add(source)
-            tracked_path(source)
-            slug = entry.get("slug")
-            if slug:
-                if slug in document_slugs:
-                    raise BuildError(f"duplicate PDF document slug: {slug}")
-                document_slugs.add(slug)
-            documents += 1
+        chapters = section.get("chapters", [])
+        if not chapters:
+            raise BuildError(f"section {section_id!r} has no chapters")
+        for chapter in chapters:
+            chapter_id = chapter.get("id")
+            if not chapter_id or chapter_id in chapter_ids:
+                raise BuildError(f"missing or duplicate chapter id: {chapter_id!r}")
+            chapter_ids.add(chapter_id)
+            if not all(chapter.get(key) for key in ("title", "audience", "purpose")):
+                raise BuildError(
+                    f"chapter {chapter_id!r} needs title, audience, and purpose"
+                )
+            entries = chapter.get("documents", [])
+            if not entries:
+                raise BuildError(f"chapter {chapter_id!r} has no documents")
+            for entry in entries:
+                source = entry.get("source")
+                if not entry.get("title") or not source:
+                    raise BuildError(
+                        f"document in chapter {chapter_id!r} needs title and source"
+                    )
+                if source in source_paths:
+                    raise BuildError(f"duplicate document source: {source}")
+                source_paths.add(source)
+                tracked_path(source)
+                slug = entry.get("slug")
+                if slug:
+                    if slug in document_slugs:
+                        raise BuildError(f"duplicate PDF document slug: {slug}")
+                    document_slugs.add(slug)
+                documents += 1
     if documents == 0:
         raise BuildError("manifest must contain at least one document")
     return manifest
@@ -150,9 +165,9 @@ def git_source_date(source: str) -> tuple[str, bool]:
     except BuildError:
         return "Git 日期不可用", True
     if not tracked or not latest:
-        return "未提交到 Git", True
+        return "未跟踪", True
     if changed:
-        return f"工作区有未提交修改（HEAD 版本 {latest}）", True
+        return f"未提交（HEAD {latest}）", True
     return latest, False
 
 
@@ -199,6 +214,28 @@ def remove_leading_title(markdown: str) -> str:
     if front_matter:
         text = text[front_matter.end():]
     return re.sub(r"\A\s*#\s+[^\n]+\n+", "", text, count=1)
+
+
+def demote_markdown_headings(markdown: str) -> str:
+    """Keep source headings below the compiled chapter and document title."""
+    lines = markdown.splitlines()
+    output: list[str] = []
+    fence_char: str | None = None
+    fence_size = 0
+    for line in lines:
+        match = re.match(r"^\s{0,3}(\x60{3,}|~{3,})", line)
+        if match:
+            marker = match.group(1)
+            if fence_char is None:
+                fence_char, fence_size = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_size:
+                fence_char, fence_size = None, 0
+            output.append(line)
+            continue
+        if fence_char is None:
+            line = re.sub(r"^(#{1,5})(?=\s)", r"\1#", line)
+        output.append(line)
+    return "\n".join(output)
 
 
 def normalize_fenced_code(markdown: str) -> str:
@@ -306,7 +343,9 @@ def rewrite_registered_links(
     return link_pattern.sub(replace, markdown)
 
 
-def collect_chapters(manifest: dict[str, Any]) -> tuple[str, list[str], int]:
+def collect_chapters(
+    manifest: dict[str, Any],
+) -> tuple[str, list[str], list[dict[str, str]]]:
     public_paths = public_doc_paths()
     product_doc_index = json.loads(PUBLIC_MANIFEST.read_text(encoding="utf-8"))
     public_slug_to_source = {
@@ -315,53 +354,64 @@ def collect_chapters(manifest: dict[str, Any]) -> tuple[str, list[str], int]:
         for page in section.get("pages", [])
     }
     docs = [
-        (section, entry)
+        (section, chapter, entry)
         for section in manifest["sections"]
-        for entry in section["documents"]
+        for chapter in section["chapters"]
+        for entry in chapter["documents"]
     ]
     source_to_slug = {
         entry["source"]: entry.get("slug", f"source-{index:03d}")
-        for index, (_, entry) in enumerate(docs, start=1)
+        for index, (_, _, entry) in enumerate(docs, start=1)
     }
     output: list[str] = []
     warnings: list[str] = []
+    source_records: list[dict[str, str]] = []
     for section in manifest["sections"]:
         output.append(f"\\part{{{section['title']}}}\n")
-        for entry in section["documents"]:
-            source = entry["source"]
-            source_path = tracked_path(source)
-            freshness, modified = git_source_date(source)
-            if modified:
-                warnings.append(f"source is modified or untracked: {source}")
-            for implementation_path in public_paths.get(source, ()):
-                if not (ROOT / implementation_path).exists():
-                    raise BuildError(
-                        f"canonical implementation path missing for {source}: {implementation_path}"
-                    )
-            if source_path.suffix.lower() == ".tex":
-                body = source_path.read_text(encoding="utf-8")
-            else:
-                body = source_path.read_text(encoding="utf-8")
-                body = remove_leading_title(body)
-                body = normalize_fenced_code(body)
-                body = normalize_status_symbols(body)
-                body = namespace_source_anchors(body, source_to_slug[source])
-                body = rewrite_registered_links(
-                    body, source, source_to_slug, public_slug_to_source
-                )
-            source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
-            slug = source_to_slug[source]
+        for chapter in section["chapters"]:
             output.extend([
-                f"# {entry['title']} {{#doc-{slug}}}\n",
-                "> **适用读者：** " + section["audience"] + "  \n"
-                + "> **本章用途：** " + section["purpose"] + "  \n"
-                + f"> **源文档：** `{source}`  \n"
-                + f"> **源文档最后修改：** {freshness}  \n"
-                + f"> **源文档 SHA-256：** `{source_hash}`\n",
-                body.strip(),
-                "\n\n",
+                f"# {chapter['title']} {{#chapter-{chapter['id']}}}\n",
+                "> **适用读者：** " + chapter["audience"] + "  \n"
+                + "> **本章目标：** " + chapter["purpose"] + "\n",
             ])
-    return "\n".join(output), warnings, len(docs)
+            for entry in chapter["documents"]:
+                source = entry["source"]
+                source_path = tracked_path(source)
+                freshness, modified = git_source_date(source)
+                if modified:
+                    warnings.append(f"source is modified or untracked: {source}")
+                for implementation_path in public_paths.get(source, ()):
+                    if not (ROOT / implementation_path).exists():
+                        raise BuildError(
+                            f"canonical implementation path missing for {source}: {implementation_path}"
+                        )
+                body = source_path.read_text(encoding="utf-8")
+                if source_path.suffix.lower() != ".tex":
+                    body = remove_leading_title(body)
+                    body = normalize_fenced_code(body)
+                    body = normalize_status_symbols(body)
+                    body = namespace_source_anchors(body, source_to_slug[source])
+                    body = rewrite_registered_links(
+                        body, source, source_to_slug, public_slug_to_source
+                    )
+                    body = demote_markdown_headings(body)
+                source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+                slug = source_to_slug[source]
+                output.extend([
+                    f"## {entry['title']} {{#doc-{slug}}}\n",
+                    f"*資料來源：{source}；Git 狀態：{freshness}。*\n",
+                    body.strip(),
+                    "\n\n",
+                ])
+                source_records.append({
+                    "part": section["title"],
+                    "chapter": chapter["title"],
+                    "title": entry["title"],
+                    "source": source,
+                    "freshness": freshness,
+                    "sha256": source_hash,
+                })
+    return "\n".join(output), warnings, source_records
 
 
 def tex_escape(text: str) -> str:
@@ -378,15 +428,52 @@ def tex_escape(text: str) -> str:
     return "".join(replacements.get(char, char) for char in text)
 
 
+def write_source_ledger(
+    source_records: list[dict[str, str]], output_dir: Path
+) -> None:
+    """Write source provenance once in the appendix instead of repeating it inline."""
+    lines = [
+        r"\begin{longtable}{p{3.2cm}p{6.6cm}p{3.1cm}p{2.0cm}}",
+        r"\toprule",
+        r"\textbf{文档标题} & \textbf{源文件} & \textbf{Git 状态} & \textbf{SHA-256 前缀} \\",
+        r"\midrule",
+        r"\endfirsthead",
+        r"\toprule",
+        r"\textbf{文档标题} & \textbf{源文件} & \textbf{Git 状态} & \textbf{SHA-256 前缀} \\",
+        r"\midrule",
+        r"\endhead",
+    ]
+    previous_group: tuple[str, str] | None = None
+    for item in source_records:
+        group = (item["part"], item["chapter"])
+        if group != previous_group:
+            group_title = tex_escape(group[0] + " / " + group[1])
+            lines.append(
+                rf"\multicolumn{{4}}{{l}}{{\textbf{{{group_title}}}}} \\"
+            )
+            previous_group = group
+        path = item["source"]
+        title = tex_escape(item["title"])
+        freshness = tex_escape(item["freshness"])
+        lines.append(
+            rf"\raggedright {title} & \raggedright\url{{{path}}} & "
+            rf"\raggedright {freshness} & "
+            rf"\texttt{{{item['sha256'][:12]}}} \\"
+        )
+    lines.extend([r"\bottomrule", r"\end{longtable}"])
+    (output_dir / "source-ledger.tex").write_text("\n".join(lines), encoding="utf-8")
+
+
 def write_metadata(
     manifest: dict[str, Any],
     output_dir: Path,
     revision: str,
     build_date: str,
     toolchain: tuple[str, str, str],
+    chapter_count: int,
+    document_count: int,
 ) -> None:
     edition = os.environ.get("TR_DOCS_EDITION", str(manifest["edition"]))
-    changed_docs = sum(len(section["documents"]) for section in manifest["sections"])
     changes = manifest.get("changes", [])
     if not changes:
         raise BuildError("manifest must contain at least one version change entry")
@@ -399,7 +486,8 @@ def write_metadata(
         "\\begin{itemize}\n"
         + f"\\item 当前文档版本：\\textbf{{{tex_escape(edition)}}}，"
         + f"基于源码快照 \\texttt{{{tex_escape(revision)}}}。\n"
-        + f"\\item 显式登记 {changed_docs} 份文档源；每份正文历史以其源文件 Git 记录为准。\n"
+        + f"\\item 全书按 {len(manifest['sections'])} 个部分、{chapter_count} 个章节组织，登记 {document_count} 份文档源。\n"
+        + "\\item 每份源文档的路径、状态和 SHA-256 前缀见附录；修订时请核对对应权威源文件。\n"
         + change_items
         + "\n\\end{itemize}"
     )
@@ -437,9 +525,13 @@ def main() -> int:
 
     try:
         manifest = load_manifest()
-        content, warnings, count = collect_chapters(manifest)
+        content, warnings, source_records = collect_chapters(manifest)
+        chapter_count = sum(len(section["chapters"]) for section in manifest["sections"])
         revision = repository_snapshot_identity()
-        print(f"manifest: {len(manifest['sections'])} sections, {count} documents")
+        print(
+            f"manifest: {len(manifest['sections'])} parts, "
+            f"{chapter_count} chapters, {len(source_records)} documents"
+        )
         print(f"source revision: {revision}")
         for warning in warnings:
             print(f"warning: {warning}", file=sys.stderr)
@@ -460,14 +552,16 @@ def main() -> int:
             build_date = dt.date.today().isoformat()
         write_metadata(manifest, OUTPUT_DIR, revision, build_date, (
             pandoc_version, xelatex_version, latexmk_version
-        ))
+        ), chapter_count, len(source_records))
+        write_source_ledger(source_records, OUTPUT_DIR)
         chapter_markdown = OUTPUT_DIR / "chapters.md"
         chapter_tex = OUTPUT_DIR / "chapters.tex"
         chapter_markdown.write_text(content, encoding="utf-8")
         resource_roots = [str(ROOT)]
         for section in manifest["sections"]:
-            for entry in section["documents"]:
-                resource_roots.append(str((ROOT / entry["source"]).parent))
+            for chapter in section["chapters"]:
+                for entry in chapter["documents"]:
+                    resource_roots.append(str((ROOT / entry["source"]).parent))
         print(f"Pandoc: {pandoc_version}")
         print(f"XeLaTeX: {xelatex_version}")
         print(f"latexmk: {latexmk_version}")
@@ -508,7 +602,12 @@ def main() -> int:
                 shutil.which("latexmk") or "latexmk", "-c",
                 f"-outdir={OUTPUT_DIR}", str(MODULE / "main.tex"),
             ])
-            for intermediate in (chapter_markdown, chapter_tex, OUTPUT_DIR / "metadata.tex"):
+            for intermediate in (
+                chapter_markdown,
+                chapter_tex,
+                OUTPUT_DIR / "metadata.tex",
+                OUTPUT_DIR / "source-ledger.tex",
+            ):
                 if intermediate.exists():
                     intermediate.unlink()
             if compiled.resolve() != output:

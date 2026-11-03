@@ -16,6 +16,23 @@ from tools.data.sqlite.account_manager import ensure_account_manager_sqlite_stor
 DAY_NIGHT_ID = "cnfutures_day_night"
 
 
+def test_tree_selection_path_uses_stable_category_label_id(monkeypatch, tmp_path):
+    from server.modules.products.product_category_views import render_product_tree
+    monkeypatch.setattr(Settings, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "account.sqlite")
+    ensure_account_manager_sqlite_store()
+    nodes = render_product_tree(DAY_NIGHT_ID, principal="alice", source_ids=("Local",), checkbox_default=True)
+    def walk(items):
+        for item in items:
+            yield item
+            yield from walk(item.get("children") or [])
+    labels = [item for item in walk(nodes) if item.get("selection_path")]
+    assert labels
+    for item in labels:
+        assert item['selection_path'] != item['key']
+        assert normalize_category_selection_paths([item['selection_path']]) == [item['selection_path']]
+
+
 def test_category_title_and_label_title_are_stored_as_ids(
     monkeypatch, tmp_path: Path,
 ) -> None:

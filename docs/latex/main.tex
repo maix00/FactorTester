@@ -6,7 +6,7 @@
 \usepackage{xcolor}
 \usepackage{tikz}
 \usepackage{fontawesome5}
-\usetikzlibrary{arrows.meta,positioning,fit,calc,decorations.pathreplacing}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,decorations.pathreplacing,shapes.geometric}
 \usepackage{booktabs}
 \usepackage{longtable}
 \usepackage{array}
@@ -44,19 +44,43 @@
   trPlanned/.style={-{Stealth[length=2mm]},draw=trAmber,dashed,line width=1pt},
   trPrivate/.style={draw=trAmber,line width=1.1pt},
   trBlocked/.style={draw=trRed,line width=1.6pt},
-  trRole/.style={draw=trViolet,fill=trPaleViolet,rounded corners=2pt,align=center,text width=3.5cm,minimum height=.72cm,inner sep=4pt,line width=.8pt}
+  trRole/.style={draw=trViolet,fill=trPaleViolet,rounded corners=2pt,align=center,text width=3.5cm,minimum height=.72cm,inner sep=4pt,line width=.8pt},
+  trFlowStart/.style={ellipse,draw=trTeal!75!black,fill=trPaleTeal,align=center,text width=2.8cm,minimum height=.72cm,inner sep=4pt,line width=.8pt},
+  trFlowStep/.style={draw=trBlue!75!black,fill=trPaleBlue,rounded corners=3pt,align=center,text width=3.7cm,minimum height=1.05cm,inner sep=5pt,line width=.8pt},
+  trFlowDecision/.style={diamond,draw=trAmber!80!black,fill=trPaleAmber,align=center,text width=2.1cm,minimum height=1.1cm,inner sep=2pt,line width=.8pt},
+  trFlowEnd/.style={ellipse,draw=trInk!70,fill=trPaleGray,align=center,text width=2.8cm,minimum height=.72cm,inner sep=4pt,line width=.8pt},
+  trFlowArrow/.style={-{Stealth[length=2mm]},draw=trBlue,line width=1pt},
+  trFlowFailure/.style={-{Stealth[length=2mm]},draw=trRed,line width=1pt},
+  trFlowActor/.style={draw=trInk!65,fill=white,rounded corners=2pt,align=center,text width=2.55cm,minimum height=.95cm,inner sep=4pt,line width=.8pt,font=\scriptsize},
+  trFlowLaneClient/.style={trFlowActor,draw=trAmber!85!black,fill=trPaleAmber},
+  trFlowLaneManager/.style={trFlowActor,draw=trBlue,fill=trPaleBlue},
+  trFlowLaneIdentity/.style={trFlowActor,draw=trViolet,fill=trPaleViolet},
+  trFlowLaneSystem/.style={trFlowActor,draw=trInk!65,fill=trPaleGray},
+  trFlowLaneData/.style={trFlowActor,draw=trTeal!80!black,fill=trPaleTeal},
+  trFlowLifeline/.style={draw=trInk!32,densely dashed,line width=.5pt},
+  trFlowControl/.style={-{Stealth[length=1.8mm]},draw=trBlue,line width=.95pt},
+  trFlowControlBoth/.style={<->,draw=trBlue,line width=.95pt},
+  trFlowFederation/.style={-{Stealth[length=1.8mm]},draw=trViolet,line width=.95pt},
+  trFlowMetaSync/.style={<->,draw=trViolet,line width=.95pt},
+  trFlowBytes/.style={-{Stealth[length=1.8mm]},draw=trTeal!75!black,line width=1.05pt},
+  trFlowBytesBoth/.style={<->,draw=trTeal!75!black,line width=1.05pt},
+  trFlowLocal/.style={-{Stealth[length=1.8mm]},draw=trTeal!55!black,line width=.8pt},
+  trFlowPending/.style={-{Stealth[length=1.8mm]},draw=trAmber,dashed,line width=.95pt},
+  trFlowRelease/.style={-{Stealth[length=1.8mm]},draw=trInk!85,line width=.95pt},
+  trFlowMessage/.style={fill=white,fill opacity=.96,text opacity=1,align=center,text width=3.65cm,font=\scriptsize,inner sep=1.2pt},
+  trFlowNote/.style={draw=trInk!35,fill=white,rounded corners=2pt,align=left,text width=5.6cm,inner sep=6pt,font=\small}
 }
 \setcounter{secnumdepth}{3}
-\setcounter{tocdepth}{2}
+\setcounter{tocdepth}{1}
 \input{.artifacts/docs-pdf/metadata.tex}
 \begin{document}
 \frontmatter
 \begin{titlepage}
   \centering
   \vspace*{30mm}
-  {\Huge\bfseries TradeResearch 项目文档合集\par}
+  {\Huge\bfseries TradeResearch 项目手册\par}
   \vspace{8mm}
-  {\Large 技术方案、架构设计、接口、数据、运维与用户指南\par}
+  {\Large 研究流程、领域模型、系统架构、接口与运行验收\par}
   \vfill
   {\large 文档版本：\DocEdition\par}
   {\large 源码快照：\DocBuildRevision\par}
@@ -69,9 +93,15 @@
 \vspace{3mm}
 \noindent\textbf{构建工具：} \DocToolchain
 \chapter*{读者指南}
-本手册按读者任务组织。每章首页注明适用读者、用途和源文档最后修改时间。正文由仓库登记的 Markdown/TeX 源生成；这些源文件仍是唯一权威版本。\tableofcontents
+本手册先按用户实际操作顺序介绍登录、准备输入、运行研究和发布报告，再说明支撑这些流程的领域模型与系统架构，最后汇总接口、验收和运维方法。
+
+研究人员可从第一部分开始；客户端和服务端开发者可先阅读第二部分，再查阅第三部分的接口与字段契约；测试和发布人员可直接阅读第四部分。每章标出适用读者和阅读目标；来源路径、Git 状态与内容摘要统一列在附录，正文不再重复版本元数据。
+\tableofcontents
 \mainmatter
 \input{.artifacts/docs-pdf/chapters.tex}
 \appendix
-\chapter{构建与来源}
-本 PDF 由 \texttt{docs/latex/manifest.toml} 中登记的源文件生成。只有显式登记的资料会被纳入，不会自动扫描整个仓库。构建版本与源文件修改时间用于定位对应内容；它们本身不代表内容已经通过代码审查。\end{document}
+\chapter{来源与构建}
+本手册由 \texttt{docs/latex/manifest.toml} 中登记的资料生成，不会扫描或自动收录仓库中的其他内容。每条源记录都标明所属章节、文件路径、Git 状态和 SHA-256 前缀，可用于定位本次编译所依据的内容。源码快照和构建工具版本见本书前页。
+
+\input{.artifacts/docs-pdf/source-ledger.tex}
+\end{document}
