@@ -65,11 +65,11 @@ def publish(service, session=SESSION):
                            projection=report(), expected_revision=None)
 
 
-def test_publishes_single_selected_report_with_two_fresh_decisions():
+def test_publishes_selected_report_and_rechecks_after_version_storage():
     service, _catalog, store, auth = harness()
     result = publish(service)
-    assert result['report_id'] == 'report-1' and store.writes == 1 and auth['checks'] == 2
-    document = next(iter(store.docs.values()))
+    assert result['report_id'] == 'report-1' and store.head_writes == 1 and auth['checks'] == 3
+    document = next(value for value in store.docs.values() if value.get('kind') == 'research_report')
     assert document['owner_identity_id'] == 'stable-alice' and document['keycloak_resource_id'] == 'resource-1'
 
 
@@ -113,7 +113,7 @@ def test_read_and_attachment_use_current_exact_report_permission_and_verify_inte
     auth['read'] = False
     with pytest.raises(PermissionError): service.read(**args)
     auth['read'] = True
-    document = next(iter(store.docs.values()))
+    document = next(value for value in store.docs.values() if value.get('kind') == 'research_report')
     document['attachments']['research_asset/image-1']['sha256'] = '0' * 64
     with pytest.raises(ValueError, match='identity'): service.read(**args, attachment='research_asset/image-1')
 
@@ -121,7 +121,7 @@ def test_read_and_attachment_use_current_exact_report_permission_and_verify_inte
 def test_read_rejects_resource_substitution_and_other_report():
     service, _catalog, store, _auth = harness()
     receipt = publish(service)
-    document = next(iter(store.docs.values()))
+    document = next(value for value in store.docs.values() if value.get('kind') == 'research_report')
     document['keycloak_resource_id'] = 'different-resource'
     with pytest.raises(PermissionError):
         service.read(session=SESSION, research_id='research-1', report_id='report-1',

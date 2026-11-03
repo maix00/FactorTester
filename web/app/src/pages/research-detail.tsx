@@ -57,7 +57,7 @@ function ResearchDetailForSession():React.ReactElement {
  const title=String(detail?.title||instance.args.researchTitle||id),linkedResearch=id;
  const availableReportBranches=selected?reportBranches(selected):[];
  const selectedReportBranch=selected?selectReportBranch(selected,selectedPublicationID):undefined;
- const selectedPublicationBranch=selectedReportBranch?.source_kind==="publication"?selectedReportBranch:undefined;
+ const selectedPublicationBranch=selectedReportBranch && ["publication","couchdb"].includes(String(selectedReportBranch.source_kind))?selectedReportBranch:undefined;
  const content=instance.args.localResearch?local.client&&local.capabilities?<LocalResearchDetail
   client={local.client} capabilities={local.capabilities}
   item={{research_id:id,profile_id:instance.args.profileId||"self",title:instance.args.researchTitle||id} as any}

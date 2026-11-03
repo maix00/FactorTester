@@ -67,7 +67,7 @@ def _owner_metadata(session, research_id, report_id, metadata):
 
 def verify_equivalent_authoring(store, *, root, head, remote, session, research_id, report_id, source_kind):
     """Compare complete bounded editable content, including assets and private links."""
-    from .authoring.tree_bundle import bundle_from_snapshot, validate_report_bundle
+    from .authoring.tree_bundle import bundle_from_snapshot, bundle_content_digest, validate_report_bundle
     from .authoring.tree_paths import report_tree_paths
     from .authoring.tree_projection import project_snapshot
     from .authoring.tree_store import load_head, tree_lock
@@ -82,6 +82,7 @@ def verify_equivalent_authoring(store, *, root, head, remote, session, research_
             raise LocalReportSyncConflict('local and Manager report versions differ')
         data = bundle_from_snapshot(project_snapshot(paths, head), package_root=root, branch_id='main')
     local_sha = hashlib.sha256(data).hexdigest()
+    content_sha = bundle_content_digest(data)
     local_manifest, _local_files = validate_report_bundle(payload=data, expected_sha256=local_sha, report_id=report_id,
         source_generation=head['generation'], source_root_ref=head['root_ref'])
     del _local_files
@@ -132,13 +133,13 @@ def verify_equivalent_authoring(store, *, root, head, remote, session, research_
     if not bundle_matches_projection(package_root=root, source_manifest=manifest,
                                      remote_projection=remote['projection'], expected_hash=record['projection_hash']):
         raise LocalReportSyncConflict('local report and Manager projection differ')
-    return local_sha
+    return content_sha
 
 
 def _attach_identical_shared_report(store, *, root, existing, metadata, remote, owner_metadata,
                                     session, identity, research_id, report_id, manager_hash):
     """Attach a second Manager only when the editable report content agrees."""
-    from .authoring.tree_bundle import bundle_from_snapshot
+    from .authoring.tree_bundle import bundle_from_snapshot, bundle_content_digest
     from .authoring.tree_paths import report_tree_paths
     from .authoring.tree_projection import project_snapshot
     from .authoring.tree_store import load_head, tree_lock
@@ -164,7 +165,7 @@ def _attach_identical_shared_report(store, *, root, existing, metadata, remote, 
             raise LocalReportSyncConflict('local report changed during attachment')
         # Assets are outside the immutable tree and can change independently.
         current_data = bundle_from_snapshot(project_snapshot(paths, current_head), package_root=root, branch_id='main')
-        if hashlib.sha256(current_data).hexdigest() != local_sha:
+        if bundle_content_digest(current_data) != local_sha:
             raise LocalReportSyncConflict('local report assets changed during attachment')
         with store._connect() as db:
             db.execute('BEGIN IMMEDIATE')

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from copy import deepcopy
+import json
 from typing import Any
 
 from tools.cli.client import FactorTesterClient
@@ -27,7 +29,21 @@ def validate_declared_reference(
 ) -> dict[str, Any]:
     """Validate one declared kind/ref pair without rewriting either value."""
     kind, target_ref = reference.kind, reference.target_ref
-    if kind == 'report_section':
+    if kind == 'historical_reference':
+        from ..authoring.tree_projection import load_snapshot
+        from ..historical_references import historical_reference, require_historical_reference
+        require_historical_reference(target_ref)
+        snapshot = load_snapshot(package_root=scope.package_root, branch_id=scope.branch_id)
+        matches = [item.get('data', {}) for item in snapshot['bindings']
+                   if item['kind'] == kind and item['target_ref'] == target_ref]
+        choices = {json.dumps(item, sort_keys=True, ensure_ascii=False) for item in matches}
+        if len(choices) != 1:
+            raise ValueError('historical citation must preserve one existing report binding')
+        data = deepcopy(matches[0])
+        original = data.get('historical_reference', {})
+        if historical_reference(original.get('kind'), original.get('target_ref')) != target_ref:
+            raise ValueError('historical citation identity differs')
+    elif kind == 'report_section':
         component_id = _suffix(target_ref, 'node:')
         if report_components is None:
             from ..authoring.tree_projection import load_snapshot

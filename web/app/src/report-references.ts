@@ -2,6 +2,12 @@
 export type ReportReference = { kind: string; ref: string };
 
 export function reportReference(target: string): ReportReference | null {
+  const historical = /^#tr-history-([A-Za-z0-9_-]{43})$/.exec(target);
+  if (historical) {
+    const raw = atob(historical[1].replaceAll("-","+").replaceAll("_","/") + "=");
+    const digest = Array.from(raw, value => value.charCodeAt(0).toString(16).padStart(2,"0")).join("");
+    return {kind:"historical_reference",ref:"historical-ref:v1:" + digest};
+  }
   let url: URL;
   try { url = new URL(target); } catch { return null; }
   if (url.username || url.password || url.search || url.hash) return null;

@@ -11,9 +11,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import mimetypes
-import subprocess
 from pathlib import Path
 from typing import Any
+from tools.cli.release.bounded_file import read_bounded_file
+from ..authoring.bundle_source_attachments import cached_source_attachment, git_blob_digest
 
 
 MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
@@ -37,6 +38,8 @@ def build_related_objects(
     attachments: dict[str, dict[str, Any]] = {}
     total = 0
     for value in bindings:
+        if value.get('kind') == 'historical_reference':
+            continue
         target_ref = str(value.get("target_ref") or "")
         if not target_ref:
             continue
@@ -53,7 +56,20 @@ def build_related_objects(
         })
         if not item["title"]:
             item["title"] = str(data.get("title_zh") or data.get("identity") or "")
-        if kind not in {"factor", "factor_set"} or source_root is None:
+        if kind not in {"factor", "factor_set"}:
+            continue
+        cached = cached_source_attachment(snapshot, kind=kind, data=data)
+        if cached is not None:
+            ref = cached['attachment_ref']
+            if ref not in attachments:
+                raw = base64.b64decode(cached['content_base64'], validate=True)
+                if total + len(raw) > MAX_ATTACHMENT_TOTAL:
+                    raise ValueError('frozen source attachments exceed their byte budget')
+                attachments[ref] = cached; total += len(raw)
+            if ref not in item['attachment_refs']:
+                item['attachment_refs'].append(ref)
+            continue
+        if source_root is None:
             continue
         relative = _safe_relative(data.get("relative_path"))
         blob = str(data.get("blob_hash") or "")
@@ -61,15 +77,20 @@ def build_related_objects(
         if relative is None or not _git_blob(blob):
             continue
         path = source_root / relative
-        if not path.is_file() or _git_blob_at(path) != blob:
+        if not path.is_file():
             continue
-        raw = path.read_bytes()
-        if not raw or len(raw) > MAX_ATTACHMENT_BYTES or total + len(raw) > MAX_ATTACHMENT_TOTAL:
+        try:
+            raw = read_bounded_file(path, MAX_ATTACHMENT_BYTES)
+        except (OSError, ValueError):
+            continue
+        if not raw or git_blob_digest(raw) != blob:
             continue
         content_hash = hashlib.sha256(raw).hexdigest()
         attachment_ref = f"attachment:sha256:{content_hash}"
         attachment = attachments.get(attachment_ref)
         if attachment is None:
+            if total + len(raw) > MAX_ATTACHMENT_TOTAL:
+                continue
             media_type = mimetypes.guess_type(path.name)[0] or (
                 "text/plain" if path.suffix.lower() in _TEXT_SUFFIXES else
                 "application/octet-stream"
@@ -153,11 +174,6 @@ def _git_blob(value: str) -> bool:
 
 def _git_blob_at(path: Path) -> str:
     try:
-        return subprocess.check_output(
-            ["git", "hash-object", str(path)],
-            cwd=path.parent,
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
+        return git_blob_digest(read_bounded_file(path, MAX_ATTACHMENT_BYTES))
+    except (OSError, ValueError):
         return ""

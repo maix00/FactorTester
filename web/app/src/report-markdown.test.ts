@@ -2,6 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { reportMarkdown } from "./report-markdown.ts";
 
+test("historical citations retain their label and never create a navigation action", () => {
+  let calls = 0;
+  const texts = ['[旧结论](factortester://historical_reference/historical-ref%3Av1%3A' + 'a'.repeat(64) + ')',
+    '[旧结论](#tr-history-' + 'A'.repeat(43) + ')'];
+  for (const text of texts) for (const callback of [undefined, () => { calls++; return 'unexpected'; }]) {
+    const html = reportMarkdown(text,null,callback);
+    assert.match(html, /aria-disabled="true">旧结论<\/span>/);
+    assert.doesNotMatch(html, /<a |<button|data-tr-report-link/);
+  }
+  assert.equal(calls,0);
+});
+
 test("report math renders TeX while leaving code and factor identifiers intact", () => {
   const calls: {value:string;display:unknown}[] = [];
   const engine = {renderToString:(value:string,options:Record<string,unknown>) => {calls.push({value,display:options.displayMode});return `<span class="math">${value}</span>`;}};

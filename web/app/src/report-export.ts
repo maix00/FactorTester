@@ -2,11 +2,26 @@ export type ReportExportFormat = "md" | "pdf";
 export type ReportExportTarget = {
   publication_id?: string; source_ref?: string; source_kind?: string; owner_ref?: string;
   profile_ref?: string; profile_id?: string; report_workspace_id?: string; branch_id?: string; title?: string;
+  research_id?: string; report_id?: string; storage_server_id?: string;
 };
 
 /** Use the selected branch's canonical channel; never infer a different user's report. */
 export function reportResourceURL(target: ReportExportTarget, segments: string[], params: Record<string, string> = {}): string | null {
   const explicit = String(target.publication_id || target.source_ref || "").trim();
+  if (target.source_kind === "couchdb") {
+    if (!/^p-[a-f0-9]{64}$/.test(explicit) || !target.research_id || !target.report_id) return null;
+    let path = `/api/research/${encodeURIComponent(target.research_id)}/reports/${encodeURIComponent(target.report_id)}/couchdb-publication/${explicit}`;
+    const query = new URLSearchParams(params);
+    if (target.storage_server_id) query.set("server_id", target.storage_server_id);
+    if (segments.length === 1 && segments[0] === "index") query.set("view", "index");
+    else if (segments.length === 2 && segments[0] === "chapters") {query.set("view", "chapter");query.set("chapter_id", segments[1]);}
+    else if (segments.length === 1 && ["markdown", "export"].includes(segments[0])) query.set("view", "markdown");
+    else if (segments.length === 2 && ["assets", "local-resources", "attachments"].includes(segments[0])) {
+      const kind = segments[0] === "assets" ? "research_asset" : segments[0] === "local-resources" ? "research_local_resource" : "research_attachment";
+      path += `/attachments/${kind}/${encodeURIComponent(segments[1])}`;
+    } else return null;
+    return `${path}?${query.toString()}`;
+  }
   let channel: "client" | "server" | "public";
   let ref: string;
   if (explicit.startsWith("local:")) { channel = "client"; ref = explicit.slice(6); }

@@ -5,6 +5,16 @@ import re
 import time
 from tools.data.sqlite.db import connect_sqlite
 
+
+def publication_source_kind(publication_id: str) -> str:
+    """Disjoint, formal publication namespaces; never infer authority from labels."""
+    if isinstance(publication_id, str):
+        if re.fullmatch(r'p-[0-9a-f]{64}', publication_id):
+            return 'couchdb'
+        if re.fullmatch(r'[A-Za-z0-9_-]{20,64}', publication_id):
+            return 'publication'
+    raise ValueError('published branch reference is invalid')
+
 BRANCH_SCHEMA = '''
 CREATE TABLE IF NOT EXISTS research_catalog_branches (
     report_id TEXT NOT NULL,
@@ -128,9 +138,10 @@ class ResearchBranchesMixin:
         """Advance only the reserved writer's exact version after byte publication."""
         if (not isinstance(generation, int) or isinstance(generation, bool) or generation < 0
                 or not isinstance(revision, str) or not re.fullmatch('[0-9a-f]{64}', revision)
-                or not isinstance(publication_id, str) or not re.fullmatch('[A-Za-z0-9_-]{20,64}', publication_id)
+                or not isinstance(publication_id, str)
                 or not isinstance(storage_server_id, str) or not storage_server_id.strip()):
             raise ValueError('published branch version or byte location is invalid')
+        publication_source_kind(publication_id)
         report = self._report_row(report_id)
         profile_decision = self._branch_profile_decision(report, actor, profile_ref)
         with self._write(report['research_id']) as conn:
@@ -166,7 +177,7 @@ class ResearchBranchesMixin:
         with connect_sqlite(self.db_path, readonly=True) as conn:
             rows = conn.execute("SELECT * FROM research_catalog_branches WHERE report_id=? AND status='active' ORDER BY created_at, branch_id",
                                 (report_id,)).fetchall()
-        return [{**dict(row), 'branch_ref': row['branch_id'], 'source_kind': 'publication',
+        return [{**dict(row), 'branch_ref': row['branch_id'], 'source_kind': publication_source_kind(row['publication_id']),
                  'source_ref': row['publication_id'], 'selected': False} for row in rows]
 
     def report_branch_identity(self, publication_id: str) -> dict:

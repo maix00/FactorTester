@@ -18,19 +18,24 @@ class Couch:
         self.docs = {}
         self.next_conflict = False
         self.writes = 0
+        self.head_writes = 0
 
-    def _request(self, method, path, body=None):
+    def _request(self, method, path, body=None, *, maximum_bytes=None):
         current = self.docs.get(path)
         if method == 'GET':
             if current is None:
                 raise HTTPError(path, 404, 'missing', {}, None)
-            return 200, json.dumps(current).encode()
-        if self.next_conflict:
+            raw = json.dumps(current).encode()
+            if maximum_bytes is not None and len(raw) > maximum_bytes:
+                raise ValueError('CouchDB response exceeds its byte limit')
+            return 200, raw
+        if self.next_conflict and path.startswith('research-report:'):
             raise HTTPError(path, 409, 'conflict', {}, None)
         value = json.loads(body)
         if current is not None and value.get('_rev') != current['_rev']:
             raise HTTPError(path, 409, 'conflict', {}, None)
         self.writes += 1
+        if value.get('kind') == 'research_report': self.head_writes += 1
         value['_rev'] = f'{self.writes}-revision'
         self.docs[path] = value
         return 201, json.dumps({'ok': True, 'rev': value['_rev']}).encode()
@@ -67,17 +72,19 @@ def test_single_report_and_only_its_attachments_are_published_atomically():
     assert restored['report_id'] == 'report-1' and restored['assets'][0].get('content_base64') is None
     assert restored['projection_hash'] == receipt['projection_hash']
     assert 'private sibling report' not in json.dumps(doc)
-    assert store.writes == 1
+    assert store.head_writes == 1
 
 
 def test_rechecks_authorization_before_commit_and_preserves_existing_document():
     store = Couch()
     first = publish(store, report())
+    writes = store.writes
     def revoked():
         raise PermissionError('current Keycloak grant revoked')
     with pytest.raises(PermissionError):
         publish(store, report(generation=2), expected=first['revision'], authorize=revoked)
-    assert store.writes == 1
+    assert store.head_writes == 1
+    assert store.writes == writes
     assert get_research_report(store, first['publication_id'])['generation'] == 1
 
 
@@ -91,23 +98,25 @@ def test_compare_and_set_and_generation_conflicts_do_not_overwrite():
     store.next_conflict = True
     with pytest.raises(ResearchPublicationConflict):
         publish(store, report(generation=2), expected=first['revision'])
-    assert store.writes == 1
+    assert store.head_writes == 1
     store.next_conflict = False
     second = publish(store, report(generation=2), expected=first['revision'])
-    assert second['revision'] != first['revision'] and store.writes == 2
+    assert second['revision'] != first['revision'] and store.head_writes == 2
 
 
 def test_lost_response_can_retry_only_identical_complete_authorized_content():
     store = Couch()
     first = publish(store, report())
+    writes = store.writes
     retry = publish(store, report())
-    assert retry['idempotent'] is True and retry['revision'] == first['revision'] and store.writes == 1
+    assert retry['idempotent'] is True and retry['revision'] == first['revision'] and store.head_writes == 1
+    assert store.writes == writes
     def revoked(): raise PermissionError('revoked')
     with pytest.raises(PermissionError): publish(store, report(), authorize=revoked)
     ref = 'research-report:' + first['publication_id']
     store.docs[ref]['_attachments'].pop(next(iter(store.docs[ref]['_attachments'])))
     with pytest.raises(ResearchPublicationConflict): publish(store, report())
-    assert store.writes == 1
+    assert store.head_writes == 1
 
 
 def test_wrong_resource_or_owner_cannot_replace_an_existing_publication():
@@ -117,7 +126,7 @@ def test_wrong_resource_or_owner_cannot_replace_an_existing_publication():
     store.docs[ref]['keycloak_resource_id'] = 'replaced-resource'
     with pytest.raises(PermissionError):
         publish(store, report(generation=2), expected=receipt['revision'])
-    assert store.writes == 1
+    assert store.head_writes == 1
 
 
 @pytest.mark.parametrize('mutation', [
