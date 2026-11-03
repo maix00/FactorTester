@@ -7,7 +7,7 @@ import click
 from tools.cli.core.context import client_from_config
 from tools.cli.core.display import print_home_welcome
 from tools.cli.core.errors import friendly_errors
-from tools.cli.http import ClientConfig, load_config, save_config
+from tools.cli.http import ClientConfig, HttpClientError, load_config, save_config
 from tools.cli.state import load_state, save_state
 
 
@@ -48,19 +48,24 @@ def configure(host: str, port: int | None, base_url: str, server_id: str) -> Non
 
 
 @click.command()
+@click.option('--no-browser', is_flag=True, help='Display the Keycloak verification link without opening it.')
 @friendly_errors
-def login() -> None:
-    """Verify the existing Keycloak-backed desktop/web session for this Manager."""
-    client = client_from_config(persist_cookies=True)
-    if client.session.agent_capability is not None:
+def login(no_browser: bool = False) -> None:
+    """Sign in through Keycloak, or verify an existing endpoint session."""
+    from tools.cli.agent_auth import load_capability
+    from tools.cli.oidc_device import DeviceLoginError, login as device_login
+    if load_capability() is not None:
         raise click.ClickException("Profile 助手能力不能用作用户登录会话")
     try:
-        data = client.current_principal()
-    except Exception as exc:
-        raise click.ClickException(
-            "CLI 不再收集本地密码。请先在 TradeResearch 网页或桌面端通过 Keycloak 登录，"
-            "再运行 traderesearch login 验证当前服务器会话。"
-        ) from exc
+        data = client_from_config(persist_cookies=True).current_principal()
+    except HttpClientError as exc:
+        if exc.status != 401:
+            raise
+        data = device_login(load_config().base_url, open_browser=not no_browser,
+                            show=lambda url, code: click.echo(f'{url}\n{code}', err=True))
+    except DeviceLoginError:
+        data = device_login(load_config().base_url, open_browser=not no_browser,
+                            show=lambda url, code: click.echo(f'{url}\n{code}', err=True))
     observed = str(data.get("username") or "").strip()
     if not observed:
         raise click.ClickException("当前服务器没有返回已验证的 Keycloak 用户身份")

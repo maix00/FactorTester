@@ -1,3 +1,4 @@
+import {appEntrySearch} from "../app-route.ts";
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Modal, Pagination, Select, Switch, Tabs } from "antd";
 import Form from "@rjsf/antd";
@@ -54,7 +55,7 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
   const [tab, setTab] = useState("execution");
   const [jobs, setJobs] = useState<JobReference[]>([]);
   const [selectedJob, setSelectedJob] = useState(0);
-  const [workspace, setWorkspace] = useState(() => instance.args.workspaceId || (instance.id === "standalone" ? new URLSearchParams(location.search).get("workspace_id") || "" : ""));
+  const [workspace, setWorkspace] = useState(() => instance.args.workspaceId || (instance.mobile && instance.active !== false ? history.state?.trWorkspaceID || "" : "") || (instance.id === "standalone" ? new URLSearchParams(appEntrySearch()).get("workspace_id") || "" : ""));
   const [contract, setContract] = useState<Contract | null>(null);
   const mobile = useCompactLayout();
   const { view, navigate, back } = useConfigurationNavigation();
@@ -75,10 +76,7 @@ export function TestConfigurationPage({ embedded = false }: { embedded?: boolean
   activeWorkspace.current = workspace;
   useEffect(() => {
     if (!instance.mobile || instance.active === false) return;
-    const url = new URL(location.href);
-    if (workspace) url.searchParams.set("workspace_id", workspace);
-    else url.searchParams.delete("workspace_id");
-    history.replaceState(history.state, "", url.href);
+    history.replaceState({...history.state, trWorkspaceID: workspace}, "", "/app");
   }, [workspace, instance.mobile, instance.active]);
   const resolutionKey=useMemo(()=>resolutionInputKey(planValue.value),[planValue]);
   useEffect(()=>{

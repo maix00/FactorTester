@@ -87,6 +87,15 @@ class CoreGetRoutesMixin:
         })
 
     def _get_entry_routes(self, parsed) -> bool:
+        if parsed.path == "/auth/oidc/device-configuration":
+            from server.identity.cli_login import configuration
+            try:
+                value = configuration()
+            except ValueError:
+                json_response(self, {"error": "Keycloak CLI login unavailable"}, 503)
+            else:
+                json_response(self, value)
+            return True
         if parsed.path == "/auth/oidc/start":
             self._oidc_login_start(parsed)
             return True

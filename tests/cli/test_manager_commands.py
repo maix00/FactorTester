@@ -42,7 +42,6 @@ def test_manager_login_reuses_keycloak_desktop_session(tmp_path, monkeypatch) ->
     CliRunner().invoke(manager_cli, [
         "configure", "--url", "http://127.0.0.1:7998",
     ])
-    saved = []
     monkeypatch.setattr(
         "tools.cli.native_session.load_token",
         lambda endpoint: "session-token" if endpoint == "http://127.0.0.1:7998" else "",
@@ -55,10 +54,6 @@ def test_manager_login_reuses_keycloak_desktop_session(tmp_path, monkeypatch) ->
             "capabilities": {"manager": True},
         },
     )
-    monkeypatch.setattr(
-        "tools.cli.manager.commands.ManagerCredentialStore.write",
-        lambda _self, token: saved.append(token),
-    )
 
     result = CliRunner().invoke(manager_cli, [
         "login",
@@ -66,7 +61,11 @@ def test_manager_login_reuses_keycloak_desktop_session(tmp_path, monkeypatch) ->
     ])
 
     assert result.exit_code == 0, result.output
-    assert saved == ["session-token"]
+    payload = json.loads(result.output)
+    assert payload["status"] == "authenticated"
+    assert payload["username"] == "root@1"
+    # The device session is stored once in the native-session store; the CLI
+    # never prints or forwards the bearer token.
     assert "session-token" not in result.output
 
 

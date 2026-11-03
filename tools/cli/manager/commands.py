@@ -71,21 +71,29 @@ def configure_manager(
 
 @manager.command("login")
 @click.option("--json", "as_json", is_flag=True)
+@click.option('--no-browser', is_flag=True)
 @friendly_errors
-def login_manager(as_json: bool) -> None:
-    """Import and verify this endpoint's existing Keycloak desktop session."""
+def login_manager(as_json: bool, no_browser: bool = False) -> None:
+    """Authenticate with Keycloak and verify Manager administration authority."""
     config = load_manager_config()
     from tools.cli.native_session import load_token
-
-    token = load_token(config.base_url)
+    from tools.cli.oidc_device import DeviceLoginError
+    from tools.cli.http import HttpClientError
+    try:
+        token = load_token(config.base_url)
+        value = ManagerClient(config, token=token).require_manager() if token else None
+    except HttpClientError as exc:
+        if exc.status != 401:
+            raise
+        token = ''
+    except DeviceLoginError:
+        token = ''
     if not token:
-        raise click.ClickException(
-            "Manager CLI 不再接受本地密码。请先在 TradeResearch 网页或桌面端"
-            "通过 Keycloak 登录到此 Manager，再重试。"
-        )
-    client = ManagerClient(config, token=token)
-    value = client.require_manager()
-    ManagerCredentialStore(config).write(token)
+        from tools.cli.oidc_device import login
+        login(config.base_url, open_browser=not no_browser,
+              show=lambda url, code: click.echo(f'{url}\n{code}', err=True))
+        token = load_token(config.base_url)
+        value = ManagerClient(config, token=token).require_manager()
     _echo({"status": "authenticated", **value}, as_json)
 
 
@@ -95,8 +103,14 @@ def login_manager(as_json: bool) -> None:
 def logout_manager(as_json: bool) -> None:
     """Revoke and remove the current Manager session."""
     client, credentials = _authenticated_client()
-    value = client.logout()
-    credentials.clear()
+    try:
+        value = client.logout()
+    finally:
+        try:
+            from tools.cli.oidc_device import revoke
+            revoke(client.config.base_url)
+        finally:
+            credentials.clear()
     _echo(value, as_json)
 
 

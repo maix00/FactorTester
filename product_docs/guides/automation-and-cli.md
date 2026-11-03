@@ -4,6 +4,28 @@
 
 CLI 命令按业务对象组织：因子库、产品库、测试配置/任务、Research/Report/Evidence 和公开文档。命令返回的稳定 ref、schema version、状态和错误码比人类可读的名称更适合脚本判断。
 
+## CLI 登录与用户批准 {#cli-device-approval}
+
+首次 CLI 登录使用 Keycloak OAuth 设备授权。CLI 发起申请并在终端显示验证地址和一次性用户码；用户在浏览器中核对目标 Manager、应用及用户码，登录该 Manager 的 Keycloak 并批准。Agent 可以发起申请和等待结果，批准由用户完成，无需把密码交给 Agent。
+
+Manager 管理命令示例（参数以当前安装入口的帮助为准）：
+
+```bash
+traderesearch-manager configure --url https://<manager-host>:7998
+traderesearch-manager login --no-browser
+traderesearch-manager status --json
+```
+
+1. 确认 CLI 配置的是目标机构内网或获授权的公网 Manager。本机若部署机构内网 Docker Manager，可使用其实际地址；个人桌面运行时仍是用户客户端，不因此成为可被 Manager 调度的执行节点。
+2. CLI 输出验证地址和临时用户码。用户自行打开该地址，核对码及申请应用后批准；拒绝或过期时 CLI 应结束登录，重新登录须使用新申请。
+3. CLI 在有效期内按服务端规定的间隔轮询。批准后获得令牌，再调用目标 Manager 验证 Keycloak subject、issuer 和准入权限，成功后才保存该端点的会话。浏览器显示批准成功还不能单独证明 CLI 登录成功，应等待 CLI 返回并检查 `status`。
+4. 各 Manager URL 的会话独立。切换 Manager 后重新验证其身份和授权；不复制浏览器 Cookie、密码或其他 Manager 的令牌，也不按相同用户名自动合并身份。
+5. 使用完毕执行 `traderesearch-manager logout`，撤销该 CLI 会话的刷新凭据并清除本地记录。一次性验收使用隔离 CLI 目录，保留状态摘要，不保留临时用户码或令牌。退出不会撤销其他客户端的独立会话。
+
+设备授权登录与设备自动登录白名单是两件事：批准本轮 OAuth 登录不等于注册计算节点、授予下载角色或批准业务写入；具体对象操作仍由 Keycloak 当前授权决定。
+
+旧客户端可能只支持复用已有原生会话。若登录发现入口不存在、被转到合规页，或 Keycloak 客户端尚未配置，应报告该部署的能力缺口；若 TLS 信任失败，应核对目标部署的证书信任配置。不得跳过证书或身份校验，也不得为兼容旧技能而改变网络拓扑。各组件记录实际版本并按能力合同验收，技能说明以项目当前文档为准。
+
 ## Agent 如何使用平台 {#agent-platform-use}
 
 Agent 应使用已安装的 `cli-anything-traderesearch-research` 或 `cli-anything-traderesearch-manager` Skill。Skill 负责说明何时查询、怎样形成证据、哪些操作需要正式对象引用，以及失败后如何安全恢复；CLI 是实际执行和返回结构化结果的唯一入口。

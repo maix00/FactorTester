@@ -1,0 +1,50 @@
+{
+  "date": "2026-11-03 Asia/Taipei",
+  "scope": "React family and strategy authoring; focused native Research bridge; not whole-platform completion",
+  "commits": {
+    "family_catalog": "a916a75bd",
+    "strategy_ui_and_legacy_removal": "b00481de4",
+    "strategy_publication": "7d86c21a4",
+    "public_application": "1fca265176743c4674f982c30195a5b249b05775",
+    "public_worker_and_data_io": "7b2992c216b26d1c9b7710a962529a928afc1e34",
+    "alpha_threshold_fix_not_deployed": "78008d830a1e54aef4cdee06507fa3b3a0101586"
+  },
+  "browser": {
+    "tool": "GTHT Playwright / Chrome; Browser plugin unavailable",
+    "locations": ["http://127.0.0.1:7998", "https://101.133.144.27:7998"],
+    "identity": "interactive Keycloak MaxJJW login; credentials excluded",
+    "passed": [
+      "family create immediately visible in directory",
+      "family source/version/member navigation and source edit",
+      "typed factor create/edit yields new immutable identity",
+      "strategy create via React form",
+      "old strategy detail/edit URL redirects to React",
+      "strategy source edit creates a new version",
+      "old strategy source remains unchanged",
+      "public strategy flow reports zero page and console errors",
+      "test objects archived/deleted and browser logout"
+    ],
+    "limitations": ["390px desktop-shell capture is not Ionic mobile end-to-end acceptance"]
+  },
+  "verification": {
+    "focused_python_tests": "20 catalog, 17 strategy/store, 4 route/manifest, 4 mutation/identity; selected runs only",
+    "frontend": "TypeScript check and desktop/mobile builds passed",
+    "native_research_bridge": "one isolated macOS WebKit/real CLI test passed in 1.25s; Manager session fixture, not two live Managers",
+    "alpha": "three shared rule tests; offline locked nautilus-backtest feature cargo check passed; no Linux wheel rebuild",
+    "public_backup": "PostgreSQL dump checksum and restore verification passed, 11 public tables",
+    "pdf": "5 sections and 24 documents compiled with Pandoc/XeLaTeX"
+  },
+  "operations": {
+    "dependency_reuse": "existing native wheels and Python dependency snapshot; no Rust rebuild for UI/store deployments",
+    "temporary_build_pause": "empty-queue guard; worker/data-I/O/CouchDB paused during bounded image preparation and restored before activation",
+    "local_cache_cleanup": "73 old incremental directories removed; two newest per crate retained; adapter target reduced from about 7.5 GiB to 5.9 GiB",
+    "old_release_directories": "four contain uncommitted现场 patches/untracked files; retained for reconciliation, not force-deleted"
+  },
+  "unfinished": [
+    "remaining old frontend dependencies and whole-platform feature migration",
+    "full native two-Manager Research/report bidirectional synchronization",
+    "execution node has no admitted data offers; queue connectivity is not data readiness",
+    "paper T/TL reproduction needs daily decision timing, funded position sizing and continuous-to-physical contract rollover routing",
+    "alpha threshold fix must enter a rebuilt native runtime before deployment/Job acceptance"
+  ]
+}

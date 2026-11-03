@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -16,13 +18,25 @@ def session_path(endpoint: str) -> Path:
 
 
 def load_token(endpoint: str) -> str:
+    value = _read(endpoint)
+    if value.get('oauth') and time.time() >= value['oauth']['expires_at'] - 30:
+        with _credential_lock(endpoint):
+            value = _read(endpoint)
+            if value.get('oauth') and time.time() >= value['oauth']['expires_at'] - 30:
+                from tools.cli.oidc_device import refresh_session
+                value = refresh_session(endpoint, value)
+                _write(endpoint, value)
+    return str(value.get('token') or '')
+
+
+def _read(endpoint: str) -> dict:
     try:
         value = json.loads(session_path(endpoint).read_text())
     except FileNotFoundError:
-        return ''
+        return {}
     if value.get('endpoint') != endpoint.rstrip('/'):
         raise ValueError('native session endpoint does not match')
-    return str(value.get('token') or '')
+    return value
 
 
 def save_session(endpoint: str, principal: str, token: str, certificate_pem: str = "") -> None:
@@ -30,19 +44,67 @@ def save_session(endpoint: str, principal: str, token: str, certificate_pem: str
     if (parsed.scheme not in {'http', 'https'} or not parsed.hostname
             or parsed.username or parsed.password or parsed.query or parsed.fragment):
         raise ValueError('native session endpoint is invalid')
+    with _credential_lock(endpoint):
+        _write(endpoint, {'endpoint': endpoint.rstrip('/'), 'principal': principal,
+                         'token': token, 'certificate_pem': certificate_pem})
+
+
+@contextmanager
+def _credential_lock(endpoint: str):
+    """Serialize refresh-token rotation and native handoff across CLI processes."""
+    target = session_path(endpoint).with_suffix('.lock')
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(target, os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(fd, 'r+b') as handle:
+        if os.name == 'nt':
+            import msvcrt
+            if not target.stat().st_size:
+                handle.write(b'\0')
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == 'nt':
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _write(endpoint: str, value: dict) -> None:
     target = session_path(endpoint)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(dir=target.parent)
     try:
         with os.fdopen(fd, 'w') as stream:
-            json.dump({'endpoint': endpoint.rstrip('/'), 'principal': principal, 'token': token, 'certificate_pem': certificate_pem}, stream)
+            json.dump(value, stream)
         os.replace(temporary, target)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
 
 def clear_session(endpoint: str) -> None:
-    session_path(endpoint).unlink(missing_ok=True)
+    with _credential_lock(endpoint):
+        session_path(endpoint).unlink(missing_ok=True)
+
+
+def save_device_session(endpoint: str, current: dict, tokens: dict, config: dict) -> None:
+    with _credential_lock(endpoint):
+        previous = _read(endpoint)
+        _write(endpoint, {
+            'endpoint': endpoint.rstrip('/'), 'principal': current['username'],
+            'token': tokens['access_token'],
+            'certificate_pem': previous.get('certificate_pem', ''),
+            'oauth': {**config, 'subject': current['keycloak_subject'],
+                      'refresh_token': tokens['refresh_token'],
+                      'token_endpoint': tokens['token_endpoint'],
+                      'expires_at': time.time() + tokens['expires_in']},
+        })
 
 
 def certificate_for(endpoint: str) -> str:
