@@ -743,6 +743,9 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-property-list > div:last-child { border-bottom:0; }
 .tr-property-list dt { color:var(--muted); }
 .tr-property-list dd { margin:0; text-align:right; color:var(--text); overflow-wrap:anywhere; min-width:0; font-variant-numeric:tabular-nums; }
+.tr-property-groups.is-comfortable .tr-property-list > div { min-height:60px; align-items:center; }
+.tr-property-groups.is-comfortable .tr-property-list dd { display:flex; justify-content:flex-end; align-items:center; gap:8px; }
+.tr-property-groups.is-comfortable .tr-property-list > .is-wide dd { justify-content:flex-start; }
 .tr-property-list > .is-wide { grid-template-columns:1fr; gap:8px; }
 .tr-property-list > .is-wide dd { text-align:left; }
 .tr-property-missing { border-top:1px solid var(--line); padding-top:16px; font-size:12px; color:var(--muted); }

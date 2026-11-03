@@ -16,5 +16,5 @@ export function AccountSummary(): React.ReactElement {
     { key: "actions", label: t("settingsPanel.accountAction"), value: true, render: () => <AccountActions /> },
   ];
   if (session?.capabilities?.manager) items.push({ key: "manager", label: "Manager", value: t("available") });
-  return <PropertyGroups groups={[{ key: "account", title: t("settingsPanel.sections.account"), items }]} />;
+  return <PropertyGroups density="comfortable" groups={[{ key: "account", title: t("settingsPanel.sections.account"), items }]} />;
 }

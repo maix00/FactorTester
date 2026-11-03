@@ -69,6 +69,13 @@ setupIonicReact({{mode:'md'}});
                     reference.wait_for()
                     assert page.locator(".tr-settings-card .tr-property-groups").is_visible()
                     assert page.locator(".tr-settings-card .tr-property-list dt").count() == 3
+                    rows = page.locator(".tr-settings-card .tr-property-list > div")
+                    boxes = [rows.nth(i).bounding_box() for i in range(rows.count())]
+                    assert max(box["height"] for box in boxes) - min(box["height"] for box in boxes) <= 1
+                    action = page.locator(".tr-settings-card .tr-account-actions button").bounding_box()
+                    value = page.locator(".tr-settings-card .tr-property-list dd").last.bounding_box()
+                    assert abs(action["x"] + action["width"] - value["x"] - value["width"]) <= 1
+
                     assert page.url == f"http://127.0.0.1:{server.server_port}/app"
                     assert reference.inner_text() == "Alice"
                     reference.click()
