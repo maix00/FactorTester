@@ -56,3 +56,38 @@ def test_invalid_cleanup_choice_is_rejected_before_git_or_transfer(tmp_path):
     assert result.returncode==2
     assert 'FACTORTESTER_CLEANUP_RELEASES must be 0 or 1' in result.stderr
     assert not calls.exists()
+
+
+@pytest.mark.parametrize('feat_sync,main_sync,accepted',[(True,True,True),(False,True,False),(True,False,False)])
+def test_skip_push_still_fetches_and_requires_published_synchronized_branches(tmp_path,feat_sync,main_sync,accepted):
+    root=Path(__file__).resolve().parents[2]
+    source=(root/'scripts/server/publish_public_main.sh').read_text()
+    prefix=source.split('nautilus_revision=',1)[0]
+    bindir=tmp_path/'bin';bindir.mkdir();calls=tmp_path/'calls'
+    git=bindir/'git'
+    git.write_text('''#!/usr/bin/env python3
+import os,sys
+from pathlib import Path
+args=sys.argv[1:]
+with Path(os.environ['CALLS']).open('a') as f:f.write(' '.join(args)+'\\n')
+command=args[2:]
+if command==['branch','--show-current']:print('main')
+elif command==['status','--porcelain']:pass
+elif command==['fetch','origin']:pass
+elif command[0]=='rev-parse':
+ ref=command[1]
+ print('published' if ref.startswith('origin/') or (ref=='feat' and os.environ['FEAT_SYNC']=='1') or (ref=='main' and os.environ['MAIN_SYNC']=='1') else 'local-only')
+elif command[0]=='merge-base':pass
+else:sys.exit(99)
+''')
+    git.chmod(0o700)
+    env={**os.environ,'PATH':str(bindir)+os.pathsep+os.environ['PATH'],'CALLS':str(calls),
+         'FACTORTESTER_PUBLISH_AUTHORIZED':'1','FACTORTESTER_SKIP_GITHUB_PUSH':'1',
+         'FACTORTESTER_CLEANUP_RELEASES':'0','FEAT_SYNC':str(int(feat_sync)),'MAIN_SYNC':str(int(main_sync))}
+    harness=tmp_path/'preflight.sh'
+    harness.write_text(prefix+'\necho admitted\n')
+    result=subprocess.run(['bash',str(harness)],env=env,capture_output=True,text=True)
+    assert (result.returncode==0) is accepted
+    assert 'fetch origin' in calls.read_text()
+    assert not any(word in calls.read_text() for word in [' push ', 'ssh'])
+    if accepted:assert 'admitted' in result.stdout

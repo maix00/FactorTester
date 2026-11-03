@@ -70,10 +70,15 @@ done
 }
 
 skip_github="${FACTORTESTER_SKIP_GITHUB_PUSH:-0}"
-if [[ "$skip_github" != "1" ]]; then
-  git -C "$repo_root" fetch origin
-  [[ "$(git -C "$repo_root" rev-parse feat)" == "$(git -C "$repo_root" rev-parse origin/feat)" ]] || {
-    echo "feat must equal origin/feat before publication" >&2
+# Skipping a no-op push must not skip branch synchronization/admission.
+git -C "$repo_root" fetch origin
+[[ "$(git -C "$repo_root" rev-parse feat)" == "$(git -C "$repo_root" rev-parse origin/feat)" ]] || {
+  echo "feat must equal origin/feat before publication" >&2
+  exit 2
+}
+if [[ "$skip_github" == "1" ]]; then
+  [[ "$(git -C "$repo_root" rev-parse main)" == "$(git -C "$repo_root" rev-parse origin/main)" ]] || {
+    echo "skipping push requires main to equal origin/main" >&2
     exit 2
   }
 fi
