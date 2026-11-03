@@ -505,12 +505,14 @@ class ClientProductCatalogMixin:
         from server.modules.shared.price_services import (
             available_sources_for_product,
             cached_contracts,
-            contract_has_data,
         )
         from server.services.product_catalog_projection import (
             catalog_product_description,
+            product_catalog_revision,
+            source_member_families,
             source_family_ids_for_member_ids,
         )
+        from server.services.product_tree_pages import product_tree_pages
         from server.services.product_tree import find_node_by_path
         from tools.products.classifier_paths import classifier_object_path
         from tools.products.Futures import FuturesContract
@@ -539,27 +541,37 @@ class ClientProductCatalogMixin:
             objects = category_objects
         else:
             node = find_node_by_path(tree, node_path.split("/")) if node_path else None
+            def scoped_contracts(value):
+                if not isinstance(value, dict):
+                    return
+                yield from (product for product in value.get("$OBJECTS$", ())
+                            if isinstance(product, FuturesContract))
+                for key, child in value.items():
+                    if key != "$OBJECTS$":
+                        yield from scoped_contracts(child)
             objects = (
                 node.get("$OBJECTS$", [])
                 if isinstance(node, dict)
-                else ([] if node_path else list(cached_contracts()))
+                else ([] if node_path else
+                      tuple(scoped_contracts(tree)) if source_ids is not None
+                      else cached_contracts())
             )
-        ordered = sorted(objects, key=lambda item: str(getattr(item, "name", item)))
-        offset = (requested_page - 1) * requested_limit
-        # Normal tree expansion needs metadata for one page, not every leaf.
-        # Search still projects source metadata because it is searchable data.
-        total = len(ordered)
-        candidates = ordered if search else ordered[offset:offset + requested_limit]
-        result = []
-        for product in candidates:
+        revision = product_catalog_revision()
+        allowed = None if source_ids is None else set(source_ids)
+        families = source_member_families() if allowed else {}
+
+        def project(product, product_path):
             name = str(getattr(product, "name", product))
             is_contract = isinstance(product, FuturesContract)
             sources = available_sources_for_product(product)
-            has_data = contract_has_data(name) if is_contract else bool(sources)
+            if allowed is not None:
+                sources = [source for source in sources if
+                           families.get(source["alias"], source["alias"]) in allowed]
+            has_data = bool(sources)
             description = catalog_product_description(product, name)
             value = {
                 "title": name,
-                "key": classifier_object_path(product),
+                "key": product_path,
                 "checkbox": False,
                 "folder": False,
                 "lazy": False,
@@ -574,27 +586,17 @@ class ClientProductCatalogMixin:
                     item["alias"] for item in sources
                 )),
                 "exchange": _catalog_exchange(product, name),
-                "product_path": classifier_object_path(product),
+                "product_path": product_path,
             }
             if is_contract:
                 value["contract_uid"] = name
-            searchable = " ".join(
-                str(value.get(key) or "")
-                for key in (
-                    "title", "product_name", "product_code", "desc",
-                    "exchange", "product_path", "source_ids",
-                )
-            ).casefold()
-            if not search or search in searchable:
-                result.append(value)
-        if search:
-            total = len(result)
-        total_pages = max(1, (total + requested_limit - 1) // requested_limit)
-        return {
-            "nodes": result[offset:offset + requested_limit] if search else result,
-            "page": requested_page,
-            "limit": requested_limit,
-            "total": total,
-            "total_pages": total_pages,
-            "has_more": requested_page < total_pages,
-        }
+            return value
+
+        return product_tree_pages.page(
+            scope=(revision, str(principal),
+                   None if source_ids is None else tuple(sorted(set(source_ids))),
+                   tuple(sorted(set([category_id] if isinstance(category_id, str)
+                                    else category_id or ()))), requested_path),
+            objects=objects, object_path=classifier_object_path, project=project,
+            query=search, page=requested_page, limit=requested_limit,
+        )

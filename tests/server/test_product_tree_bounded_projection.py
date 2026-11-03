@@ -36,3 +36,11 @@ def test_empty_out_of_range_page_does_not_project_metadata(directory):
     result=ClientProductCatalogMixin.contract_tree_page(page=1000,limit=25)
     assert result['nodes']==[] and result['total']==5000
     assert directory==[]
+
+def test_warm_search_reuses_metadata_and_empty_scope_does_not_fall_back(directory):
+    ClientProductCatalogMixin.contract_tree_page(query='source',page=1,limit=25)
+    assert len(directory)==5000
+    ClientProductCatalogMixin.contract_tree_page(query='source',page=2,limit=25)
+    assert len(directory)==5000
+    result=ClientProductCatalogMixin.contract_tree_page(source_ids=(),page=1,limit=25)
+    assert result['total']==0 and result['nodes']==[]

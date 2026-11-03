@@ -11,17 +11,20 @@ type Node={key:string;title:React.ReactNode;children?:Node[];isLeaf:boolean;raw:
 export function ProductTree():React.ReactElement {
  const {t}=useTranslation(),instance=usePageInstance(),compact=useCompactLayout();
  const [nodes,setNodes]=useState<Node[]>([]),[loading,setLoading]=useState(true);
+ const [refresh,setRefresh]=useState(0);
+ const refreshed=useRef(0);
  const lifecycle=useRef<AbortController|null>(null),pending=useRef(new Map<string,Promise<void>>());
  const convert=(rows:Row[]):Node[]=>rows.map(row=>({key:String(row.key),title:String(row.title==="Product Lists"?t("catalog.products"):row.title||row.key),
   isLeaf:!row.lazy&&!row.children?.length,raw:row,...(row.children?.length?{children:convert(row.children)}:{})}));
  useEffect(()=>{
   const controller=new AbortController();lifecycle.current=controller;setLoading(true);setNodes([]);pending.current.clear();
-  void request("/api/product-library/tree",{signal:controller.signal})
+  const invalidate=refresh!==refreshed.current;refreshed.current=refresh;
+  void request(`/api/product-library/tree${invalidate?"?refresh=1":""}`,{signal:controller.signal})
    .then(value=>{if(!controller.signal.aborted)setNodes(convert(value.tree||[]));})
    .catch(reason=>{if(!controller.signal.aborted)notify({code:"product.tree.load",type:"error",message:reason.message});})
    .finally(()=>{if(!controller.signal.aborted)setLoading(false);});
   return()=>controller.abort();
- },[t]);
+ },[t,refresh]);
  const load=(path:string,page=1):Promise<void>=>{
   const key=JSON.stringify([path,page]),old=pending.current.get(key);if(old)return old;
   const signal=lifecycle.current?.signal;
@@ -37,9 +40,11 @@ export function ProductTree():React.ReactElement {
   void task.finally(()=>{if(pending.current.get(key)===task)pending.current.delete(key);}).catch(()=>undefined);
   return task;
  };
- return <Spin spinning={loading}><section className="tr-product-tree" aria-label={t("catalog.tree")}>
-  {!loading&&!nodes.length?<Empty image={Empty.PRESENTED_IMAGE_SIMPLE}/>:<Tree<Node> virtual height={compact?360:520} blockNode showLine treeData={nodes}
+ return <section className="tr-product-tree" aria-label={t("catalog.tree")}>
+  <div className="tr-inline-actions"><Button size="small" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>{t("catalogActions.refreshProducts")}</Button></div>
+  <Spin spinning={loading}>
+  {!loading&&!nodes.length?<Empty image={Empty.PRESENTED_IMAGE_SIMPLE}/>:<Tree<Node> key={refresh} virtual height={compact?360:520} blockNode showLine treeData={nodes}
    loadData={node=>node.isLeaf||node.children?.length?Promise.resolve():load(String(node.key))}
    onSelect={(_,info)=>{const row=info.node.raw;if(row.product_name)instance.open("product-detail",{productName:String(row.product_name),productTitle:String(row.desc||row.product_name),...(row.contract_uid?{contractUid:String(row.contract_uid)}:{})});}}/>}
- </section></Spin>;
+ </Spin></section>;
 }

@@ -278,6 +278,24 @@ class CatalogRoutesMixin:
                     "fields": product.get("fields", {}),
                 }
             elif parsed.path == "/api/product-library/tree":
+                from server.services.product_catalog_projection import (
+                    clear_product_catalog_projection_cache,
+                )
+                # Explicit user refresh, not a per-page TTL/full rebuild.
+                # Visitors cannot repeatedly invalidate the shared index.
+                if query.get("refresh", [""])[0] == "1":
+                    if visitor is not None:
+                        json_response(self, {"success": False,
+                                             "error": "login required for catalog refresh"}, 403)
+                        return True
+                    from server.modules.shared.price_services import (
+                        cached_products, cached_contracts, cached_product_tree,
+                        cached_product_tree_for_category,
+                    )
+                    for cached in (cached_products, cached_contracts,
+                                   cached_product_tree, cached_product_tree_for_category):
+                        cached.cache_clear()
+                    clear_product_catalog_projection_cache()
                 if visitor is not None:
                     descriptors = visitor_source_descriptors(
                         self.state.federated_source_descriptors(),
