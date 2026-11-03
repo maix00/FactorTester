@@ -57,7 +57,8 @@ setupIonicReact({{mode:'md'}});
                         if(mobile)document.documentElement.classList.add('tr-mobile-runtime');
                         window.fetch=async input=>{
                             const path=new URL(String(input),location.origin).pathname;
-                            const value=path==='/api/session'?{session:{username:'Example@Alice@123',alias:'Alice',role:'user'}}:
+                            const value=path==='/api/session'?{session:{username:'Example@Alice@123',alias:'Alice',role:'user',capabilities:{manager:true,research:true},admin_capabilities:['admin_console:read','admin_console:manage']}}:
+                                path==='/api/client/releases/beta.json'?{version:'1.2.3',dmg_url:'/api/client/releases/assets/beta/'+'a'.repeat(64)+'.dmg'}:
                                 path==='/api/client/profiles'?{profiles:[]}:
                                 path==='/api/research'?{researches:Array.from({length:25},(_,i)=>({research_id:'research-'+i,title:'Research '+i,owner_ref:'Example@Alice@123'}))}:
                                 {items:[],researches:[],reports:[]};
@@ -68,7 +69,22 @@ setupIonicReact({{mode:'md'}});
                     reference = page.locator(".tr-settings-card .tr-object-reference").filter(has_text="Alice")
                     reference.wait_for()
                     assert page.locator(".tr-settings-card .tr-property-groups").is_visible()
-                    assert page.locator(".tr-settings-card .tr-property-list dt").count() == 3
+                    assert page.locator(".tr-settings-card .tr-property-group:first-child .tr-property-list dt").count() == 3
+                    if not mobile:
+                        page.wait_for_function("""() => ![...document.querySelectorAll('.tr-settings-overlay')].some(element => /ant-zoom-(appear|enter)/.test(element.className))""")
+                    page.wait_for_function("""() => [...document.querySelectorAll('.tr-settings-card .tr-property-list > div')].every(row => row.getBoundingClientRect().height >= 41)""")
+                    rows = page.locator(".tr-settings-card .tr-property-list > div")
+                    boxes = rows.evaluate_all("elements => elements.map(element => ({height:element.getBoundingClientRect().height}))")
+                    assert len(boxes) == 5
+                    assert max(box["height"] for box in boxes) <= 43
+                    assert max(box["height"] for box in boxes) - min(box["height"] for box in boxes) <= 1
+                    action = page.locator(".tr-settings-card .tr-account-actions button").bounding_box()
+                    value = page.locator(".tr-settings-card .tr-property-group:first-child .tr-property-list dd").last.bounding_box()
+                    assert abs(action["x"] + action["width"] - value["x"] - value["width"]) <= 1
+
+                    assert action["height"] <= 28  # Shared AppTheme derives a 27px small control.
+                    assert not page.locator(".tr-settings-card").get_by_text("Manager", exact=True).count()
+                    assert page.locator(".tr-settings-card").get_by_text("管理控制台" if zh else "Admin console: manage", exact=True).is_visible()
                     assert page.url == f"http://127.0.0.1:{server.server_port}/app"
                     assert reference.inner_text() == "Alice"
                     reference.click()
@@ -87,6 +103,13 @@ setupIonicReact({{mode:'md'}});
                         page.screenshot(path=str(tmp_path / f"account-mobile-{locale}.png"))
                         header.get_by_role("button", name="返回" if zh else "Back", exact=True).click()
                         header.locator("ion-title").filter(has_text="设置" if zh else "Settings").wait_for()
+                        page.get_by_role("button", name="客户端 ›" if zh else "Client ›", exact=True).click()
+                        download = page.get_by_role("link", name="下载 macOS 客户端" if zh else "Download for macOS", exact=True)
+                        download.wait_for()
+                        assert download.get_attribute("href").endswith("/" + "a" * 64 + ".dmg")
+                        assert not page.get_by_text("客户端更新" if zh else "Client updates", exact=True).count()
+                        header.get_by_role("button", name="返回" if zh else "Back", exact=True).click()
+                        header.locator("ion-title").filter(has_text="设置" if zh else "Settings").wait_for()
                         header.get_by_role("button", name="返回" if zh else "Back", exact=True).click()
                         page.locator(".tr-mobile-shell[data-root='true']").wait_for()
                         assert header.get_by_role("button", name="通知中心" if zh else "Notification center").is_visible()
@@ -98,6 +121,10 @@ setupIonicReact({{mode:'md'}});
                         assert dialog.get_by_text("用户" if zh else "User", exact=True).is_visible()
                         page.wait_for_timeout(350)
                         page.screenshot(path=str(tmp_path / f"account-desktop-{locale}.png"))
+                        dialog.locator(".tr-settings-nav").get_by_role("button", name="客户端" if zh else "Client", exact=True).click()
+                        download = dialog.get_by_role("link", name="下载 macOS 客户端" if zh else "Download for macOS", exact=True)
+                        download.wait_for()
+                        assert download.get_attribute("href").endswith("/" + "a" * 64 + ".dmg")
                         dialog.locator(".ant-modal-close").click()
                         dialog.wait_for(state="hidden")
                     assert "settings=account" not in page.url

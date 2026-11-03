@@ -14,6 +14,8 @@ export type AuthSession = {
   role?: string;
   capabilities?: Record<string, boolean>;
   admin_capabilities?: string[];
+  public_server_login?: boolean;
+  keycloak_roles?: string[];
   visitor_login?: boolean;
 } | null;
 

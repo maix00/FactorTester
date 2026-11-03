@@ -34,9 +34,7 @@ export function DeviceOrientationSettings(): React.ReactElement {
     finally { setBusy(false); }
   };
   if (!value) return <Spin />;
-  return <div className="tr-settings-row">
-    <b>{t("deviceOrientation.title")}</b><Select aria-label={t("deviceOrientation.title")} value={value} disabled={busy} className="tr-appearance-select" popupClassName="tr-appearance-dropdown" popupMatchSelectWidth={false}
+  return <Select size="small" aria-label={t("deviceOrientation.title")} value={value} disabled={busy} className="tr-appearance-select" popupClassName="tr-appearance-dropdown" popupMatchSelectWidth={false}
       onChange={(next: Orientation) => void setOrientation(next)} options={(["portrait", "landscape", "system"] as Orientation[])
-        .map(key => ({value:key, label:t(`deviceOrientation.${key}`)}))} />
-  </div>;
+        .map(key => ({value:key, label:t(`deviceOrientation.${key}`)}))} />;
 }

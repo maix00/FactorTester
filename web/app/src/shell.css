@@ -193,14 +193,9 @@ html.tr-mobile-runtime :is(input:not([type="checkbox"]):not([type="radio"]), tex
 .tr-settings-page-header p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
 .tr-settings-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 14px; }
 .tr-settings-card h3 { margin: 0 0 12px; font-size: 13px; }
-.tr-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
-.tr-settings-row b { display: block; font-size: 12px; }
-.tr-settings-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
-.tr-appearance-settings .tr-settings-row:first-child { border-top: 0; }
-.tr-appearance-select { width: min(160px, 55%); min-width: 0; }
+.tr-appearance-select { width:160px; max-width:100%; min-width:0; }
 .tr-appearance-dropdown { min-width: max-content !important; }
 .tr-appearance-dropdown .ant-select-item-option-content { white-space: nowrap; overflow: visible; text-overflow: clip; }
-.tr-settings-value { color: var(--muted); font-size: 12px; }
 .tr-settings-migrating p { margin: 0; color: var(--muted); font-size: 12px; }
 @media (max-width: 620px) {
   .tr-settings-hub { grid-template-columns: 148px minmax(0, 1fr); gap: 10px; }
@@ -553,11 +548,8 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-function-body .ant-table-tbody > tr.ant-table-row-selected > td { background:#eaf2ff; }
 @media(max-width:767px) { .tr-function-body .ant-table { min-width:0; } .tr-function-body .ant-table-tbody > tr > td { height:72px; } .tr-library-filters .ant-select { flex-basis:calc(50% - 6px); } }
 .tr-settings-content .tr-settings-page-header { min-height:72px; box-sizing:border-box; align-items:center; }
-.tr-settings-content .tr-settings-row { min-height:72px; padding:16px 0; box-sizing:border-box; border-bottom:1px solid #edf0f6; }
 .tr-settings-content .tr-settings-card { box-shadow:none; border-color:#e8ecf2; }
 .tr-settings-content h2 { font-size:22px; }
-.tr-settings-content .tr-settings-row b { font-size:14px; font-weight:500; }
-.tr-settings-content .tr-settings-row:last-child { border-bottom:0; }
 .tr-device-settings { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; min-width:0; }
 .tr-device-controls { display:flex; align-items:center; gap:12px; }
 .tr-device-controls .ant-input-search { flex:1; min-width:0; }
@@ -743,6 +735,9 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-property-list > div:last-child { border-bottom:0; }
 .tr-property-list dt { color:var(--muted); }
 .tr-property-list dd { margin:0; text-align:right; color:var(--text); overflow-wrap:anywhere; min-width:0; font-variant-numeric:tabular-nums; }
+.tr-property-groups.has-controls .tr-property-list > div { min-height:42px; padding:7px 0; align-items:center; }
+.tr-property-groups.has-controls .tr-property-list dd { display:flex; justify-content:flex-end; align-items:center; gap:8px; }
+.tr-property-groups.has-controls .tr-property-list > .is-wide dd { justify-content:flex-start; }
 .tr-property-list > .is-wide { grid-template-columns:1fr; gap:8px; }
 .tr-property-list > .is-wide dd { text-align:left; }
 .tr-property-missing { border-top:1px solid var(--line); padding-top:16px; font-size:12px; color:var(--muted); }
@@ -784,7 +779,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-trading-grid .ant-card-body { padding:20px; }
 .tr-settings-content { max-height:75vh; overflow:auto; padding-right:8px; }
 .tr-settings-card { padding:0; border:0; background:transparent; }
-.tr-settings-row { border-top:0; }
 .tr-settings-alert { margin: 10px 0; }
 @media(max-width:760px) {
  .tr-record-values > div { grid-template-columns:minmax(100px,36%) minmax(0,1fr); gap:16px; padding:10px 0; }
@@ -933,3 +927,5 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 @media(max-width: 760px) { .tr-factor-parameter-input { grid-template-columns: 1fr; } }
 
 .tr-family-source { overflow: auto; max-height: 60dvh; padding: 16px; border: 1px solid var(--line); border-radius: 8px; margin-top: 16px; }
+
+.tr-settings-body { display:grid; gap:20px; min-width:0; }
