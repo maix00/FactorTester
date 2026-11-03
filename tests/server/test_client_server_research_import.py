@@ -11,8 +11,8 @@ import pytest
 from tools.cli.release.research_reporting.local_rpc import LocalResearchRPC
 
 
-def test_owned_research_import_retries_and_never_overwrites_local_changes(tmp_path):
-    research_id = 'research:v1:' + 'R' * 24
+@pytest.mark.parametrize('research_id', ['research:v1:' + 'R' * 24, 'research:migrated:' + 'b' * 32])
+def test_owned_research_import_retries_and_never_overwrites_local_changes(tmp_path, research_id):
     identity = {'username': 'alice', 'keycloak_issuer': 'https://id.test/realm',
                 'keycloak_subject': 'subject', 'tr_identity_id': 'stable'}
     item = {'research_id': research_id, 'owner_ref': 'alice', 'is_owned': True, 'status': 'active',

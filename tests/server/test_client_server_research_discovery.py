@@ -77,3 +77,31 @@ def test_discovery_queues_authorized_changes_without_opening_research_page(tmp_p
         assert max(size for _token, size in calls) <= 3
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+
+def test_mixed_migrated_discovery_preserves_refs_and_rejects_invalid_page(tmp_path, monkeypatch):
+    import pytest
+    from tools.cli.release.research_reporting import local_server_research as module
+    from tools.cli.release.research_reporting.local_catalog import LocalResearchCatalog
+    from tools.cli.release.research_reporting.local_publication import ensure_publication_table
+
+    store = LocalResearchCatalog(tmp_path, issuer='https://issuer.test/realm', identity_id='stable', profiles={'self'})
+    ensure_publication_table(store)
+    refs = ['research:migrated:' + 'b' * 32, 'research:v1:' + 'R' * 24]
+    items = [{'research_id': ref, 'updated_at': 1.0, 'title': 'Retained research', 'description': ''} for ref in refs]
+    class Session:
+        def get(self, path, *, query):
+            assert path == '/api/research/owned-sync'
+            return {'success': True, 'researches': items, 'next_cursor': None}
+    monkeypatch.setattr(module, 'manager_session', lambda *_: ('https://manager.test', Session()))
+    kwargs = dict(binding={}, manager={'endpoint': 'https://manager.test'}, profile_id='self', cursor='', limit=3)
+    assert module.discover_server_researches(store, **kwargs) == {'queued': 2, 'next_cursor': None}
+    with store._connect() as db:
+        assert {r[0] for r in db.execute('SELECT research_id FROM server_research_pending')} == set(refs)
+    for invalid in ('research:migrated:' + 'b' * 31, 'research:migrated:../private', 'research:unknown:' + 'a' * 32):
+        items.append({'research_id': invalid, 'updated_at': 1.0, 'title': 'Invalid', 'description': ''})
+        with pytest.raises(ValueError, match='response is invalid'):
+            module.discover_server_researches(store, **kwargs)
+        items.pop()
+    with store._connect() as db:
+        assert db.execute('SELECT count(*) FROM server_research_pending').fetchone()[0] == 2

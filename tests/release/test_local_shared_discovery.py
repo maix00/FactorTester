@@ -64,3 +64,16 @@ def test_existing_local_report_from_another_manager_is_queued_for_exact_validati
     with store._connect() as db:
         row = db.execute('SELECT report_id,manager_hash,source_kind FROM server_report_pending').fetchone()
     assert (row['report_id'], row['manager_hash'], row['source_kind']) == (item['report_id'], 'manager-b', 'local')
+
+
+def test_shared_report_discovery_keeps_migrated_research_identity(tmp_path):
+    store = LocalResearchCatalog(tmp_path, issuer='https://issuer.test/realm', identity_id='stable', profiles={'self'})
+    ensure_publication_table(store)
+    item = {**_item('A'), 'research_id': 'research:migrated:' + 'b' * 32}
+    class Session:
+        def get(self, _path, *, query):
+            return {'success': True, 'reports': [item], 'next_cursor': None}
+    assert discover_local_reports(store, session=Session(), manager_hash='manager', profile_id='self', limit=1) == (False, [])
+    with store._connect() as db:
+        row = db.execute('SELECT research_id,report_id,source_kind FROM server_report_pending').fetchone()
+        assert tuple(row) == (item['research_id'], item['report_id'], 'local')
