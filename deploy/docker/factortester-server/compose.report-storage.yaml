@@ -1,0 +1,29 @@
+# Optional institution-local report store. It joins the existing private
+# network and exposes no host port or additional Manager endpoint.
+services:
+  report-store:
+    image: ${TR_REPORT_COUCHDB_IMAGE:?set reviewed immutable CouchDB image}
+    env_file:
+      - ${TR_REPORT_COUCHDB_ENV_FILE:?set protected report-store environment}
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    pids_limit: 128
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - report-store-data:/opt/couchdb/data
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:5984/_up]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  manager:
+    depends_on:
+      report-store:
+        condition: service_healthy
+
+volumes:
+  report-store-data:
+    name: ${TR_REPORT_COUCHDB_VOLUME:-traderesearch-internal-report-storage}

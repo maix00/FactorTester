@@ -54,6 +54,15 @@ def bundle_matches_projection(*, package_root: Path, source_manifest: dict,
         if local_id in ids and ids[local_id] != original_id:
             return False
         ids[local_id] = original_id
+    from .authoring.bundle_local_links import unavailable_relative
+    for item in source_manifest.get('unavailable_links', []):
+        original = str(item['target'])
+        local = quote(unavailable_relative(item).as_posix(), safe='/')
+        local_id = hashlib.sha256(local.encode('utf-8')).hexdigest()[:24]
+        original_id = hashlib.sha256(original.encode('utf-8')).hexdigest()[:24]
+        if local_id in ids and ids[local_id] != original_id:
+            return False
+        ids[local_id] = original_id
 
     def restore(value):
         if isinstance(value, str):

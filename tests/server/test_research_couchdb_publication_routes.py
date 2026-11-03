@@ -38,7 +38,7 @@ def _request(monkeypatch, *, change=lambda _c, _a: None, body=None, configured=T
 def test_http_route_publishes_selected_report(monkeypatch):
     (status, response), store = _request(monkeypatch)
     assert status == 201 and response['publication']['report_id'] == 'report-1'
-    assert store.writes == 1
+    assert store.head_writes == 1
 
 
 def test_catalog_report_publication_keeps_verified_editable_source(tmp_path, monkeypatch):

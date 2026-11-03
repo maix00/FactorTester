@@ -5,6 +5,7 @@
 
   function referenceKind(target, context) {
     const raw = String(target || "");
+    if (/^#tr-history-[A-Za-z0-9_-]{43}$/.test(raw)) return "historical_reference";
     if (context.referenceMeta?.[raw]?.kind) return context.referenceMeta[raw].kind;
     if (/^(?:factortester-local|file):\/\//i.test(raw)
         || /^factortester:\/\/file(?:[/?#]|$)/i.test(raw)) return "file";
@@ -25,7 +26,7 @@
     const kind = referenceKind(target, context);
     const legacyFactorSnapshot = /^factortester:\/\/factor\/(?:factor|factor-family|factor-set)%3Av1%3A/i
       .test(String(target || ""));
-    if (legacyFactorSnapshot) {
+    if (legacyFactorSnapshot || kind === 'historical_reference') {
       const value = document.createElement("span");
       value.className = "reference-chip reference-factor reference-legacy";
       value.dataset.referenceKind = kind;

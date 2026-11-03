@@ -1,5 +1,6 @@
 import marked from "../../../static/vendor/marked/marked.min.js";
 import type { FormulaRenderer } from "./components/formula.tsx";
+import { reportReference } from "./report-references.ts";
 
 type MathToken = { type:string; raw:string; latex:string; display:boolean };
 type LinkRenderer = (href: string, label: string) => string | null;
@@ -22,8 +23,9 @@ function parser(engine: FormulaRenderer | null, link?: LinkRenderer, image?: Ima
   const render = (token: MathToken): string => engine
     ? engine.renderToString(token.latex, {displayMode:token.display,throwOnError:false,trust:false,maxExpand:1000})
     : `<span>${escapeHTML(token.raw)}</span>`;
-  if (link) result.use({renderer:{link(token:{href:string;text:string}) {
-    const id = link(token.href,token.text);
+  result.use({renderer:{link(token:{href:string;text:string}) {
+    if (reportReference(token.href)?.kind === "historical_reference") return `<span class="tr-report-reference-unavailable" aria-disabled="true">${escapeHTML(token.text)}</span>`;
+    const id = link?.(token.href,token.text) ?? null;
     return id === null ? false : `<button type="button" class="tr-table-link tr-object-reference" data-tr-report-link="${escapeHTML(id).replace(/"/g,"&quot;")}">${escapeHTML(token.text)}</button>`;
   }}});
   if (image) result.use({renderer:{image(token:{href:string;text:string}) {

@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 compose_file="$repo_root/deploy/docker/factortester-server/compose.yaml"
-env_file="${FACTORTESTER_DOCKER_ENV_FILE:-$HOME/Library/Application Support/FactorTester/server-docker/server.env}"
+env_file="${TRADERESEARCH_DOCKER_ENV_FILE:-${FACTORTESTER_DOCKER_ENV_FILE:-$HOME/Library/Application Support/TradeResearch/server-docker/server.env}}"
 
 usage() {
   cat <<'EOF'
@@ -174,6 +174,16 @@ manager_hot_reload_status() {
       ;;
   esac
 }
+
+report_store_env="$(deployment_value TR_REPORT_COUCHDB_ENV_FILE "")"
+if [[ -n "$report_store_env" ]]; then
+  [[ -f "$report_store_env" ]] || { echo "configured report-store environment is missing" >&2; exit 2; }
+  report_store_image="$(deployment_value TR_REPORT_COUCHDB_IMAGE "")"
+  [[ "$report_store_image" =~ ^couchdb@sha256:[0-9a-f]{64}$ ]] || {
+    echo "report store requires a reviewed immutable CouchDB image" >&2; exit 2;
+  }
+  compose+=(--file "$repo_root/deploy/docker/factortester-server/compose.report-storage.yaml")
+fi
 
 command="${1:-}"
 if [[ -z "$command" ]]; then

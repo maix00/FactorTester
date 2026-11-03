@@ -18,6 +18,10 @@ from tools.cli.release.bounded_file import read_bounded_file
 from .tree_paths import report_tree_paths
 from .tree_hierarchy import validate_parent_child
 from .bundle_job_artifacts import export_job_artifacts, restore_job_artifacts, artifact_requests
+from .bundle_source_attachments import (capture_source_attachments, validate_source_attachments,
+                                        restore_source_attachments)
+from .bundle_local_links import inherited_unavailable, unavailable_relative, validate_unavailable_links
+from .bundle_migration_source import capture_migration_source, validate_bundle_migration_source
 from .tree_schema import canonical_bytes, digest, validate_node
 from .tree_store import (atomic_write, load_head, load_node, store_node,
                          tree_lock, validate_head, write_head)
@@ -62,14 +66,16 @@ def export_report_bundle(*, package_root: Path, branch_id: str,
         return bundle_from_snapshot(snapshot, package_root=package_root, branch_id=branch_id)
 
 
-def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) -> bytes:
+def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str,
+                         allow_unavailable_links: bool = False) -> bytes:
     """Serialize a snapshot while the caller holds its report-tree lock."""
     paths, head = snapshot['paths'], snapshot['head']
     nodes = {}
     def visit(ref):
         if ref in nodes:
             raise ValueError('report tree contains a repeated node')
-        node = load_node(paths, ref)
+        node = (validate_node(snapshot['node_values'][ref]) if 'node_values' in snapshot
+                else load_node(paths, ref))
         nodes[ref] = node
         for child in node['children']:
             visit(child['ref'])
@@ -92,14 +98,28 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
             raise ValueError('report bundle asset hash mismatch')
         assets.append({'asset_ref': asset['asset_ref'], **descriptor})
     resources = _LocalResources(snapshot)
+    unavailable = []
+    known_unavailable = inherited_unavailable(snapshot)
     for target in _local_targets(snapshot):
         path = _resolve_local_resource(resources, target)
         if path is None or not path.is_file():
+            if allow_unavailable_links or target in known_unavailable:
+                from urllib.parse import urlparse, unquote
+                filename = Path(unquote(urlparse(target).path)).name
+                unavailable.append({'target': target, 'filename': filename, 'reason': 'source_unavailable'})
+                continue
             raise ValueError('report bundle local resource is unavailable')
         links.append({'target': target, **capture(read_bounded_file(path, MAX_BUNDLE_BYTES), path.name)})
     job_artifacts = export_job_artifacts(snapshot, capture, maximum_bytes=MAX_BUNDLE_BYTES)
+    source_attachments = capture_source_attachments(snapshot, capture)
+    migration_source = capture_migration_source(snapshot, capture)
     manifest = {'schema_version': 2, 'source_branch_id': branch_id,
                 'head': head, 'nodes': nodes, 'assets': assets, 'links': links, 'job_artifacts': job_artifacts}
+    if source_attachments or unavailable:
+        manifest.update(schema_version=3, source_attachments=source_attachments, unavailable_links=unavailable)
+    if migration_source is not None:
+        manifest.update(schema_version=4, source_attachments=source_attachments,
+                        unavailable_links=unavailable, migration_source=migration_source)
     encoded = canonical_bytes(manifest)
     if total + len(encoded) > MAX_BUNDLE_BYTES:
         raise ValueError('report bundle exceeds size limit')
@@ -142,7 +162,13 @@ def _read_bundle(payload: bytes, expected_sha256: str):
             if sum(item.file_size for item in archive.infolist()) > MAX_BUNDLE_BYTES:
                 raise ValueError('report bundle expanded size exceeds limit')
             manifest = json.loads(archive.read('manifest.json'))
-            if set(manifest) != {'schema_version', 'source_branch_id', 'head', 'nodes', 'assets', 'links', 'job_artifacts'} or manifest['schema_version'] != 2:
+            fields = {'schema_version', 'source_branch_id', 'head', 'nodes', 'assets', 'links', 'job_artifacts'}
+            version = manifest.get('schema_version')
+            if version in {3, 4}:
+                fields.update({'source_attachments', 'unavailable_links'})
+            if version == 4:
+                fields.add('migration_source')
+            if set(manifest) != fields or version not in {2, 3, 4}:
                 raise ValueError('report bundle schema is invalid')
             files = {name.removeprefix('objects/'): archive.read(name) for name in names if name != 'manifest.json'}
     except (zipfile.BadZipFile, json.JSONDecodeError, KeyError, TypeError) as exc:
@@ -150,12 +176,15 @@ def _read_bundle(payload: bytes, expected_sha256: str):
     for key, raw in files.items():
         if hashlib.sha256(raw).hexdigest() != key:
             raise ValueError('report bundle resource checksum mismatch')
-    for item in [*manifest['assets'], *manifest['links'], *manifest['job_artifacts']]:
+    descriptors = [*manifest['assets'], *manifest['links'], *manifest['job_artifacts'], *manifest.get('source_attachments', [])]
+    if manifest.get('migration_source') is not None:
+        descriptors.append(manifest['migration_source'])
+    for item in descriptors:
         if not isinstance(item.get('filename'), str) or item['filename'] in {'', '.', '..'} or Path(item['filename']).name != item['filename']:
             raise ValueError('report bundle filename is invalid')
         if item['sha256'] not in files or len(files[item['sha256']]) != item['size_bytes']:
             raise ValueError('report bundle resource is missing or truncated')
-    if set(files) != {item['sha256'] for item in [*manifest['assets'], *manifest['links'], *manifest['job_artifacts']]}:
+    if set(files) != {item['sha256'] for item in descriptors}:
         raise ValueError('report bundle contains unreferenced resources')
     return manifest, files
 
@@ -197,6 +226,9 @@ def validate_report_bundle(*, payload: bytes, expected_sha256: str, report_id: s
     for key, expected in requests.items():
         if expected and jobs[key]['sha256'] != expected:
             raise ValueError('report bundle Job artifact version mismatch')
+    validate_source_attachments(manifest, files)
+    validate_unavailable_links(manifest)
+    validate_bundle_migration_source(manifest, files)
     return manifest, files
 
 
@@ -233,6 +265,8 @@ def _import_validated_report_bundle(*, manifest: dict, files: dict, expected_sha
             destination = resource_root / item['sha256'] / Path(item['filename']).name
             atomic_write(destination, files[item['sha256']])
             replacements[item['target']] = quote(str(destination.relative_to(resource_root.parent)), safe='/')
+        for item in manifest.get('unavailable_links', []):
+            replacements[item['target']] = quote(unavailable_relative(item).as_posix(), safe='/')
         def rewrite(value):
             if isinstance(value, str):
                 for before in sorted(replacements, key=len, reverse=True):
@@ -261,8 +295,15 @@ def _import_validated_report_bundle(*, manifest: dict, files: dict, expected_sha
         target_head['root_ref'] = materialize(head['root_ref'])
         target_head['changed_node_ids'] = ['root']
         ensure_sqlite_index(paths, load_node(paths, target_head['root_ref']), target_head['generation'])
+        source_digest = restore_source_attachments(paths, manifest, files)
+        migration = manifest.get('migration_source')
+        if migration is not None:
+            atomic_write(paths['root'] / 'migration-source.json', files[migration['sha256']])
         atomic_write(receipt, canonical_bytes({'bundle_sha256': expected_sha256,
-                     'source_branch_id': manifest['source_branch_id'], 'source_head': head}))
+                     'source_branch_id': manifest['source_branch_id'], 'source_head': head,
+                     **({'source_attachment_manifest_sha256': source_digest} if source_digest else {}),
+                     **({'migration_source_sha256': migration['sha256']} if migration is not None else {}),
+                     **({'unavailable_links': manifest['unavailable_links']} if manifest.get('unavailable_links') else {})}))
         write_head(paths, target_head)
         return {'paths': paths, 'head': target_head, 'inherited': True,
                 'source_manifest': manifest,
