@@ -916,6 +916,9 @@ class ResearchCatalog(ResearchBranchesMixin, ResearchShareLinksMixin):
                 "visibility": str(row["research_visibility"]),
             }
             result.append(value)
+        heads = self._registered_branch_choices_many([item['report_id'] for item in result])
+        for item in result:
+            item['branches'] = heads[item['report_id']]
         return result
 
     def list_evidence_links(
