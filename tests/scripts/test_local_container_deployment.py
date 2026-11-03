@@ -146,3 +146,29 @@ def test_local_build_context_excludes_nested_native_and_python_outputs() -> None
     for pattern in ("**/target", "**/__pycache__", "**/*.so", "**/*.dylib"):
         assert patterns.index(pattern) > include
     assert "!deploy/docker/factortester-server/install-agent-tools.sh" in patterns
+
+
+def test_lifecycle_keeps_configured_private_report_store(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    fake = tmp_path / "docker"
+    fake.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CAPTURE_FILE"\n')
+    fake.chmod(0o700)
+    capture = tmp_path / "args"
+    envfile = tmp_path / "server.env"
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("CAPTURE_FILE", str(capture))
+    monkeypatch.setenv("TRADERESEARCH_DOCKER_ENV_FILE", str(envfile))
+    monkeypatch.delenv("TR_REPORT_COUCHDB_ENV_FILE", raising=False)
+    admin, writer = tmp_path / "admin.env", tmp_path / "writer.env"
+    admin.write_text("")
+    writer.write_text("")
+    for configured in (False, True):
+        envfile.write_text(
+            f"TR_REPORT_COUCHDB_ENV_FILE={admin}\nTR_REPORT_COUCHDB_WRITER_ENV_FILE={writer}\n"
+            + "TR_REPORT_COUCHDB_IMAGE=couchdb@sha256:" + "a" * 64 + "\n" if configured else "")
+        subprocess.run(["bash", str(ROOT / "scripts/server/factortester_container.sh"), "config"], check=True)
+        args = capture.read_text().splitlines()
+        overlays = [arg for arg in args if arg.endswith("compose.report-storage.yaml")]
+        assert bool(overlays) is configured
+        assert args[-1] == "config"

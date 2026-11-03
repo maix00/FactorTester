@@ -33,3 +33,17 @@ def test_main_requires_explicit_key(tmp_path: Path) -> None:
 def test_beta_rejects_missing_persistent_key(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="not installed"):
         manifest_private_key("beta", None, home=tmp_path)
+
+
+def test_beta_uses_canonical_key_after_legacy_root_removal(tmp_path: Path) -> None:
+    expected = tmp_path / "Library/Application Support/TradeResearch/server-release-signing/beta-private.pem"
+    expected.parent.mkdir(parents=True)
+    expected.write_text("private", encoding="utf-8")
+    assert manifest_private_key("beta", None, home=tmp_path) == expected
+
+
+def test_beta_rejects_divergent_state_roots(tmp_path: Path) -> None:
+    for name in ("TradeResearch", "FactorTester"):
+        (tmp_path / "Library/Application Support" / name).mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="conflict"):
+        manifest_private_key("beta", None, home=tmp_path)
