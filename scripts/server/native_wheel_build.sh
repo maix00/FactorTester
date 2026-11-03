@@ -48,6 +48,11 @@ if [[ -f "$BUILD_OUT/checksums.sha256" ]] && shasum -a 256 -c "$BUILD_OUT/checks
   exit 0
 fi
 echo "native wheel cache=miss build_id=$BUILD_ID reason=missing-or-invalid-wheel-receipt"
+if [[ "${NAUTILUS_INCREMENTAL_ONLY:-0}" == "1" ]] && ! compgen -G "$TARGET_CACHE/release/deps/libnautilus_model-*.rlib" >/dev/null; then
+  echo "incremental-only build requires retained Linux Nautilus dependencies; no cold rebuild started" >&2
+  exit 3
+fi
+
 bash "$ROOT/scripts/server/check_local_build_capacity.sh"
 mkdir -p "$CACHE/cargo/registry" "$CACHE/cargo/git" "$TARGET_CACHE"
 # Full adapter dependencies alone exceeded 4 GiB in the representative Linux
@@ -94,6 +99,14 @@ if ! docker image inspect "$BUILDER" >/dev/null 2>&1; then
     "$ROOT/deploy/docker/factortester-public"
 fi
 
+ALPHA_REUSED=0
+if python3 "$ROOT/scripts/server/reuse_alpha_wheel.py" --repo "$ROOT/vendor/py-alpha-lib" --cache "$OUT" --revision "$ALPHA_REVISION" --platform "$PLATFORM"; then
+  ALPHA_REUSED=1
+else
+  reuse_status=$?
+  [[ "$reuse_status" == "3" ]] || exit "$reuse_status"
+fi
+
 docker run --rm --platform "$PLATFORM" \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
   -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
@@ -101,6 +114,7 @@ docker run --rm --platform "$PLATFORM" \
   -v "$CACHE/cargo/registry:/root/.cargo/registry" \
   -v "$CACHE/cargo/git:/root/.cargo/git" \
   -v "$TARGET_CACHE:/target" \
+  -e TR_ALPHA_WHEEL_REUSED="$ALPHA_REUSED" \
   -e CARGO_TARGET_DIR=/target \
   -e CARGO_INCREMENTAL="${NAUTILUS_INCREMENTAL:-1}" \
   -e CARGO_PROFILE_RELEASE_DEBUG=0 \
@@ -108,8 +122,10 @@ docker run --rm --platform "$PLATFORM" \
   "$BUILDER" bash -lc '
     set -euo pipefail
     . /root/.cargo/env
+    if [ "$TR_ALPHA_WHEEL_REUSED" != "1" ]; then
     cd /repo/vendor/py-alpha-lib/py-binding
     CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /alpha-wheels -i python3.14
+    fi
     cd /repo/native/traderesearch_nautilus_runtime
     CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /wheels -i python3.14
   '

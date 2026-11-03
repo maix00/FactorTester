@@ -60,3 +60,14 @@ PostgreSQL 使用一致性备份，SQLite 使用原生备份机制，CouchDB 文
 
 具体服务器的变更计划、逐对象映射、执行回执与异常记录单独归档。
 它们是一次操作的证据，不是项目功能或通用运维方法，不编入本 PDF。
+
+
+## 增量构建与存储预算 {#incremental-build-storage}
+
+成品 wheel 缓存与 Cargo 编译缓存分别管理。源码及平台身份一致、校验和有效的成品直接复用；只修改 Nautilus adapter 时，独立 alpha Python wheel 只有在其余输入树完全一致且旧字节校验通过后才复用。组合运行时仍须重新链接以包含 adapter 修复，不能给旧二进制改标签冒充新版本。
+
+保留与目标平台、工具链匹配的 Cargo target、registry 和 git 缓存，在不同发布 worktree 间显式使用同一 `NAUTILUS_CACHE`、`NAUTILUS_TARGET_CACHE` 与 `NAUTILUS_WHEEL_DIR`。共用缓存由现有构建锁串行保护；macOS arm64 缓存不能代替 Linux amd64 缓存。设置 `NAUTILUS_INCREMENTAL_ONLY=1` 可在缺少 Linux Nautilus 依赖产物时拒绝冷构建；缓存存在时仍由 Cargo 校验依赖是否有效。
+
+构建前核对可用磁盘及单次峰值预算。现有原生 target 缓存默认预算为 6 GiB；成品与临时源快照另行计量。校验通过的重复 wheel 优先使用同文件系统硬链接；不为每个 worktree 长期复制一套依赖。清理必须按明确产物和保留策略执行，保留当前运行、回退和正在使用的产物；不得清空整个 DerivedData、Docker 卷或用户目录来腾空间。
+
+服务器、macOS 客户端及 iOS 客户端分别选择构建、安装与发布阶段。服务端部署默认不构建或安装客户端；仅有服务端变更时不重打客户端包。客户端构建复用现有 Xcode DerivedData，清理是显式操作；安装前另核对目标设备、签名和实际产物。iOS 模拟器与真机产物、安装与分发不可混为同一阶段。
