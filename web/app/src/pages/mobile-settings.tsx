@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsSection } from "../components/settings-section.tsx";
-import { visibleSettingsSections, type SettingsSectionID } from "../settings-model.ts";
+import { visibleSettingsSections, settingsSectionLabelKey, type SettingsSectionID } from "../settings-model.ts";
 import { useAuth } from "../auth.tsx";
 import { PageIcon } from "../icon.tsx";
 import { ObjectReferenceProvider } from "../components/object-reference-provider.tsx";
@@ -20,7 +20,7 @@ export function MobileSettingsPage({ onOpen }: { onOpen: (section: MobileSetting
         {sections.map(({id:section,icon}) => (
           <button key={section} type="button" className="tr-mobile-open-row" onClick={() => onOpen(section)}>
             <span className="tr-mobile-open-icon"><PageIcon name={icon} /></span>
-            <span>{t(`settingsPanel.sections.${section}`)}</span>
+            <span>{t(settingsSectionLabelKey(section, window))}</span>
             <span className="tr-mobile-open-route">›</span>
           </button>
         ))}
