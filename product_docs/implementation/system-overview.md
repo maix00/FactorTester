@@ -19,10 +19,10 @@ Manager 提供 /app、认证会话、业务 API、对象目录、任务状态和
 
 ## 代码定位与扩展边界 {#canonical-paths}
 
-- Manager 组合与状态：server/manager/runtime.py
-- HTTP 路由：server/manager/http/
-- React Web Shell：web/app/src/desktop-shell.tsx、web/app/src/mobile-shell.tsx
-- 测试定义与执行：server/services/、server/modules/
-- Swift 宿主与桥接：apple/Sources/Features/Web/、apple/Sources/Navigation/
+- Manager 组合与状态：`server/manager/runtime.py`
+- HTTP 路由：`server/manager/http/`
+- React Web Shell：`web/app/src/desktop-shell.tsx`、`web/app/src/mobile-shell.tsx`
+- 测试定义与执行：`server/services/`、`server/modules/`
+- Swift 宿主与桥接：`apple/Sources/Features/Web/`、`apple/Sources/Navigation/`
 
 新增模块应声明权威来源、对象引用、权限、生命周期、版本兼容和失败行为。服务器不扫描客户端文件系统以猜测本地数据源；客户端不自行发明公共字段语义。

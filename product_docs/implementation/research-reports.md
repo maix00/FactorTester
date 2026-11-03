@@ -18,8 +18,8 @@ React 阅读器按需加载章节、对象链接和允许显示的证据摘要�
 
 规范代码入口：
 
-- 报告 authoring：tools/cli/release/research_reporting/authoring/
-- 报告展示服务：server/services/research_report_presentations.py
-- 本机目录与原生桥：tools/cli/release/research_reporting/local_catalog.py、apple/Sources/Features/Web/LocalResearchBridge.swift
-- Manager 报告与授权：server/manager/http/research_catalog_routes.py、server/manager/services/research_couchdb_publication.py
-- React 报告页面：web/app/src/pages/research.tsx、web/app/src/components/local-research-page.tsx
+- 报告 authoring：`tools/cli/release/research_reporting/authoring/`
+- 报告展示服务：`server/services/research_report_presentations.py`
+- 本机目录与原生桥：`tools/cli/release/research_reporting/local_catalog.py`、`apple/Sources/Features/Web/LocalResearchBridge.swift`
+- Manager 报告与授权：`server/manager/http/research_catalog_routes.py`、`server/manager/services/research_couchdb_publication.py`
+- React 报告页面：`web/app/src/pages/research.tsx`、`web/app/src/components/local-research-page.tsx`
