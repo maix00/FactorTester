@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Spin } from "antd";
+import { Alert, Button, ConfigProvider, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { ProfileSettings } from "./profile-settings.tsx";
 import { DeviceSettings } from "./device-settings.tsx";
+import { SettingsFields } from "./settings-fields.tsx";
+import { ClientDownloads } from "./client-downloads.tsx";
 import { AccountSummary } from "./account-summary.tsx";
 import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
@@ -23,7 +25,7 @@ export function SettingsSection(props:SettingsSectionProps):React.ReactElement {
  const hasAdminCapability=session?.admin_capabilities?.includes("admin_console:manage")===true;
  const allowed=props.adminSurface ? isAdminSection&&hasAdminCapability : visibleSettingsSections({manager:Boolean(session?.capabilities?.manager),superAdmin:hasAdminCapability}).some(item=>item.id===props.section);
  if(!allowed)return <Alert type="info" message={t("settingsPanel.permissionRequired")} />;
- return <SettingsSectionContent {...props}/>;
+ return <ConfigProvider componentSize="small"><div className="tr-settings-body"><SettingsSectionContent {...props}/></div></ConfigProvider>;
 }
 function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):React.ReactElement{
  const {t}=useTranslation();const {session}=useAuth();
@@ -37,7 +39,6 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
       manager: "/api/worktrees",
       mihomo: "/api/admin/mihomo",
       quota: "/api/jobs/storage",
-      updates: "/api/client/releases/beta.json",
     };
     const endpoint = endpoints[section];
     if (!endpoint) { setSectionData(null); return; }
@@ -58,24 +59,14 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
   }, [section,reload]);
  if(error && section!=="server")return <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/>;
  return <>          {section === "appearance" ? <AppearanceSettings /> : section === "language" ? (
-            <div className="tr-settings-card">
-              <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.language")}</b></div>
-                <LanguageSwitch />
-              </div>
-            </div>
+            <SettingsFields items={[{key:"language",label:t("settingsPanel.language"),value:true,render:()=><LanguageSwitch compact/>}]}/>
           ) : section === "workspace" ? (
-            <div className="tr-settings-card">
-              <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.layout")}</b></div>
-                <button type="button" className="tr-toolbar-button" onClick={onResetLayout} disabled={!onResetLayout}>{t("resetLayout")}</button>
-              </div>
-            </div>
+            <SettingsFields items={[{key:"layout",label:t("settingsPanel.layout"),value:true,render:()=><Button size="small" onClick={onResetLayout} disabled={!onResetLayout}>{t("resetLayout")}</Button>}]}/>
           ) : section === "server" ? (
             <>{typeof window !== "undefined" && nativeManagerSettingsAvailable(window) ? <div className="tr-settings-card tr-manager-connection"><ManagerConnectionSettings /></div> : null}<div className="tr-settings-card tr-manager-server-summary">
               {error ? <Alert type="error" message={error} action={<Button onClick={()=>{setError("");setReload(value=>value+1);}}>{t("retry")}</Button>}/> : serverInfo ? <ServerSummary data={serverInfo} /> : <Spin tip={t("loading")}/>}
             </div></>
-          ) : section === "profiles" ? <ProfileSettings/> : section === "devices" ? <DeviceSettings /> : ["controlDatabase", "quota", "updates", "manager", "mihomo"].includes(section) ? (
+          ) : section === "profiles" ? <ProfileSettings/> : section === "devices" ? <DeviceSettings /> : section === "updates" ? <ClientDownloads/> : ["controlDatabase", "quota", "manager", "mihomo"].includes(section) ? (
             <div className="tr-settings-card">
               {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} onRefresh={() => setReload(value => value + 1)} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>

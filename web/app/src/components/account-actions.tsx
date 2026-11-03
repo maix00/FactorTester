@@ -1,16 +1,16 @@
 import React from "react";
 import { DownOutlined } from "@ant-design/icons";
-import { Button, Dropdown, Tooltip, type MenuProps } from "antd";
+import { Button, Dropdown, Tooltip, type MenuProps, type ButtonProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth.tsx";
 import { PageIcon } from "../icon.tsx";
 import { objectReferenceLabel } from "../object-reference.ts";
 
-export function AccountActions(): React.ReactElement {
+export function AccountActions({size}: {size?: ButtonProps["size"]} = {}): React.ReactElement {
   const {t}=useTranslation(),{session,openAuth,logout}=useAuth();
   return <div className="tr-account-actions" aria-label={t("auth.account")}>
-    {session ? <Button onClick={()=>void logout()}>{t("auth.signOut")}</Button> : <>
-      <Button onClick={()=>openAuth("login")}>{t("auth.signIn")}</Button>
+    {session ? <Button size={size} onClick={()=>void logout()}>{t("auth.signOut")}</Button> : <>
+      <Button size={size} onClick={()=>openAuth("login")}>{t("auth.signIn")}</Button>
     </>}
   </div>;
 }

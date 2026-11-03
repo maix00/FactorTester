@@ -1,3 +1,4 @@
+import { settingsSectionLabelKey } from "./settings-model.ts";
 import {appEntrySearch,cleanAppURL} from "./app-route.ts";
 import {appCatalogLink} from "./app-link.ts";
 import {pageObjectKey,pageObjectTitle} from "./page-object.ts";
@@ -110,7 +111,7 @@ function MobileWorkspace(): React.ReactElement {
   const back = (): void => history.back();
   const currentPage = getPage(current.pageId);
   const title = current.pageId === "settings" && setting
-    ? t(`settingsPanel.sections.${setting}`)
+    ? t(settingsSectionLabelKey(setting, window))
     : pageObjectTitle(current.pageId,current.args)
       ? pageObjectTitle(current.pageId,current.args)!
       : t(`nav.${current.pageId}`, { defaultValue: currentPage?.title || current.pageId });
