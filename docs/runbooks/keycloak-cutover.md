@@ -231,3 +231,31 @@ invoke migration commands with the same protected environment loading already
 used by the deployment verifier. An absent URL in a diagnostic process is not
 evidence that the running Manager lacks a configured control database. Do not
 print the secret or place it in command-line arguments.
+
+## CLI device-login client
+
+`traderesearch login` and `traderesearch manager login` use the OAuth 2.0
+device authorization grant. New hosts get the public `traderesearch-cli`
+client from `scripts/migrations/keycloak_prepare_host.py`. An existing realm
+must be reconciled explicitly; the default is a read-only plan:
+
+```bash
+python -m scripts.migrations.keycloak_cli_client          # plan
+python -m scripts.migrations.keycloak_cli_client --apply  # create/repair
+```
+
+Required realm configuration, without granting user roles:
+
+* public client, standard/implicit/direct-grant disabled,
+  `oauth2.device.authorization.grant.enabled=true`;
+* default client scopes `basic`, `roles`, `profile`. The `basic` scope carries
+  the standard `sub` claim through Keycloak's sub mapper. A CLI token without
+  `sub` is rejected by Manager introspection even when every other claim is
+  valid;
+* the `tr-manager` audience mapper, the reviewed `tr_*` identity claim mappers,
+  and the `traderesearch-realm-group-paths` group mapper.
+
+Verify after applying: complete a real device login against the Manager and
+confirm `/api/session` returns the verified Keycloak subject. A token issued
+without these scopes can still be introspected as `active=true` but has no
+`sub`; that is an authorization failure, not a reason to relax session checks.

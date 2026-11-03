@@ -56,7 +56,12 @@ class FactorTesterClient(
         try:
             return self._expect_success(self.session.post("/auth/logout", {}))
         finally:
-            self.session.clear_cookies()
+            try:
+                if self.session.persist_cookies:
+                    from .oidc_device import revoke
+                    revoke(self.session.base_url)
+            finally:
+                self.session.clear_cookies()
 
     def research_report(self, publication_id: str) -> dict[str, Any]:
         return self._expect_success(self.session.get(

@@ -17,9 +17,10 @@ def order_audit_server():
     app = Flask(__name__)
     app.secret_key = "order-audit-e2e"
 
-    @app.post("/auth/login")
-    def login():
-        assert request.get_json() == {"username": "alice", "password": "pw"}
+    @app.get("/api/session")
+    def current_session():
+        # The CLI no longer collects a local password. A Manager session that
+        # already exists in the persisted cookie jar is verified here.
         session["username"] = "alice"
         return jsonify(success=True, username="alice")
 
@@ -96,11 +97,7 @@ def test_installed_cli_reads_order_audit_over_real_http(tmp_path):
     }
     with order_audit_server() as base_url:
         run_cli(command, ["configure", "--base-url", base_url], env)
-        run_cli(
-            command,
-            ["login", "--username", "alice", "--password", "pw"],
-            env,
-        )
+        run_cli(command, ["login"], env)
         result = run_cli(
             command, ["job", "orders", "job-1", "--json"], env,
         )
