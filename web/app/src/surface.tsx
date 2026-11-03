@@ -4,7 +4,6 @@ import { ProductDetailPage } from "./pages/product-detail.tsx";
 import { JobsPage, JobDetailPage } from "./pages/jobs.tsx";
 import { Alert } from "antd";
 import { useTranslation } from "react-i18next";
-import { SettingsSection } from "./components/settings-section.tsx";
 import { AccountPage } from "./pages/account.tsx";
 import { CatalogPage } from "./pages/catalog.tsx";
 import { ResearchDetailPage } from "./pages/research-detail.tsx";
@@ -28,8 +27,7 @@ function PageContent({ pageId }: { pageId: string }): React.ReactElement {
   if (pageId === "product-detail") return <ProductDetailPage />;
   if (pageId === "job-detail") return <JobDetailPage />;
   if (pageId === "jobs") return <JobsPage />;
-  if (pageId === "account") return <AccountPage />;
-  if (pageId === "settings") return <SettingsSection section="account" />;
+  if (pageId === "account" || pageId === "settings") return <AccountPage />;
   if (["products", "factors", "strategies", "catalog"].includes(pageId)) return <CatalogPage domain={pageId === "catalog" ? "products" : pageId as "products" | "factors" | "strategies"} />;
   if (pageId === "more") return <WorkspacePage />;
   if(pageId === "research-detail" || pageId === "research-report") return <ResearchDetailPage/>;
