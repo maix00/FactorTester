@@ -139,3 +139,21 @@ def test_rejected_submission_is_preserved_without_replay_and_skips_reserved_gene
     receipt['rejected_submission']['phase'] = 'published'
     with pytest.raises(ValueError, match='requires reconciliation'):
         validate_migration_source(receipt, report_id=head['report_id'])
+
+
+def test_storage_cutover_creates_explicit_successor_even_without_tree_changes(tmp_path):
+    from tools.cli.release.research_reporting.authoring.bundle_migration_source import validate_migration_source
+    root = tmp_path / 'source'
+    initialize_tree(package_root=root, branch_id='main', report_id='report-1', title='Unchanged report')
+    paths = report_tree_paths(root, 'main');original = paths['head'].read_bytes();head = json.loads(original)
+    unchanged, plain_receipt = upgrade_historical_report(paths, head=head)
+    assert unchanged['head'] == head and not plain_receipt['changed']
+    snapshot, receipt = upgrade_historical_report(paths, head=head, storage_cutover=True)
+    assert snapshot['head']['root_ref'] == head['root_ref']
+    assert snapshot['head']['generation'] == head['generation'] + 1
+    assert receipt['source_head'] == head and receipt['storage_cutover'] is True
+    validate_migration_source(receipt, report_id='report-1')
+    assert paths['head'].read_bytes() == original
+    receipt['storage_cutover'] = False
+    with pytest.raises(ValueError, match='successor differs'):
+        validate_migration_source(receipt, report_id='report-1')

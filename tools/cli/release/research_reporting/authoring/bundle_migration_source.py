@@ -21,7 +21,7 @@ def validate_migration_source(value, *, report_id):
     fields = {'source_head', 'source_nodes', 'node_ref_mapping', 'source_bytes',
               'converted_references', 'changed', 'source_generation', 'generation',
               'source_root_ref', 'root_ref', 'source_variants', 'rejected_submission'}
-    if not isinstance(value, dict) or set(value) != fields:
+    if not isinstance(value, dict) or set(value) not in (fields, fields | {'storage_cutover'}):
         raise ValueError('report migration source schema is invalid')
     head = validate_head(value['source_head'])
     if (head['report_id'] != report_id or value['source_generation'] != head['generation']
@@ -64,7 +64,10 @@ def validate_migration_source(value, *, report_id):
             or pending.get('submission_sequence') != head['generation'] + 1
             or pending.get('sidecars') != [] or pending.get('published_generation') is not None):
         raise ValueError('report migration source submission requires reconciliation')
-    changed = root != head['root_ref'] or pending is not None
+    storage_cutover = value.get('storage_cutover', False)
+    if type(storage_cutover) is not bool:
+        raise ValueError('report migration source storage cutover flag is invalid')
+    changed = storage_cutover or root != head['root_ref'] or pending is not None
     generation = head['generation'] + (2 if pending else 1) if changed else head['generation']
     if value['changed'] is not changed or value['generation'] != generation:
         raise ValueError('report migration source successor differs')
