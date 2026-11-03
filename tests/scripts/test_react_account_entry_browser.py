@@ -58,7 +58,7 @@ setupIonicReact({{mode:'md'}});
                         window.fetch=async input=>{
                             const path=new URL(String(input),location.origin).pathname;
                             const value=path==='/api/session'?{session:{username:'Example@Alice@123',alias:'Alice',role:'user',capabilities:{manager:true,research:true},admin_capabilities:['admin_console:read','admin_console:manage']}}:
-                                path==='/api/client/releases/beta.json'?{version:'1.2.3',dmg_url:'/api/client/releases/assets/beta/'+'a'.repeat(64)+'.dmg'}:
+                                path==='/api/client/releases/beta.json'?{version:'1.2.3',sha256:'a'.repeat(64),dmg_url:'/api/client/releases/assets/beta/'+'a'.repeat(64)+'.dmg'}:
                                 path==='/api/client/profiles'?{profiles:[]}:
                                 path==='/api/research'?{researches:Array.from({length:25},(_,i)=>({research_id:'research-'+i,title:'Research '+i,owner_ref:'Example@Alice@123'}))}:
                                 {items:[],researches:[],reports:[]};
