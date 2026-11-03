@@ -104,3 +104,23 @@ def test_many_small_files_are_bounded_independently_of_content_bytes(repository,
         layer.plan_changes(root,base,revision)
     with pytest.raises(ValueError,match='Git output exceeds'):
         layer._git(root,'show',revision+':deploy/requirements-public-linux.txt',maximum_bytes=1)
+
+
+def test_known_host_only_changes_do_not_rebuild_public_dependencies(repository):
+    root,git,write,base=repository
+    for path in layer.HOST_ONLY:write(path,'host configuration only\n')
+    write('server/service.py','next = 2\n')
+    revision=commit(git)
+    assert [item['path'] for item in layer.plan_changes(root,base,revision)['files']]==['server/service.py']
+
+
+def test_host_only_native_files_are_excluded_from_the_real_public_image():
+    from pathlib import PurePosixPath
+    import shlex
+    dockerfile=Path(__file__).resolve().parents[2]/'deploy/docker/factortester-public/FactorTester.Dockerfile'
+    sources=[]
+    for line in dockerfile.read_text().replace(chr(92) + chr(10), " ").splitlines():
+        if line.startswith('COPY '):
+            sources.extend(x for x in shlex.split(line)[1:-1] if not x.startswith('--') and not x.startswith('/'))
+    for path in layer.HOST_ONLY:
+        assert not any(source=='.' or PurePosixPath(path).is_relative_to(source) for source in sources),path

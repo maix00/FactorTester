@@ -37,3 +37,5 @@ Dockview workspace
 ```
 
 No page creates its own global notification host.
+
+The generic page iframe fallback has been removed after mapping builtin modules to React surfaces. Restored `settings` panes use the shared React account section; unknown or retired page IDs show a localized notice. Job HTML report sandbox frames remain independent. This does not retire the remaining agent-chat adapter or certify whole-platform parity.
