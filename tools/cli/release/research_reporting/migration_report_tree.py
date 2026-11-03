@@ -109,9 +109,12 @@ def recover_node_from_git(package_root, path):
     return result.stdout, {'kind': 'git_blob', 'object_id': identity}
 
 
-def upgrade_historical_report(paths, *, head, recover_node=None, pending_submission=None):
+def upgrade_historical_report(paths, *, head, recover_node=None, pending_submission=None,
+                              storage_cutover=False):
     """Return an in-memory successor plus exact source/root mappings."""
     original_head = validate_head(deepcopy(head))
+    if type(storage_cutover) is not bool:
+        raise ValueError('historical storage cutover flag is invalid')
     source, output, mappings, seen_ids = {}, {}, {}, set()
     used, converted = 0, 0
     root = paths['root'].resolve()
@@ -169,7 +172,7 @@ def upgrade_historical_report(paths, *, head, recover_node=None, pending_submiss
         return target
 
     next_root = visit(original_head['root_ref'])
-    changed = next_root != original_head['root_ref'] or pending_submission is not None
+    changed = storage_cutover or next_root != original_head['root_ref'] or pending_submission is not None
     successor = deepcopy(original_head)
     if changed:
         generation = (pending_submission['submission_sequence'] + 1 if pending_submission
@@ -182,6 +185,7 @@ def upgrade_historical_report(paths, *, head, recover_node=None, pending_submiss
                'source_bytes': used, 'converted_references': converted, 'changed': changed,
                'source_generation': original_head['generation'], 'generation': successor['generation'],
                'source_root_ref': original_head['root_ref'], 'root_ref': successor['root_ref'],
-               'source_variants': variants, 'rejected_submission': deepcopy(pending_submission)}
+               'source_variants': variants, 'rejected_submission': deepcopy(pending_submission),
+               'storage_cutover': storage_cutover}
     snapshot['migration_source'] = receipt
     return snapshot, receipt
