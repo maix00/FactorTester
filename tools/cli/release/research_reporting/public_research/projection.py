@@ -593,7 +593,10 @@ def public_bindings(
             "label": _public_text(str(value.get("label") or ""), resources),
         }
         data = value.get("data")
-        if isinstance(data, dict):
+        if item['kind'] == 'historical_reference':
+            original = data.get('historical_reference', {}) if isinstance(data, dict) else {}
+            item['data'] = {'status': 'unavailable', 'original_kind': str(original.get('kind') or '')}
+        elif isinstance(data, dict):
             item["data"] = public_value(data, resources)
         if item["binding_id"] and item["target_ref"]:
             result.append(item)
@@ -735,7 +738,9 @@ def _local_targets(snapshot: dict[str, Any]) -> list[str]:
 
     visit(snapshot.get("head"))
     visit(snapshot.get("components"))
-    visit(snapshot.get("bindings"))
+    # Inert source history is private provenance, not a declaration to read
+    # old filesystem locations or to publish another attachment.
+    visit([item for item in snapshot.get('bindings', []) if item.get('kind') != 'historical_reference'])
     return sorted(targets)
 
 

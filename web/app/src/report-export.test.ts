@@ -17,3 +17,15 @@ test("desktop bridge uses native format and download name is safe", () => {
   assert.equal(reportExportPayload({publication_id:"local:r:b"},"md").format,"markdown");
   assert.equal(reportExportName("AU/2025:test", "pdf"),"AU-2025-test.pdf");
 });
+
+test("CouchDB branches keep their explicit Manager and catalog identity", () => {
+  const target = {source_kind:"couchdb", publication_id:`p-${"a".repeat(64)}`, research_id:"research:one", report_id:"report:two", storage_server_id:"internal-manager"};
+  const base = `/api/research/research%3Aone/reports/report%3Atwo/couchdb-publication/${target.publication_id}`;
+  assert.equal(reportResourceURL(target,["index"]),`${base}?server_id=internal-manager&view=index`);
+  assert.equal(reportResourceURL(target,["chapters","chapter/one"]),`${base}?server_id=internal-manager&view=chapter&chapter_id=chapter%2Fone`);
+  assert.equal(reportResourceURL(target,["assets","a1"]),`${base}/attachments/research_asset/a1?server_id=internal-manager`);
+  assert.equal(reportResourceURL(target,["local-resources","r1"],{inline:"1"}),`${base}/attachments/research_local_resource/r1?inline=1&server_id=internal-manager`);
+  assert.equal(reportResourceURL({...target,report_id:""},["index"]),null);
+  assert.equal(reportResourceURL({...target,publication_id:"legacy"},["index"]),null);
+  assert.equal(reportResourceURL(target,["unknown"]),null);
+});

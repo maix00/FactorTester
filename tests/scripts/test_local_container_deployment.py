@@ -14,6 +14,16 @@ def _compose() -> dict:
     return yaml.safe_load((DEPLOYMENT / "compose.yaml").read_text(encoding="utf-8"))
 
 
+def test_optional_report_storage_uses_existing_network_and_bounded_resources():
+    config = yaml.safe_load((DEPLOYMENT / 'compose.report-storage.yaml').read_text())
+    store = config['services']['report-store']
+    assert not store.get('ports') and not store.get('networks')
+    assert store['mem_limit'] == store['memswap_limit'] == '512m'
+    assert store['cpus'] == 1 and store['pids_limit'] == 128
+    assert config['services']['manager']['depends_on']['report-store']['condition'] == 'service_healthy'
+    assert config['volumes']['report-store-data']['name'].endswith(':-traderesearch-internal-report-storage}')
+
+
 def test_local_compose_defaults_to_canonical_client_ports() -> None:
     ports = _compose()["services"]["wireguard"]["ports"]
 

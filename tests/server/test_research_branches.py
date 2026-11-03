@@ -198,3 +198,54 @@ def test_viewer_cannot_create_workspace_or_reserve_branch(tmp_path):
         catalog.reserve_report_branch('report', actor='bob', profile_ref='self', branch_id='denied')
     assert not catalog.can_read_authoring_publication(
         {'report_id': 'report', 'owner_ref': 'alice', 'publication_id': 'p' * 24}, 'bob')
+
+
+def test_couchdb_branch_reference_uses_verified_store_and_reserved_profile(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from server.manager.http import research_branch_routes as routes
+    from server.manager.http.research_catalog_routes import ResearchCatalogRoutesMixin
+    catalog, rid = setup(tmp_path)
+    catalog.reserve_report_branch('report', actor='bob', profile_ref='self', branch_id='review')
+    ref = 'p-' + 'b' * 64
+    publication = {'publication_id': ref, 'report_id': 'report', 'branch_ref': 'review',
+                   'owner_ref': 'alice', 'generation': 2, 'projection_hash': 'a' * 64,
+                   'storage_server_id': 'actual-manager'}
+    seen = []
+    def read(**kwargs):
+        seen.append(kwargs)
+        return {'publication': dict(publication), 'publish_authorized': True}
+    class Handler(ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=catalog, server_id='actual-manager')
+        def _session(self): return {'username': 'bob'}
+        def _research_service(self): raise AssertionError('CouchDB must not read legacy files')
+        def _research_couch_service(self): return SimpleNamespace(read=read)
+    responses = []
+    monkeypatch.setattr(routes, 'json_response', lambda h, body, status=200: responses.append((body, status)))
+    request = SimpleNamespace(path='/api/research/reports/report/branches/review/publish')
+    payload = {'profile_ref': 'self', 'publication_id': ref, 'expected_generation': 0,
+               'expected_revision': '', 'generation': 999, 'revision': 'forged', 'storage_server_id': 'forged'}
+    publication['branch_ref'] = 'wrong'
+    with pytest.raises(PermissionError, match='identity does not match'):
+        Handler()._post_report_branch_route(request, 'bob', payload)
+    publication['branch_ref'] = 'review'
+    assert Handler()._post_report_branch_route(request, 'bob', payload)
+    result = responses[-1][0]['branch']
+    assert result['generation'] == 2 and result['storage_server_id'] == 'actual-manager'
+    assert seen[-1] == dict(session={'username': 'bob'}, research_id=rid, report_id='report',
+        publication_ref=ref, branch_ref='review', metadata_only=True, requires_publish=True)
+    choices = catalog._registered_branch_choices('report')
+    assert choices[0]['source_kind'] == 'couchdb'
+    assert choices[0]['publication_id'] == ref
+    with pytest.raises(PermissionError, match='reserved report branch Profile'):
+        Handler()._post_report_branch_route(request, 'bob', {**payload, 'profile_ref': 'other'})
+
+
+@pytest.mark.parametrize('reference', ['p-' + 'x' * 64, 'p-' + 'b' * 63, 'p-' + 'b' * 65, ''])
+def test_invalid_publication_namespace_cannot_advance_reserved_branch(tmp_path, reference):
+    catalog, _ = setup(tmp_path)
+    catalog.reserve_report_branch('report', actor='alice', profile_ref='self', branch_id='main')
+    with pytest.raises(ValueError):
+        catalog.publish_report_branch('report', 'main', actor='alice', profile_ref='self',
+            expected_generation=0, expected_revision='', generation=1, revision='a' * 64,
+            publication_id=reference, storage_server_id='server-one')
+    assert catalog.list_report_branches('report', viewer='alice')[0]['status'] == 'reserved'

@@ -6,6 +6,7 @@ REPORT_LINK_KINDS = frozenset({
     "factor", "profile", "profile_revision", "product",
     "contract", "continuous_contract",
     "report_section",
+    "historical_reference",
 })
 
 _REFERENCE_LINK_KINDS = (

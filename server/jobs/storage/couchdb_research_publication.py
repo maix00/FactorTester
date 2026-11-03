@@ -232,6 +232,14 @@ def commit_shared_report(store, *, manager_id: str, owner_id: str, owner_ref: st
     # Authorization may change while a large projection is prepared or read.
     # Check the same verified caller immediately before the CouchDB CAS.
     authorize_now()
+    from .couchdb_research_versions import archive_report_version, valid_version_ref
+    parent = current.get('version_ref') if current is not None else None
+    if current is not None and not valid_version_ref(parent):
+        parent = archive_report_version(store, current)
+    doc['version_ref'] = archive_report_version(store, doc, parent=parent)
+    # Version objects are private candidates until this HEAD CAS succeeds.
+    # A grant can be revoked while their bounded attachments are being stored.
+    authorize_now()
     try:
         status, response = store._request("PUT", ref, json.dumps(doc, ensure_ascii=False,
             sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8"))

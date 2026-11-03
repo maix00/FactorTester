@@ -67,7 +67,10 @@ class CouchDBObjectStore:
         self.timeout = timeout
 
     def _request(self, method: str, path: str, body: bytes | None = None,
-                 content_type: str = "application/json") -> tuple[int, bytes]:
+                 content_type: str = "application/json", *,
+                 maximum_bytes: int | None = None) -> tuple[int, bytes]:
+        if maximum_bytes is not None and (type(maximum_bytes) is not int or maximum_bytes < 0):
+            raise ValueError('invalid CouchDB response byte limit')
         request = urllib.request.Request(
             f"{self.base_url}/{self.database}/{path.lstrip('/')}",
             data=body, method=method,
@@ -79,7 +82,10 @@ class CouchDBObjectStore:
             ).decode()
             request.add_header("Authorization", f"Basic {token}")
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return response.status, response.read()
+            raw = response.read() if maximum_bytes is None else response.read(maximum_bytes + 1)
+            if maximum_bytes is not None and len(raw) > maximum_bytes:
+                raise ValueError('CouchDB response exceeds its byte limit')
+            return response.status, raw
 
     def put_report(self, report: JobTestReportDocument, *, overwrite: bool = False) -> None:
         from server.identity.auth_mode import keycloak_enabled

@@ -134,28 +134,42 @@ def load_component_snapshot(
 
 def project_snapshot(
     paths: dict[str, Path], head: dict[str, Any],
+    *, node_values: dict | None = None,
 ) -> dict[str, Any]:
     """Project a HEAD while the caller owns the report-tree lock."""
     components: list[dict[str, Any]] = []
     bindings: list[dict[str, Any]] = []
     binding_ids: set[str] = set()
+    def loader(ref):
+        if node_values is None:
+            return load_node(paths, ref)
+        from .tree_schema import validate_node, digest
+        value = validate_node(node_values[ref])
+        sha = digest(value)
+        if ref != f'nodes/{sha[:2]}/{sha}.json':
+            raise ValueError('projected report node checksum differs')
+        return value
     flatten(
-        paths, load_node(paths, head["root_ref"]), None,
-        components, bindings, binding_ids,
+        paths, loader(head["root_ref"]), None,
+        components, bindings, binding_ids, node_loader=loader,
     )
-    return {
+    result = {
         "paths": paths,
         "head": head,
         "updated_at": paths["head"].stat().st_mtime,
         "components": components,
         "bindings": bindings,
     }
+    if node_values is not None:
+        result['node_values'] = node_values
+    return result
 
 
 def flatten(
     paths: dict[str, Path], node: dict[str, Any], parent_id: str | None,
     components: list[dict[str, Any]], bindings: list[dict[str, Any]],
     binding_ids: set[str],
+    *, node_loader=None,
 ) -> None:
     if node["kind"] != "root":
         if parent_id is None:
@@ -175,9 +189,10 @@ def flatten(
     for child in node["children"]:
         flatten(
             paths,
-            load_node(paths, child["ref"]),
+            node_loader(child['ref']) if node_loader else load_node(paths, child["ref"]),
             None if node["kind"] == "root" else node["node_id"],
             components,
             bindings,
             binding_ids,
+            node_loader=node_loader,
         )

@@ -16,7 +16,7 @@ import stat
 import tempfile
 import time
 
-from .authoring.tree_bundle import bundle_from_snapshot
+from .authoring.tree_bundle import bundle_from_snapshot, bundle_content_digest
 from .authoring.tree_projection import project_snapshot
 from .public_research.projection import _local_targets
 
@@ -37,7 +37,7 @@ def _path(store, report_id: str, manager_hash: str) -> Path:
 def content_digest(root: Path, paths: dict, head: dict) -> str:
     """Caller holds the tree lock; output includes all editable resources."""
     data = bundle_from_snapshot(project_snapshot(paths, head), package_root=root, branch_id='main')
-    return hashlib.sha256(data).hexdigest()
+    return bundle_content_digest(data)
 
 
 def needs_baseline(paths: dict, head: dict) -> bool:

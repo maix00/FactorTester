@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { reportReference } from "./report-references.ts";
 
+test("compact historical markers resolve to their full inert identity", () => {
+  assert.deepEqual(reportReference("#tr-history-" + "A".repeat(43)), {kind:"historical_reference",ref:"historical-ref:v1:" + "00".repeat(32)});
+});
+
 test("report links preserve declared identities and reject malformed addresses", () => {
   assert.deepEqual(reportReference("factortester://product/Product%2FFutures%2F_products%2FAU.SHF"), {kind:"product",ref:"Product/Futures/_products/AU.SHF"});
   assert.deepEqual(reportReference("traderesearch://factor-family/family%3Av2%3A123"), {kind:"factor_family",ref:"family:v2:123"});

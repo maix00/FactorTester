@@ -17,6 +17,7 @@ from tools.cli.identities.factor import (
 )
 
 from ...report_link_kinds import REPORT_LINK_KINDS
+from ..historical_references import require_historical_reference
 from .reference_target_paths import (
     validate_product_object_target,
     validate_product_series_target,
@@ -134,7 +135,9 @@ def _validate_reference(value: str) -> None:
 def _validate_domain_reference(
     *, kind: str, target_ref: str, field: str,
 ) -> None:
-    if kind == "factor":
+    if kind == 'historical_reference':
+        require_historical_reference(target_ref)
+    elif kind == "factor":
         validators = (
             require_factor_reference,
             require_factor_family_reference,

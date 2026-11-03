@@ -9,7 +9,7 @@ from urllib.parse import quote, urlsplit
 
 from tools.cli.http import HttpSession
 from .authoring.tree_paths import report_tree_paths
-from .authoring.tree_bundle import bundle_from_snapshot
+from .authoring.tree_bundle import bundle_from_snapshot, bundle_content_digest
 from .authoring.tree_projection import project_snapshot
 from .authoring.tree_store import load_head, tree_lock
 from .generation import report_workspace_lock
@@ -150,5 +150,5 @@ def publish_local_report(store, *, binding: dict, manager: dict, profile_id: str
         from .local_sync_baseline import write_baseline
         write_baseline(store, report_id=report_id, manager_hash=manager_hash,
             receipt={**value, 'local_root_ref': head['root_ref']},
-            content_sha256=authoring['sha256'])
+            content_sha256=bundle_content_digest(bundle))
         return {'publication': {key: value[key] for key in ('publication_id', 'revision', 'generation', 'projection_hash', 'report_id')}}
