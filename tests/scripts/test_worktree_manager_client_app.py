@@ -3846,8 +3846,35 @@ def test_catalog_exposes_only_base_category_dimensions() -> None:
     }
 
 
+def test_product_tree_explicit_refresh_invalidates_local_metadata(tmp_path, monkeypatch) -> None:
+    from server.services import product_catalog_projection as projection
+    from server.modules.shared import price_services
+    state = authenticated_state(tmp_path)
+    calls = []
+    monkeypatch.setattr(catalog_routes, "product_library_source_ids", lambda _query: ())
+    monkeypatch.setattr(state.client_state, "product_tree", lambda *a, **kw: [])
+    monkeypatch.setattr(projection, "clear_product_catalog_projection_cache",
+                        lambda: calls.append("projections"))
+    for name in ("cached_products", "cached_contracts", "cached_product_tree",
+                 "cached_product_tree_for_category"):
+        monkeypatch.setattr(getattr(price_services, name), "cache_clear",
+                            lambda name=name: calls.append(name))
+    with running_manager(state) as base_url:
+        for suffix in ("", "?refresh=1"):
+            with urlopen(Request(f"{base_url}/api/product-library/tree{suffix}",
+                                 headers={"Authorization": "Bearer user-token"})) as response:
+                assert json.loads(response.read())["tree"] == []
+            if not suffix:
+                assert calls == []
+    assert calls == ["cached_products", "cached_contracts", "cached_product_tree",
+                     "cached_product_tree_for_category", "projections"]
+
+
 def test_product_tree_source_filter_prunes_unavailable_branches(monkeypatch) -> None:
     from server.services import product_catalog_projection as projection
+    # This fixture replaces the registry itself; installation invalidation is
+    # exercised separately with real cache interfaces in page-index tests.
+    monkeypatch.setattr(projection, "product_catalog_revision", lambda: 0)
 
     class Product:
         def __init__(self, name):

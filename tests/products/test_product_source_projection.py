@@ -47,3 +47,47 @@ def test_concrete_source_members_resolve_to_source_families() -> None:
         ["LocalCNFuturesContractMIN1", "RemoteCNFuturesDAY1", "missing"],
         descriptors,
     ) == ("Local", "Remote", "missing")
+
+
+def test_real_local_contract_tree_pages_preserve_refs_and_source_bindings(monkeypatch):
+    """Use the isolated real catalog fixture, never a running Manager/database."""
+    from server.manager.services.client_product_catalog import ClientProductCatalogMixin
+    from server.modules.shared import price_services
+    from server.services.product_catalog_projection import clear_product_catalog_projection_cache
+    from tools.products.classifier_paths import classifier_object_path
+    import pytest
+    contracts = cached_contracts()
+    if len(contracts) > 10_000:
+        pytest.skip("real metadata fixture exceeds this bounded acceptance budget")
+    clear_product_catalog_projection_cache()
+    calls = []
+    original = price_services.available_sources_for_product
+    def sources(product, freq=None):
+        calls.append(product.name)
+        return original(product, freq)
+    monkeypatch.setattr(price_services, "available_sources_for_product", sources)
+    refs = set()
+    page = 1
+    while True:
+        result = ClientProductCatalogMixin.contract_tree_page(
+            "Product/FuturesContract/CNFuturesContract/_products", source_ids=("Local",),
+            page=page, limit=100,
+        )
+        for row in result["nodes"]:
+            assert row["source_family_ids"] == ["Local"]
+            assert "LocalCNFuturesContractMIN1" in row["source_ids"]
+            assert row["key"] not in refs
+            refs.add(row["key"])
+        if not result["has_more"]:
+            break
+        page += 1
+    assert refs == {classifier_object_path(item) for item in contracts}
+    assert len(calls) == len(refs)
+    search = ClientProductCatalogMixin.contract_tree_page(
+        "Product/FuturesContract/CNFuturesContract/_products", source_ids=("Local",),
+        query="LocalCNFuturesContractMIN1", limit=100,
+    )
+    assert search["total"] == len(refs)
+    assert len(calls) == len(refs)
+    print(f"real-contract-metadata refs={len(refs)} pages={page} warm-source-projections=0")
+    clear_product_catalog_projection_cache()

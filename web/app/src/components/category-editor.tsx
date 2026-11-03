@@ -1,10 +1,11 @@
 import React, { useRef, useState } from "react";
-import { Button, Form, Input, Popconfirm } from "antd";
+import { Button, Form, Input, Pagination, Popconfirm } from "antd";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
 import { DetailsCancelButton, DetailsPanel } from "./details-panel.tsx";
 import { useCompactLayout } from "../configuration/layout.ts";
 import { notify } from "../notifications/core.ts";
+import { ProductPathPicker } from "./product-path-picker.tsx";
 
 type Category = Record<string, any>;
 
@@ -19,9 +20,11 @@ export function CategoryEditor({ category, onSaved, onDeleted, onCancel }: {
   const editing = Boolean(category?.id);
   const items = Array.isArray(category?.items) ? category.items as Category[] : [];
   const composite = category?.is_composite === true;
-  const [entries, setEntries] = useState<Category[]>(items.length ? items.map(item => ({...item, paths: (item.paths || []).join("\n")})) : [{label:"",paths:""}]);
+  const [entries, setEntries] = useState<Category[]>(() => items.length ? items.map(item => ({...item, paths: (item.paths || []).join("\n")})) : [{label:"",paths:""}]);
   const [name, setName] = useState(String(category?.alias || category?.title_zh || category?.name || ""));
   const [busy, setBusy] = useState(false);
+  const [entryPage, setEntryPage] = useState(1), [activeEntry, setActiveEntry] = useState<number | null>(null);
+  const currentPage = Math.min(entryPage, Math.max(1, Math.ceil(entries.length / 5)));
   const mutation = useRef(false);
   const save = async (): Promise<void> => {
     if (mutation.current) return;
@@ -57,12 +60,14 @@ export function CategoryEditor({ category, onSaved, onDeleted, onCancel }: {
     {editing ? <div className="tr-inline-editor-heading"><h2>{t("category.edit")}</h2></div> : null}
     <Form layout="vertical" requiredMark={false}>
       <Form.Item label={t("category.name")}><Input aria-label={t("category.name")} disabled={composite || busy} value={name} onChange={(event) => setName(event.target.value)} /></Form.Item>
-      {entries.map((item,index) => <fieldset key={index} className="tr-category-entry">
+      {entries.slice((currentPage-1)*5,currentPage*5).map((item,offset) => { const index=(currentPage-1)*5+offset; return <fieldset key={index} className="tr-category-entry">
         <Form.Item label={t("category.entryLabel")}><Input aria-label={`${t("category.entryLabel")} ${index+1}`} disabled={busy || item.label_generated} value={item.label} onChange={event=>setEntries(current=>current.map((row,i)=>i===index?{...row,label:event.target.value}:row))}/></Form.Item>
-        <Form.Item label={t("category.paths")}><Input.TextArea aria-label={`${t("category.paths")} ${index+1}`} disabled={busy || composite || item.label_generated} autoSize={{minRows:3,maxRows:8}} value={item.paths} onChange={event=>setEntries(current=>current.map((row,i)=>i===index?{...row,paths:event.target.value}:row))}/></Form.Item>
-        {!composite && !item.label_generated && entries.length>1?<Button danger type="text" disabled={busy} onClick={()=>setEntries(current=>current.filter((_,i)=>i!==index))}>{t("category.removeEntry")}</Button>:null}
-      </fieldset>)}
-      {!composite?<Button disabled={busy} onClick={()=>setEntries(current=>[...current,{label:"",paths:""}])}>{t("category.addEntry")}</Button>:null}
+        <Form.Item label={t("category.paths")}><ProductPathPicker label={`${t("category.paths")} ${index+1}`} disabled={busy || composite || item.label_generated}
+          treeOpen={activeEntry===index} onTreeOpenChange={open=>setActiveEntry(open?index:null)} allowExclusions={false} value={item.paths} onChange={paths=>setEntries(current=>current.map((row,i)=>i===index?{...row,paths}:row))}/></Form.Item>
+        {!composite && !item.label_generated && entries.length>1?<Button danger type="text" disabled={busy} onClick={()=>{setActiveEntry(null);setEntries(current=>current.filter((_,i)=>i!==index));}}>{t("category.removeEntry")}</Button>:null}
+      </fieldset>;})}
+      {entries.length>5?<Pagination size="small" current={currentPage} pageSize={5} total={entries.length} showSizeChanger={false} onChange={page=>{setEntryPage(page);setActiveEntry(null);}}/>:null}
+      {!composite?<Button disabled={busy} onClick={()=>{setEntryPage(Math.ceil((entries.length+1)/5));setActiveEntry(entries.length);setEntries(current=>[...current,{label:"",paths:""}]);}}>{t("category.addEntry")}</Button>:null}
       <div className="tr-inline-actions"><Button type="primary" loading={busy} onClick={() => void save()}>{t("configuration.save")}</Button><DetailsCancelButton disabled={busy} closePanel={mobile && !editing} onCancel={onCancel}/>{editing ? <Popconfirm title={t("category.deleteTitle")} description={t("category.deleteHint")} onConfirm={() => void remove()} okText={t("category.deleteConfirm")} cancelText={t("configuration.cancel")}><Button danger loading={busy}>{t("category.delete")}</Button></Popconfirm> : null}</div>
     </Form>
   </div>;

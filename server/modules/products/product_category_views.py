@@ -55,10 +55,31 @@ def render_product_tree(
     tree = _base_product_tree(source_ids)
     nodes = convert_to_fancytree(tree, checkbox_default=checkbox_default)
     if selected:
-        memberships = _category_memberships(selected, principal)
+        definitions = {}
+        memberships = _category_memberships(selected, principal, definitions=definitions)
         _append_category_views(
             nodes, tree, memberships, checkbox_default=checkbox_default,
         )
+        # Display labels are not persisted identities. Resolve label IDs once
+        # per definition, not once per product or tree occurrence.
+        label_ids = {}
+        for category_id in selected:
+            definition = definitions.get(category_id) or {}
+            label_ids[category_id] = {
+                str(item.get("label") or item.get("title") or ""): str(item["label_id"])
+                for item in definition.get("items") or [] if item.get("label_id")
+            }
+        def attach_selection_paths(items):
+            for item in items:
+                key = str(item.get("key") or "")
+                if item.get("lazy") and f"/{_CATEGORY_MARKER}/" in key:
+                    prefix, reference = key.split(f"/{_CATEGORY_MARKER}/", 1)
+                    category_id, _, label = reference.partition("/")
+                    label_id = label_ids.get(category_id, {}).get(label)
+                    if label_id:
+                        item["selection_path"] = f"{prefix}/{_CATEGORY_MARKER}/{category_id}/{label_id}"
+                attach_selection_paths(item.get("children") or [])
+        attach_selection_paths(nodes)
     return nodes
 
 
@@ -127,6 +148,7 @@ def _base_product_tree(source_ids: Iterable[str] | None) -> Mapping[Any, Any]:
 
 def _category_memberships(
     category_ids: Iterable[str], principal: str,
+    *, definitions: dict | None = None,
 ) -> dict[str, tuple[str, dict[str, tuple[Any, ...]]]]:
     from server.modules.products.product_category_paths import _category_members
     from server.modules.products.product_category_store import get_product_category
@@ -153,6 +175,8 @@ def _category_memberships(
                 }
         if definition is None:
             raise ValueError(f"产品分类不存在: {category_id}")
+        if definitions is not None:
+            definitions[category_id] = definition
         title = str(
             definition.get("title_zh")
             or definition.get("alias")
