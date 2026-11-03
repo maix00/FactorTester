@@ -67,6 +67,8 @@ setupIonicReact({{mode:'md'}});
                     page.add_script_tag(path=str(bundle))
                     reference = page.locator(".tr-settings-card .tr-object-reference").filter(has_text="Alice")
                     reference.wait_for()
+                    assert page.locator(".tr-settings-card .tr-property-groups").is_visible()
+                    assert page.locator(".tr-settings-card .tr-property-list dt").count() == 3
                     assert page.url == f"http://127.0.0.1:{server.server_port}/app"
                     assert reference.inner_text() == "Alice"
                     reference.click()
