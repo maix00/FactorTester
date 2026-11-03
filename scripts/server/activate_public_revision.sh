@@ -8,6 +8,11 @@ production_env="${4:-${FACTORTESTER_REMOTE_PUBLIC_ENV:-/etc/factortester-contain
 release_retention="${5:-${FACTORTESTER_PUBLIC_RELEASE_RETENTION:-3}}"
 native_build_id="${6:-}"
 prepare_only="${7:-0}"
+cleanup_releases="${8:-0}"
+[[ "$cleanup_releases" == "0" || "$cleanup_releases" == "1" ]] || {
+  echo "cleanup-releases must be 0 or 1" >&2
+  exit 2
+}
 release_root="$container_root/releases"
 release_path="$release_root/$revision"
 next_env="$production_env.next-$revision"
@@ -349,12 +354,10 @@ fi
 printf '%s\t%s\t%s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$revision" "verified" \
   >> "$deployment_log"
-# Disk hygiene runs by default: old release images stay bounded by the
-# retention count, and dangling layers / build cache are never a release
-# artifact.  A full disk once starved PostgreSQL and hung the whole host.
-if [[ "${FACTORTESTER_CLEANUP_RELEASES:-1}" == "1" ]]; then
+# Removing retained release worktrees/images requires explicit cleanup scope.
+# The named BuildKit caches already have their own GC budget; never prune the
+# host's unrelated Docker images or global builder cache during a release.
+if [[ "$cleanup_releases" == "1" ]]; then
   cleanup_old_application_releases
 fi
-sudo docker image prune -f >/dev/null 2>&1 || true
-sudo docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
-echo "Published public main $revision; PostgreSQL container preserved; release images bounded to $release_retention"
+echo "Published public main $revision; PostgreSQL container preserved; release cleanup=$cleanup_releases retention=$release_retention"
