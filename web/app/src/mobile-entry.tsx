@@ -1,3 +1,4 @@
+import {cleanAppURL} from "./app-route.ts";
 import React from "react";
 import "./i18n.ts";
 import { installGlobalErrorNotifications } from "./notifications/install.ts";
@@ -16,4 +17,4 @@ import "./shell.css";
 setupIonicReact({ mode: "md" });
 
 const mount = document.querySelector<HTMLElement>("[data-tr-web-app]");
-if (mount) { captureResearchShare(); createRoot(mount).render(<AuthGate mobile><MobileShell /><ResearchShareRedeemer /></AuthGate>); }
+if (mount) { captureResearchShare(); cleanAppURL(); createRoot(mount).render(<AuthGate mobile><MobileShell /><ResearchShareRedeemer /></AuthGate>); }
