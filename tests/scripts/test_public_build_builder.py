@@ -79,3 +79,38 @@ def test_native_builder_reuses_only_trusted_https_daemon_mirror_configuration():
     for invalid in ['http://mirror.example', 'https://user:secret@mirror.example',
                     'https://mirror.example/path', 'https://mirror.example/?token=secret']:
         with pytest.raises(ValueError): builder_config([invalid])
+
+
+def test_low_memory_profile_preserves_host_reserve_and_uses_its_own_builder(tmp_path):
+    from scripts.server.public_build_builder import require_host_headroom
+    memory = 1536 * 1024**2
+    meminfo = tmp_path / 'meminfo'
+    meminfo.write_text('MemAvailable: 2097151 kB\nSwapFree: 9999999 kB\n')
+    with pytest.raises(RuntimeError, match='available RAM'):
+        require_host_headroom(meminfo, memory=memory)
+    meminfo.write_text('MemAvailable: 2097152 kB\n')
+    require_host_headroom(meminfo, memory=memory)
+    calls = []
+    def run(args, **kwargs):
+        calls.append(args)
+        if args[1:3] == ['buildx', 'inspect'] and '--bootstrap' not in args:
+            return SimpleNamespace(returncode=1, stdout='', stderr='no builder found')
+        return SimpleNamespace(returncode=0, stdout=json.dumps([limits(Memory=memory, MemorySwap=memory)]) if args[1]=='inspect' else '', stderr='')
+    assert prepare(run, headroom=lambda: None, memory=memory) == 'tr-public-bounded-1536m'
+    create = next(c for c in calls if c[1:3] == ['buildx', 'create'])
+    assert 'memory=1536m' in create and 'memory-swap=1536m' in create
+    assert not any(c[1] in {'update', 'rm', 'stop'} for c in calls)
+    with pytest.raises(RuntimeError):
+        validate_limits(limits(), memory=memory)
+
+
+def test_build_memory_profile_requires_an_explicit_supported_budget(monkeypatch):
+    from scripts.server.public_build_builder import selected_memory
+    monkeypatch.delenv('TR_PUBLIC_BUILD_MEMORY_MIB', raising=False)
+    assert selected_memory() == MEMORY
+    monkeypatch.setenv('TR_PUBLIC_BUILD_MEMORY_MIB', '1536')
+    assert selected_memory() == 1536 * 1024**2
+    for value in ['0', '-1', '1024', '4096', 'unlimited']:
+        monkeypatch.setenv('TR_PUBLIC_BUILD_MEMORY_MIB', value)
+        with pytest.raises(ValueError):
+            selected_memory()
