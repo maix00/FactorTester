@@ -38,4 +38,4 @@ Dockview workspace
 
 No page creates its own global notification host.
 
-The generic page iframe fallback has been removed after mapping builtin modules to React surfaces. Restored `settings` panes use the shared React account section; unknown or retired page IDs show a localized notice. Job HTML report sandbox frames remain independent. This does not retire the remaining agent-chat adapter or certify whole-platform parity.
+The generic page iframe fallback has been removed after mapping builtin modules to React surfaces. Restored `settings` and `account` desktop panes open the existing global settings overlay and are removed from Dockview; standalone account rendering reuses FunctionPage and PropertyGroups. Mobile keeps its existing settings list/detail navigation; unknown or retired page IDs show a localized notice. Job HTML report sandbox frames remain independent. This does not retire the remaining agent-chat adapter or certify whole-platform parity.

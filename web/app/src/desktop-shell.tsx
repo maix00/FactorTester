@@ -232,7 +232,10 @@ export function DesktopShell(): React.ReactElement {
       if (raw) {
         event.api.fromJSON(JSON.parse(raw));
         for (const panel of [...event.api.panels]) {
-          if (panel.params?.pageId === "account") panel.api.close();
+          if (["account", "settings"].includes(panel.params?.pageId)) {
+            panel.api.close();
+            setSettingsOpen(true);
+          }
           else if (panel.params?.pageId === "catalog") panel.api.updateParameters({ pageId: "products" });
           else if (panel.params?.pageId === "agent-assistant") panel.api.setTitle(t("assistant.title"));
         }

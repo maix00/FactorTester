@@ -3,8 +3,7 @@ import { Alert, Button, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { ProfileSettings } from "./profile-settings.tsx";
 import { DeviceSettings } from "./device-settings.tsx";
-import { AccountActions } from "./account-actions.tsx";
-import { ObjectReference } from "./object-reference.tsx";
+import { AccountSummary } from "./account-summary.tsx";
 import { ResultView } from "./result-view.tsx";
 import { LanguageSwitch } from "./language-switch.tsx";
 import { AppearanceSettings } from "./appearance-settings.tsx";
@@ -81,20 +80,7 @@ function SettingsSectionContent({section,onResetLayout}:SettingsSectionProps):Re
               {sectionData ? section === "quota" ? <QuotaSummary data={sectionData} onRefresh={() => setReload(value => value + 1)} /> : <ResultView value={sectionData} /> : <Spin tip={t("loading")}/>}
             </div>
           ) : section === "account" ? (
-            <div className="tr-settings-card">
-              <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.accountSession")}</b></div>
-                <span className="tr-settings-value">{session?.username ? <ObjectReference value={{kind:"user",ref:session.username}}/> : t("settingsPanel.notSignedIn")}</span>
-              </div>
-              <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.role")}</b></div>
-                <span className="tr-settings-value">{session?.role ? t(`auth.roles.${session.role}`, {defaultValue:session.role}) : "—"}</span>
-              </div>
-              <div className="tr-settings-row">
-                <div><b>{t("settingsPanel.accountAction")}</b></div>
-                <AccountActions/>
-              </div>
-            </div>
+            <div className="tr-settings-card"><AccountSummary /></div>
           ) : (
             <div className="tr-settings-card tr-settings-migrating">
               <p>{t("settingsPanel.migrating")}</p>

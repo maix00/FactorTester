@@ -66,7 +66,9 @@ createRoot(document.getElementById('root')).render(<Harness/>);
                     page.get_by_text(text,exact=True).wait_for()
                     assert page.locator('iframe').count()==0
                     page.get_by_role('button',name='Restore settings',exact=True).click()
-                    page.locator('.tr-settings-card .tr-object-reference').filter(has_text='Alice').wait_for()
+                    page.locator('.tr-function-page .tr-property-groups .tr-object-reference').filter(has_text='Alice').wait_for()
+                    assert page.locator('.tr-function-header').count()==1
+                    assert page.locator('.tr-property-list dt').count()==3
                     assert page.locator('iframe').count()==0
                     assert page.url.endswith('/app')
                     assert all('/settings/' not in url and '/retired-module' not in url for url in navigations)
