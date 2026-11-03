@@ -48,7 +48,7 @@ if [[ -f "$BUILD_OUT/checksums.sha256" ]] && shasum -a 256 -c "$BUILD_OUT/checks
   exit 0
 fi
 echo "native wheel cache=miss build_id=$BUILD_ID reason=missing-or-invalid-wheel-receipt"
-if [[ "${NAUTILUS_INCREMENTAL_ONLY:-0}" == "1" ]] && ! compgen -G "$TARGET_CACHE/release/deps/libnautilus_model-*.rlib" >/dev/null; then
+if [[ "${NAUTILUS_INCREMENTAL_ONLY:-1}" == "1" ]] && ! compgen -G "$TARGET_CACHE/release/deps/libnautilus_model-*.rlib" >/dev/null; then
   echo "incremental-only build requires retained Linux Nautilus dependencies; no cold rebuild started" >&2
   exit 3
 fi

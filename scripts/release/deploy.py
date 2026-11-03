@@ -55,7 +55,7 @@ def check_storage(args, root=ROOT):
         path=root/'apple'/name
         if path.exists():
             size+=int(subprocess.check_output(['du','-sk',str(path)],text=True).split()[0])*1024
-    if size > args.max_client_cache_gib*GIB:
+    if args.max_client_cache_gib is not None and size > args.max_client_cache_gib*GIB:
         raise ValueError('combined client caches exceed budget; preserve and review before cleanup')
 
 
@@ -88,12 +88,14 @@ def main(argv=None):
     p.add_argument('--device-id')
     p.add_argument('--team-id')
     p.add_argument('--min-free-gib',type=int,default=15)
-    p.add_argument('--max-client-cache-gib',type=int,default=12)
+    p.add_argument('--max-client-cache-gib',type=int)
     p.add_argument('--execute',action='store_true')
     args=p.parse_args(argv)
     try:
-        if min(args.min_free_gib,args.max_client_cache_gib)<=0:
+        if args.min_free_gib<=0 or (args.max_client_cache_gib is not None and args.max_client_cache_gib<=0):
             raise ValueError('storage budgets must be positive')
+        if args.execute and (args.macos!='none' or args.ios!='none') and args.max_client_cache_gib is None:
+            raise ValueError('client execution requires an explicit --max-client-cache-gib budget')
         stages=plan(args)
         print(json.dumps({'execute':args.execute,'stages':stages},indent=2),flush=True)
         if args.execute:

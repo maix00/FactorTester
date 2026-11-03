@@ -72,7 +72,7 @@ def test_finished_wheel_hit_skips_capacity_checks_and_compilation(tmp_path):
     (alpha_dir/'py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl').write_bytes(b'fixture')
     (folder/'checksums.sha256').write_text(f'{hashlib.sha256(wheel.read_bytes()).hexdigest()}  {wheel}\n')
     command=['bash',str(scripts/'native_wheel_build.sh')]
-    env={**os.environ,'NAUTILUS_WHEEL_DIR':str(out),'NAUTILUS_CACHE':str(tmp_path/'cache')}
+    env={**os.environ,'NAUTILUS_WHEEL_DIR':str(out),'NAUTILUS_CACHE':str(tmp_path/'cache'),'NAUTILUS_INCREMENTAL_ONLY':'0'}
     result=run(command,root,env=env)
     assert result.returncode==0,result.stderr
     assert 'cache=hit' in result.stdout

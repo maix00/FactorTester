@@ -66,7 +66,7 @@ PostgreSQL 使用一致性备份，SQLite 使用原生备份机制，CouchDB 文
 
 成品 wheel 缓存与 Cargo 编译缓存分别管理。源码及平台身份一致、校验和有效的成品直接复用；只修改 Nautilus adapter 时，独立 alpha Python wheel 只有在其余输入树完全一致且旧字节校验通过后才复用。组合运行时仍须重新链接以包含 adapter 修复，不能给旧二进制改标签冒充新版本。
 
-保留与目标平台、工具链匹配的 Cargo target、registry 和 git 缓存，在不同发布 worktree 间显式使用同一 `NAUTILUS_CACHE`、`NAUTILUS_TARGET_CACHE` 与 `NAUTILUS_WHEEL_DIR`。共用缓存由现有构建锁串行保护；macOS arm64 缓存不能代替 Linux amd64 缓存。设置 `NAUTILUS_INCREMENTAL_ONLY=1` 可在缺少 Linux Nautilus 依赖产物时拒绝冷构建；缓存存在时仍由 Cargo 校验依赖是否有效。
+保留与目标平台、工具链匹配的 Cargo target、registry 和 git 缓存，在不同发布 worktree 间显式使用同一 `NAUTILUS_CACHE`、`NAUTILUS_TARGET_CACHE` 与 `NAUTILUS_WHEEL_DIR`。共用缓存由现有构建锁串行保护；macOS arm64 缓存不能代替 Linux amd64 缓存。默认 `NAUTILUS_INCREMENTAL_ONLY=1`，在缺少 Linux Nautilus 依赖产物时拒绝冷构建；只有明确批准的初始构建才设置为 `0`，以后恢复默认。缓存存在时仍由 Cargo 校验依赖是否有效。
 
 构建前核对可用磁盘及单次峰值预算。现有原生 target 缓存默认预算为 6 GiB；成品与临时源快照另行计量。校验通过的重复 wheel 优先使用同文件系统硬链接；不为每个 worktree 长期复制一套依赖。清理必须按明确产物和保留策略执行，保留当前运行、回退和正在使用的产物；不得清空整个 DerivedData、Docker 卷或用户目录来腾空间。
 
@@ -82,12 +82,12 @@ PostgreSQL 使用一致性备份，SQLite 使用原生备份机制，CouchDB 文
 python -m scripts.release.deploy --macos build --ios build
 
 # 明确选择执行 macOS 构建，保留运行中的 App
-python -m scripts.release.deploy --macos build --execute
+python -m scripts.release.deploy --macos build --max-client-cache-gib <agreed-gib> --execute
 
 # 为已经启动的指定模拟器构建并安装，不自动启动设备
-python -m scripts.release.deploy --ios install --device-id <simulator-udid> --execute
+python -m scripts.release.deploy --ios install --device-id <simulator-udid> --max-client-cache-gib <agreed-gib> --execute
 ```
 
 `--server public` 必须在干净 main worktree 中执行并具有既有发布授权；`--server intranet` 必须在干净 feat worktree 中指定 `--intranet-env`，只重载所选 Manager，不重启整套服务。两者默认均不安装客户端。macOS 安装使用 `--macos install`，沿用稳定签名、暂存校验和原子替换；只有进入安装阶段才退出已有 App。iOS 真机安装还须使用 `--ios-target device`、明确设备及有效 `--team-id`，不自动请求或扩展签名权限。当前入口不上传 App Store/TestFlight，也不创建移动分发授权。
 
-客户端构建默认复用各平台的 DerivedData，不执行 clean。macOS 的历史 Debug 目录清理改为显式设置 `FTCLIENT_DEBUG_CLEANUP=1` 才启用；构建失败不通过删除缓存重试。计划入口默认要求至少 15 GiB 可用空间，三个客户端构建目录合计预算为 12 GiB，可通过命令参数明确调整。检查发生在执行前和每个阶段结束后；它是停止后续步骤的门槛，不是操作系统硬磁盘配额。超限时保留产物并报告，不擅自删除缓存或已安装 App。
+客户端构建默认复用各平台的 DerivedData，不执行 clean。macOS 的历史 Debug 目录清理改为显式设置 `FTCLIENT_DEBUG_CLEANUP=1` 才启用；构建失败不通过删除缓存重试。计划入口默认要求至少 15 GiB 可用空间，执行客户端构建或安装前，必须显式指定三个客户端构建目录的合计预算 `--max-client-cache-gib`，不默认批准数 GiB 的本机新增占用。检查发生在执行前和每个阶段结束后；它是停止后续步骤的门槛，不是操作系统硬磁盘配额。超限时保留产物并报告，不擅自删除缓存或已安装 App。

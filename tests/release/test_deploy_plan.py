@@ -59,3 +59,10 @@ def test_invalid_macos_mode_stops_before_tools_are_called(tmp_path):
     assert result.returncode==2
     assert 'usage:' in result.stderr
     assert not result.stdout
+
+
+def test_client_execution_without_storage_budget_is_refused():
+    with patch.object(deploy.subprocess,'run',side_effect=AssertionError('unexpected execution')):
+        with pytest.raises(SystemExit) as failure:
+            deploy.main(['--macos','build','--execute'])
+    assert failure.value.code==2
