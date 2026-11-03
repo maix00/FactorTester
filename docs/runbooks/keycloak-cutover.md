@@ -259,3 +259,38 @@ Verify after applying: complete a real device login against the Manager and
 confirm `/api/session` returns the verified Keycloak subject. A token issued
 without these scopes can still be introspected as `active=true` but has no
 `sub`; that is an authorization failure, not a reason to relax session checks.
+
+### Acceptance checklist (each Manager)
+
+1. Unauthenticated `GET /auth/oidc/device-configuration` returns 200 with
+   `issuer` and `client_id`. An old image returns 303 to `/compliance` or 404;
+   that means the release is not ready, not that the CLI is broken.
+2. `python -m scripts.migrations.keycloak_cli_client` reports `verified`.
+3. From a clean CLI home, `traderesearch configure --base-url <manager>` then
+   `traderesearch login --no-browser`; complete the device approval in a real
+   browser. `/api/session` must return the verified Keycloak subject and
+   `tr_identity_id`; the CLI must not print bearer or refresh credentials.
+4. Reject the stale-token case explicitly: before the `basic` scope was added,
+   the same token introspected as `active=true` with `sub=null` and Manager
+   returned 401. Do not weaken session verification to accept that token.
+5. `traderesearch logout` revokes the refresh credential; a later CLI request
+   must require a new device login.
+
+### Two-Manager local research ownership drill
+
+Prerequisites: both Managers run the same reviewed release; each realm has the
+CLI client; both Keycloak realms hold the reviewed stable-identity mapping; the
+same user has the same `tr_identity_id` on both sides. This remains a deployment
+and federation exercise, not a code-only change.
+
+1. On Manager A, create or publish one local Research/Report as user M.
+2. On Manager B, sign in as the same stable identity; `owned-local-report-sync`
+   may discover the object only after identity, authorization and version
+   checks. Compare object ref sets, not just counts.
+3. Sign in to Manager B as a different user with the same display name. That
+   user must discover nothing; same-name mapping is never accepted as identity.
+4. Revoke the share/permission and repeat the read; it must fail closed, and
+   the stale lease must not keep a cached allow.
+5. Record the two Managers' release SHA, object ref sets, allow/deny decisions
+   and revocation evidence in the protected acceptance directory. A shared
+   process or shared realm in a smoke test is not two-server acceptance.
