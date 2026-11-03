@@ -149,7 +149,11 @@ enum TestJobBackupStore {
             appropriateFor: nil, create: true
         )
         let scope = hash(Data("\(principal)|\(origin)".utf8))
-        return base.appendingPathComponent("FactorTester/job-backups", isDirectory: true)
+        let canonical = base.appendingPathComponent("TradeResearch", isDirectory: true)
+        let legacy = base.appendingPathComponent("FactorTester", isDirectory: true)
+        let selected = !FileManager.default.fileExists(atPath: canonical.path) &&
+            FileManager.default.fileExists(atPath: legacy.path) ? legacy : canonical
+        return selected.appendingPathComponent("job-backups", isDirectory: true)
             .appendingPathComponent(scope, isDirectory: true)
             .appendingPathComponent(hash(Data(jobID.utf8)), isDirectory: true)
     }

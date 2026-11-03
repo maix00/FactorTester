@@ -97,10 +97,14 @@ struct LocalProfileSnapshotStore {
             in: .userDomainMask
         ).first ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support")
-        return root.appendingPathComponent("FactorTester/profiles")
+        let canonical = root.appendingPathComponent("TradeResearch", isDirectory: true)
+        let legacy = root.appendingPathComponent("FactorTester", isDirectory: true)
+        let selected = !FileManager.default.fileExists(atPath: canonical.path) &&
+            FileManager.default.fileExists(atPath: legacy.path) ? legacy : canonical
+        return selected.appendingPathComponent("profiles", isDirectory: true)
         #else
         return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appendingPathComponent(".local/share/factortester/profiles")
+            .appendingPathComponent(".local/share/traderesearch/profiles")
         #endif
     }
 }
