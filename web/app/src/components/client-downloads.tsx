@@ -3,6 +3,7 @@ import { Alert, Button, Spin } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { request } from "../configuration/api.ts";
+import { clientInstallerHref } from "../client-release.ts";
 import { SettingsFields } from "./settings-fields.tsx";
 
 export function ClientDownloads(): React.ReactElement {
@@ -20,14 +21,7 @@ export function ClientDownloads(): React.ReactElement {
   }, [revision, t]);
   if (error) return <Alert type="info" message={error} action={<Button onClick={() => setRevision(value => value + 1)}>{t("retry")}</Button>} />;
   if (!release) return <Spin />;
-  let href: string | undefined;
-  try {
-    const raw = release.dmg_url || release.url;
-    if (typeof raw === "string" && raw) {
-      const url = new URL(raw, location.href);
-      if (!url.username && !url.password && (url.protocol === "https:" || (url.protocol === "http:" && url.origin === location.origin))) href = url.href;
-    }
-  } catch { /* An invalid release URL cannot become a download action. */ }
+  const href = clientInstallerHref(release, location.href);
   return <SettingsFields items={[
     { key: "version", label: t("clientDownloads.version"), value: release.version || release.short_version || t("clientDownloads.unavailable") },
     { key: "macos", label: "macOS", value: true, render: () => <Button size="small" icon={<DownloadOutlined aria-hidden />} href={href} disabled={!href} target="_blank" rel="noopener noreferrer">{t("clientDownloads.downloadMac")}</Button> },
