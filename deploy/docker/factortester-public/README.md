@@ -136,3 +136,18 @@ python -S -m sources.inventory --root "$TR_SOURCE_BUNDLES_HOST_ROOT" --limit 100
 数据本身的静默更新和实时流由成员 update_policy 与源适配器处理，Bundle 代码版本不等于数据版本。
 当前内置 Local 行情激活仍沿用现有实现，历史规则成员的执行切换、客户端 manifest 切换及
 来源包外移尚未完成；本覆盖文件不自动完成这些迁移。
+
+
+### Bounded application-image build profiles
+
+The default BuildKit container uses 2048 MiB, two CPU cores, no extra swap and
+one concurrent build step. On a smaller host, an operator may explicitly set
+`TR_PUBLIC_BUILD_MEMORY_MIB=1536` in the protected deployment env file for a
+lower-memory attempt. Both profiles require another 512 MiB of available host
+RAM; swap is never counted. Invalid or unlimited budgets are rejected.
+The smaller profile uses its own builder and the existing bounded GC policy,
+preserving the default builder/cache. Account for both caches in disk admission.
+A failed build leaves the running application in place. These profiles build
+application images from finished native wheels; Rust compilation stays on the
+approved separate builder. A resource-constrained image build is not evidence
+that the candidate has passed application or backtest acceptance.
