@@ -333,3 +333,71 @@ def test_compression_keeps_preexisting_offline_content_baselines(tmp_path):
     assert hashlib.sha256(payload).hexdigest() != before_upgrade
     assert bundle_content_digest(payload) == before_upgrade
     assert content_digest(source, report_tree_paths(source, 'main'), head) == before_upgrade
+
+
+def test_missing_job_artifacts_remain_missing_through_bundle_roundtrip(tmp_path, monkeypatch):
+    from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
+    from tools.cli.release.research_reporting.authoring.tree_bundle import bundle_from_snapshot, validate_report_bundle
+    from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+    from tools.cli.release.research_reporting.local_projection_validation import bundle_matches_projection
+    monkeypatch.setenv('TRADERESEARCH_JOB_CACHE_ROOT', str(tmp_path / 'cache'))
+    source = tmp_path / 'source'
+    initialize_tree(package_root=source,branch_id='main',report_id='same-report',title='Report')
+    add_component(package_root=source,branch_id='main',component_id='chapter',kind='chapter',title='Chapter',parent_id=None,body='',content=None,display_kind='')
+    raw = b'value\n1\n2\n'
+    digest = hashlib.sha256(raw).hexdigest()
+    add_component(package_root=source, branch_id='main', component_id='missing-table', kind='table', title='',
+        parent_id='chapter', body='', content={'columns':['value'],'rows':[['1']],'preview':{'max_rows':200,'max_columns':20,'is_truncated':True},'source':{
+            'job_id':'missing-job','artifact_ref':'job-artifact:missing-job:statistics',
+            'filename':'statistics.csv','content_hash':digest,'content_type':'text/csv'}}, display_kind='')
+    for folder in ('one','two'):
+        file=source/'branches/main'/folder/'same.txt'
+        file.parent.mkdir();file.write_text('same bytes')
+        add_component(package_root=source,branch_id='main',component_id=folder,kind='entry',title='',parent_id='chapter',body=f'[evidence]({folder}/same.txt)',content=None,display_kind='')
+    snapshot = load_snapshot(package_root=source, branch_id='main')
+    original_head = snapshot['head'].copy()
+    with pytest.raises(ValueError, match='full Job artifact is unavailable'):
+        bundle_from_snapshot(snapshot, package_root=source, branch_id='main')
+    payload = bundle_from_snapshot(snapshot, package_root=source, branch_id='main', allow_unavailable_artifacts=True)
+    options = dict(payload=payload, expected_sha256=hashlib.sha256(payload).hexdigest(), report_id='same-report',
+                   source_generation=original_head['generation'],source_root_ref=original_head['root_ref'])
+    manifest, _ = validate_report_bundle(**options)
+    missing = [{'job_id':'missing-job','name':'statistics','expected_sha256':digest,'reason':'source_unavailable'}]
+    assert manifest['schema_version'] == 5
+    assert manifest['unavailable_job_artifacts'] == missing
+    assert manifest['job_artifacts'] == []
+    target = tmp_path / 'target'
+    import_report_bundle(**options, package_root=target, branch_id='main', restore_artifacts=False)
+    imported = load_snapshot(package_root=target, branch_id='main')
+    projected = build_upload_projection(imported)
+    table = next(x for x in projected['components'] if x['component_id']=='missing-table')
+    assert table['content']['rows'] == [['1']]
+    assert table['content']['source']['available'] is False
+    assert table['content']['source']['content_hash'] == digest
+    assert cached_job_artifact(job_id='missing-job',name='statistics') is None
+    snapshot['unavailable_job_artifacts'] = missing
+    from tools.cli.release.research_reporting.public_research.object_uploads import detach_object_bytes, projection_hash
+    original, _ = detach_object_bytes(build_upload_projection(snapshot))
+    original['projection_hash'] = projection_hash(original)
+    assert bundle_matches_projection(package_root=target, source_manifest=manifest, remote_projection=original, expected_hash=projection_hash(original))
+    cache_job_artifact(job_id='missing-job',name='statistics',filename='statistics.csv',content_type='text/csv',
+                       raw=raw,server_url='https://example.test')
+    reexport = bundle_from_snapshot(imported, package_root=target, branch_id='main')
+    with zipfile.ZipFile(io.BytesIO(reexport)) as archive:
+        again = json.loads(archive.read('manifest.json'))
+    assert again['unavailable_job_artifacts'] == missing
+    assert again['job_artifacts'] == []
+    assert load_snapshot(package_root=source,branch_id='main')['head'] == original_head
+
+
+@pytest.mark.parametrize('change', ['hash', 'identity', 'duplicate', 'extra'])
+def test_missing_job_artifact_inventory_rejects_invalid_descriptors(change):
+    from tools.cli.release.research_reporting.authoring.bundle_job_artifacts import validate_unavailable_job_artifacts
+    item = {'job_id':'job','name':'table','expected_sha256':'a'*64,'reason':'source_unavailable'}
+    items=[item]
+    if change=='hash':item['expected_sha256']='b'*64
+    elif change=='identity':item['name']='other'
+    elif change=='duplicate':items.append(dict(item))
+    else:item['unexpected']=True
+    with pytest.raises(ValueError,match='unavailable Job artifact'):
+        validate_unavailable_job_artifacts(items,{('job','table'):'a'*64})

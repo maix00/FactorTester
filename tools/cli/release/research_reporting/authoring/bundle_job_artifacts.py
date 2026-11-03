@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 import hashlib
+import json
 from pathlib import Path
 import re
 
@@ -44,15 +45,71 @@ def artifact_requests(snapshot):
     return requests
 
 
-def export_job_artifacts(snapshot, capture, *, maximum_bytes):
-    result = []
+def unavailable_job_artifacts(snapshot):
+    if 'unavailable_job_artifacts' in snapshot:
+        return snapshot['unavailable_job_artifacts']
+    root=snapshot.get('paths',{}).get('root')
+    if root is None:return []
+    receipt=Path(root)/'collaboration-fork.json'
+    if not receipt.is_file():return []
+    from tools.cli.release.bounded_file import read_bounded_file
+    return json.loads(read_bounded_file(receipt,2*1024**2)).get('unavailable_job_artifacts',[])
+
+
+def validate_unavailable_job_artifacts(items, requests):
+    if not isinstance(items,list) or len(items)>256:
+        raise ValueError('unavailable Job artifact inventory is invalid')
+    result={}
+    for item in items:
+        if (not isinstance(item,dict) or set(item)!={'job_id','name','expected_sha256','reason'}
+                or not isinstance(item['job_id'],str) or not isinstance(item['name'],str)
+                or not isinstance(item['expected_sha256'],str) or item['reason']!='source_unavailable'):
+            raise ValueError('unavailable Job artifact descriptor is invalid')
+        key=(item['job_id'],item['name'])
+        if key in result or key not in requests or requests[key]!=item['expected_sha256']:
+            raise ValueError('unavailable Job artifact identity or version differs')
+        result[key]=item['expected_sha256']
+    return result
+
+
+def export_job_artifacts(snapshot, capture, *, maximum_bytes, allow_unavailable=False):
+    result,missing = [],[]
+    requests=artifact_requests(snapshot)
+    # A frozen missing state survives later cache contents; exporting a report
+    # never silently repairs it or substitutes another version.
+    inherited={}
+    for item in unavailable_job_artifacts(snapshot):
+        key=(item['job_id'],item['name'])
+        if key in requests and requests[key]==item['expected_sha256']:inherited[key]=item
     for (job, name), expected in sorted(artifact_requests(snapshot).items()):
+        if (job,name) in inherited:
+            missing.append(inherited[(job,name)]);continue
         cached = cached_job_artifact(job_id=job, name=name, expected_hash=expected, maximum_bytes=maximum_bytes)
         if cached is None:
+            if allow_unavailable:
+                missing.append({'job_id':job,'name':name,'expected_sha256':expected,'reason':'source_unavailable'})
+                continue
             raise ValueError(f'full Job artifact is unavailable: {job}/{name}')
         result.append({'job_id': job, 'name': name, 'content_type': cached['content_type'],
                        **capture(cached['raw'], cached['file_name'])})
-    return result
+    validate_unavailable_job_artifacts(missing,requests)
+    return result,missing
+
+
+def mark_unavailable_sources(value, items):
+    """Project an explicit missing state without editing original tree nodes."""
+    missing={(item['job_id'],item['name']) for item in items}
+    def visit(raw):
+        if isinstance(raw,list):return [visit(item) for item in raw]
+        if not isinstance(raw,dict):return raw
+        result={key:visit(item) for key,item in raw.items()}
+        source=result.get('source')
+        if isinstance(source,dict):
+            ref=source.get('artifact_ref');match=_REF.fullmatch(ref) if isinstance(ref,str) else None
+            if match and match.groups() in missing:
+                result['source']={**source,'available':False,'unavailable_reason':'source_unavailable'}
+        return result
+    return visit(value)
 
 
 def restore_job_artifacts(items, files):
