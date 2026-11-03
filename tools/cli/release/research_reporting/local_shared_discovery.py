@@ -1,10 +1,9 @@
 """Bounded discovery of this user's explicitly shared local report branches."""
 from __future__ import annotations
 
-import re
-
 from tools.cli.http import HttpClientError
 from .report_workspace_identity import report_workspace_id_for
+from .research_identity import is_research_ref
 
 
 def discover_local_reports(store, *, session, manager_hash: str, profile_id: str, limit: int):
@@ -36,7 +35,7 @@ def discover_local_reports(store, *, session, manager_hash: str, profile_id: str
         if (not isinstance(item, dict) or set(item) != {'research_id', 'report_id', 'research_title',
                 'metadata_status', 'publication', 'editable', 'authoring'}
                 or not isinstance(item['research_id'], str)
-                or not re.fullmatch(r'research:v1:[A-Za-z0-9_-]{24,128}', item['research_id'])
+                or not is_research_ref(item['research_id'])
                 or not isinstance(item['report_id'], str) or item['report_id'] in seen
                 or not isinstance(item['publication'], dict) or item['publication'].get('report_id') != item['report_id']
                 or type(item['editable']) is not bool or item['metadata_status'] not in {'ready', 'needs_repair'}):

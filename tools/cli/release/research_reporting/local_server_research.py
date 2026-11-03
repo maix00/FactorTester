@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import math
-import re
 import time
 from urllib.parse import quote, urlsplit
 
 from .local_publication import manager_session
+from .research_identity import is_research_ref
 
 
 def discover_server_researches(store, *, binding: dict, manager: dict, profile_id: str,
@@ -28,7 +28,7 @@ def discover_server_researches(store, *, binding: dict, manager: dict, profile_i
         if not isinstance(item, dict) or set(item) != {'research_id', 'updated_at', 'title', 'description'}:
             raise ValueError('Manager Research discovery response is invalid')
         ref, version = item['research_id'], item['updated_at']
-        if (not isinstance(ref, str) or not re.fullmatch(r'research:v1:[A-Za-z0-9_-]{24,128}', ref)
+        if (not is_research_ref(ref)
                 or ref in versions or type(version) not in (int, float) or not math.isfinite(version) or version < 0
                 or not isinstance(item['title'], str) or not item['title'].strip() or len(item['title']) > 256
                 or not isinstance(item['description'], str) or len(item['description']) > 10000):
@@ -57,7 +57,7 @@ def discover_server_researches(store, *, binding: dict, manager: dict, profile_i
 def queue_server_researches(store, *, manager: dict, profile_id: str, research_ids: list[str]) -> int:
     profile = store._profile(profile_id)
     if (not isinstance(research_ids, list) or not 1 <= len(research_ids) <= 100
-            or any(not isinstance(ref, str) or not re.fullmatch(r'research:v1:[A-Za-z0-9_-]{24,128}', ref) for ref in research_ids)
+            or any(not is_research_ref(ref) for ref in research_ids)
             or len(set(research_ids)) != len(research_ids)):
         raise ValueError('invalid Research identities')
     if not isinstance(manager, dict) or not isinstance(manager.get('endpoint'), str):
