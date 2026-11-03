@@ -249,3 +249,40 @@ def test_invalid_publication_namespace_cannot_advance_reserved_branch(tmp_path, 
             expected_generation=0, expected_revision='', generation=1, revision='a' * 64,
             publication_id=reference, storage_server_id='server-one')
     assert catalog.list_report_branches('report', viewer='alice')[0]['status'] == 'reserved'
+
+
+def test_scoped_report_directory_reads_current_heads_in_one_batch(tmp_path, monkeypatch):
+    from server.manager.services import research_branches as module
+    from server.manager.http.research_catalog_routes import ResearchCatalogRoutesMixin
+    from types import SimpleNamespace
+    catalog, rid = setup(tmp_path)
+    catalog.register_report(rid, actor='alice', report_id='other-report', title='Other', profile_ref='self')
+    catalog.reserve_report_branch('report', actor='alice', profile_ref='self', branch_id='main')
+    ref = 'p-' + 'c' * 64
+    catalog.publish_report_branch('report', 'main', actor='alice', profile_ref='self',
+        expected_generation=0, expected_revision='', generation=2, revision='a' * 64,
+        publication_id=ref, storage_server_id='institution')
+    catalog.reserve_report_branch('other-report', actor='alice', profile_ref='self', branch_id='draft')
+    queries = []
+    connect = module.connect_sqlite
+    def traced(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connection.set_trace_callback(lambda sql: queries.append(sql) if 'FROM research_catalog_branches' in sql else None)
+        return connection
+    monkeypatch.setattr(module, 'connect_sqlite', traced)
+    monkeypatch.setattr(catalog, '_report_branches', lambda *_a: (_ for _ in ()).throw(AssertionError('no per-report source discovery')))
+    directory = catalog.list_reports_for_scope(viewer='alice', scope='mine')
+    assert len(queries) == 1
+    assert {row['report_id'] for row in directory} == {'report', 'other-report'}
+    current = next(row for row in directory if row['report_id'] == 'report')
+    assert [branch['publication_id'] for branch in current['branches']] == [ref]
+    assert current['branches'][0]['source_kind'] == 'couchdb'
+    assert next(row for row in directory if row['report_id'] == 'other-report')['branches'] == []
+    class Handler(ResearchCatalogRoutesMixin):
+        def _research_service(self):
+            return SimpleNamespace(list_visible=lambda _viewer: [dict(report_id='report', owner_ref='alice',
+                profile_ref='self', branch_ref='main', publication_id='old-mirror')])
+    projected = Handler()._research_catalog_publication_branches(directory, 'alice')
+    report = next(row for row in projected if row['report_id'] == 'report')
+    assert [branch['publication_id'] for branch in report['branches']] == [ref]
+    assert report['branches'][0]['source_kind'] == 'couchdb'

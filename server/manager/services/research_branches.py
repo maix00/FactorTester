@@ -174,11 +174,25 @@ class ResearchBranchesMixin:
         return [dict(row) for row in rows]
 
     def _registered_branch_choices(self, report_id: str) -> list[dict]:
+        return self._registered_branch_choices_many([report_id])[report_id]
+
+    def _registered_branch_choices_many(self, report_ids) -> dict[str, list[dict]]:
+        """Read heads only for already-authorized Reports in bounded SQL batches."""
+        ids = list(dict.fromkeys(report_ids))
+        result = {report_id: [] for report_id in ids}
+        if not ids:
+            return result
         with connect_sqlite(self.db_path, readonly=True) as conn:
-            rows = conn.execute("SELECT * FROM research_catalog_branches WHERE report_id=? AND status='active' ORDER BY created_at, branch_id",
-                                (report_id,)).fetchall()
-        return [{**dict(row), 'branch_ref': row['branch_id'], 'source_kind': publication_source_kind(row['publication_id']),
-                 'source_ref': row['publication_id'], 'selected': False} for row in rows]
+            for start in range(0, len(ids), 200):
+                batch = ids[start:start + 200]
+                placeholders = ','.join('?' for _ in batch)
+                rows = conn.execute("SELECT * FROM research_catalog_branches WHERE status='active' AND report_id IN ("
+                                    + placeholders + ") ORDER BY created_at, branch_id", batch).fetchall()
+                for row in rows:
+                    result[row['report_id']].append({**dict(row), 'branch_ref': row['branch_id'],
+                        'source_kind': publication_source_kind(row['publication_id']),
+                        'source_ref': row['publication_id'], 'selected': False})
+        return result
 
     def report_branch_identity(self, publication_id: str) -> dict:
         """Return the branch one publication belongs to.
