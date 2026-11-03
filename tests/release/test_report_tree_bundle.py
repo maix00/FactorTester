@@ -268,3 +268,50 @@ def test_job_cache_rejects_dot_directories(tmp_path, monkeypatch):
         with pytest.raises(ValueError, match='job_id'):
             with job_cache_write_lock(job_id):
                 pass
+
+
+def test_compressible_report_over_wire_limit_keeps_every_resource(tmp_path):
+    from tools.cli.release.research_reporting.authoring.tree_bundle import validate_report_bundle
+    from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+    from server.jobs.storage.couchdb_research_publication import prepare_projection, prepare_authoring
+
+    source, _head = _source(tmp_path)
+    branch_assets = source / 'branches/main/assets'
+    branch_assets.mkdir()
+    (branch_assets / 'plot.png').write_bytes((source / 'assets/plot.png').read_bytes())
+    resource = b'bounded report evidence\n' * 160000
+    (source / 'branches/main/evidence.txt').write_bytes(resource)
+    for number in (2, 3):
+        (source / f'branches/main/evidence{number}.txt').write_bytes(resource + str(number).encode())
+        add_component(package_root=source, branch_id='main', component_id=f'evidence{number}', kind='entry',
+                      title='', parent_id='chapter', body=f'[Evidence](evidence{number}.txt)',
+                      content=None, display_kind='')
+    snapshot = load_snapshot(package_root=source, branch_id='main')
+    head = snapshot['head']
+    args = dict(package_root=source, branch_id='main', expected_generation=head['generation'], expected_root_ref=head['root_ref'])
+    payload = export_report_bundle(**args)
+    assert payload == export_report_bundle(**args)
+    assert len(resource) * 3 > 8 * 1024**2
+    assert len(payload) < 8 * 1024**2
+    digest = hashlib.sha256(payload).hexdigest()
+    manifest, files = validate_report_bundle(payload=payload, expected_sha256=digest, report_id='same-report',
+        source_generation=head['generation'], source_root_ref=head['root_ref'])
+    assert resource in files.values() and resource + b'3' in files.values()
+    projection = prepare_projection(build_upload_projection(snapshot), report_id='same-report')[0]
+    import base64
+    descriptor, verified_bytes = prepare_authoring(
+        {'sha256': digest, 'root_ref': head['root_ref'], 'content_base64': base64.b64encode(payload).decode()},
+        report_id='same-report', generation=head['generation'], branch_ref='main', projection=projection)
+    assert descriptor['sha256'] == digest and verified_bytes == payload
+
+
+def test_compressed_bundle_still_rejects_expanded_size_over_limit(monkeypatch):
+    from tools.cli.release.research_reporting.authoring import tree_bundle as module
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('manifest.json', '{}')
+        archive.writestr('objects/' + 'a' * 64, b'x' * 2048)
+    payload = output.getvalue()
+    monkeypatch.setattr(module, 'MAX_BUNDLE_BYTES', 1024)
+    with pytest.raises(ValueError, match='expanded size exceeds limit'):
+        module._read_bundle(payload, hashlib.sha256(payload).hexdigest())

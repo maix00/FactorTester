@@ -104,10 +104,12 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
     if total + len(encoded) > MAX_BUNDLE_BYTES:
         raise ValueError('report bundle exceeds size limit')
     stream = io.BytesIO()
-    # Fixed ZIP timestamps make retries byte-identical for the same source.
+    # Fixed timestamps and compression settings keep retries deterministic.
+    # The decoder bounds expanded bytes separately, including compressed input.
     with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_STORED) as archive:
         for name, raw in [('manifest.json', encoded), *[(f'objects/{key}', files[key]) for key in sorted(files)]]:
-            archive.writestr(zipfile.ZipInfo(name), raw)
+            archive.writestr(zipfile.ZipInfo(name), raw,
+                             compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
     return stream.getvalue()
 
 def _read_bundle(payload: bytes, expected_sha256: str):
