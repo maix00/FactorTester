@@ -20,6 +20,8 @@ services:
       timeout: 3s
       retries: 20
   manager:
+    env_file:
+      - ${TR_REPORT_COUCHDB_WRITER_ENV_FILE:?set protected Manager report-writer environment}
     depends_on:
       report-store:
         condition: service_healthy

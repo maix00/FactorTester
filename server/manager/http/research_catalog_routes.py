@@ -96,7 +96,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         local_discovery = parsed.path == '/api/research/owned-local-report-sync'
         if publication is None and local_publication is None and not local_grants and not local_discovery and parsed.path not in {'/api/research/owned-sync', '/api/research/owned-report-sync'}:
             self._refresh_research_catalog(viewer)
-        service = None if local_publication or local_grants or local_discovery else self._research_catalog_service()
+        # A byte-owner peer verifies its own catalog. Resolve a local catalog
+        # only when the selected local operation actually needs it.
+        service = None if publication or local_publication or local_grants or local_discovery else self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
             if local_discovery:
@@ -169,7 +171,12 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 if owner_metadata and server_id and server_id not in {'local', self.state.server_id}:
                     raise ValueError('remote owner metadata is not available through this route')
                 branch_ref = '' if publication_ref else str(query.get('branch_ref', [''])[0])
-                if local_publication and server_id and server_id not in {'local', self.state.server_id}:
+                view = query.get('view', [''])[0]
+                if (len(query.get('view', [])) > 1 or view not in {'', 'index', 'chapter', 'markdown'}
+                        or (view and (metadata_only or attachment or local_publication))
+                        or (view == 'chapter' and (len(query.get('chapter_id', [])) != 1 or not query['chapter_id'][0]))):
+                    raise ValueError('invalid report reader view')
+                if server_id and server_id not in {'local', self.state.server_id}:
                     from server.identity.server_admission import server_admission
                     from server.modules.single_factor_test.execution_nodes import peer_execution_route
                     route = peer_execution_route(self.state, server_id)
@@ -177,7 +184,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                         principal=viewer, delegated_user_token=self._bearer_token(), payload={
                             'research_id': research_id, 'report_id': report_id,
                             'publication_ref': publication_ref or '', 'branch_ref': branch_ref, 'attachment': attachment,
-                            'metadata_only': metadata_only, 'requires_publish': requires_publish, 'requires_edit': requires_edit})
+                            'metadata_only': metadata_only, 'requires_publish': requires_publish, 'requires_edit': requires_edit,
+                            **({'source_kind': 'catalog'} if publication else {})})
                     if not server_admission(session, state=self.state, use_cache=False)[0]:
                         raise PermissionError('current Manager access is not authorized')
                     if attachment:
@@ -225,6 +233,33 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     self.end_headers()
                     self.wfile.write(raw)
                     return True
+                if view:
+                    projection = value['projection']
+                    if view == 'index':
+                        from tools.cli.release.research_reporting.public_research.projection import projection_index
+                        value = projection_index(projection)
+                    elif view == 'chapter':
+                        from tools.cli.release.research_reporting.public_research.projection import chapter_projection
+                        value = chapter_projection(projection, query['chapter_id'][0])
+                    else:
+                        from tools.cli.release.research_reporting.report_export import markdown_export, document_identity
+                        record = value['publication']
+                        try:
+                            raw, media, _ = markdown_export(projection, query.get('format', ['md'])[0],
+                                identity=document_identity(branch=record['branch_ref'], owner=record['owner_ref'],
+                                    generation=record['generation'], revision=record['revision'],
+                                    projection_hash=record['projection_hash'], report_id=report_id))
+                        except NotImplementedError as error:
+                            json_response(self, {'success': False, 'error': str(error)}, 501)
+                            return True
+                        self.send_response(200)
+                        self.send_header('Content-Type', media)
+                        self.send_header('Cache-Control', 'private, no-store')
+                        self.send_header('X-Content-Type-Options', 'nosniff')
+                        self.send_header('Content-Length', str(len(raw)))
+                        self.end_headers()
+                        self.wfile.write(raw)
+                        return True
                 payload = value
             elif self._get_report_branch_route(parsed, viewer):
                 return True

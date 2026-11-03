@@ -8,7 +8,7 @@ from tests.server.test_couchdb_research_publication import Couch
 
 
 class ViewCouch(Couch):
-    def _request(self, method, path, body=None):
+    def _request(self, method, path, body=None, *, maximum_bytes=None):
         if method == 'GET' and '/_view/owned?' in path:
             query = parse_qs(urlsplit(path).query)
             start, end = json.loads(query['startkey'][0]), json.loads(query['endkey'][0])
@@ -21,7 +21,7 @@ class ViewCouch(Couch):
                     rows.append({'key': key, 'doc': doc})
             rows.sort(key=lambda item: item['key'])
             return 200, json.dumps({'rows': rows[:int(query['limit'][0])]}).encode()
-        return super()._request(method, path, body)
+        return super()._request(method, path, body, maximum_bytes=maximum_bytes)
 
 
 def test_directory_is_owner_scoped_and_survives_deleted_cursor():

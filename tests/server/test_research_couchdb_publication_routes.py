@@ -159,3 +159,45 @@ def test_retired_import_does_not_discover_or_apply_legacy_acl(monkeypatch, path)
     assert Handler()._post_research_catalog_routes(SimpleNamespace(path=path))
     assert responses[0][0] == 410 and responses[0][1]['success'] is False
     assert not hasattr(routes.ResearchCatalogRoutesMixin, '_discover_research_report_records')
+
+
+def test_canonical_reader_views_use_current_grants_and_only_selected_chapter(monkeypatch):
+    from tools.cli.release.research_reporting.public_research.object_uploads import projection_hash
+    service, catalog, _store, auth = harness()
+    value = report()
+    value['components'] = [
+        {'component_id': 'chapter', 'parent_id': None, 'kind': 'chapter', 'title': 'Chapter one', 'body': ''},
+        {'component_id': 'entry', 'parent_id': 'chapter', 'kind': 'entry', 'title': 'Entry', 'body': 'Exact report body'},
+        {'component_id': 'other', 'parent_id': None, 'kind': 'chapter', 'title': 'Other chapter', 'body': 'Other body'},
+    ]
+    value['projection_hash'] = projection_hash(value)
+    receipt = service.publish(session=SESSION, research_id='research-1', report_id='report-1',
+        branch_ref='main', projection=value, expected_revision=None)
+    replies = []
+    monkeypatch.setattr(routes, 'json_response', lambda _h, payload, status=200: replies.append((status, payload)))
+    class Handler(routes.ResearchCatalogRoutesMixin):
+        state = service.state
+        def __init__(self): self.wfile, self.status, self.headers = BytesIO(), None, {}
+        def _session(self): return SESSION
+        def _research_catalog_service(self): return catalog
+        def _research_couch_service(self, *, local=False): return service
+        def _refresh_research_catalog(self, _principal): raise AssertionError('no filesystem discovery')
+        def send_response(self, status): self.status = status
+        def send_header(self, name, value): self.headers[name] = value
+        def end_headers(self): pass
+    path = '/api/research/research-1/reports/report-1/couchdb-publication/' + receipt['publication_id']
+    handler = Handler()
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query='view=index'))
+    assert replies[-1][0] == 200
+    assert [r['component_id'] for r in replies[-1][1]['chapters']] == ['chapter', 'other']
+    assert 'components' not in replies[-1][1]
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query='view=chapter&chapter_id=chapter'))
+    assert [r['component_id'] for r in replies[-1][1]['components']] == ['chapter', 'entry']
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query='view=markdown'))
+    assert handler.status == 200 and b'Exact report body' in handler.wfile.getvalue()
+    assert handler.headers['Cache-Control'] == 'private, no-store'
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query='view=markdown&format=pdf'))
+    assert replies[-1][0] == 501
+    auth['read'] = False
+    assert handler._get_research_catalog_routes(SimpleNamespace(path=path, query='view=index'))
+    assert replies[-1][0] == 403

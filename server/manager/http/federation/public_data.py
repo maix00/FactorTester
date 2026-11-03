@@ -105,9 +105,15 @@ class FederationPublicDataRoutesMixin:
                     or type(payload.get('metadata_only', False)) is not bool
                     or type(payload.get('requires_publish', False)) is not bool
                     or type(payload.get('requires_edit', False)) is not bool
-                    or set(payload) - {'research_id', 'report_id', 'publication_ref', 'branch_ref', 'attachment', 'metadata_only', 'requires_publish', 'requires_edit'}):
+                    or payload.get('source_kind', 'local') not in ('local', 'catalog')
+                    or set(payload) - {'research_id', 'report_id', 'publication_ref', 'branch_ref', 'attachment', 'metadata_only', 'requires_publish', 'requires_edit', 'source_kind'}):
                 raise PermissionError('verified report reader is required')
-            service = LocalReportPublicationService(state=self.state, store=report_store_from_environment())
+            store = report_store_from_environment()
+            if payload.get('source_kind') == 'catalog':
+                from server.manager.services.research_couchdb_publication import ResearchCouchPublicationService
+                service = ResearchCouchPublicationService(state=self.state, catalog=self.state.research_catalog, store=store)
+            else:
+                service = LocalReportPublicationService(state=self.state, store=store)
             result = service.read(session=context[1], research_id=payload.get('research_id'),
                 report_id=payload.get('report_id'), publication_ref=str(payload.get('publication_ref') or ''),
                 branch_ref=str(payload.get('branch_ref') or ''), attachment=str(payload.get('attachment') or ''),

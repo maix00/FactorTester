@@ -19,11 +19,15 @@ REPORT = 'report:v1:' + 'P' * 24
 PUBLICATION = 'p-' + 'a' * 64
 
 
-def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tmp_path, monkeypatch):
+@pytest.mark.parametrize('source_kind', ['local', 'catalog'])
+def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tmp_path, monkeypatch, source_kind):
     from server.identity import federated_peer_delegation as delegation
     from server.identity.request_context import current_verified_identity
     from server.manager.services import local_report_publication, research_couchdb_publication
 
+    # This is a signed-peer authorization test, independent of concurrent
+    # product-document drafts and their compile-time code-path validation.
+    monkeypatch.setattr(manager, 'TechnicalDocsLibrary', lambda *_a, **_kw: SimpleNamespace())
     state = manager.ManagerState(tmp_path / 'repo', 'python', server_role='main',
         server_id='target', state_root=tmp_path / 'state')
     key = NodeKey.load_or_create(tmp_path / 'source.key', node_id='source')
@@ -52,6 +56,11 @@ def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tm
                                     'storage_server_id': 'target', 'branch_ref': 'main'},
                     'projection': {'report_id': REPORT}}
     monkeypatch.setattr(local_report_publication, 'LocalReportPublicationService', ReportService)
+    class CatalogReportService(ReportService):
+        def __init__(self, *, state, store, catalog):
+            assert catalog is state.research_catalog
+            super().__init__(state=state, store=store)
+    monkeypatch.setattr(research_couchdb_publication, 'ResearchCouchPublicationService', CatalogReportService)
     server = ThreadingHTTPServer(('127.0.0.1', 0), peer_control_handler(state))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -60,6 +69,8 @@ def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tm
                'identity_id': 'stable-person', 'delegation_assertion': 'source-assertion',
                'principal': 'attacker-provided', 'payload': {'research_id': RESEARCH,
                     'report_id': REPORT, 'publication_ref': PUBLICATION}}
+    if source_kind == 'catalog':
+        request['payload']['source_kind'] = 'catalog'
     try:
         result = client.signed_json('/api/federation/public-data', request)
         assert result['publication']['report_id'] == REPORT and calls[-1][0] == PUBLICATION
@@ -86,7 +97,8 @@ def test_signed_peer_report_uses_delegated_target_identity_and_live_decisions(tm
         server.shutdown(); server.server_close(); thread.join(timeout=2)
 
 
-def test_browser_remote_report_does_not_fall_back_to_local_or_stale(tmp_path, monkeypatch):
+@pytest.mark.parametrize('source_kind', ['local', 'catalog'])
+def test_browser_remote_report_does_not_fall_back_to_local_or_stale(tmp_path, monkeypatch, source_kind):
     from server.identity import server_admission
     from server.manager.http import research_catalog_routes as routes
     from server.modules.single_factor_test import execution_nodes
@@ -108,10 +120,13 @@ def test_browser_remote_report_does_not_fall_back_to_local_or_stale(tmp_path, mo
     Handler.state = state
     query = urlencode({'research_id': RESEARCH, 'report_id': REPORT, 'branch_ref': 'main', 'server_id': 'target'})
     parsed = SimpleNamespace(path='/api/research/local-report-publication', query=query)
+    if source_kind == 'catalog':
+        parsed.path = f'/api/research/{RESEARCH}/reports/{REPORT}/couchdb-publication'
     assert Handler()._get_research_catalog_routes(parsed)
     assert responses[-1][0] == 200 and responses[-1][1]['projection']['report_id'] == REPORT
     assert calls[0][1]['delegated_user_token'] == 'source-session-token'
     assert calls[0][1]['kind'] == 'shared-report'
+    assert calls[0][1]['payload'].get('source_kind', 'local') == source_kind
     edit_query = query + '&metadata_only=1&requires_edit=1'
     assert Handler()._get_research_catalog_routes(SimpleNamespace(path=parsed.path, query=edit_query))
     assert responses[-1][0] == 200 and calls[-1][1]['payload']['requires_edit'] is True

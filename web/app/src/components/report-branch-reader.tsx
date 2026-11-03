@@ -85,6 +85,7 @@ function ReportCell({ value, field = "", parent = {}, onOpen, resolveImage }: { 
   if (value && typeof value === "object") {
     const item = value as Row, target = String(item.target || item.href || item.url || item.reference || ""), label = String(item.label || item.title || item.text || item.filename || target);
     const reference = reportReference(target);
+    if (reference?.kind === "historical_reference") return <span aria-disabled="true" className="tr-report-reference-unavailable">{label}</span>;
     if (reference) return <button type="button" className="tr-table-link tr-object-reference" onClick={() => onOpen(reference,label)}>{label}</button>;
     if (/^https?:\/\//i.test(target)) return <a href={target} target="_blank" rel="noopener noreferrer">{label}</a>;
     if (!target && typeof item.text === "string") return <ReportCell value={item.text} onOpen={onOpen} resolveImage={resolveImage} />;

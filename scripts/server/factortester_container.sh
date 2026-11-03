@@ -178,6 +178,10 @@ manager_hot_reload_status() {
 report_store_env="$(deployment_value TR_REPORT_COUCHDB_ENV_FILE "")"
 if [[ -n "$report_store_env" ]]; then
   [[ -f "$report_store_env" ]] || { echo "configured report-store environment is missing" >&2; exit 2; }
+  report_writer_env="$(deployment_value TR_REPORT_COUCHDB_WRITER_ENV_FILE "")"
+  [[ -n "$report_writer_env" && -f "$report_writer_env" ]] || {
+    echo "configured Manager report-writer environment is missing" >&2; exit 2;
+  }
   report_store_image="$(deployment_value TR_REPORT_COUCHDB_IMAGE "")"
   [[ "$report_store_image" =~ ^couchdb@sha256:[0-9a-f]{64}$ ]] || {
     echo "report store requires a reviewed immutable CouchDB image" >&2; exit 2;

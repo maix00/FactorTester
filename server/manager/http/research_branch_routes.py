@@ -32,23 +32,10 @@ class ResearchBranchRoutesMixin:
         else:
             branch_id = unquote(match.group(2))
             publication_id = data.get('publication_id')
-            research = self._research_service()
             try:
-                candidates = [p for p in research.list_visible(actor) if p.get('publication_id') == publication_id]
-                if len(candidates) != 1:
-                    raise ValueError('published report object is unavailable or ambiguous')
-                publication = candidates[0]
-                if (publication.get('report_id'), publication.get('owner_ref'), publication.get('profile_ref'),
-                    publication.get('branch_ref')) != (report_id, actor, data.get('profile_ref'), branch_id):
-                    raise PermissionError('published object does not belong to the reserved report branch Profile')
-                index = research.index(publication_id, actor)
-                if index.get('authoring_bundle'):
-                    from tools.cli.release.research_reporting.authoring.tree_bundle import validate_report_bundle
-                    bundle = index['authoring_bundle']
-                    raw, _, _ = research.local_resource(publication_id, bundle['resource_id'], actor)
-                    validate_report_bundle(payload=raw, expected_sha256=bundle['content_hash'],
-                                           report_id=report_id, source_generation=index.get('generation'),
-                                           source_root_ref=bundle['root_ref'])
+                publication, index = self._verified_branch_publication(report_id=report_id,
+                    branch_id=branch_id, actor=actor, profile_ref=data.get('profile_ref'),
+                    publication_id=publication_id)
             except PermissionError:
                 raise
             except (ConnectionError, OSError) as error:
@@ -65,6 +52,45 @@ class ResearchBranchRoutesMixin:
                 storage_server_id=publication.get('storage_server_id'))
         json_response(self, {'success': True, 'branch': branch})
         return True
+
+    def _verified_branch_publication(self, *, report_id, branch_id, actor, profile_ref, publication_id):
+        from server.manager.services.research_branches import publication_source_kind
+        if publication_source_kind(publication_id) == 'couchdb':
+            session = self._session()
+            if not isinstance(session, dict) or session.get('username') != actor:
+                raise PermissionError('verified branch publisher is required')
+            catalog = self._research_catalog_service()
+            candidates = [row for row in catalog.list_report_branches(report_id, viewer=actor)
+                          if row['branch_id'] == branch_id]
+            if len(candidates) != 1 or (candidates[0]['principal_ref'], candidates[0]['profile_ref']) != (actor, profile_ref):
+                raise PermissionError('published object does not belong to the reserved report branch Profile')
+            report = catalog._report_row(report_id)
+            result = self._research_couch_service().read(session=session,
+                research_id=report['research_id'], report_id=report_id, publication_ref=publication_id,
+                branch_ref=branch_id, metadata_only=True, requires_publish=True)
+            publication = result.get('publication')
+            if (result.get('publish_authorized') is not True or not isinstance(publication, dict)
+                    or publication.get('publication_id') != publication_id
+                    or publication.get('report_id') != report_id or publication.get('branch_ref') != branch_id
+                    or publication.get('storage_server_id') != self.state.server_id):
+                raise PermissionError('verified CouchDB branch identity does not match')
+            return publication, publication
+        research = self._research_service()
+        candidates = [p for p in research.list_visible(actor) if p.get('publication_id') == publication_id]
+        if len(candidates) != 1:
+            raise ValueError('published report object is unavailable or ambiguous')
+        publication = candidates[0]
+        if (publication.get('report_id'), publication.get('owner_ref'), publication.get('profile_ref'),
+            publication.get('branch_ref')) != (report_id, actor, profile_ref, branch_id):
+            raise PermissionError('published object does not belong to the reserved report branch Profile')
+        index = research.index(publication_id, actor)
+        if index.get('authoring_bundle'):
+            from tools.cli.release.research_reporting.authoring.tree_bundle import validate_report_bundle
+            bundle = index['authoring_bundle']
+            raw, _, _ = research.local_resource(publication_id, bundle['resource_id'], actor)
+            validate_report_bundle(payload=raw, expected_sha256=bundle['content_hash'],
+                report_id=report_id, source_generation=index.get('generation'), source_root_ref=bundle['root_ref'])
+        return publication, index
 
     def _require_branch_profile_actor(self, profile_ref: str) -> None:
         authentication = getattr(self.state, 'session_authentication', None)
