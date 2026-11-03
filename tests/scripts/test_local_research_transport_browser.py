@@ -23,18 +23,15 @@ def test_research_create_survives_page_reload_through_real_cli(tmp_path):
     harness.write_text(f'''
 import React from {json.dumps(str(APP / "node_modules/react/index.js"))};
 import {{createRoot}} from {json.dumps(str(APP / "node_modules/react-dom/client.js"))};
-import {{ResearchPage}} from {json.dumps(str(APP / "src/pages/research.tsx"))};
-import {{PageInstanceProvider}} from {json.dumps(str(APP / "src/page-instance.ts"))};
+import {{DesktopShell}} from {json.dumps(str(APP / "src/desktop-shell.tsx"))};
 import {{AuthGate}} from {json.dumps(str(APP / "src/auth.tsx"))};
-import {{ObjectReferenceProvider}} from {json.dumps(str(APP / "src/components/object-reference-provider.tsx"))};
 import {{bindNotificationSink}} from {json.dumps(str(APP / "src/notifications/core.ts"))};
 import {json.dumps(str(APP / "src/i18n.ts"))};
 import {json.dumps(str(APP / "src/shell.css"))};
+import {json.dumps(str(APP / "node_modules/dockview-react/dist/styles/dockview.css"))};
 (window as any).reportNotices=[];
-bindNotificationSink((notice,done)=>{{(window as any).reportNotices.push(notice);done();}});
-createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvider value={{{{
- id:'fixture',pageId:'research',mobile:false,args:{{}},active:true,open:()=>{{}}
-}}}}><ObjectReferenceProvider><ResearchPage /></ObjectReferenceProvider></PageInstanceProvider></AuthGate>);
+(window as any).bindTestNotifications=()=>bindNotificationSink((notice,done)=>{{(window as any).reportNotices.push(notice);done();}});
+createRoot(document.getElementById('root')!).render(<AuthGate><DesktopShell /></AuthGate>);
 ''', encoding="utf-8")
     subprocess.run([str(APP / "node_modules/.bin/esbuild"), str(harness), "--bundle", "--format=iife",
                     "--target=es2020", f"--outfile={bundle}"], cwd=APP, check=True, capture_output=True)
@@ -80,80 +77,67 @@ createRoot(document.getElementById('root')!).render(<AuthGate><PageInstanceProvi
                     if(path==='/api/research')return reply({researches:[]});
                     if(path==='/api/research/reports')return reply({reports:[]});
                     if(path==='/api/research/capabilities/keycloak-sharing')return reply({capabilities:{schema:'tr-research-keycloak-sharing-v1',authority:'keycloak',create_research:true}});
+                    if(path.startsWith('/api/test-authoring')||path.startsWith('/api/jobs'))return reply({workspaces:[],jobs:[],templates:[]});
                     throw Error('unexpected request '+path);};
                 }''')
                 page.add_script_tag(path=str(bundle))
+                page.locator(".tr-module-nav").get_by_role("button",name="研究台",exact=True).click()
                 page.get_by_role("button", name="新建研究").wait_for()
+                page.evaluate("window.bindTestNotifications()")
             open_page()
             page.get_by_role("button", name="新建研究").click()
             page.locator(".ant-dropdown:visible").get_by_role("menuitem", name="本机", exact=True).click()
             assert not page.locator(".ant-modal:visible").get_by_role("combobox", name="研究身份").is_visible()
             page.get_by_label("名称", exact=True).fill("本机真实存储验收")
             page.locator(".ant-modal").get_by_role("button", name="新建研究").click()
-            page.get_by_role("button", name="本机真实存储验收").click()
-            dialog = page.get_by_role("dialog")
-            dialog.get_by_role("button", name="新建研究报告").click()
-            dialog.get_by_label("名称", exact=True).fill("本机报告验收")
-            dialog.get_by_role("button", name="新建研究报告", exact=True).last.click()
-            dialog.get_by_text("本机报告验收").wait_for()
+            def surface():
+                return page.locator('.tr-tab-layer[aria-hidden="false"]')
+            def create_report(title):
+                surface().get_by_role("button", name="新建研究报告", exact=True).click()
+                form=surface().locator("form")
+                form.get_by_label("名称",exact=True).fill(title)
+                form.get_by_role("button",name="新建研究报告",exact=True).click()
+                surface().get_by_role("button",name=title,exact=True).wait_for()
+            # Creation opens a real independent Research page through Dockview.
+            create_report("本机报告验收")
+            create_report("本机第二报告")
             open_page()
-            page.get_by_role("tab", name="研究报告").click()
-            report_row = page.get_by_role("row").filter(has_text="本机报告验收")
-            report_row.get_by_text("本机", exact=True).wait_for()
-            assert report_row.get_by_role("button", name="查看 alice 的信息").is_visible()
-            if os.environ.get("TR_REPORT_LIST_SCREENSHOT"):
-                page.screenshot(path=os.environ["TR_REPORT_LIST_SCREENSHOT"])
-            report_row.get_by_role("button", name="本机报告验收").click()
-            dialog = page.get_by_role("dialog")
-            dialog.get_by_role("button", name="编辑报告内容").wait_for()
-            dialog.get_by_role("button", name="返回", exact=True).click()
-            dialog.get_by_role("button", name="新建研究报告").click()
-            dialog.get_by_label("名称", exact=True).fill("本机第二报告")
-            dialog.get_by_role("button", name="新建研究报告", exact=True).last.click()
-            dialog.get_by_text("本机第二报告").wait_for()
-            dialog.locator(".ant-modal-close").click()
-            page.get_by_role("row").filter(has_text="本机第二报告").wait_for()
-            open_page()
-            page.get_by_role("tab", name="研究报告").click()
-            page.get_by_role("row").filter(has_text="本机报告验收").get_by_role("button", name="本机真实存储验收").click()
-            page.get_by_role("dialog").get_by_role("button", name="新建研究报告").wait_for()
-            open_page()
-            page.get_by_role("button", name="本机真实存储验收").click()
-            dialog = page.get_by_role("dialog")
-            dialog.get_by_role("button", name="本机报告验收").click()
-            dialog.get_by_role("button", name="返回").wait_for()
-            assert dialog.get_by_text("本机报告验收").is_visible()
-            dialog.get_by_text("暂无数据").wait_for()
-            dialog.get_by_role("button", name="编辑报告内容").click()
-            prior_syncs = len(synced)
-            dialog.get_by_label("新章节标题").fill("研究方法")
-            dialog.get_by_role("button", name="新增章节").click()
-            dialog.get_by_label("段落正文").fill("真实存储的段落内容")
-            dialog.get_by_role("button", name="添加段落").click()
-            dialog.get_by_text("真实存储的段落内容").wait_for()
+            surface().get_by_role("tab", name="研究报告",exact=True).click()
+            report_row=surface().get_by_role("row").filter(has_text="本机报告验收")
+            report_row.get_by_text("本机",exact=True).wait_for()
+            assert report_row.get_by_role("button",name="查看 alice 的信息").is_visible()
+            surface().get_by_role("row").filter(has_text="本机第二报告").wait_for()
+            report_row.get_by_role("button",name="本机报告验收",exact=True).click()
+            surface().get_by_role("button",name="编辑报告内容").click()
+            assert not page.get_by_role("dialog").count()
+            prior_syncs=len(synced)
+            surface().get_by_label("新章节标题").fill("研究方法")
+            surface().get_by_role("button",name="新增章节").click()
+            surface().get_by_label("段落正文").fill("真实存储的段落内容")
+            surface().get_by_role("button",name="添加段落").click()
+            surface().get_by_text("真实存储的段落内容").wait_for()
             for _ in range(30):
-                if len(synced) > prior_syncs: break
+                if len(synced)>prior_syncs:break
                 page.wait_for_timeout(100)
-            assert len(synced) > prior_syncs
+            assert len(synced)>prior_syncs
             open_page()
-            page.get_by_role("button", name="本机真实存储验收").click()
-            dialog = page.get_by_role("dialog")
-            dialog.get_by_role("button", name="本机报告验收").click()
-            dialog.get_by_role("button", name="编辑报告内容").click()
-            dialog.get_by_text("真实存储的段落内容").wait_for()
+            surface().get_by_role("tab",name="研究报告",exact=True).click()
+            surface().get_by_role("row").filter(has_text="本机报告验收").get_by_role("button",name="本机报告验收",exact=True).click()
+            surface().get_by_role("button",name="编辑报告内容").click()
+            surface().get_by_text("真实存储的段落内容").wait_for()
             assert not published
-            dialog.get_by_role("button", name="发布到服务器").click()
-            page.locator(".ant-popconfirm:visible").get_by_role("button", name="发布到服务器").click()
+            surface().get_by_role("button",name="发布到服务器").click()
+            page.locator(".ant-popconfirm:visible").get_by_role("button",name="发布到服务器").click()
             for _ in range(30):
-                if published: break
+                if published:break
                 page.wait_for_timeout(100)
-            assert len(published) == 1
-            dialog.get_by_role("button", name="获取服务器版本").click()
-            page.locator(".ant-popconfirm:visible").get_by_role("button", name="获取服务器版本").click()
+            assert len(published)==1
+            surface().get_by_role("button",name="获取服务器版本").click()
+            page.locator(".ant-popconfirm:visible").get_by_role("button",name="获取服务器版本").click()
             for _ in range(30):
-                if pulled: break
+                if pulled:break
                 page.wait_for_timeout(100)
-            assert pulled == published
+            assert pulled==published
             page.wait_for_function("window.reportNotices.some(n => n.code === 'research.local.report.pulled')")
             notice = page.evaluate("window.reportNotices.find(n => n.code === 'research.local.report.pulled')")
             assert notice['type'] == 'warning' and notice['message'] == '服务器版本未变化；本机仍有未发布的修改。'

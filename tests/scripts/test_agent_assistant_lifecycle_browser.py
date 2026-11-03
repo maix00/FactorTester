@@ -70,16 +70,18 @@ createRoot(document.getElementById("root")!).render(<App />);
                     host.className = 'profile-chatkit-host agent-fixture-chat';
                     host.textContent = 'fixture conversation';
                     host.__ftBeforeTabSave = () => { window.fixture.disposed++; };
-                    root.append(host); options.mountHost.replaceChildren(root); return root;
+                    const identity=document.createElement('a');identity.textContent='Open identity';identity.href=options.profileHref;identity.onclick=event=>{event.preventDefault();options.onOpenProfile();};
+                    root.append(identity,host); options.mountHost.replaceChildren(root); return root;
                   }};
                   window.fetch = async (input, options = {}) => {
                     const url = String(input);
                     let body, status = 200;
                     if (url === '/api/client/profiles') body = {success: true, profiles: [{
-                      profile_id: 'self', is_self_profile: true,
+                      profile_id: 'self', profile_key:'fixture::alice::self', is_self_profile: true,
                       runtime: {runtime_kind: 'server', configured: true},
                       active_claim: {claim_id: 'fixture'},
                     }]};
+                    else if (url.startsWith('/api/client/profile-directory/profile?')) body={profile:{profile_id:'self',display_name:'Self',owner_ref:'alice'}};
                     else if (url.startsWith('/api/client/profile-agent?'))
                       body = {success: true, status: {running: window.fixture.running}};
                     else if (url === '/api/client/profile-agent/assistance/workspaces')
@@ -126,6 +128,12 @@ createRoot(document.getElementById("root")!).render(<App />);
                 page.add_script_tag(path=str(bundle))
                 page.locator("#first").click()
                 page.locator(".agent-fixture-chat").first.wait_for()
+                before=page.url
+                page.get_by_role("link",name="Open identity").click()
+                dialog=page.get_by_role("dialog")
+                dialog.get_by_text("Self",exact=True).wait_for()
+                assert page.url==before
+                dialog.locator(".ant-modal-close").click()
                 page.locator("#second").click()
                 page.wait_for_function(
                     "document.querySelectorAll('.agent-fixture-chat').length === 2"
