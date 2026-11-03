@@ -21,7 +21,8 @@ assert InstrumentId.from_str("T2403.CFFEX").value == "T2403.CFFEX"
 assert callable(BacktestEngine)
 assert callable(native.attach_factor_family)
 assert callable(native.replay_shared_inputs)
+assert native.FACTOR_OBSERVED_SOURCE_ORDINAL_VERSION == 1
 print(json.dumps({"linux_native_import": True, "version": nautilus_trader.__version__,
-                  "factor_family_bridge": True, "shared_replay": True}))
+                  "factor_family_bridge": True, "shared_replay": True, "observed_source_ordinal_version": 1}))
 PY
 '
