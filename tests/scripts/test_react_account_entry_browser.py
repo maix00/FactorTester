@@ -50,6 +50,7 @@ setupIonicReact({{mode:'md'}});
                     page.set_default_timeout(8000)
                     errors = []; page.on("pageerror", lambda error: errors.append(str(error)))
                     page.goto(f"http://127.0.0.1:{server.server_port}/index.html?settings=account")
+                    page.evaluate("history.replaceState(null, '', '/app?settings=account')")
                     assert page.title() == "TradeResearch account QA"
                     page.evaluate("""mobile => {
                         window.mobile=mobile;
@@ -66,6 +67,7 @@ setupIonicReact({{mode:'md'}});
                     page.add_script_tag(path=str(bundle))
                     reference = page.locator(".tr-settings-card .tr-object-reference").filter(has_text="Alice")
                     reference.wait_for()
+                    assert page.url == f"http://127.0.0.1:{server.server_port}/app"
                     assert reference.inner_text() == "Alice"
                     reference.click()
                     details = page.get_by_role("dialog").filter(has=page.get_by_text("Example@Alice@123", exact=True))
@@ -101,7 +103,7 @@ setupIonicReact({{mode:'md'}});
                         # Dockview keeps pages mounted. Their Ant controls must
                         # not override a hidden ancestor and bleed into another tab.
                         for _ in range(2):
-                            for title, page_id in (("研究" if zh else "Research", "research"),
+                            for title, page_id in (("研究台" if zh else "Research", "research"),
                                                    ("测试台" if zh else "Test bench", "test-bench")):
                                 page.locator('.tr-module-nav').get_by_role('button', name=title, exact=True).click()
                                 active = page.locator(f'.tr-tab-layer[data-tab-layer="{page_id}"][aria-hidden="false"]')
@@ -115,11 +117,11 @@ setupIonicReact({{mode:'md'}});
                         nav.get_by_role('button', name='产品库' if zh else 'Products', exact=True).click()
                         search = page.locator('.tr-tab-layer[data-tab-layer="products"] .tr-library-filters input').first
                         search.fill('retained query')
-                        nav.get_by_role('button', name='研究' if zh else 'Research', exact=True).click()
+                        nav.get_by_role('button', name='研究台' if zh else 'Research', exact=True).click()
                         assert not search.is_visible()
                         nav.get_by_role('button', name='产品库' if zh else 'Products', exact=True).click()
                         assert search.input_value() == 'retained query'
-                        nav.get_by_role('button', name='研究' if zh else 'Research', exact=True).click()
+                        nav.get_by_role('button', name='研究台' if zh else 'Research', exact=True).click()
                         research = page.locator('.tr-tab-layer[data-tab-layer="research"] .tr-research-page')
                         research.locator('.ant-pagination').wait_for()
                         bounds = research.evaluate('''node => {

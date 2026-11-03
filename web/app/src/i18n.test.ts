@@ -16,7 +16,7 @@ test("shared resources translate nav and jobs keys", async () => {
   assert.equal(i18n.t("adminFunctions.manageUsers"), "Manage users and permissions in Keycloak");
   assert.equal(i18n.t("configuration.strategyFields.signal"), "Signal factor");
   await i18n.changeLanguage("zh");
-  assert.equal(i18n.t("nav.research"), "研究");
+  assert.equal(i18n.t("nav.research"), "研究台");
   assert.equal(i18n.t("brand.name"), "TradeResearch");
   assert.equal(i18n.t("adminFunctions.manageOrganizations"), "在 Keycloak 中管理机构");
   assert.equal(i18n.t("configuration.strategyFields.signal"), "信号因子");

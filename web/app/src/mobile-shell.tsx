@@ -1,3 +1,4 @@
+import {appEntrySearch,cleanAppURL} from "./app-route.ts";
 import {appCatalogLink} from "./app-link.ts";
 import {pageObjectKey,pageObjectTitle} from "./page-object.ts";
 import React, { useEffect, useRef, useState } from "react";
@@ -22,23 +23,31 @@ export function MobileShell(): React.ReactElement {
   return <AppTheme><IonApp><MobileNotificationHost><MobileWorkspace /></MobileNotificationHost></IonApp></AppTheme>;
 }
 
+function restoredEntries(value: unknown): Entry[] | null {
+  if (!Array.isArray(value) || !value.length || !value.every(entry => entry && typeof entry.id === "string" && getPage(entry.pageId) && entry.args && typeof entry.args === "object")) return null;
+  if (!tabs.every(tab => value.some(entry => entry.root && entry.pageId === tab.id))) return null;
+  return value;
+}
+
 function MobileWorkspace(): React.ReactElement {
   const { t } = useTranslation();
-  const initialLink=appCatalogLink(location.search);
-  const initialAccount = new URLSearchParams(location.search).get("settings") === "account";
-  const [entries, setEntries] = useState<Entry[]>(() => [
+  const [restored] = useState(() => restoredEntries(history.state?.trMobileEntries));
+  const initialLink=restored ? null : appCatalogLink(appEntrySearch());
+  const initialAccount = !restored && new URLSearchParams(appEntrySearch()).get("settings") === "account";
+  const [entries, setEntries] = useState<Entry[]>(() => restored || [
     ...tabs.map((page) => ({ id: newPageInstanceId(page.id), pageId: page.id, args: {}, root: true })),
     ...(initialLink ? [{id:newPageInstanceId(initialLink.pageId),pageId:initialLink.pageId,args:initialLink.args}] : []),
     ...(initialAccount ? [{id: newPageInstanceId("settings"), pageId: "settings", args: {}}] : []),
   ]);
-  const [active, setActive] = useState(() => initialAccount || initialLink ? entries[entries.length - 1].id : entries[0].id);
-  const [setting, setSetting] = useState<MobileSettingSection | null>(initialAccount ? "account" : null);
+  const [active, setActive] = useState(() => restored?.some(entry=>entry.id===history.state?.trPage) ? history.state.trPage : initialAccount || initialLink ? entries[entries.length - 1].id : entries[0].id);
+  const [setting, setSetting] = useState<MobileSettingSection | null>(restored ? history.state?.trSettings || null : initialAccount ? "account" : null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const assistantHistoryId = useRef(newPageInstanceId("assistant"));
   const assistantClosing = useRef(false);
   const refs = useRef(entries); refs.current = entries;
   const current = entries.find((item) => item.id === active) || entries[0];
   useEffect(() => {
+    cleanAppURL();
     if (initialAccount) {
       const url = new URL(location.href); url.searchParams.delete("settings");
       history.replaceState({trPage: entries[0].id}, "", url.href);
@@ -51,7 +60,9 @@ function MobileWorkspace(): React.ReactElement {
       history.pushState({trPage:active},"",location.href);
     } else history.replaceState({ ...history.state, trPage: active }, "", location.href);
     const onPop = (event: PopStateEvent): void => {
-      const known = refs.current.find((item) => item.id === event.state?.trPage);
+      const saved = restoredEntries(event.state?.trMobileEntries);
+      if (saved) setEntries(saved);
+      const known = (saved || refs.current).find((item) => item.id === event.state?.trPage);
       if (known) setActive(known.id);
       else setActive(refs.current.find((item) => item.pageId === "more")!.id);
       setSetting(event.state?.trSettings || null);
@@ -76,10 +87,13 @@ function MobileWorkspace(): React.ReactElement {
       if (!assistantClosing.current) { assistantClosing.current = true; history.back(); }
     } else setAssistantOpen(false);
   };
-  const setRoute = (id: string, replace = false): void => {
+  useEffect(() => {
+    history.replaceState({...history.state, trMobileEntries: entries}, "", location.href);
+  }, [entries]);
+  const setRoute = (id: string, replace = false, nextEntries = entries): void => {
     const url = new URL(location.href);
     for (const key of ["tr_config", "tr_item", "tr_path", "workspace_id"]) url.searchParams.delete(key);
-    history[replace ? "replaceState" : "pushState"]({ trPage: id }, "", url.href);
+    history[replace ? "replaceState" : "pushState"]({ trPage: id, trMobileEntries: nextEntries }, "", url.href);
     setActive(id); setSetting(null);
   };
   const open = (pageId: string, args: PageArguments = {}): void => {
@@ -91,7 +105,7 @@ function MobileWorkspace(): React.ReactElement {
       if (existing) { setRoute(existing.id); return; }
     }
     const item: Entry = { id: newPageInstanceId(pageId), pageId, args };
-    setEntries((items) => [...items, item]); setRoute(item.id);
+    setEntries((items) => [...items, item]); setRoute(item.id, false, [...entries, item]);
   };
   const back = (): void => history.back();
   const currentPage = getPage(current.pageId);
