@@ -16,7 +16,7 @@ source_snapshot="$(mktemp -d "$CACHE/package.XXXXXX")"
 trap 'rm -rf "$source_snapshot"' EXIT
 revision="$(git -C "$ROOT/vendor/nautilus_trader" rev-parse HEAD)"
 git -C "$ROOT/vendor/nautilus_trader" archive "$revision" python/nautilus_trader | tar -xf - -C "$source_snapshot"
-docker run --rm --platform "${NAUTILUS_BUILD_PLATFORM:-linux/amd64}" --memory=1g --cpus=1 \
+docker run --rm --platform "${NAUTILUS_BUILD_PLATFORM:-linux/amd64}" --memory=1g --memory-swap=1g --cpus=1 \
   -v "$source_snapshot/python/nautilus_trader:/source:ro" \
   -v "$(cd "$(dirname "$wheel")" && pwd):/wheels" \
   -v "$ROOT/scripts/server/complete_nautilus_wheel.py:/pack.py:ro" \
