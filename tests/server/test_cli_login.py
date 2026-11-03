@@ -137,3 +137,65 @@ def test_missing_realm_scope_blocks_provisioning():
     adapter._get = get
     with pytest.raises(ValueError, match='missing required client scopes: basic'):
         provision(adapter)
+
+
+def test_device_configuration_is_served_as_an_entry_route(monkeypatch):
+    from types import SimpleNamespace
+
+    from server.identity import cli_login
+    from server.manager.http import core_get_routes
+
+    responses = []
+
+    class Handler(core_get_routes.CoreGetRoutesMixin):
+        state = SimpleNamespace(public_server=True, require_login_for_ui=True)
+
+        def _public_login_gate(self, *_args, **_kwargs):
+            raise AssertionError('confirmation must not run before CLI discovery')
+
+    monkeypatch.setattr(
+        core_get_routes, 'json_response',
+        lambda _handler, body, status=200: responses.append((body, status)),
+    )
+    monkeypatch.setattr(
+        cli_login, 'configuration',
+        lambda: {'issuer': 'https://id.example/realms/research',
+                 'client_id': DEFAULT_CLIENT_ID},
+    )
+
+    handled = Handler()._get_entry_routes(
+        SimpleNamespace(path='/auth/oidc/device-configuration', query=''),
+    )
+
+    assert handled is True
+    assert responses == [
+        ({'issuer': 'https://id.example/realms/research',
+          'client_id': DEFAULT_CLIENT_ID}, 200),
+    ]
+
+
+def test_device_configuration_fails_closed_without_oidc_configuration(monkeypatch):
+    from types import SimpleNamespace
+
+    from server.identity import cli_login
+    from server.manager.http import core_get_routes
+
+    responses = []
+
+    class Handler(core_get_routes.CoreGetRoutesMixin):
+        state = SimpleNamespace(public_server=False, require_login_for_ui=False)
+
+    monkeypatch.setattr(
+        core_get_routes, 'json_response',
+        lambda _handler, body, status=200: responses.append((body, status)),
+    )
+
+    def unavailable():
+        raise ValueError('Keycloak OIDC client is not configured')
+
+    monkeypatch.setattr(cli_login, 'configuration', unavailable)
+
+    assert Handler()._get_entry_routes(
+        SimpleNamespace(path='/auth/oidc/device-configuration', query=''),
+    ) is True
+    assert responses[0][1] == 503

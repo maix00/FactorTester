@@ -17,6 +17,17 @@ def test_prepare_creates_private_files_and_correct_identity_claims(tmp_path):
     claims = {m['name']: m['config']['user.attribute'] for m in manager['protocolMappers'] if 'user.attribute' in m['config']}
     assert claims['tr_organization_id'] == 'tr_organization_id'
     assert claims['tr_username'] == 'legacy_username'
+    cli = next(c for c in data['clients'] if c['clientId'] == 'traderesearch-cli')
+    assert cli['publicClient'] is True
+    assert cli['directAccessGrantsEnabled'] is False
+    assert cli['attributes']['oauth2.device.authorization.grant.enabled'] == 'true'
+    # The basic scope carries Keycloak's sub mapper; roles carries
+    # resource_access and profile carries preferred_username.
+    assert set(cli['defaultClientScopes']) == {'basic', 'roles', 'profile'}
+    audiences = {m['config'].get('included.client.audience')
+                 for m in cli['protocolMappers']
+                 if m.get('protocolMapper') == 'oidc-audience-mapper'}
+    assert audiences == {'tr-manager'}
     with pytest.raises(FileExistsError):
         prepare(root, public_url='https://example.test', network='manager-private', project='identity', realm='research', manager_ipv4='172.30.185.6')
 

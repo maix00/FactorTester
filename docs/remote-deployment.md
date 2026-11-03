@@ -77,3 +77,20 @@ SHA-256 检查已完成文件或分块，不依赖文件大小或本地进度。
 权限写入常驻 Manager。完成真实对账后取消 prepare-only，再运行相同发布入口激活。
 激活重新检查当前旧版本并制作新备份；准备与激活之间发生源版本或数据变化必须重新
 核对。准备阶段的 `.next-<revision>` 配置仍属于受保护文件，不提供给客户端。
+
+## CLI 设备登录 client
+
+新 host 的 CLI client 由 `keycloak_prepare_host.py` 随 realm 导入创建。已存在的
+realm 必须先运行只读计划，再在明确授权下执行 apply：
+
+```bash
+python -m scripts.migrations.keycloak_cli_client          # 只读计划
+python -m scripts.migrations.keycloak_cli_client --apply  # 创建或修复
+```
+
+client 必须保留 `basic`、`roles`、`profile` 三个默认 scope；`basic` 是 Keycloak
+`sub` 声明的来源，缺失时 Manager 会正确拒绝 token。它还需要 `tr-manager`
+audience、身份 claim mapper 和 `traderesearch-realm-group-paths` group mapper。
+激活新应用前，用真实设备登录核对 Manager `/api/session`；未登录状态下
+`/auth/oidc/device-configuration` 必须可读（该入口在公共登录门之前处理）。旧版本
+镜像没有这个入口，因此旧版本返回 303/404 不能用来判断新镜像。
