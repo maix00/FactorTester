@@ -47,12 +47,14 @@ def prepare(root: Path, *, public_url: str, network: str, project: str, realm: s
     from server.identity.keycloak_profile import identity_mappers, MANAGER_ROLES
     roles = MANAGER_ROLES
     mappers = identity_mappers()
+    from server.identity.cli_login import client_definition
     definition = {'realm': realm, 'enabled': True, 'registrationAllowed': False,
                   'resetPasswordAllowed': False, 'adminPermissionsEnabled': True,
                   'userManagedAccessAllowed': True,
                   'roles': {'client': {'tr-manager': [{'name': role} for role in roles],
                                        'tr-visitor': [{'name': 'access'}]}},
                   'clients': [
+                      client_definition(),
                       {'clientId': 'tr-manager', 'enabled': True, 'publicClient': False,
                        'secret': manager_secret, 'standardFlowEnabled': True,
                        'directAccessGrantsEnabled': False, 'serviceAccountsEnabled': True,

@@ -78,6 +78,10 @@ class ManagerCredentialStore:
         environment = (config_env(MANAGER_TOKEN_ENV) or "").strip()
         if environment:
             return environment
+        from tools.cli.native_session import load_token
+        native = load_token(self.config.base_url)
+        if native:
+            return native
         if platform.system() == "Darwin":
             result = subprocess.run(
                 [

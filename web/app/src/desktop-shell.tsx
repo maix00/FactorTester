@@ -1,3 +1,4 @@
+import {appEntrySearch,cleanAppURL} from "./app-route.ts";
 import {appCatalogLink} from "./app-link.ts";
 import React, { useCallback, useEffect, useState } from "react";
 import { Dropdown, Tooltip } from "antd";
@@ -139,7 +140,7 @@ export function DesktopShell(): React.ReactElement {
   const [active, setActive] = useState(pages[0]?.id ?? "research");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
   const effectiveCollapsed=collapsed || compact;
-  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(location.search).get("settings") === "account");
+  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(appEntrySearch()).get("settings") === "account");
   const closeSettings = (): void => {
     setSettingsOpen(false);
     const url = new URL(location.href);
@@ -264,12 +265,13 @@ export function DesktopShell(): React.ReactElement {
       if (seenRootPages.has(pageId)) panel.api.close();
       else seenRootPages.add(pageId);
     }
-    const link=appCatalogLink(location.search);
+    const link=appCatalogLink(appEntrySearch());
     if(link){
       const page=getPage(link.pageId);
       if(page){const matching=event.api.panels.find(panel=>panel.params?.pageId===link.pageId&&JSON.stringify(panel.params?.args||{})===JSON.stringify(link.args));
         if(matching)matching.api.setActive();else event.api.addPanel({id:newPageInstanceId(link.pageId),component:"page",tabComponent:"page",title:label(page),params:{pageId:link.pageId,args:link.args},renderer:"always"});}
     }
+    cleanAppURL();
     const currentPageId = String(event.api.activePanel?.params?.pageId ?? "");
     if (currentPageId) setActive(currentPageId);
     event.api.onDidActivePanelChange(({ panel }) => {
