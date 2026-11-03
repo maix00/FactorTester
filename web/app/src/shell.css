@@ -132,9 +132,7 @@ html[data-tr-theme="dark"] {
 .tr-sidebar-resize:hover, .tr-sidebar-resize:active { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 .tr-app-shell.is-collapsed .tr-sidebar-resize { display: none; }
 .tr-workspace-bar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-height: 34px; padding: 0 14px; color: var(--muted); font-size: 11px; background: var(--panel); border-bottom: 1px solid var(--line); }
-.tr-page-frame { display: block; width: 100%; height: 100%; min-height: calc(100vh - 34px); border: 0; background: var(--bg); }
 .tr-page-surface { padding: 0; min-height: 100%; }
-.tr-page-frame { height: 100%; min-height: 0; }
 .tr-mobile-workspace { padding: 18px 16px; }
 .tr-mobile-workspace header h1 { margin: 0; font-size: 20px; }
 .tr-mobile-workspace header p { margin: 4px 0 14px; color: var(--muted); font-size: 12px; }
@@ -255,8 +253,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-mobile-job-card small { color: var(--muted); font-size: 11px; }
 .tr-mobile-jobs-empty, .tr-mobile-jobs-error { color: var(--muted); font-size: 12px; text-align: center; padding: 24px 0; }
 .tr-mobile-load-more { width: 100%; margin-top: 12px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
-.tr-frame-shell { position: relative; height: 100%; min-height: 0; }
-.tr-frame-loading { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; color: var(--muted); background: var(--bg); font-size: 12px; }
 .tr-catalog-page { padding: 24px 28px; overflow: auto; height: 100%; }
 .tr-catalog-page header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .tr-catalog-page h1 { margin: 0; font-size: 22px; }

@@ -27,7 +27,12 @@ RESERVE = 10 * 1024**3
 RUNTIME_PREFIXES = ('server/', 'tools/', 'scripts/', 'static/', 'docs/',
                     'product_docs/', 'web/app/src/', 'skills/')
 NON_RUNTIME = ('tests/',)
-HOST_ONLY = {'deploy/docker/factortester-server/compose.report-storage.yaml'}
+HOST_ONLY = {
+    'deploy/docker/factortester-server/compose.report-storage.yaml',
+    # These client-only files are excluded by the public Dockerfile.
+    'apple/Sources/Features/Jobs/TestJobBackupStore.swift',
+    'apple/Sources/Features/Profiles/LocalProfileSnapshotStore.swift',
+}
 BUILD_INPUTS = {'scripts/server/public_python_dependencies.py'}
 
 

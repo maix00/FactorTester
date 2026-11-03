@@ -2,8 +2,9 @@ import React from "react";
 import { SourceDetailPage } from "./pages/source-detail.tsx";
 import { ProductDetailPage } from "./pages/product-detail.tsx";
 import { JobsPage, JobDetailPage } from "./pages/jobs.tsx";
-import { getPage } from "./registry.ts";
-import { PageFrame } from "./frame.tsx";
+import { Alert } from "antd";
+import { useTranslation } from "react-i18next";
+import { SettingsSection } from "./components/settings-section.tsx";
 import { AccountPage } from "./pages/account.tsx";
 import { CatalogPage } from "./pages/catalog.tsx";
 import { ResearchDetailPage } from "./pages/research-detail.tsx";
@@ -22,12 +23,13 @@ export function PageSurface({ pageId }: { pageId: string }): React.ReactElement 
 }
 
 function PageContent({ pageId }: { pageId: string }): React.ReactElement {
-  const page = getPage(pageId);
+  const { t } = useTranslation();
   if (pageId === "source-detail") return <SourceDetailPage />;
   if (pageId === "product-detail") return <ProductDetailPage />;
   if (pageId === "job-detail") return <JobDetailPage />;
   if (pageId === "jobs") return <JobsPage />;
   if (pageId === "account") return <AccountPage />;
+  if (pageId === "settings") return <SettingsSection section="account" />;
   if (["products", "factors", "strategies", "catalog"].includes(pageId)) return <CatalogPage domain={pageId === "catalog" ? "products" : pageId as "products" | "factors" | "strategies"} />;
   if (pageId === "more") return <WorkspacePage />;
   if(pageId === "research-detail" || pageId === "research-report") return <ResearchDetailPage/>;
@@ -37,5 +39,5 @@ function PageContent({ pageId }: { pageId: string }): React.ReactElement {
   if (pageId === "configuration") return <TestConfigurationPage />;
   if (pageId === "admin") return <AdminFunctionsPage />;
   if (pageId === "technical-docs") return <TechnicalDocsPage />;
-  return <PageFrame pageId={pageId} />;
+  return <Alert type="info" message={t("pageUnavailable")} />;
 }
