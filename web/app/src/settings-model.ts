@@ -1,3 +1,4 @@
+import { hasDesktopClientBridge } from "./desktop-client.ts";
 export const SETTINGS_SECTIONS = [
   { id: "account", icon: "account" },
   { id: "server", icon: "catalog" },
@@ -22,4 +23,10 @@ export function visibleSettingsSections(access: {
 }) {
   void access;
   return SETTINGS_SECTIONS.filter(item => !ADMIN_SETTINGS_SECTIONS.includes(item.id as typeof ADMIN_SETTINGS_SECTIONS[number]));
+}
+
+/** Presentation only; package access is still authorized by the Manager. */
+export function settingsSectionLabelKey(section: SettingsSectionID, host: unknown): string {
+  return section === "updates" && !hasDesktopClientBridge(host)
+    ? "clientDownloads.title" : `settingsPanel.sections.${section}`;
 }
