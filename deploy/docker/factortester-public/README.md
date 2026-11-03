@@ -65,8 +65,9 @@ Run `scripts/server/publish_public_main.sh` from a clean `main` worktree for the
 normal incremental publication transaction. It pushes only missing Git
 objects, builds the SHA-tagged application image with Docker's layer cache,
 backs up PostgreSQL, switches only the application container, and verifies both
-the runtime and database restore before accepting the release. After acceptance
-it retains the newest three revisions recorded as verified in
+the runtime and database restore before accepting the release. Previous releases
+are retained by default. When explicitly authorized and selected, retention
+cleanup keeps the newest three revisions recorded as verified in
 `/opt/factortester/deployments.log`; set
 `FACTORTESTER_PUBLIC_RELEASE_RETENTION` to another
 positive integer when more rollback depth is required. Cleanup is limited to
@@ -80,8 +81,8 @@ bare repository through the configured maintenance SSH/Alibaba Session Manager
 transport, verifies the remote SHA, and invokes the activation transaction
 synchronously. The default `launch-advisor` alias does not require public TCP
 22; a local `2222` forward remains an optional manual transport. Once that
-single command starts, build, backup, switch, verification, rollback, and
-retention do not require an operator or Agent. If the maintenance transport
+single command starts, build, backup, switch, verification, rollback, and any
+explicitly selected retention cleanup do not require another operator action. If the maintenance transport
 fails, the currently verified release remains untouched and the same command
 can be retried.
 
@@ -151,3 +152,12 @@ A failed build leaves the running application in place. These profiles build
 application images from finished native wheels; Rust compilation stays on the
 approved separate builder. A resource-constrained image build is not evidence
 that the candidate has passed application or backtest acceptance.
+
+
+Publication retains previous release worktrees and images by default. Set
+`FACTORTESTER_CLEANUP_RELEASES=1` only when release-retention cleanup has been
+explicitly authorized; that choice is validated before transfer and passed to
+the activation stage. It applies only to old application releases under the
+configured retention policy. Publication does not prune unrelated Docker images
+or the host's global builder cache. Disk admission may therefore stop a release
+until an explicit cleanup plan or additional capacity is available.
