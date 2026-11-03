@@ -25,6 +25,9 @@ def test_smoke_requires_an_explicit_image_and_never_starts_manager(tmp_path):
     assert 'NAUTILUS_SMOKE_WHEEL=selected.whl' in args
     body = args[-1]
     assert '--no-index' in body and '--no-deps' in body
+    # Adapter fixes keep the upstream distribution version: pip must replace
+    # the image's existing same-version binary before this acceptance run.
+    assert '--force-reinstall' in body
     assert 'from nautilus_trader.model import InstrumentId' in body
     assert 'native.replay_shared_inputs' in body
     assert 'model.identifiers' not in body
