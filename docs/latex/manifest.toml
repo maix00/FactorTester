@@ -1,7 +1,12 @@
 schema_version = 2
 title = "TradeResearch 项目手册"
 description = "按用户工作流程、领域模型、系统架构、接口和运行验收组织。"
-edition = "0.4.0"
+edition = "0.4.1"
+
+[[changes]]
+version = "0.4.1"
+date = "2026-11-03"
+summary = "更新产品组、分类和测试配置的共享多选与路径规则，区分多节点 Bundle 安装，并明确报告缺失附件的保留政策。"
 
 [[changes]]
 version = "0.4.0"
