@@ -103,14 +103,31 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
     encoded = canonical_bytes(manifest)
     if total + len(encoded) > MAX_BUNDLE_BYTES:
         raise ValueError('report bundle exceeds size limit')
+    return _encode_bundle(manifest, files, compressed=True)
+
+
+def _encode_bundle(manifest: dict, files: dict, *, compressed: bool) -> bytes:
+    encoded = canonical_bytes(manifest)
     stream = io.BytesIO()
     # Fixed timestamps and compression settings keep retries deterministic.
     # The decoder bounds expanded bytes separately, including compressed input.
     with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_STORED) as archive:
         for name, raw in [('manifest.json', encoded), *[(f'objects/{key}', files[key]) for key in sorted(files)]]:
             archive.writestr(zipfile.ZipInfo(name), raw,
-                             compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
+                             compress_type=zipfile.ZIP_DEFLATED if compressed else zipfile.ZIP_STORED,
+                             compresslevel=6 if compressed else None)
     return stream.getvalue()
+
+
+def bundle_content_digest(payload: bytes) -> str:
+    """Keep existing offline baselines stable across transport compression.
+
+    Before compression, clients hashed this fixed, stored ZIP representation.
+    Continue to use that representation for local change detection; wire and
+    attachment SHA-256 still validate the actual transmitted bytes.
+    """
+    manifest, files = _read_bundle(payload, hashlib.sha256(payload).hexdigest())
+    return hashlib.sha256(_encode_bundle(manifest, files, compressed=False)).hexdigest()
 
 def _read_bundle(payload: bytes, expected_sha256: str):
     if len(payload) > MAX_BUNDLE_BYTES + 1024 * 1024 or hashlib.sha256(payload).hexdigest() != expected_sha256:

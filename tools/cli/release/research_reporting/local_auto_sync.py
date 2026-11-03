@@ -122,7 +122,7 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                     # A root and the published projection do not cover every
                     # editable attachment or private link in the authoring
                     # bundle. Validate that content before advancing a receipt.
-                    from .authoring.tree_bundle import bundle_from_snapshot
+                    from .authoring.tree_bundle import bundle_from_snapshot, bundle_content_digest
                     from .authoring.tree_projection import project_snapshot
                     from .local_catalog_import import verify_equivalent_authoring
                     identity = session.get('/api/session')
@@ -150,7 +150,7 @@ def sync_published_reports(store, *, binding: dict, manager: dict, profile_id: s
                         if (current['generation'], current['root_ref']) != (head['generation'], head['root_ref']):
                             raise LocalReportSyncConflict('local report changed during comparison')
                         data = bundle_from_snapshot(project_snapshot(paths, current), package_root=root, branch_id='main')
-                        if hashlib.sha256(data).hexdigest() != local_sha:
+                        if bundle_content_digest(data) != local_sha:
                             raise LocalReportSyncConflict('local report resources changed during comparison')
                         with store._connect() as db:
                             result = db.execute('''UPDATE report_publications

@@ -315,3 +315,21 @@ def test_compressed_bundle_still_rejects_expanded_size_over_limit(monkeypatch):
     monkeypatch.setattr(module, 'MAX_BUNDLE_BYTES', 1024)
     with pytest.raises(ValueError, match='expanded size exceeds limit'):
         module._read_bundle(payload, hashlib.sha256(payload).hexdigest())
+
+
+def test_compression_keeps_preexisting_offline_content_baselines(tmp_path):
+    from tools.cli.release.research_reporting.authoring.tree_bundle import bundle_content_digest
+    from tools.cli.release.research_reporting.local_sync_baseline import content_digest
+    from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
+
+    source, head = _source(tmp_path)
+    payload = export_report_bundle(package_root=source, branch_id='main',
+        expected_generation=head['generation'], expected_root_ref=head['root_ref'])
+    stored = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(payload)) as compressed, zipfile.ZipFile(stored, 'w') as old:
+        for name in compressed.namelist():
+            old.writestr(zipfile.ZipInfo(name), compressed.read(name))
+    before_upgrade = hashlib.sha256(stored.getvalue()).hexdigest()
+    assert hashlib.sha256(payload).hexdigest() != before_upgrade
+    assert bundle_content_digest(payload) == before_upgrade
+    assert content_digest(source, report_tree_paths(source, 'main'), head) == before_upgrade
