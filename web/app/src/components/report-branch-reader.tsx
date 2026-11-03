@@ -99,6 +99,7 @@ function ReportCell({ value, field = "", parent = {}, onOpen, resolveImage }: { 
 }
 
 function ReportTable({ value, onOpen, resolveImage }: { value: unknown; onOpen:(reference:ReportReference,label:string) => void; resolveImage:ImageResolver }): React.ReactElement {
+  const {t} = useTranslation();
   const [page,setPage] = useState(1), [size,setSize] = useState(20);
   const content = value && typeof value === "object" ? value as Row : {};
   const rows: unknown[] = Array.isArray(value) ? value : Array.isArray(content.rows) ? content.rows : [];
@@ -106,14 +107,14 @@ function ReportTable({ value, onOpen, resolveImage }: { value: unknown; onOpen:(
   const firstCells = Array.isArray(first) ? first : first && typeof first === "object" && Array.isArray((first as Row).cells) ? (first as Row).cells : null;
   const columns: any[] = Array.isArray(content.columns) ? content.columns : Array.isArray(content.headers) ? content.headers : firstCells ? firstCells.map((_:unknown,index:number) => String(index + 1)) : first && typeof first === "object" ? Object.keys(first) : [];
   const indexed = rows.slice((page-1)*size,page*size).map((row,index) => ({index:(page-1)*size+index,row}));
-  return <TRDataTable rows={indexed} rowKey="index" pagination={{page,pageSize:size,total:rows.length,hideOnSinglePage:true,onChange:(next,nextSize) => {setPage(next);setSize(nextSize);}}} columns={columns.map((column,index) => ({
+  return <>{content.source?.available === false && <Alert type="warning" showIcon message={t("report.attachmentMissing")} />}<TRDataTable rows={indexed} rowKey="index" pagination={{page,pageSize:size,total:rows.length,hideOnSinglePage:true,onChange:(next,nextSize) => {setPage(next);setSize(nextSize);}}} columns={columns.map((column,index) => ({
     key:String(typeof column === "object" ? column.key || index : column),title:String(typeof column === "object" ? column.title || column.label || column.key || "" : column),
     render:(_:unknown,item:{index:number;row:unknown}) => {
       const row = item.row as any;
       const cell = Array.isArray(row) ? row[index] : Array.isArray(row?.cells) ? row.cells[index] : row?.[typeof column === "object" ? column.key : column];
       return <ReportCell value={cell} field={String(typeof column === "object" ? column.key || "" : column)} parent={row && !Array.isArray(row) && typeof row === "object" ? row : {}} onOpen={onOpen} resolveImage={resolveImage} />;
     },
-  }))} />;
+  }))} /></>;
 }
 
 function ReportBlock({ component, assets, bindings, resources, target, source, chapterID, resourceURLs, hideTitle = false }: { component: Row; assets: Row[]; bindings: Row[]; resources: Row[]; target: ReportExportTarget; source?:ReportReaderSource; chapterID:string; resourceURLs:Record<string,string>; hideTitle?:boolean }): React.ReactElement {

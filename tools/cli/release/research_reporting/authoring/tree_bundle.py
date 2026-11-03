@@ -17,10 +17,11 @@ from tools.cli.release.bounded_file import read_bounded_file
 
 from .tree_paths import report_tree_paths
 from .tree_hierarchy import validate_parent_child
-from .bundle_job_artifacts import export_job_artifacts, restore_job_artifacts, artifact_requests
+from .bundle_job_artifacts import (export_job_artifacts, restore_job_artifacts, artifact_requests,
+                                   validate_unavailable_job_artifacts)
 from .bundle_source_attachments import (capture_source_attachments, validate_source_attachments,
                                         restore_source_attachments)
-from .bundle_local_links import inherited_unavailable, unavailable_relative, validate_unavailable_links
+from .bundle_local_links import inherited_unavailable, unavailable_relative, validate_unavailable_links, bundle_link_relative
 from .bundle_migration_source import capture_migration_source, validate_bundle_migration_source
 from .tree_schema import canonical_bytes, digest, validate_node
 from .tree_store import (atomic_write, load_head, load_node, store_node,
@@ -67,7 +68,8 @@ def export_report_bundle(*, package_root: Path, branch_id: str,
 
 
 def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str,
-                         allow_unavailable_links: bool = False) -> bytes:
+                         allow_unavailable_links: bool = False,
+                         allow_unavailable_artifacts: bool = False) -> bytes:
     """Serialize a snapshot while the caller holds its report-tree lock."""
     paths, head = snapshot['paths'], snapshot['head']
     nodes = {}
@@ -110,7 +112,8 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str,
                 continue
             raise ValueError('report bundle local resource is unavailable')
         links.append({'target': target, **capture(read_bounded_file(path, MAX_BUNDLE_BYTES), path.name)})
-    job_artifacts = export_job_artifacts(snapshot, capture, maximum_bytes=MAX_BUNDLE_BYTES)
+    job_artifacts,missing_jobs = export_job_artifacts(snapshot, capture, maximum_bytes=MAX_BUNDLE_BYTES,
+                                                     allow_unavailable=allow_unavailable_artifacts)
     source_attachments = capture_source_attachments(snapshot, capture)
     migration_source = capture_migration_source(snapshot, capture)
     manifest = {'schema_version': 2, 'source_branch_id': branch_id,
@@ -120,6 +123,9 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str,
     if migration_source is not None:
         manifest.update(schema_version=4, source_attachments=source_attachments,
                         unavailable_links=unavailable, migration_source=migration_source)
+    if missing_jobs:
+        manifest.update(schema_version=5,source_attachments=source_attachments,unavailable_links=unavailable,
+                        migration_source=migration_source,unavailable_job_artifacts=missing_jobs)
     encoded = canonical_bytes(manifest)
     if total + len(encoded) > MAX_BUNDLE_BYTES:
         raise ValueError('report bundle exceeds size limit')
@@ -164,11 +170,13 @@ def _read_bundle(payload: bytes, expected_sha256: str):
             manifest = json.loads(archive.read('manifest.json'))
             fields = {'schema_version', 'source_branch_id', 'head', 'nodes', 'assets', 'links', 'job_artifacts'}
             version = manifest.get('schema_version')
-            if version in {3, 4}:
+            if version in {3, 4, 5}:
                 fields.update({'source_attachments', 'unavailable_links'})
-            if version == 4:
+            if version in {4, 5}:
                 fields.add('migration_source')
-            if set(manifest) != fields or version not in {2, 3, 4}:
+            if version == 5:
+                fields.add('unavailable_job_artifacts')
+            if set(manifest) != fields or version not in {2, 3, 4, 5}:
                 raise ValueError('report bundle schema is invalid')
             files = {name.removeprefix('objects/'): archive.read(name) for name in names if name != 'manifest.json'}
     except (zipfile.BadZipFile, json.JSONDecodeError, KeyError, TypeError) as exc:
@@ -221,9 +229,11 @@ def validate_report_bundle(*, payload: bytes, expected_sha256: str, report_id: s
         raise ValueError('report bundle asset manifest mismatch')
     requests = artifact_requests({'components': list(nodes.values())})
     jobs = {(item['job_id'], item['name']): item for item in manifest['job_artifacts']}
-    if len(jobs) != len(manifest['job_artifacts']) or set(jobs) != set(requests):
+    missing=validate_unavailable_job_artifacts(manifest.get('unavailable_job_artifacts',[]),requests)
+    if len(jobs) != len(manifest['job_artifacts']) or set(jobs)&set(missing) or set(jobs)|set(missing) != set(requests):
         raise ValueError('report bundle Job artifact inventory mismatch')
     for key, expected in requests.items():
+        if key in missing:continue
         if expected and jobs[key]['sha256'] != expected:
             raise ValueError('report bundle Job artifact version mismatch')
     validate_source_attachments(manifest, files)
@@ -262,7 +272,7 @@ def _import_validated_report_bundle(*, manifest: dict, files: dict, expected_sha
         replacements = {}
         resource_root = Path(package_root).resolve() / 'branches' / branch_id / 'resources'
         for item in manifest['links']:
-            destination = resource_root / item['sha256'] / Path(item['filename']).name
+            destination = resource_root.parent / bundle_link_relative(item, schema_version=manifest['schema_version'])
             atomic_write(destination, files[item['sha256']])
             replacements[item['target']] = quote(str(destination.relative_to(resource_root.parent)), safe='/')
         for item in manifest.get('unavailable_links', []):
@@ -303,6 +313,7 @@ def _import_validated_report_bundle(*, manifest: dict, files: dict, expected_sha
                      'source_branch_id': manifest['source_branch_id'], 'source_head': head,
                      **({'source_attachment_manifest_sha256': source_digest} if source_digest else {}),
                      **({'migration_source_sha256': migration['sha256']} if migration is not None else {}),
+                     **({'unavailable_job_artifacts':manifest['unavailable_job_artifacts']} if manifest.get('unavailable_job_artifacts') else {}),
                      **({'unavailable_links': manifest['unavailable_links']} if manifest.get('unavailable_links') else {})}))
         write_head(paths, target_head)
         return {'paths': paths, 'head': target_head, 'inherited': True,
