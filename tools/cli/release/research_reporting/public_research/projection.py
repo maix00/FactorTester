@@ -98,6 +98,10 @@ def build_upload_projection(
         "related_objects": related_objects,
         "attachments": attachments,
     }
+    from ..authoring.bundle_job_artifacts import unavailable_job_artifacts, mark_unavailable_sources
+    missing=unavailable_job_artifacts(snapshot)
+    if missing:
+        payload['components']=mark_unavailable_sources(payload['components'],missing)
     payload["projection_hash"] = hashlib.sha256(
         json.dumps(
             payload, ensure_ascii=False, sort_keys=True,

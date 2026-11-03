@@ -45,3 +45,11 @@ def validate_unavailable_links(manifest):
                 or item['filename'] in {'.', '..'} or '/' in item['filename'] or '\\' in item['filename']):
             raise ValueError('unavailable report resource identity is invalid')
         seen.add(item['target'])
+
+
+def bundle_link_relative(item, *, schema_version):
+    """Keep distinct source links distinct even when bytes and filenames match."""
+    root = Path("resources") / item["sha256"]
+    if schema_version >= 5:
+        root /= hashlib.sha256(item["target"].encode("utf-8")).hexdigest()[:24]
+    return root / item["filename"]
