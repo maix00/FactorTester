@@ -1,3 +1,4 @@
+import {cleanAppURL} from "./app-route.ts";
 import React from "react";
 import "./i18n.ts";
 import { installGlobalErrorNotifications } from "./notifications/install.ts";
@@ -10,4 +11,4 @@ import "./shell.css";
 import "dockview-react/dist/styles/dockview.css";
 
 const mount = document.querySelector<HTMLElement>("[data-tr-web-app]");
-if (mount) { captureResearchShare(); createRoot(mount).render(<AuthGate><DesktopShell /><ResearchShareRedeemer /></AuthGate>); }
+if (mount) { captureResearchShare(); cleanAppURL(); createRoot(mount).render(<AuthGate><DesktopShell /><ResearchShareRedeemer /></AuthGate>); }

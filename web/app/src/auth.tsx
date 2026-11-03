@@ -1,3 +1,4 @@
+import {appEntrySearch} from "./app-route.ts";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Brand } from "./components/brand.tsx";
@@ -56,7 +57,7 @@ async function readJSON(response: Response): Promise<Record<string, any>> {
 }
 
 function currentPath(): string {
-  return `${location.pathname}${location.search}`;
+  return `${location.pathname}${appEntrySearch()}`;
 }
 
 export function AuthGate({ children, mobile = false }: { children: React.ReactNode; mobile?: boolean }): React.ReactElement {
@@ -69,13 +70,14 @@ export function AuthGate({ children, mobile = false }: { children: React.ReactNo
   const [authError, setAuthError] = useState("");
 
   useEffect(() => {
-    const query = new URLSearchParams(location.search);
-    const error = query.get("auth_error");
+    const query = new URLSearchParams(appEntrySearch());
+    const error = history.state?.trAuthError || query.get("auth_error");
     if (!error) return;
     setAuthError(error);
     query.delete("auth_error");
     const search = query.toString();
-    history.replaceState(history.state, "", `${location.pathname}${search ? `?${search}` : ""}${location.hash}`);
+    const state = {...history.state}; delete state.trAuthError;
+    history.replaceState({...state,trEntrySearch:search ? `?${search}` : ""}, "", location.pathname === "/app" ? "/app" : `${location.pathname}${location.hash}`);
   }, []);
 
   useEffect(() => {

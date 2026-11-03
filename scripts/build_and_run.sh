@@ -2,6 +2,10 @@
 set -euo pipefail
 
 MODE="${1:-run}"
+case "$MODE" in
+  run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify|--install|install|--build|build) ;;
+  *) echo "usage: $0 [build|run|--debug|--logs|--telemetry|--verify|--install]" >&2; exit 2 ;;
+esac
 APP_NAME="TradeResearch"
 BUNDLE_ID="com.gtht.client"
 SIGNING_IDENTITY="${FTCLIENT_SIGNING_IDENTITY:-FTClient Beta Release}"
@@ -22,7 +26,7 @@ export DEVELOPER_DIR
 # Keep the cleanup exact to this project's generated directories; never clean
 # arbitrary DerivedData or the release output owned by this script.
 cleanup_stale_debug_artifacts() {
-  if test "${FTCLIENT_SKIP_DEBUG_CLEANUP:-0}" = "1"; then
+  if test "${FTCLIENT_DEBUG_CLEANUP:-0}" != "1" || test "${FTCLIENT_SKIP_DEBUG_CLEANUP:-0}" = "1"; then
     echo "skipping stale FTClient DerivedData cleanup (FTCLIENT_SKIP_DEBUG_CLEANUP=1)"
     return
   fi
@@ -54,7 +58,6 @@ cleanup_staging() {
 }
 trap cleanup_staging EXIT
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 cleanup_stale_debug_artifacts
 
 xcodegen generate --spec "$APPLE_DIR/project.yml" --project "$APPLE_DIR"
@@ -64,6 +67,7 @@ XCODEBUILD_ARGS=(
   -configuration Release
   -derivedDataPath "$DERIVED_DATA"
   CODE_SIGNING_ALLOWED=NO
+  -jobs "${FTCLIENT_BUILD_JOBS:-2}"
 )
 if test -n "${FTCLIENT_MARKETING_VERSION:-}"; then
   XCODEBUILD_ARGS+=("MARKETING_VERSION=$FTCLIENT_MARKETING_VERSION")
@@ -204,6 +208,7 @@ PY
 }
 
 install_app() {
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
   STAGING_PATH="/Applications/.$APP_NAME.staging.$$"
   test -f "$APP_BUNDLE/Contents/Resources/TradeResearch/bundle-receipt.json"
   require_same_identity "$APP_BUNDLE" "$INSTALLED_APP"
@@ -243,6 +248,9 @@ PY
 }
 
 case "$MODE" in
+  build|--build)
+    echo "built and verified: $APP_BUNDLE"
+    ;;
   run)
     install_app
     open_app

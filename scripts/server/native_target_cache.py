@@ -44,9 +44,7 @@ def trim(cache: Path, target: Path, *, limit_kib: int) -> dict:
         result['action'] = 'incremental-pruned'
     remaining = allocated_kib(target)
     if remaining > limit_kib:
-        shutil.rmtree(target)
-        result['action'] = 'evicted'
-        remaining = 0
+        raise ValueError(f'compiled dependencies need {remaining} KiB, exceeding {limit_kib} KiB; preserved to avoid repeated cold builds')
     result['after_kib'] = remaining
     return result
 
