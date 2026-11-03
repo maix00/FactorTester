@@ -18,7 +18,7 @@ import React from REACT;import {createRoot} from DOM;import {ProductTree} from T
 window.calls=[];window.opened=[];
 window.fetch=async(url)=>{const u=new URL(url,location.origin);window.calls.push(u.pathname+u.search);
  const body=u.pathname.endsWith('/tree')?{tree:[{key:'Product/Test',title:'Test products',folder:true,lazy:true}]}:
- {nodes:Array.from({length:50},(_,i)=>{const id=(Number(u.searchParams.get('page'))-1)*50+i;return {key:'Product/Test/P'+id,title:'P'+id,product_name:'P'+id,lazy:false,folder:false};}),has_more:true,total:5000};
+ {nodes:Array.from({length:50},(_,i)=>{const id=(Number(u.searchParams.get('page'))-1)*50+i;return {key:'Product/Test/P'+id,title:'P'+id,product_name:'P'+id,lazy:false,folder:false};}),has_more:true,total:5000,page:Number(u.searchParams.get('page'))||1};
  return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}});};
 createRoot(document.getElementById('root')).render(<PageInstanceProvider value={{id:'test',pageId:'products',mobile:false,args:{},open:(page,args)=>window.opened.push({page,args})}}><ProductTree/></PageInstanceProvider>);
 '''
@@ -43,20 +43,25 @@ createRoot(document.getElementById('root')).render(<PageInstanceProvider value={
                 assert 'limit=50' in page.evaluate('window.calls[1]')
                 assert page.locator('.ant-tree-treenode').count()<40
                 page.locator('.ant-tree-list-holder').evaluate('e=>e.scrollTop=e.scrollHeight')
-                page.get_by_role('button',name='Load more products',exact=True).click()
+                page.locator('.tr-product-tree-pager .ant-pagination-next').click()
                 page.wait_for_function('window.calls.length===3')
                 assert 'page=2' in page.evaluate('window.calls[2]')
+                page.locator('.tr-product-tree-pager .ant-pagination-prev').click()
+                page.wait_for_function('window.calls.length===4')
                 page.locator('.ant-tree-list-holder').evaluate('e=>e.scrollTop=0')
                 page.get_by_text('P0',exact=True).click()
                 assert page.evaluate('window.opened')==[{'page':'product-detail','args':{'productName':'P0','productTitle':'P0'}}]
                 assert page.locator('.ant-tree-treenode').count()<40
                 page.get_by_role('button',name='Refresh product catalog',exact=True).click()
-                page.wait_for_function('window.calls.length===4')
-                assert page.evaluate('window.calls[3]') == '/api/product-library/tree?refresh=1'
+                page.wait_for_function('window.calls.length===5')
+                assert page.evaluate('window.calls[4]') == '/api/product-library/tree?refresh=1'
                 page.locator('.ant-tree-switcher').first.click()
                 page.get_by_text('P0',exact=True).wait_for()
-                assert page.evaluate('window.calls.length')==5
+                assert page.evaluate('window.calls.length')==6
                 page.screenshot(path=str(tmp_path/'product-tree-refresh.png'))
                 assert not errors
             finally:browser.close()
-    finally:server.shutdown();server.server_close();thread.join(timeout=5)
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=5)
+        for name in ('harness.tsx','harness.js','harness.css','index.html'):
+            (tmp_path/name).unlink(missing_ok=True)

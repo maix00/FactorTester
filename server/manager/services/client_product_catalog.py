@@ -490,6 +490,7 @@ class ClientProductCatalogMixin:
         query: str = "",
         page: int = 1,
         limit: int | None = 25,
+        catalog: bool = False,
     ) -> dict[str, Any]:
         """Return one searchable, bounded page of lazy catalog leaves.
 
@@ -541,19 +542,19 @@ class ClientProductCatalogMixin:
             objects = category_objects
         else:
             node = find_node_by_path(tree, node_path.split("/")) if node_path else None
-            def scoped_contracts(value):
+            def scoped_products(value):
                 if not isinstance(value, dict):
                     return
                 yield from (product for product in value.get("$OBJECTS$", ())
-                            if isinstance(product, FuturesContract))
+                            if catalog or isinstance(product, FuturesContract))
                 for key, child in value.items():
                     if key != "$OBJECTS$":
-                        yield from scoped_contracts(child)
+                        yield from scoped_products(child)
             objects = (
                 node.get("$OBJECTS$", [])
                 if isinstance(node, dict)
                 else ([] if node_path else
-                      tuple(scoped_contracts(tree)) if source_ids is not None
+                      tuple(scoped_products(tree)) if source_ids is not None or catalog
                       else cached_contracts())
             )
         revision = product_catalog_revision()
@@ -587,6 +588,7 @@ class ClientProductCatalogMixin:
                 )),
                 "exchange": _catalog_exchange(product, name),
                 "product_path": product_path,
+                "product_ref": f"product:{product_path}",
             }
             if is_contract:
                 value["contract_uid"] = name
@@ -596,7 +598,7 @@ class ClientProductCatalogMixin:
             scope=(revision, str(principal),
                    None if source_ids is None else tuple(sorted(set(source_ids))),
                    tuple(sorted(set([category_id] if isinstance(category_id, str)
-                                    else category_id or ()))), requested_path),
+                                    else category_id or ()))), requested_path, catalog),
             objects=objects, object_path=classifier_object_path, project=project,
             query=search, page=requested_page, limit=requested_limit,
         )

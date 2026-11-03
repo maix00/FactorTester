@@ -320,6 +320,7 @@ class CatalogRoutesMixin:
                             category_arg, source_ids, principal,
                         )
                     ),
+                    "server_id": self.state.server_id,
                 }
             elif parsed.path == "/api/product-library/contract-tree":
                 if visitor is not None:
@@ -347,6 +348,7 @@ class CatalogRoutesMixin:
                         query=str(query.get("query", [""])[0] or ""),
                         page=page,
                         limit=limit,
+                        **({"catalog": True} if query.get("scope", [""])[0] == "catalog" else {}),
                     )
                 else:
                     nodes = {
@@ -362,6 +364,7 @@ class CatalogRoutesMixin:
                     "category_ids": category_ids,
                     "source_ids": list(source_ids),
                     **nodes,
+                    "server_id": self.state.server_id,
                 }
             elif parsed.path == "/api/product-library/contracts":
                 if visitor is not None:
