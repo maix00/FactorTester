@@ -45,10 +45,11 @@ def bundle_matches_projection(*, package_root: Path, source_manifest: dict,
         # rewritten to the local content-addressed resource directory.
         component['content_revision'] = component_content_revision(node)
 
+    from .authoring.bundle_local_links import bundle_link_relative
     ids = {}
     for item in source_manifest['links']:
         original = str(item['target'])
-        local = quote(str(Path('resources') / item['sha256'] / item['filename']), safe='/')
+        local = quote(str(bundle_link_relative(item, schema_version=source_manifest['schema_version'])), safe='/')
         local_id = hashlib.sha256(local.encode('utf-8')).hexdigest()[:24]
         original_id = hashlib.sha256(original.encode('utf-8')).hexdigest()[:24]
         if local_id in ids and ids[local_id] != original_id:
