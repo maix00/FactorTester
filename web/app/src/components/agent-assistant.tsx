@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import {ObjectReferenceProvider} from "./object-reference-provider.tsx";
+import {ObjectReferenceContext} from "./object-reference.tsx";
+import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Alert, Button, Drawer, Select, Space, Spin, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -38,7 +40,11 @@ type AgentAssistantProps = {
   presentation?: "drawer" | "panel";
 };
 
-export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: AgentAssistantProps): React.ReactElement {
+export function AgentAssistant(props: AgentAssistantProps): React.ReactElement {
+  return <ObjectReferenceProvider><AgentAssistantContent {...props}/></ObjectReferenceProvider>;
+}
+function AgentAssistantContent({ open, onOpenChange, presentation = "drawer" }: AgentAssistantProps): React.ReactElement {
+  const openObject = useContext(ObjectReferenceContext);
   const { t, i18n } = useTranslation();
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -228,6 +234,8 @@ export function AgentAssistant({ open, onOpenChange, presentation = "drawer" }: 
         navigate: (path: string) => { window.location.assign(path); },
       };
       const chat = await legacyRef.current.FTAgentChat.render(context, self, {
+        profileHref: "/app",
+        onOpenProfile: () => openObject?.({kind:"profile",ref:self.profile_id,profileKey:self.profile_key,label:agentProfileLabel(self)}),
         conversationOnly: true,
         lifecycleManaged: true,
         runtimeStatus: status,

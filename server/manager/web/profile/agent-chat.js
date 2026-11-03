@@ -87,10 +87,11 @@
     link.textContent = profile.alias || profile.title || profile.profile_id;
     const query = new URLSearchParams({profile_tab: "overview"});
     if (profile.profile_key) query.set("profile_key", profile.profile_key);
-    link.href = `/profiles/${encodeURIComponent(profile.profile_id)}?${query}`;
+    link.href = options.profileHref || `/profiles/${encodeURIComponent(profile.profile_id)}?${query}`;
     link.addEventListener("click", event => {
       event.preventDefault();
-      context.navigate?.(`/profiles/${encodeURIComponent(profile.profile_id)}?${query}`);
+      if (typeof options.onOpenProfile === "function") options.onOpenProfile(profile);
+      else context.navigate?.(`/profiles/${encodeURIComponent(profile.profile_id)}?${query}`);
     });
     profileGroup.append(link);
     // A dedicated Agent session keeps a fixed Profile; only the drawer
